@@ -1,0 +1,716 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type {
+  DragEvent as ReactDragEvent,
+  MouseEvent as ReactMouseEvent,
+  PointerEvent as ReactPointerEvent,
+  ReactNode,
+} from 'react';
+import { Button } from '@/components/ui/button';
+import './shapes/register';
+import './tools/register';
+import { Background } from './Background';
+import { CanvasControls } from './CanvasControls';
+import { cameraToTransform, screenToWorld, type Point } from './camera';
+import { viewportWorldBounds } from './geometry';
+import { CursorsLayer } from '@/collab/CursorsLayer';
+import { setLocalCursor, setLocalViewport } from '@/collab/presence';
+import {
+  stopFollowingForManualCameraChange,
+  useFollowStore,
+} from '@/collab/use-follow-store';
+import { usePresenceStore } from '@/collab/use-presence-store';
+import { ShapeView } from './ShapeView';
+import { FrameView } from './shapes/frame';
+import { SelectionLayer } from './SelectionLayer';
+import { TextEditorOverlay } from './TextEditorOverlay';
+import { toolRegistry } from './tools/tool-registry';
+import type { ToolContext, ToolPointerInfo } from './tools/types';
+import { duplicateShapes, groupShapes, ungroupShapes } from './commands';
+import { copyShapes, pasteShapes } from './clipboard';
+import { deleteTargetIds } from './hierarchy';
+import { placeImageFiles } from './place-image';
+import { useEnteredGroupStore } from './use-entered-group-store';
+import {
+  compareIndex,
+  editor,
+  redo,
+  setCurrentPage,
+  spatialIndex,
+  undo,
+  useDocumentStore,
+} from './use-document-store';
+import { shapeRegistry } from './shapes/shape-registry';
+import { useCameraStore } from './use-camera-store';
+import { useCanvasUiStore } from './use-canvas-ui-store';
+import { useElementSize } from './use-element-size';
+import { useSafariGestures } from './use-safari-gestures';
+import { isSelectable } from './selectable';
+import { useHiddenStore } from './use-hidden-store';
+import { useSelectionStore } from './use-selection-store';
+import { useSpacePan } from './use-space-pan';
+import { useTextEditingStore } from './use-text-editing-store';
+import { useToolStore } from './use-tool-store';
+import { useToolLockStore } from './use-tool-lock-store';
+import { useWheel } from './use-wheel';
+import {
+  bringForward,
+  bringToFront,
+  sendBackward,
+  sendToBack,
+} from './z-order';
+
+const ZOOM_STEP = 1.25;
+
+function isTypingTarget(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  return (
+    !!el &&
+    (el.tagName === 'INPUT' ||
+      el.tagName === 'TEXTAREA' ||
+      el.isContentEditable)
+  );
+}
+
+export function Canvas() {
+  const [containerRef, size] = useElementSize<HTMLDivElement>();
+  const camera = useCameraStore((s) => s.camera);
+  const peers = usePresenceStore((s) => s.peers);
+  const following = useFollowStore((s) => s.following);
+  const lastSummonApplied = useFollowStore((s) => s.lastSummonApplied);
+  const background = useCanvasUiStore((s) => s.background);
+  const setBackground = useCanvasUiStore((s) => s.setBackground);
+  const activeToolId = useToolStore((s) => s.activeToolId);
+  const pan = useSpacePan();
+  useWheel(containerRef);
+  useSafariGestures(containerRef);
+
+  const [pointerWorld, setPointerWorld] = useState<Point | null>(null);
+  // Which gesture owns the current pointer interaction.
+  const gesture = useRef<'pan' | 'tool' | null>(null);
+  // Live viewport center (screen px), read by keyboard zoom shortcuts.
+  const centerRef = useRef({ x: 0, y: 0 });
+  centerRef.current = { x: size.width / 2, y: size.height / 2 };
+
+  const ctx = useMemo<ToolContext>(
+    () => ({
+      editor,
+      setTool: useToolStore.getState().setTool,
+      complete: () => {
+        if (!useToolLockStore.getState().locked) {
+          useToolStore.getState().setTool('select');
+        }
+      },
+    }),
+    [],
+  );
+
+  const editingId = useTextEditingStore((s) => s.editingId);
+  const hidden = useHiddenStore((s) => s.hidden);
+  const currentPageId = useDocumentStore((s) => s.currentPageId);
+  const shapesRecord = useDocumentStore(
+    (s) => s.doc.pages[s.currentPageId]?.shapes,
+  );
+  const shapes = useMemo(
+    () => Object.values(shapesRecord ?? {}).sort(compareIndex),
+    [shapesRecord],
+  );
+
+  const viewport =
+    size.width > 0 ? viewportWorldBounds(camera, size.width, size.height) : null;
+  const visibleIds = viewport ? new Set(spatialIndex.search(viewport)) : null;
+  const visibleShapes = (
+    visibleIds ? shapes.filter((s) => visibleIds.has(s.id)) : shapes
+  ).filter((s) => s.id !== editingId && !hidden[s.id]);
+
+  // Frame children render inside their frame's clip (recursively), so they are
+  // excluded from the flat top-level pass.
+  const hasFrameAncestor = (s: { parentId?: string | null }): boolean => {
+    let cur = s.parentId ? shapesRecord?.[s.parentId] : undefined;
+    const seen = new Set<string>();
+    while (cur && !seen.has(cur.id)) {
+      if (cur.type === 'frame') return true;
+      seen.add(cur.id);
+      cur = cur.parentId ? shapesRecord?.[cur.parentId] : undefined;
+    }
+    return false;
+  };
+  const childrenSorted = (parentId: string) =>
+    Object.values(shapesRecord ?? {})
+      .filter((s) => s.parentId === parentId && s.id !== editingId && !hidden[s.id])
+      .sort(compareIndex);
+  const renderShape = (shape: (typeof shapes)[number]): ReactNode =>
+    shape.type === 'frame' ? (
+      <FrameView key={shape.id} frame={shape}>
+        {childrenSorted(shape.id).map(renderShape)}
+      </FrameView>
+    ) : (
+      <ShapeView key={shape.id} shape={shape} />
+    );
+  const topLevelShapes = visibleShapes.filter((s) => !hasFrameAncestor(s));
+
+  const editingShape = editingId ? shapesRecord?.[editingId] : undefined;
+  const tutorPeer = useMemo(() => peers.find((peer) => peer.isTutor), [peers]);
+  const tutorClientId = tutorPeer?.clientId ?? null;
+  const tutorViewport = tutorPeer?.viewport ?? null;
+  const tutorSummon = tutorPeer?.summon ?? null;
+  const tutorPage = tutorPeer?.page ?? null;
+  const summonBaselineReady = useRef(false);
+
+  const toInfo = useCallback(
+    (e: ReactPointerEvent | ReactMouseEvent): ToolPointerInfo => {
+      const rect = containerRef.current?.getBoundingClientRect();
+      const screen = {
+        x: e.clientX - (rect?.left ?? 0),
+        y: e.clientY - (rect?.top ?? 0),
+      };
+      const pointerType =
+        'pointerType' in e && typeof e.pointerType === 'string'
+          ? e.pointerType
+          : 'mouse';
+      const rawPressure = 'pressure' in e ? e.pressure : 0.5;
+      const pressure =
+        Number.isFinite(rawPressure) && rawPressure > 0 ? rawPressure : 0.5;
+      return {
+        point: screenToWorld(screen, useCameraStore.getState().camera),
+        pressure,
+        pointerType,
+        shiftKey: e.shiftKey,
+        altKey: e.altKey,
+        ctrlKey: e.ctrlKey,
+        metaKey: e.metaKey,
+        button: e.button,
+      };
+    },
+    [containerRef],
+  );
+
+  const activeTool = () => toolRegistry.get(useToolStore.getState().activeToolId);
+
+  // True only for events that originate on the canvas DOM surface — excludes
+  // in-canvas floating UI (data-ui-layer) and portaled popups/dialogs, whose
+  // React events still bubble here but aren't DOM descendants of the canvas.
+  const isSurfaceEvent = useCallback(
+    (target: EventTarget | null): boolean => {
+      const node = target as HTMLElement | null;
+      if (!node || !containerRef.current?.contains(node)) return false;
+      return !node.closest('[data-ui-layer]');
+    },
+    [containerRef],
+  );
+
+  const onPointerDown = useCallback(
+    (e: ReactPointerEvent) => {
+      if (!isSurfaceEvent(e.target)) return;
+      if (pan.isSpaceDown) {
+        stopFollowingForManualCameraChange();
+        gesture.current = 'pan';
+        pan.onPointerDown(e);
+        return;
+      }
+      gesture.current = 'tool';
+      e.currentTarget.setPointerCapture(e.pointerId);
+      activeTool()?.onPointerDown?.(toInfo(e), ctx);
+    },
+    [pan, toInfo, ctx, isSurfaceEvent],
+  );
+
+  const onPointerMove = useCallback(
+    (e: ReactPointerEvent) => {
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (rect) {
+        const world = screenToWorld(
+          { x: e.clientX - rect.left, y: e.clientY - rect.top },
+          useCameraStore.getState().camera,
+        );
+        setPointerWorld(world);
+        setLocalCursor(world);
+      }
+      if (gesture.current === 'pan') {
+        pan.onPointerMove(e);
+      } else if (gesture.current === 'tool') {
+        activeTool()?.onPointerMove?.(toInfo(e), ctx);
+      }
+    },
+    [pan, toInfo, ctx, containerRef],
+  );
+
+  const onPointerUp = useCallback(
+    (e: ReactPointerEvent) => {
+      if (gesture.current === 'pan') {
+        pan.onPointerUp(e);
+      } else if (gesture.current === 'tool') {
+        activeTool()?.onPointerUp?.(toInfo(e), ctx);
+        if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+          e.currentTarget.releasePointerCapture(e.pointerId);
+        }
+      }
+      gesture.current = null;
+    },
+    [pan, toInfo, ctx],
+  );
+
+  const onDoubleClick = useCallback(
+    (e: ReactMouseEvent) => {
+      if (pan.isSpaceDown || !isSurfaceEvent(e.target)) return;
+      activeTool()?.onDoubleClick?.(toInfo(e), ctx);
+    },
+    [pan, toInfo, ctx, isSurfaceEvent],
+  );
+
+  // Right-click selects the shape under the cursor (so the context menu acts on
+  // it). Does not preventDefault — the context menu opens normally.
+  const onContextMenu = useCallback(
+    (e: ReactMouseEvent) => {
+      if (!isSurfaceEvent(e.target)) return;
+      const info = toInfo(e);
+      const tol = 4 / useCameraStore.getState().camera.z;
+      const shapes = editor.getShapes();
+      const isHidden = useHiddenStore.getState().isHidden;
+      let hitId: string | null = null;
+      for (let i = shapes.length - 1; i >= 0; i--) {
+        const s = shapes[i]!;
+        // Right-click can target locked shapes (to unlock them) but not hidden.
+        if (isHidden(s.id)) continue;
+        if (shapeRegistry.getFor(s)?.hitTest(s, info.point, tol)) {
+          hitId = s.id;
+          break;
+        }
+      }
+      const sel = useSelectionStore.getState();
+      if (hitId && !sel.selectedIds.includes(hitId)) sel.setSelection([hitId]);
+      else if (!hitId) sel.clear();
+    },
+    [toInfo, isSurfaceEvent],
+  );
+
+  // Clear selection whenever we leave the select tool.
+  useEffect(() => {
+    if (size.width <= 0 || size.height <= 0) return;
+    setLocalViewport(camera, size);
+  }, [camera, size.width, size.height]);
+
+  useEffect(() => {
+    if (!following) return;
+    if (tutorClientId === null) {
+      useFollowStore.getState().setFollowing(false);
+      return;
+    }
+    // Follow the tutor across pages, then mirror their viewport.
+    if (tutorPage && tutorPage !== currentPageId) setCurrentPage(tutorPage);
+    if (!tutorViewport || size.width <= 0 || size.height <= 0) return;
+    const bounds = viewportWorldBounds(
+      tutorViewport.camera,
+      tutorViewport.size.width,
+      tutorViewport.size.height,
+    );
+    useCameraStore.getState().zoomToBounds(bounds, size.width, size.height, 1);
+  }, [
+    following,
+    tutorClientId,
+    tutorViewport,
+    tutorPage,
+    currentPageId,
+    size.width,
+    size.height,
+  ]);
+
+  useEffect(() => {
+    if (tutorClientId === null) {
+      summonBaselineReady.current = false;
+      return;
+    }
+    if (!summonBaselineReady.current) {
+      if (tutorSummon !== null) {
+        useFollowStore.getState().setLastSummonApplied(tutorSummon);
+      }
+      summonBaselineReady.current = true;
+      return;
+    }
+    if (
+      tutorSummon === null ||
+      tutorSummon <= lastSummonApplied ||
+      !tutorViewport ||
+      size.width <= 0 ||
+      size.height <= 0
+    ) {
+      return;
+    }
+    // A summon yanks you to the tutor's page as well as their viewport.
+    if (tutorPage && tutorPage !== currentPageId) setCurrentPage(tutorPage);
+    const bounds = viewportWorldBounds(
+      tutorViewport.camera,
+      tutorViewport.size.width,
+      tutorViewport.size.height,
+    );
+    useCameraStore.getState().zoomToBounds(bounds, size.width, size.height, 1);
+    useFollowStore.getState().setLastSummonApplied(tutorSummon);
+  }, [
+    tutorClientId,
+    tutorSummon,
+    tutorViewport,
+    tutorPage,
+    currentPageId,
+    lastSummonApplied,
+    size.width,
+    size.height,
+  ]);
+
+  useEffect(() => {
+    if (activeToolId !== 'select') useSelectionStore.getState().clear();
+  }, [activeToolId]);
+
+  // Keyboard: selection ops, z-order, delete, escape, and tool hotkeys.
+  // (Full configurable shortcut sweep is Phase 27.)
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (isTypingTarget(e.target)) return;
+      const mod = e.metaKey || e.ctrlKey;
+      const ids = useSelectionStore.getState().selectedIds;
+
+      if (mod && (e.key === 'z' || e.key === 'Z')) {
+        e.preventDefault();
+        if (e.shiftKey) redo();
+        else undo();
+        return;
+      }
+      if (mod && (e.key === 'y' || e.key === 'Y')) {
+        e.preventDefault();
+        redo();
+        return;
+      }
+      if (mod && (e.key === 'd' || e.key === 'D')) {
+        e.preventDefault();
+        if (ids.length) {
+          useSelectionStore.getState().setSelection(duplicateShapes(editor, ids));
+        }
+        return;
+      }
+      if (mod && e.key === 'a') {
+        e.preventDefault();
+        useSelectionStore
+          .getState()
+          .setSelection(
+            editor.getShapes().filter(isSelectable).map((s) => s.id),
+          );
+        return;
+      }
+      if (mod && (e.key === 'g' || e.key === 'G')) {
+        e.preventDefault();
+        if (e.shiftKey) {
+          const freed = ungroupShapes(editor, ids);
+          if (freed.length) useSelectionStore.getState().setSelection(freed);
+        } else if (ids.length >= 2) {
+          const gid = groupShapes(editor, ids);
+          if (gid) useSelectionStore.getState().setSelection([gid]);
+        }
+        return;
+      }
+      if (mod && e.key === ']') {
+        e.preventDefault();
+        if (ids.length) (e.shiftKey ? bringToFront : bringForward)(editor, ids);
+        return;
+      }
+      if (mod && e.key === '[') {
+        e.preventDefault();
+        if (ids.length) (e.shiftKey ? sendToBack : sendBackward)(editor, ids);
+        return;
+      }
+      // Clipboard.
+      if (mod && e.key === 'c') {
+        if (ids.length) copyShapes(editor, ids);
+        return;
+      }
+      if (mod && e.key === 'x') {
+        if (ids.length) {
+          copyShapes(editor, ids);
+          const cut = ids.filter((id) => !editor.getShape(id)?.locked);
+          editor.deleteShapes(cut);
+          useSelectionStore.getState().clear();
+        }
+        return;
+      }
+      if (mod && e.key === 'v') {
+        e.preventDefault();
+        const pasted = pasteShapes(editor);
+        if (pasted.length) useSelectionStore.getState().setSelection(pasted);
+        return;
+      }
+
+      // Zoom (anchored at the viewport center).
+      if (mod && (e.key === '=' || e.key === '+')) {
+        e.preventDefault();
+        stopFollowingForManualCameraChange();
+        const s = useCameraStore.getState();
+        s.zoomAtScreen(centerRef.current, s.camera.z * ZOOM_STEP);
+        return;
+      }
+      if (mod && e.key === '-') {
+        e.preventDefault();
+        stopFollowingForManualCameraChange();
+        const s = useCameraStore.getState();
+        s.zoomAtScreen(centerRef.current, s.camera.z / ZOOM_STEP);
+        return;
+      }
+      if (mod && e.key === '0') {
+        e.preventDefault();
+        stopFollowingForManualCameraChange();
+        useCameraStore.getState().zoomAtScreen(centerRef.current, 1);
+        return;
+      }
+
+      // Arrow-key nudge (Shift = coarse). Skips locked shapes.
+      if (
+        e.key === 'ArrowLeft' ||
+        e.key === 'ArrowRight' ||
+        e.key === 'ArrowUp' ||
+        e.key === 'ArrowDown'
+      ) {
+        if (!ids.length) return;
+        e.preventDefault();
+        const step = e.shiftKey ? 10 : 1;
+        const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
+        const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
+        for (const id of ids) {
+          const s = editor.getShape(id);
+          if (s && !s.locked) editor.updateShape(id, { x: s.x + dx, y: s.y + dy });
+        }
+        return;
+      }
+
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        // Never delete locked shapes; deleting a container takes its children.
+        const unlocked = ids.filter((id) => !editor.getShape(id)?.locked);
+        const deletable = deleteTargetIds(editor.getShapes(), unlocked);
+        if (deletable.length) {
+          e.preventDefault();
+          editor.deleteShapes(deletable);
+          useSelectionStore.getState().clear();
+        }
+        return;
+      }
+      if (e.key === 'Escape') {
+        useEnteredGroupStore.getState().exit();
+        useSelectionStore.getState().clear();
+        useToolStore.getState().setTool('select');
+        return;
+      }
+      if (mod || e.altKey) return;
+      // Shape Lock: toggle the lock on the current selection. Must precede the
+      // hotkey lookup, since byHotkey('L') would otherwise match the Line tool.
+      if (e.shiftKey && (e.key === 'L' || e.key === 'l')) {
+        e.preventDefault();
+        if (ids.length) {
+          const allLocked = ids.every((id) => editor.getShape(id)?.locked);
+          for (const id of ids) editor.updateShape(id, { locked: !allLocked });
+        }
+        return;
+      }
+      // Tool Lock: keep the active creation tool after placing a shape.
+      if (e.key === 'q' || e.key === 'Q') {
+        e.preventDefault();
+        useToolLockStore.getState().toggle();
+        return;
+      }
+      const tool = toolRegistry.byHotkey(e.key);
+      if (tool) {
+        e.preventDefault();
+        useToolStore.getState().setTool(tool.id);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  // Paste images from the clipboard (placed at the viewport center).
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      if (isTypingTarget(e.target)) return;
+      const list = e.clipboardData?.items;
+      const files: File[] = [];
+      if (list) {
+        for (let i = 0; i < list.length; i++) {
+          const item = list[i]!;
+          if (item.kind === 'file' && item.type.startsWith('image/')) {
+            const f = item.getAsFile();
+            if (f) files.push(f);
+          }
+        }
+      }
+      if (!files.length) return;
+      e.preventDefault();
+      const world = screenToWorld(
+        centerRef.current,
+        useCameraStore.getState().camera,
+      );
+      void placeImageFiles(files, world).then((ids) => {
+        if (ids.length) {
+          useToolStore.getState().setTool('select');
+          useSelectionStore.getState().setSelection(ids);
+        }
+      });
+    };
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+  }, []);
+
+  // Drag-and-drop image files onto the canvas (placed at the drop point).
+  const onDragOver = useCallback((e: ReactDragEvent) => {
+    if (Array.from(e.dataTransfer.types).includes('Files')) e.preventDefault();
+  }, []);
+  const onDrop = useCallback(
+    (e: ReactDragEvent) => {
+      const files = Array.from(e.dataTransfer.files).filter((f) =>
+        f.type.startsWith('image/'),
+      );
+      if (!files.length) return;
+      e.preventDefault();
+      const rect = containerRef.current?.getBoundingClientRect();
+      const world = screenToWorld(
+        { x: e.clientX - (rect?.left ?? 0), y: e.clientY - (rect?.top ?? 0) },
+        useCameraStore.getState().camera,
+      );
+      void placeImageFiles(files, world).then((ids) => {
+        if (ids.length) {
+          useToolStore.getState().setTool('select');
+          useSelectionStore.getState().setSelection(ids);
+        }
+      });
+    },
+    [containerRef],
+  );
+
+  // Zoom controls.
+  const center = useCallback(
+    () => ({ x: size.width / 2, y: size.height / 2 }),
+    [size.width, size.height],
+  );
+  const onZoomIn = useCallback(() => {
+    stopFollowingForManualCameraChange();
+    const s = useCameraStore.getState();
+    s.zoomAtScreen(center(), s.camera.z * ZOOM_STEP);
+  }, [center]);
+  const onZoomOut = useCallback(() => {
+    stopFollowingForManualCameraChange();
+    const s = useCameraStore.getState();
+    s.zoomAtScreen(center(), s.camera.z / ZOOM_STEP);
+  }, [center]);
+  const onZoomReset = useCallback(() => {
+    stopFollowingForManualCameraChange();
+    useCameraStore.getState().zoomAtScreen(center(), 1);
+  }, [center]);
+  const onZoomToFit = useCallback(() => {
+    stopFollowingForManualCameraChange();
+    const s = useCameraStore.getState();
+    const bounds = spatialIndex.totalBounds();
+    if (!bounds) s.reset();
+    else s.zoomToBounds(bounds, size.width, size.height);
+  }, [size.width, size.height]);
+
+  const toolCursor = toolRegistry.get(activeToolId)?.cursor ?? 'default';
+  const cursor = pan.isPanning
+    ? 'grabbing'
+    : pan.isSpaceDown
+      ? 'grab'
+      : toolCursor;
+
+  return (
+    <div
+      ref={containerRef}
+      className="absolute inset-0 overflow-hidden bg-background"
+      style={{ touchAction: 'none', cursor }}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onDoubleClick={onDoubleClick}
+      onContextMenu={onContextMenu}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+      onPointerLeave={() => {
+        setPointerWorld(null);
+        setLocalCursor(null);
+      }}
+    >
+      <Background
+        type={background}
+        camera={camera}
+        width={size.width}
+        height={size.height}
+      />
+
+      <svg className="absolute inset-0 h-full w-full">
+        <g transform={cameraToTransform(camera)}>
+          {topLevelShapes.map(renderShape)}
+        </g>
+      </svg>
+
+      <SelectionLayer camera={camera} />
+      <CursorsLayer camera={camera} />
+
+      {editingShape?.type === 'text' && (
+        <TextEditorOverlay shape={editingShape} camera={camera} />
+      )}
+
+      <Hud
+        camera={camera}
+        pointerWorld={pointerWorld}
+        rendered={visibleShapes.length}
+        total={shapes.length}
+      />
+
+      <CanvasControls
+        zoom={camera.z}
+        background={background}
+        onBackgroundChange={setBackground}
+        onZoomIn={onZoomIn}
+        onZoomOut={onZoomOut}
+        onZoomReset={onZoomReset}
+        onZoomToFit={onZoomToFit}
+      />
+    </div>
+  );
+}
+
+interface HudProps {
+  camera: { x: number; y: number; z: number };
+  pointerWorld: Point | null;
+  rendered: number;
+  total: number;
+}
+
+function Hud({ camera, pointerWorld, rendered, total }: HudProps) {
+  const round = (n: number) => Math.round(n);
+  return (
+    <div
+      data-ui-layer
+      className="pointer-events-none absolute bottom-3 left-3 flex flex-col gap-2"
+    >
+      <div className="rounded-md border border-border bg-card/90 px-2.5 py-1.5 font-mono text-xs text-muted-foreground shadow-sm backdrop-blur select-none">
+        <div>
+          camera&nbsp;&nbsp;x:{round(camera.x)} y:{round(camera.y)} z:
+          {camera.z.toFixed(2)}
+        </div>
+        <div>
+          pointer&nbsp;
+          {pointerWorld
+            ? `x:${round(pointerWorld.x)} y:${round(pointerWorld.y)}`
+            : '—'}
+        </div>
+        <div>
+          shapes&nbsp;&nbsp;{rendered}/{total} in view
+        </div>
+      </div>
+      <div className="pointer-events-auto flex items-center gap-2">
+        <Button
+          variant="outline"
+          size="xs"
+          onClick={() => {
+            stopFollowingForManualCameraChange();
+            useCameraStore.getState().reset();
+          }}
+        >
+          Reset view
+        </Button>
+      </div>
+    </div>
+  );
+}

@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: whiteboard
+      POSTGRES_PASSWORD: whiteboard
+      POSTGRES_DB: whiteboard
+    ports:
+      # Host port 5433 to avoid clashing with other local Postgres instances.
+      - '5433:5432'
+    volumes:
+      - whiteboard_pg:/var/lib/postgresql/data
+
+volumes:
+  whiteboard_pg:

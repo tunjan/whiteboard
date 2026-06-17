@@ -1,0 +1,112 @@
+import { Crosshair, Users } from 'lucide-react';
+import type { CSSProperties } from 'react';
+import type { Identity } from '@/collab/identity';
+import { TUTOR_COLOR } from '@/collab/identity';
+import { summonAll } from '@/collab/presence';
+import { useFollowStore } from '@/collab/use-follow-store';
+import { usePresenceStore } from '@/collab/use-presence-store';
+import { Button } from '@/components/ui/button';
+import { Surface } from '@/components/ui/surface';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
+import { cn } from '@/lib/utils';
+
+interface FollowControlsProps {
+  identity: Identity | null;
+}
+
+export function FollowControls({ identity }: FollowControlsProps) {
+  const peers = usePresenceStore((s) => s.peers);
+  const following = useFollowStore((s) => s.following);
+  const toggle = useFollowStore((s) => s.toggle);
+  const tutorPeer = peers.find((peer) => peer.isTutor);
+  const hasStudents = peers.some((peer) => !peer.isTutor);
+
+  if (!identity) return null;
+
+  if (identity.isTutor) {
+    return (
+      <TooltipProvider delay={300}>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="Bring everyone to my view"
+                disabled={!hasStudents}
+                onClick={summonAll}
+                className="size-8 rounded-lg"
+              />
+            }
+          >
+            <Users />
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            {hasStudents
+              ? 'Bring everyone to my view'
+              : 'No students connected'}
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    );
+  }
+
+  if (!tutorPeer) return null;
+
+  const tutorColor = tutorPeer.color || TUTOR_COLOR;
+  const activeStyle = {
+    '--follow-color': tutorColor,
+  } as CSSProperties;
+
+  return (
+    <>
+      <TooltipProvider delay={300}>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant={following ? 'outline' : 'ghost'}
+                size="sm"
+                aria-label={following ? 'Stop following tutor' : 'Follow tutor'}
+                aria-pressed={following}
+                onClick={toggle}
+                className={cn(
+                  'h-8 rounded-lg',
+                  following &&
+                    'border-[var(--follow-color)] bg-[color-mix(in_oklch,var(--follow-color),transparent_84%)] text-foreground hover:bg-[color-mix(in_oklch,var(--follow-color),transparent_78%)]',
+                )}
+                style={following ? activeStyle : undefined}
+              />
+            }
+          >
+            <Crosshair data-icon="inline-start" />
+            <span className="hidden sm:inline">
+              {following ? 'Following' : 'Follow tutor'}
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            {following ? 'Stop following tutor' : 'Follow tutor'}
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+
+      {following ? (
+        <Surface className="absolute top-[4.75rem] left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 px-3 py-2">
+          <span
+            className="size-2 rounded-full"
+            style={{ background: tutorColor }}
+            aria-hidden="true"
+          />
+          <span className="text-xs font-medium text-foreground">
+            Following tutor - move to exit
+          </span>
+        </Surface>
+      ) : null}
+    </>
+  );
+}
