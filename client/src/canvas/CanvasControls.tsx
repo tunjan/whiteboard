@@ -1,15 +1,21 @@
-import { Maximize2, Minus, Plus, Grid2x2 } from 'lucide-react';
-import { Button, buttonVariants } from '@/components/ui/button';
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { cn } from '@/lib/utils';
+  CircleDot,
+  Crosshair,
+  Grid2x2,
+  Maximize2,
+  Minus,
+  Plus,
+  Square,
+  type LucideIcon,
+} from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import {
   type BackgroundType,
   BACKGROUND_LABELS,
@@ -40,34 +46,38 @@ export function CanvasControls({
       data-ui-layer
       className="absolute right-3 bottom-3 flex items-center gap-2 select-none"
     >
-      <DropdownMenu>
-        <DropdownMenuTrigger
+      <TooltipProvider delay={300}>
+        <ToggleGroup
           aria-label="Background"
-          className={cn(
-            buttonVariants({ variant: 'outline', size: 'sm' }),
-            'gap-1.5 bg-card shadow-sm',
-          )}
+          className="w-auto bg-card shadow-sm"
+          value={[background]}
+          onValueChange={(v) => {
+            if (v[0]) onBackgroundChange(v[0] as BackgroundType);
+          }}
         >
-          <Grid2x2 className="size-4" />
-          <span className="hidden sm:inline">
-            {BACKGROUND_LABELS[background]}
-          </span>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent side="top" align="end">
-          <DropdownMenuRadioGroup
-            value={background}
-            onValueChange={(v) => onBackgroundChange(v as BackgroundType)}
-          >
-            <DropdownMenuLabel>Background</DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            {BACKGROUND_TYPES.map((t) => (
-              <DropdownMenuRadioItem key={t} value={t}>
-                {BACKGROUND_LABELS[t]}
-              </DropdownMenuRadioItem>
-            ))}
-          </DropdownMenuRadioGroup>
-        </DropdownMenuContent>
-      </DropdownMenu>
+          {BACKGROUND_TYPES.map((t) => {
+            const Icon = BACKGROUND_ICONS[t];
+            return (
+              <Tooltip key={t}>
+                <TooltipTrigger
+                  render={
+                    <ToggleGroupItem
+                      aria-label={BACKGROUND_LABELS[t]}
+                      className="size-7 flex-none p-0 [&_svg]:size-4"
+                      value={t}
+                    />
+                  }
+                >
+                  <Icon />
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                  <span>{BACKGROUND_LABELS[t]}</span>
+                </TooltipContent>
+              </Tooltip>
+            );
+          })}
+        </ToggleGroup>
+      </TooltipProvider>
 
       <div className="flex items-center rounded-md border border-border bg-card shadow-sm">
         <Button
@@ -107,3 +117,10 @@ export function CanvasControls({
     </div>
   );
 }
+
+const BACKGROUND_ICONS: Record<BackgroundType, LucideIcon> = {
+  blank: Square,
+  dot: CircleDot,
+  graph: Grid2x2,
+  coordinate: Crosshair,
+};

@@ -90,7 +90,7 @@
     /* Canvas grid colors (derived from foreground so they adapt to the theme). */
     --grid-minor: color-mix(in oklch, var(--foreground) 9%, transparent);
     --grid-major: color-mix(in oklch, var(--foreground) 16%, transparent);
-    --grid-dot: color-mix(in oklch, var(--foreground) 26%, transparent);
+    --grid-dot: color-mix(in oklch, var(--foreground) 80%, transparent);
     --grid-axis: color-mix(in oklch, var(--foreground) 52%, transparent);
     --sidebar: oklch(0.987 0.002 197.1);
     --sidebar-foreground: oklch(0.148 0.004 228.8);
@@ -127,7 +127,7 @@
     /* Slightly stronger so the grid stays crisp on the dark canvas. */
     --grid-minor: color-mix(in oklch, var(--foreground) 11%, transparent);
     --grid-major: color-mix(in oklch, var(--foreground) 20%, transparent);
-    --grid-dot: color-mix(in oklch, var(--foreground) 30%, transparent);
+    --grid-dot: color-mix(in oklch, var(--foreground) 80%, transparent);
     --grid-axis: color-mix(in oklch, var(--foreground) 58%, transparent);
     --border: oklch(1 0 0 / 10%);
     --input: oklch(1 0 0 / 15%);
@@ -175,4 +175,3 @@
     outline-offset: 2px !important;
   }
 }
-
