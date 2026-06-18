@@ -56,10 +56,31 @@ behind the single tutor password (`/api/auth/login`); board links
 ```bash
 npm run typecheck   # strict TS check across all workspaces
 npm run build       # production build of the client
+npm start           # serve the built client + API/collab server
 npm run db:up       # start Postgres (docker-compose)
 npm run db:down     # stop Postgres
 npm run db:push     # apply the Drizzle schema
 ```
+
+## Deploy on Render
+
+This repo includes a `render.yaml` blueprint for self-hosting the app as one
+Render web service plus a managed Postgres database.
+
+1. Push the repository to GitHub/GitLab.
+2. In Render, choose **Blueprint** and select this repository.
+3. Set the required `TUTOR_PASSWORD` secret when Render prompts for it.
+4. Deploy.
+
+Render provisions:
+
+- a Node 22 web service that builds the Vite client and runs the Hono API,
+  static client, and Hocuspocus WebSocket collaboration server on one origin
+- a managed Postgres database wired through `DATABASE_URL`
+- a persistent disk mounted at `/var/data` for uploaded image blobs
+
+The start command runs `npm run db:push` before booting the server so the
+Drizzle schema is applied to the Render database.
 
 ## Tech stack
 

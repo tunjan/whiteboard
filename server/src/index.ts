@@ -1,5 +1,8 @@
 import { serve } from '@hono/node-server';
+import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono } from 'hono';
+import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { env } from './env';
 import { authRoutes } from './auth/routes';
@@ -13,6 +16,17 @@ app.get('/health', (c) => c.json({ status: 'ok' }));
 app.route('/api/auth', authRoutes);
 app.route('/api/boards', boardRoutes);
 app.route('/api/blobs', blobRoutes);
+
+const clientDist = fileURLToPath(new URL('../../client/dist', import.meta.url));
+const clientIndex = fileURLToPath(
+  new URL('../../client/dist/index.html', import.meta.url),
+);
+
+app.use('/*', serveStatic({ root: clientDist }));
+app.get('*', async (c) => {
+  const index = await readFile(clientIndex, 'utf8');
+  return c.html(index);
+});
 
 const server = serve({ fetch: app.fetch, port: env.port }, (info) => {
   console.log(`[server] HTTP + collab listening on http://localhost:${info.port}`);

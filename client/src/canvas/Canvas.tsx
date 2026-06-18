@@ -1,11 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import type {
   DragEvent as ReactDragEvent,
   MouseEvent as ReactMouseEvent,
   PointerEvent as ReactPointerEvent,
   ReactNode,
 } from 'react';
-import { Button } from '@/components/ui/button';
 import './shapes/register';
 import './tools/register';
 import { Background } from './Background';
@@ -14,7 +13,6 @@ import {
   cameraToTransform,
   nextDiscreteZoom,
   screenToWorld,
-  type Point,
 } from './camera';
 import { viewportWorldBounds } from './geometry';
 import { CursorsLayer } from '@/collab/CursorsLayer';
@@ -95,7 +93,6 @@ export function Canvas() {
   useTouchPinch(containerRef);
   useSafariGestures(containerRef);
 
-  const [pointerWorld, setPointerWorld] = useState<Point | null>(null);
   // Which gesture owns the current pointer interaction.
   const gesture = useRef<'pan' | 'tool' | null>(null);
   // Live viewport center (screen px), read by keyboard zoom shortcuts.
@@ -243,7 +240,6 @@ export function Canvas() {
           { x: e.clientX - rect.left, y: e.clientY - rect.top },
           useCameraStore.getState().camera,
         );
-        setPointerWorld(world);
         setLocalCursor(world);
       }
       if (gesture.current === 'pan') {
@@ -657,7 +653,6 @@ export function Canvas() {
       onDragOver={onDragOver}
       onDrop={onDrop}
       onPointerLeave={() => {
-        setPointerWorld(null);
         setLocalCursor(null);
       }}
     >
@@ -681,13 +676,6 @@ export function Canvas() {
         <TextEditorOverlay shape={editingShape} camera={camera} />
       )}
 
-      <Hud
-        camera={camera}
-        pointerWorld={pointerWorld}
-        rendered={visibleShapes.length}
-        total={shapes.length}
-      />
-
       <CanvasControls
         zoom={camera.z}
         background={background}
@@ -697,51 +685,6 @@ export function Canvas() {
         onZoomReset={onZoomReset}
         onZoomToFit={onZoomToFit}
       />
-    </div>
-  );
-}
-
-interface HudProps {
-  camera: { x: number; y: number; z: number };
-  pointerWorld: Point | null;
-  rendered: number;
-  total: number;
-}
-
-function Hud({ camera, pointerWorld, rendered, total }: HudProps) {
-  const round = (n: number) => Math.round(n);
-  return (
-    <div
-      data-ui-layer
-      className="pointer-events-none absolute bottom-3 left-3 flex flex-col gap-2"
-    >
-      <div className="rounded-md border border-border bg-card/90 px-2.5 py-1.5 font-mono text-xs text-muted-foreground shadow-sm backdrop-blur select-none">
-        <div>
-          camera&nbsp;&nbsp;x:{round(camera.x)} y:{round(camera.y)} z:
-          {camera.z.toFixed(2)}
-        </div>
-        <div>
-          pointer&nbsp;
-          {pointerWorld
-            ? `x:${round(pointerWorld.x)} y:${round(pointerWorld.y)}`
-            : '—'}
-        </div>
-        <div>
-          shapes&nbsp;&nbsp;{rendered}/{total} in view
-        </div>
-      </div>
-      <div className="pointer-events-auto flex items-center gap-2">
-        <Button
-          variant="outline"
-          size="xs"
-          onClick={() => {
-            stopFollowingForManualCameraChange();
-            useCameraStore.getState().reset();
-          }}
-        >
-          Reset view
-        </Button>
-      </div>
     </div>
   );
 }
