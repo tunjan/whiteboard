@@ -3,24 +3,20 @@ import { LogOut, Pencil, Plus, Shapes, Trash2 } from 'lucide-react';
 import type { BoardMeta } from '@whiteboard/shared';
 import { type AuthState, getAuth, logout } from '@/board/auth';
 import { boardRepository } from '@/board/server-board-repository';
+import { BoardTitleDialog } from '@/components/board-title-dialog';
 import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
 import { navigate } from '@/router';
 import { Login } from './login';
+
+type TitleDialogState =
+  | { mode: 'create' }
+  | { mode: 'rename'; board: BoardMeta };
 
 /** Board management home — tutor-only (create / open / rename / delete). */
 export function Home() {
   const [auth, setAuth] = useState<AuthState | null>(null);
   const [boards, setBoards] = useState<BoardMeta[]>([]);
-  const [renaming, setRenaming] = useState<BoardMeta | null>(null);
-  const [renameValue, setRenameValue] = useState('');
+  const [titleDialog, setTitleDialog] = useState<TitleDialogState | null>(null);
 
   const refresh = () => {
     void boardRepository.list().then(setBoards);
@@ -44,11 +40,6 @@ export function Home() {
     return <Login onSuccess={() => void getAuth().then(setAuth)} />;
   }
 
-  const createBoard = async () => {
-    const b = await boardRepository.create('Untitled board');
-    navigate(`/board/${b.id}`);
-  };
-
   const remove = async (b: BoardMeta) => {
     if (window.confirm(`Delete "${b.name}"? This cannot be undone.`)) {
       await boardRepository.delete(b.id);
@@ -56,10 +47,16 @@ export function Home() {
     }
   };
 
-  const commitRename = async () => {
-    if (!renaming) return;
-    await boardRepository.rename(renaming.id, renameValue);
-    setRenaming(null);
+  const commitTitle = async (title: string) => {
+    if (!titleDialog) return;
+    if (titleDialog.mode === 'create') {
+      const b = await boardRepository.create(title);
+      setTitleDialog(null);
+      navigate(`/board/${b.id}`);
+      return;
+    }
+    await boardRepository.rename(titleDialog.board.id, title);
+    setTitleDialog(null);
     refresh();
   };
 
@@ -74,8 +71,8 @@ export function Home() {
             <h1 className="text-lg font-semibold tracking-tight">Boards</h1>
           </div>
           <div className="flex items-center gap-2">
-            <Button onClick={createBoard}>
-              <Plus className="size-4" />
+            <Button onClick={() => setTitleDialog({ mode: 'create' })}>
+              <Plus data-icon="inline-start" />
               New board
             </Button>
             <Button
@@ -119,8 +116,7 @@ export function Home() {
                     size="icon-xs"
                     aria-label="Rename"
                     onClick={() => {
-                      setRenaming(b);
-                      setRenameValue(b.name);
+                      setTitleDialog({ mode: 'rename', board: b });
                     }}
                   >
                     <Pencil />
@@ -140,32 +136,25 @@ export function Home() {
         )}
       </div>
 
-      <Dialog
-        open={renaming !== null}
+      <BoardTitleDialog
+        open={titleDialog !== null}
+        heading={
+          titleDialog?.mode === 'create' ? 'Name whiteboard' : 'Rename board'
+        }
+        description={
+          titleDialog?.mode === 'create'
+            ? 'Choose a title before the whiteboard is created.'
+            : undefined
+        }
+        initialValue={
+          titleDialog?.mode === 'rename' ? titleDialog.board.name : ''
+        }
+        submitLabel={titleDialog?.mode === 'create' ? 'Create' : 'Save'}
         onOpenChange={(open) => {
-          if (!open) setRenaming(null);
+          if (!open) setTitleDialog(null);
         }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Rename board</DialogTitle>
-          </DialogHeader>
-          <Input
-            value={renameValue}
-            onChange={(e) => setRenameValue(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') void commitRename();
-            }}
-            autoFocus
-          />
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setRenaming(null)}>
-              Cancel
-            </Button>
-            <Button onClick={commitRename}>Save</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        onSubmit={commitTitle}
+      />
     </div>
   );
 }

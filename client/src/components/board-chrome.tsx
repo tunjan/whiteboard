@@ -52,10 +52,12 @@ function OverflowAvatar({ count }: { count: number }) {
 export function BoardChrome({
   title,
   onBack,
+  onRenameTitle,
   identity,
 }: {
   title: string;
   onBack: () => void;
+  onRenameTitle?: () => void;
   identity: Identity | null;
 }) {
   const theme = useThemeStore((s) => s.theme);
@@ -78,6 +80,7 @@ export function BoardChrome({
     participants.length - visibleParticipants.length,
   );
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const renameTitle = identity?.isTutor ? onRenameTitle : undefined;
 
   return (
     <>
@@ -97,9 +100,27 @@ export function BoardChrome({
             <ArrowLeft className="size-4" />
           </Button>
         )}
-        <span className="max-w-[140px] truncate text-sm font-semibold text-foreground">
-          {title}
-        </span>
+        {renameTitle ? (
+          <button
+            type="button"
+            aria-label="Rename board title"
+            title="Double-click to rename"
+            onDoubleClick={renameTitle}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                renameTitle();
+              }
+            }}
+            className="max-w-[140px] cursor-text truncate rounded-md px-1 text-left text-sm font-semibold text-foreground outline-none focus-visible:ring-2 focus-visible:ring-foreground focus-visible:ring-offset-2"
+          >
+            {title}
+          </button>
+        ) : (
+          <span className="max-w-[140px] truncate text-sm font-semibold text-foreground">
+            {title}
+          </span>
+        )}
         <div className="h-5 w-px bg-border" />
         <PageMenu />
       </Surface>

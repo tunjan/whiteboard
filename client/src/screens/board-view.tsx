@@ -13,6 +13,7 @@ import {
 } from '@/collab/identity';
 import { setLocalUser } from '@/collab/presence';
 import { BoardChrome } from '@/components/board-chrome';
+import { BoardTitleDialog } from '@/components/board-title-dialog';
 import { CanvasContextMenu } from '@/components/canvas-context-menu';
 import { GraphPanel } from '@/components/graph-panel';
 import { NameDialog } from '@/components/name-dialog';
@@ -26,6 +27,7 @@ export function BoardView({ boardId }: { boardId: string }) {
   const [identity, setIdentity] = useState<Identity | null>(null);
   const [needsName, setNeedsName] = useState(false);
   const [assignedColor, setAssignedColor] = useState('#2f6df6');
+  const [renamingBoard, setRenamingBoard] = useState(false);
 
   // The page id requested by the share link (`?p=`), pending until it syncs in.
   const pendingPage = useRef<string | null>(null);
@@ -88,6 +90,9 @@ export function BoardView({ boardId }: { boardId: string }) {
       <BoardChrome
         title={name}
         onBack={() => navigate('/')}
+        onRenameTitle={
+          identity?.isTutor ? () => setRenamingBoard(true) : undefined
+        }
         identity={identity}
       />
       <Toolbar />
@@ -101,6 +106,18 @@ export function BoardView({ boardId }: { boardId: string }) {
           setStoredName(n);
           setIdentity({ name: n, color: assignedColor, isTutor: false });
           setNeedsName(false);
+        }}
+      />
+      <BoardTitleDialog
+        open={renamingBoard}
+        heading="Rename board"
+        initialValue={name}
+        submitLabel="Save"
+        onOpenChange={setRenamingBoard}
+        onSubmit={async (title) => {
+          await boardRepository.rename(boardId, title);
+          setName(title);
+          setRenamingBoard(false);
         }}
       />
     </div>
