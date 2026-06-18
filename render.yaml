@@ -27,4 +27,4 @@ services:
 
 databases:
   - name: whiteboard-db
-    plan: starter
+    plan: basic-256mb
