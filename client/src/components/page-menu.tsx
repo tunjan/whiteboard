@@ -76,7 +76,7 @@ export function PageMenu() {
       </Button>
 
       {open ? (
-        <Surface className="absolute top-10 left-0 z-30 flex w-64 flex-col gap-0.5 p-1.5">
+        <Surface className="touch-targets absolute top-10 left-0 z-30 flex w-64 flex-col gap-0.5 p-1.5">
           <div className="px-1.5 py-1 text-xs font-medium text-muted-foreground">
             Pages
           </div>
@@ -120,7 +120,7 @@ export function PageMenu() {
                     />
                     <span className="truncate">{page.name}</span>
                   </button>
-                  <div className="flex shrink-0 items-center opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                  <div className="touch-reveal flex shrink-0 items-center opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
                     <Button
                       variant="ghost"
                       size="icon-xs"

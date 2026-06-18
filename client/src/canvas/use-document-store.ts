@@ -29,7 +29,10 @@ export function boardRoom(boardId: string): string {
 }
 
 function collabUrl(): string {
-  if (import.meta.env.DEV) return 'ws://localhost:3001';
+  // Dev: the collab server runs on :3001. Use the page's own hostname (not a
+  // literal "localhost") so a phone/iPad hitting the dev box over the LAN
+  // connects to the right machine instead of to itself.
+  if (import.meta.env.DEV) return `ws://${location.hostname}:3001`;
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   return `${proto}//${location.host}`;
 }

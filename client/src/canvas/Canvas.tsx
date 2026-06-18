@@ -95,6 +95,18 @@ export function Canvas() {
 
   // Which gesture owns the current pointer interaction.
   const gesture = useRef<'pan' | 'tool' | null>(null);
+  // The pointer currently driving `gesture` (so stray pointers are ignored).
+  const toolPointerId = useRef<number | null>(null);
+  // Live touch pointers on the surface — drives single- vs multi-touch routing.
+  const activeTouches = useRef<Set<number>>(new Set());
+  // A pen (Apple Pencil) is down: finger touches are palm-rejected while it is.
+  const penActive = useRef(false);
+  // Latched once ≥2 fingers touch, cleared only when all lift — suppresses tool
+  // routing for the rest of a pinch so lifting one finger never draws a stray mark.
+  const pinchLatch = useRef(false);
+  // Long-press → context menu (touch has no right-click).
+  const longPressTimer = useRef<number | null>(null);
+  const longPressOrigin = useRef<{ x: number; y: number } | null>(null);
   // Live viewport center (screen px), read by keyboard zoom shortcuts.
   const centerRef = useRef({ x: 0, y: 0 });
   centerRef.current = { x: size.width / 2, y: size.height / 2 };
@@ -214,46 +226,156 @@ export function Canvas() {
     [containerRef],
   );
 
-  const onPointerDown = useCallback(
-    (e: ReactPointerEvent) => {
-      if (!isSurfaceEvent(e.target)) return;
-      if (isTouchPointer(e)) return;
-      if (pan.isSpaceDown) {
-        stopFollowingForManualCameraChange();
-        gesture.current = 'pan';
-        pan.onPointerDown(e);
-        return;
+  // End the active tool/pan gesture, either committing it (the pointer lifted
+  // normally) or cancelling it (a pinch/pen stole the interaction).
+  const endToolGesture = useCallback(
+    (target: Element, mode: 'cancel') => {
+      const id = toolPointerId.current;
+      if (gesture.current === 'tool' && mode === 'cancel') {
+        activeTool()?.onCancel?.(ctx);
       }
+      if (id !== null && target.hasPointerCapture(id)) {
+        target.releasePointerCapture(id);
+      }
+      gesture.current = null;
+      toolPointerId.current = null;
+    },
+    [ctx],
+  );
+
+  const startToolGesture = useCallback(
+    (e: ReactPointerEvent) => {
       gesture.current = 'tool';
+      toolPointerId.current = e.pointerId;
       e.currentTarget.setPointerCapture(e.pointerId);
       activeTool()?.onPointerDown?.(toInfo(e), ctx);
     },
-    [pan, toInfo, ctx, isSurfaceEvent],
+    [toInfo, ctx],
+  );
+
+  const clearLongPress = useCallback(() => {
+    if (longPressTimer.current !== null) {
+      window.clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+    longPressOrigin.current = null;
+  }, []);
+
+  // Arm a long-press on a one-finger touch: holding still for ~500ms aborts the
+  // in-progress stroke and opens the context menu (touch has no right-click).
+  // Dispatching a native `contextmenu` lets the existing onContextMenu select the
+  // shape and the ContextMenuTrigger open — no duplicated logic.
+  const armLongPress = useCallback(
+    (e: ReactPointerEvent) => {
+      const cx = e.clientX;
+      const cy = e.clientY;
+      const target = e.currentTarget;
+      longPressOrigin.current = { x: cx, y: cy };
+      longPressTimer.current = window.setTimeout(() => {
+        longPressTimer.current = null;
+        longPressOrigin.current = null;
+        endToolGesture(target, 'cancel');
+        const el = document.elementFromPoint(cx, cy) ?? target;
+        el.dispatchEvent(
+          new MouseEvent('contextmenu', {
+            bubbles: true,
+            cancelable: true,
+            clientX: cx,
+            clientY: cy,
+            view: window,
+          }),
+        );
+      }, 500);
+    },
+    [endToolGesture],
+  );
+
+  const onPointerDown = useCallback(
+    (e: ReactPointerEvent) => {
+      // Touch: drive the active tool with one finger; two fingers = pinch/pan.
+      if (isTouchPointer(e)) {
+        if (penActive.current) return; // palm rejection while the pen is down
+        activeTouches.current.add(e.pointerId);
+        if (activeTouches.current.size >= 2) {
+          // Second finger down → a pinch is starting: abort the one-finger stroke
+          // (useTouchPinch owns the camera from here) and mute tool routing.
+          pinchLatch.current = true;
+          clearLongPress();
+          endToolGesture(e.currentTarget, 'cancel');
+          return;
+        }
+        if (pinchLatch.current) return; // mid-pinch: wait until all fingers lift
+        if (!isSurfaceEvent(e.target)) return;
+        startToolGesture(e);
+        armLongPress(e);
+        return;
+      }
+
+      // Mouse / pen.
+      if (!isSurfaceEvent(e.target)) return;
+      if (e.pointerType === 'pen') {
+        penActive.current = true;
+        // A resting finger may have started a stroke first; the pen takes over.
+        if (gesture.current === 'tool' && toolPointerId.current !== e.pointerId) {
+          endToolGesture(e.currentTarget, 'cancel');
+        }
+      }
+      if (pan.isSpaceDown) {
+        stopFollowingForManualCameraChange();
+        gesture.current = 'pan';
+        toolPointerId.current = e.pointerId;
+        pan.onPointerDown(e);
+        return;
+      }
+      startToolGesture(e);
+    },
+    [pan, isSurfaceEvent, endToolGesture, startToolGesture],
   );
 
   const onPointerMove = useCallback(
     (e: ReactPointerEvent) => {
-      if (isTouchPointer(e)) return;
+      if (isTouchPointer(e) && penActive.current) return;
       const rect = containerRef.current?.getBoundingClientRect();
-      if (rect) {
+      // Skip the presence cursor while pinching (two fingers, jittery midpoint).
+      if (rect && !(isTouchPointer(e) && pinchLatch.current)) {
         const world = screenToWorld(
           { x: e.clientX - rect.left, y: e.clientY - rect.top },
           useCameraStore.getState().camera,
         );
         setLocalCursor(world);
       }
+      // A real drag past the slop cancels the pending long-press.
+      if (longPressOrigin.current) {
+        const dx = e.clientX - longPressOrigin.current.x;
+        const dy = e.clientY - longPressOrigin.current.y;
+        if (Math.hypot(dx, dy) > 10) clearLongPress();
+      }
+      if (e.pointerId !== toolPointerId.current) return;
       if (gesture.current === 'pan') {
         pan.onPointerMove(e);
       } else if (gesture.current === 'tool') {
         activeTool()?.onPointerMove?.(toInfo(e), ctx);
       }
     },
-    [pan, toInfo, ctx, containerRef],
+    [pan, toInfo, ctx, containerRef, clearLongPress],
+  );
+
+  const releaseTouch = useCallback(
+    (e: ReactPointerEvent) => {
+      clearLongPress();
+      if (e.pointerType === 'pen') penActive.current = false;
+      if (isTouchPointer(e)) {
+        activeTouches.current.delete(e.pointerId);
+        if (activeTouches.current.size === 0) pinchLatch.current = false;
+      }
+    },
+    [clearLongPress],
   );
 
   const onPointerUp = useCallback(
     (e: ReactPointerEvent) => {
-      if (isTouchPointer(e)) return;
+      releaseTouch(e);
+      if (e.pointerId !== toolPointerId.current) return;
       if (gesture.current === 'pan') {
         pan.onPointerUp(e);
       } else if (gesture.current === 'tool') {
@@ -263,8 +385,26 @@ export function Canvas() {
         }
       }
       gesture.current = null;
+      toolPointerId.current = null;
     },
-    [pan, toInfo, ctx],
+    [pan, toInfo, ctx, releaseTouch],
+  );
+
+  // The browser fires pointercancel when it steals a touch (e.g. a pinch is
+  // recognized) — abort the in-progress gesture rather than committing it.
+  const onPointerCancel = useCallback(
+    (e: ReactPointerEvent) => {
+      releaseTouch(e);
+      if (e.pointerId !== toolPointerId.current) return;
+      if (gesture.current === 'pan') {
+        pan.onPointerUp(e);
+        gesture.current = null;
+        toolPointerId.current = null;
+      } else {
+        endToolGesture(e.currentTarget, 'cancel');
+      }
+    },
+    [pan, releaseTouch, endToolGesture],
   );
 
   const onDoubleClick = useCallback(
@@ -376,6 +516,9 @@ export function Canvas() {
   useEffect(() => {
     if (activeToolId !== 'select') useSelectionStore.getState().clear();
   }, [activeToolId]);
+
+  // Drop any pending long-press timer on unmount.
+  useEffect(() => clearLongPress, [clearLongPress]);
 
   // Tool lifecycle: enter the active tool, and run the previous tool's onExit on
   // switch (the effect cleanup). Lets a tool tear down in-progress state — e.g.
@@ -648,6 +791,7 @@ export function Canvas() {
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
+      onPointerCancel={onPointerCancel}
       onDoubleClick={onDoubleClick}
       onContextMenu={onContextMenu}
       onDragOver={onDragOver}

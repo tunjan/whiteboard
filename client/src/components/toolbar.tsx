@@ -174,7 +174,7 @@ export function Toolbar() {
 
   return (
     <TooltipProvider delay={300}>
-      <Surface className="absolute bottom-6 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1.5 p-2 shadow-[0_14px_42px_rgba(0,0,0,0.14),0_4px_12px_rgba(0,0,0,0.08)] dark:shadow-[0_18px_48px_rgba(0,0,0,0.55),0_4px_14px_rgba(0,0,0,0.35)]">
+      <Surface className="touch-targets absolute bottom-[calc(1.5rem+env(safe-area-inset-bottom))] left-1/2 z-20 flex max-w-[calc(100vw-1rem)] -translate-x-1/2 flex-wrap justify-center items-center gap-1.5 p-2 shadow-[0_14px_42px_rgba(0,0,0,0.14),0_4px_12px_rgba(0,0,0,0.08)] dark:shadow-[0_18px_48px_rgba(0,0,0,0.55),0_4px_14px_rgba(0,0,0,0.35)]">
         {/* Group 1: Navigation & Selection */}
         <div className="flex items-center gap-1">
           {GROUP_1.map(renderToolButton)}

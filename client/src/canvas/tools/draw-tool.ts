@@ -96,5 +96,13 @@ export function createDrawTool(): Tool {
       points = [];
       // Stay in the draw tool; intentionally no selection of the new stroke.
     },
+
+    // A pinch (or tool switch) mid-stroke discards the partial stroke entirely.
+    onCancel(ctx: ToolContext) {
+      const sid = id;
+      id = null;
+      points = [];
+      if (sid) ctx.editor.deleteShapes([sid]);
+    },
   };
 }

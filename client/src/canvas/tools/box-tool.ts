@@ -97,5 +97,12 @@ export function createBoxTool(opts: BoxToolOptions): Tool {
       useSelectionStore.getState().setSelection([id]);
       ctx.complete();
     },
+
+    // Pinch-to-zoom mid-create: drop the in-flight shape, stay in the tool.
+    onCancel(ctx: ToolContext) {
+      const id = creatingId;
+      creatingId = null;
+      if (id) ctx.editor.deleteShapes([id]);
+    },
   };
 }

@@ -269,7 +269,7 @@ export function StylePanel() {
   };
 
   return (
-    <Surface className="absolute top-[4.5rem] right-4 z-20 w-56 p-3.5">
+    <Surface className="absolute top-[calc(4.5rem+env(safe-area-inset-top))] right-[calc(1rem+env(safe-area-inset-right))] z-20 w-56 p-3.5">
       <div className="flex flex-col">
         {/* Color + opacity — the always-present group. Label-less by design:
             the swatches and slider read on their own, keeping the panel calm. */}

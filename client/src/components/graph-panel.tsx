@@ -199,7 +199,7 @@ export function GraphPanel() {
   );
 
   return (
-    <Surface className="absolute top-[4.5rem] right-4 z-20 flex max-h-[calc(100vh-7rem)] w-80 flex-col gap-3 overflow-y-auto p-3.5">
+    <Surface className="touch-targets absolute top-[calc(4.5rem+env(safe-area-inset-top))] right-[calc(1rem+env(safe-area-inset-right))] z-20 flex max-h-[calc(100dvh-7rem-env(safe-area-inset-top))] w-80 flex-col gap-3 overflow-y-auto p-3.5">
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
           <div className="text-sm font-semibold text-foreground">Function</div>

@@ -165,6 +165,55 @@
   #root {
     height: 100%;
   }
+  /* iPad / Safari touch hardening. */
+  html,
+  body {
+    /* No rubber-band scroll chaining or pull-to-refresh over the canvas. */
+    overscroll-behavior: none;
+    /* No gray flash on tap, no long-press text-selection callout. */
+    -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+  }
+  /* Treat the app like a native surface: never select chrome text on long-press,
+     but keep real text fields (and the canvas text editor) selectable. */
+  body {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  input,
+  textarea,
+  [contenteditable],
+  [contenteditable] * {
+    -webkit-user-select: text;
+    user-select: text;
+  }
+  /* Buttons/menus: kill the 300ms tap delay and double-tap zoom on controls.
+     The canvas keeps its own `touch-action: none` for custom gestures. */
+  button,
+  [role="button"],
+  [role="menuitem"],
+  a {
+    touch-action: manipulation;
+  }
+}
+
+@layer utilities {
+  @media (pointer: coarse) {
+    /* Controls revealed on hover for mouse users must be permanently visible
+       where there is no hover (touch). Applied alongside group-hover. */
+    .touch-reveal {
+      opacity: 1 !important;
+    }
+    /* Opt-in container: grow its clickable controls to a comfortable ~40px
+       touch target on coarse pointers (mouse layouts stay compact). */
+    .touch-targets button,
+    .touch-targets [role="button"],
+    .touch-targets [role="menuitem"],
+    .touch-targets [data-slot="button"] {
+      min-height: 2.5rem;
+      min-width: 2.5rem;
+    }
+  }
 }
 
 

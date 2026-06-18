@@ -59,7 +59,13 @@ type Gesture =
       items: GroupItem[];
     }
   | { type: 'rotate'; initial: Shape; center: Point; startAngle: number }
-  | { type: 'handle'; shapeId: string; handleId: string; util: ShapeUtil }
+  | {
+      type: 'handle';
+      shapeId: string;
+      handleId: string;
+      util: ShapeUtil;
+      initial: Shape;
+    }
   | { type: 'marquee'; start: Point; base: string[] }
   | null;
 
@@ -235,7 +241,13 @@ export function createSelectTool(): Tool {
             const shape = ctx.editor.getShape(sinfo.ids[0]!);
             const util = shape ? shapeRegistry.getFor(shape) : undefined;
             if (shape && util?.onHandleDrag) {
-              gesture = { type: 'handle', shapeId: shape.id, handleId: h.id, util };
+              gesture = {
+                type: 'handle',
+                shapeId: shape.id,
+                handleId: h.id,
+                util,
+                initial: shape,
+              };
               return;
             }
           }
@@ -472,6 +484,41 @@ export function createSelectTool(): Tool {
         if ((s.parentId ?? null) !== (next ?? null)) {
           ctx.editor.updateShape(id, { parentId: next });
         }
+      }
+    },
+
+    // Pinch-to-zoom (or any interrupt) mid-gesture: revert the in-progress
+    // move/resize/rotate/handle drag to its pre-gesture state so an accidental
+    // partial drag never sticks. A marquee just drops (it mutated no shape).
+    onCancel(ctx: ToolContext) {
+      const g = gesture;
+      gesture = null;
+      useSelectionStore.getState().setMarquee(null);
+      useSelectionStore.getState().setSnapGuides([]);
+      if (!g) return;
+      const restore = (s: Shape) =>
+        ctx.editor.updateShape(s.id, {
+          x: s.x,
+          y: s.y,
+          rotation: s.rotation,
+          props: s.props as unknown as Record<string, unknown>,
+        });
+      switch (g.type) {
+        case 'move':
+          for (const [id, init] of g.initial) {
+            ctx.editor.updateShape(id, { x: init.x, y: init.y });
+          }
+          break;
+        case 'resize':
+        case 'rotate':
+        case 'handle':
+          restore(g.initial);
+          break;
+        case 'group-resize':
+          for (const item of g.items) restore(item.initial);
+          break;
+        case 'marquee':
+          break;
       }
     },
 

@@ -76,9 +76,12 @@ export function createEraserTool(): Tool {
       reset();
     },
 
-    // Escape / tool switch mid-stroke cancels: the highlighted shapes revert and
-    // nothing is deleted.
+    // Escape / tool switch / pinch mid-stroke cancels: the highlighted shapes
+    // revert and nothing is deleted.
     onExit() {
+      reset();
+    },
+    onCancel() {
       reset();
     },
   };

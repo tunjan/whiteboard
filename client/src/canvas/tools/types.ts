@@ -48,6 +48,12 @@ export interface Tool {
   onPointerDown?(info: ToolPointerInfo, ctx: ToolContext): void;
   onPointerMove?(info: ToolPointerInfo, ctx: ToolContext): void;
   onPointerUp?(info: ToolPointerInfo, ctx: ToolContext): void;
+  /**
+   * Abort the in-progress interaction without committing it — e.g. a one-finger
+   * stroke is interrupted when a second finger lands and a pinch-zoom begins.
+   * Tools should discard any pending shape/edit and restore pre-gesture state.
+   */
+  onCancel?(ctx: ToolContext): void;
   onDoubleClick?(info: ToolPointerInfo, ctx: ToolContext): void;
   onKeyDown?(e: KeyboardEvent, ctx: ToolContext): void;
 }

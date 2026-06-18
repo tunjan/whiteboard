@@ -44,7 +44,7 @@ export function CanvasControls({
   return (
     <div
       data-ui-layer
-      className="absolute right-3 bottom-3 flex items-center gap-2 select-none"
+      className="touch-targets absolute right-[calc(0.75rem+env(safe-area-inset-right))] bottom-[calc(0.75rem+env(safe-area-inset-bottom))] flex items-center gap-2 select-none"
     >
       <TooltipProvider delay={300}>
         <ToggleGroup

@@ -17,7 +17,7 @@ function Slider({
       <SliderPrimitive.Control className="flex w-full touch-none items-center py-1.5 select-none">
         <SliderPrimitive.Track className="relative h-1.5 w-full rounded-full bg-muted">
           <SliderPrimitive.Indicator className="absolute h-full rounded-full bg-accent-brand" />
-          <SliderPrimitive.Thumb className="size-4 rounded-full border-2 border-accent-brand bg-background shadow-sm transition-transform hover:scale-110 focus-visible:outline-none" />
+          <SliderPrimitive.Thumb className="size-4 rounded-full border-2 border-accent-brand bg-background shadow-sm transition-transform hover:scale-110 focus-visible:outline-none pointer-coarse:size-6" />
         </SliderPrimitive.Track>
       </SliderPrimitive.Control>
     </SliderPrimitive.Root>

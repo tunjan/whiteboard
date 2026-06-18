@@ -81,7 +81,7 @@ export function BoardChrome({
   return (
     <>
       {/* Left Floating Panel (Back & Title) */}
-      <Surface className="absolute top-4 left-4 z-20 flex h-11 items-center gap-1.5 px-1.5">
+      <Surface className="touch-targets absolute top-[calc(1rem+env(safe-area-inset-top))] left-[calc(1rem+env(safe-area-inset-left))] z-20 flex h-11 items-center gap-1.5 px-1.5">
         {/* Back navigates to the boards list, which is tutor-only. Students join
             via a shared link and aren't authenticated, so following it would
             bounce them to the login page — hide it for them. */}
@@ -104,7 +104,7 @@ export function BoardChrome({
       </Surface>
 
       {/* Center Floating Panel (Collab & Presence) */}
-      <Surface className="absolute top-4 left-1/2 -translate-x-1/2 z-20 flex h-11 items-center gap-3 px-3.5">
+      <Surface className="absolute top-[calc(1rem+env(safe-area-inset-top))] left-1/2 -translate-x-1/2 z-20 flex h-11 items-center gap-3 px-3.5">
         <ConnectionIndicator />
         <div className="h-5 w-px bg-border" />
         <div className="flex items-center gap-2">
@@ -126,7 +126,7 @@ export function BoardChrome({
       </Surface>
 
       {/* Right Floating Panel (Share, Theme & Settings) */}
-      <Surface className="absolute top-4 right-4 z-20 flex h-11 items-center gap-1.5 px-2">
+      <Surface className="touch-targets absolute top-[calc(1rem+env(safe-area-inset-top))] right-[calc(1rem+env(safe-area-inset-right))] z-20 flex h-11 items-center gap-1.5 px-2">
         <ShareButton />
         <div className="h-5 w-px bg-border" />
         <FollowControls identity={identity} />
