@@ -38,6 +38,10 @@ This starts both workspaces concurrently:
 - **server** — Hono HTTP API (tutor auth) + Hocuspocus collaboration server at
   http://localhost:3001
 
+Local music files can be placed under `server/data/music`. First-level folders
+become playlists, and supported audio files (`.mp3`, `.m4a`, `.wav`, `.ogg`,
+`.oga`, `.aac`, `.flac`, `.webm`) appear in the whiteboard music player.
+
 The server boots without Postgres (auth works on its own); Postgres is only
 needed once boards sync through the server. The boards home screen is gated
 behind the single tutor password (`/api/auth/login`); board links

@@ -2,7 +2,15 @@ import * as Y from 'yjs';
 import { IndexeddbPersistence } from 'y-indexeddb';
 import { HocuspocusProvider } from '@hocuspocus/provider';
 import { create } from 'zustand';
-import { genId, type Page, type Shape, type WhiteboardDocument } from '@whiteboard/shared';
+import {
+  DEFAULT_MUSIC_PLAYBACK,
+  genId,
+  type MusicPlaybackState,
+  type MusicPlaybackStatus,
+  type Page,
+  type Shape,
+  type WhiteboardDocument,
+} from '@whiteboard/shared';
 import type { Editor, ShapePatch } from './editor';
 import { generateKeyBetween } from './order';
 import { shapeRegistry } from './shapes/shape-registry';
@@ -11,6 +19,7 @@ import { useCameraStore } from './use-camera-store';
 import { useSelectionStore } from './use-selection-store';
 import { useConnectionStore } from '@/collab/use-connection-store';
 import { setActiveAwareness, setLocalPage } from '@/collab/presence';
+import { useMusicPlaybackStore } from '@/music/use-music-playback-store';
 
 // page-default's shapes live at the doc root map `shapes` (unchanged from Pass 1),
 // which keeps the Yjs structure idempotent across IndexedDB + server sync. Every
@@ -133,6 +142,8 @@ interface Session {
   doc: Y.Doc;
   /** Page registry: pageId -> { id, name, index }. */
   pages: Y.Map<YPageMeta>;
+  /** Shared playback state for the board's music player. */
+  music: Y.Map<unknown>;
   /** Shapes map for the active page (root `shapes` for page-default). */
   currentShapes: Y.Map<YShape>;
   currentPageId: string;
@@ -140,6 +151,7 @@ interface Session {
   /** Deep observer bound to `currentShapes`; swapped on page switch. */
   shapesObserver: (events: Y.YEvent<Y.AbstractType<unknown>>[]) => void;
   pagesObserver: () => void;
+  musicObserver: () => void;
   persistence: IndexeddbPersistence | null;
   provider: HocuspocusProvider | null;
   cleanup: () => void;
@@ -197,6 +209,43 @@ function rebuildSnapshot(): void {
     doc: { pages, pageOrder },
     currentPageId: session.currentPageId,
   });
+}
+
+function readMusicPlayback(): MusicPlaybackState {
+  if (!session) return DEFAULT_MUSIC_PLAYBACK;
+  const status = asMusicStatus(session.music.get('status'));
+  return {
+    trackId: asStringOrNull(session.music.get('trackId')),
+    status,
+    position: asNonNegativeNumber(session.music.get('position'), 0),
+    updatedAt: asNonNegativeNumber(session.music.get('updatedAt'), 0),
+    version: asNonNegativeNumber(session.music.get('version'), 0),
+    requestedBy: asOptionalString(session.music.get('requestedBy')),
+  };
+}
+
+function publishMusicPlayback(): void {
+  useMusicPlaybackStore.getState().setPlayback(readMusicPlayback());
+}
+
+function asStringOrNull(value: unknown): string | null {
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+function asOptionalString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function asNonNegativeNumber(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+    ? value
+    : fallback;
+}
+
+function asMusicStatus(value: unknown): MusicPlaybackStatus {
+  return value === 'playing' || value === 'paused' || value === 'stopped'
+    ? value
+    : DEFAULT_MUSIC_PLAYBACK.status;
 }
 
 function applyAffected(ids: Set<string>): void {
@@ -275,9 +324,11 @@ export function loadBoard(
     doc: EMPTY_SNAPSHOT,
     currentPageId: DEFAULT_PAGE_ID,
   });
+  useMusicPlaybackStore.getState().reset();
 
   const doc = new Y.Doc();
   const pages = doc.getMap('pages') as Y.Map<YPageMeta>;
+  const music = doc.getMap('music');
   const currentShapes = getShapesMap(doc, DEFAULT_PAGE_ID);
   const undo = new Y.UndoManager(currentShapes, {
     trackedOrigins: new Set([LOCAL_ORIGIN]),
@@ -299,6 +350,9 @@ export function loadBoard(
     rebuildSnapshot();
   };
   pages.observe(pagesObserver);
+
+  const musicObserver = () => publishMusicPlayback();
+  music.observe(musicObserver);
 
   const persistence = opts.persist
     ? new IndexeddbPersistence(boardRoom(boardId), doc)
@@ -323,21 +377,25 @@ export function loadBoard(
     boardId,
     doc,
     pages,
+    music,
     currentShapes,
     currentPageId: DEFAULT_PAGE_ID,
     undo,
     shapesObserver,
     pagesObserver,
+    musicObserver,
     persistence,
     provider,
     cleanup: () => {
       setActiveAwareness(null);
       session?.currentShapes.unobserveDeep(session.shapesObserver);
       pages.unobserve(pagesObserver);
+      music.unobserve(musicObserver);
       undo.destroy();
       provider?.destroy();
       persistence?.destroy();
       doc.destroy();
+      useMusicPlaybackStore.getState().reset();
     },
   };
 
@@ -352,6 +410,7 @@ export function loadBoard(
   provider?.on('synced', maybeSeedDefaultPage);
 
   fullResync();
+  publishMusicPlayback();
 
   let disposed = false;
   return () => {
@@ -465,6 +524,41 @@ export function movePage(id: string, direction: 'up' | 'down'): void {
   const index = generateKeyBetween(before, after);
   session.doc.transact(() => {
     session!.pages.get(id)?.set('index', index);
+  });
+}
+
+// --- Music playback API ---
+
+export function setMusicPlayback(
+  update: {
+    trackId?: string | null;
+    status?: MusicPlaybackStatus;
+    position?: number;
+    requestedBy?: string;
+  },
+): void {
+  if (!session) return;
+  const current = readMusicPlayback();
+  const nextTrackId =
+    update.trackId !== undefined ? update.trackId : current.trackId;
+  const nextStatus = update.status ?? current.status;
+  const nextPosition =
+    update.position !== undefined
+      ? Math.max(0, update.position)
+      : current.position;
+  const nextVersion = current.version + 1;
+
+  session.doc.transact(() => {
+    session?.music.set('trackId', nextTrackId);
+    session?.music.set('status', nextStatus);
+    session?.music.set('position', Number.isFinite(nextPosition) ? nextPosition : 0);
+    session?.music.set('updatedAt', Date.now());
+    session?.music.set('version', nextVersion);
+    if (update.requestedBy?.trim()) {
+      session?.music.set('requestedBy', update.requestedBy.trim());
+    } else if ('requestedBy' in update) {
+      session?.music.delete('requestedBy');
+    }
   });
 }
 

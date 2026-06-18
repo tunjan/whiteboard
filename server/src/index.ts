@@ -9,6 +9,7 @@ import { authRoutes } from './auth/routes';
 import { blobRoutes } from './blobs/routes';
 import { boardRoutes } from './boards/routes';
 import { hocuspocus } from './collab/hocuspocus';
+import { musicRoutes } from './music/routes';
 
 const app = new Hono();
 
@@ -16,6 +17,7 @@ app.get('/health', (c) => c.json({ status: 'ok' }));
 app.route('/api/auth', authRoutes);
 app.route('/api/boards', boardRoutes);
 app.route('/api/blobs', blobRoutes);
+app.route('/api/music', musicRoutes);
 
 const clientDist = fileURLToPath(new URL('../../client/dist', import.meta.url));
 const clientIndex = fileURLToPath(

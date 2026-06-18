@@ -4,6 +4,7 @@ import type { Identity } from '@/collab/identity';
 import { usePresenceStore } from '@/collab/use-presence-store';
 import { ConnectionIndicator } from '@/components/connection-indicator';
 import { FollowControls } from '@/components/follow-controls';
+import { MusicPlayer } from '@/music/music-player';
 import { PageMenu } from '@/components/page-menu';
 import { SettingsDialog } from '@/components/settings-dialog';
 import { ShareButton } from '@/components/share-button';
@@ -125,9 +126,9 @@ export function BoardChrome({
         </div>
       </Surface>
 
-      {/* Right Floating Panel (Share, Theme & Settings) */}
+      {/* Right Floating Panel (Music, view controls, settings, share) */}
       <Surface className="touch-targets absolute top-[calc(1rem+env(safe-area-inset-top))] right-[calc(1rem+env(safe-area-inset-right))] z-20 flex h-11 items-center gap-1.5 px-2">
-        <ShareButton />
+        <MusicPlayer identity={identity} />
         <div className="h-5 w-px bg-border" />
         <FollowControls identity={identity} />
         <Button
@@ -148,6 +149,8 @@ export function BoardChrome({
         >
           <Settings2 className="size-4" />
         </Button>
+        <div className="h-5 w-px bg-border" />
+        <ShareButton />
       </Surface>
 
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />

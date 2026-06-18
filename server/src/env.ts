@@ -24,4 +24,6 @@ export const env = {
     'postgres://whiteboard:whiteboard@localhost:5433/whiteboard',
   /** Directory where uploaded image blobs are stored (content-addressed). */
   blobDir: process.env.BLOB_DIR ?? 'data/blobs',
+  /** Directory containing local audio files grouped by playlist folders. */
+  musicDir: process.env.MUSIC_DIR ?? 'data/music',
 } as const;
