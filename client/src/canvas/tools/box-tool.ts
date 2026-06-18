@@ -62,6 +62,7 @@ export function createBoxTool(opts: BoxToolOptions): Tool {
         x: info.point.x,
         y: info.point.y,
         rotation: 0,
+        opacity: style.opacity,
         index: getTopIndex(ctx.editor.getShapes()),
         props,
       } as Shape;

@@ -49,10 +49,9 @@ interface StyleStore {
   /** Current stroke dash style. */
   dash: StrokeDash;
   /**
-   * Current opacity (0–1) reflected by the style panel. Local-only for now —
-   * the slider is wired to this value but shape rendering does not yet consume
-   * it (opacity is not part of the shape model). TODO: thread through shape
-   * props + render once the data model gains an `opacity` field.
+   * Current opacity (0–1) for new shapes, reflected by the style panel. Applied
+   * to a shape's `opacity` field at creation and editable on the selection; the
+   * canvas compounds it with ancestor opacities at render time.
    */
   opacity: number;
   /** Whether new arrows draw an arrowhead at the start point. */

@@ -86,9 +86,16 @@ export function FrameChrome({
 export function FrameView({
   frame,
   children,
+  opacity = 1,
 }: {
   frame: Shape & { type: 'frame' };
   children: ReactNode;
+  /**
+   * The frame's own resolved opacity. Applied to the frame chrome only — never
+   * to the children group, since each child already compounds the frame's
+   * opacity into its own resolved value (avoiding a double application).
+   */
+  opacity?: number;
 }) {
   const clipId = `frame-clip-${frame.id}`;
   const { x, y, props } = frame;
@@ -97,7 +104,7 @@ export function FrameView({
       <clipPath id={clipId}>
         <rect x={x} y={y} width={props.w} height={props.h} />
       </clipPath>
-      {/* Background + border behind children. */}
+      {/* Background behind children. */}
       <rect
         x={x}
         y={y}
@@ -106,27 +113,30 @@ export function FrameView({
         fill="var(--color-card)"
         stroke="var(--color-border)"
         strokeWidth={1}
+        opacity={opacity}
       />
       <g clipPath={`url(#${clipId})`}>{children}</g>
-      {/* Border on top so it stays crisp over clipped content. */}
-      <rect
-        x={x}
-        y={y}
-        width={props.w}
-        height={props.h}
-        fill="none"
-        stroke="var(--color-border)"
-        strokeWidth={1}
-      />
-      <text
-        x={x + 2}
-        y={y - 6}
-        fill="var(--color-muted-foreground)"
-        fontSize={13}
-        fontFamily="'Inter Variable', system-ui, sans-serif"
-      >
-        {props.name}
-      </text>
+      {/* Border + title on top, at the frame's own opacity. */}
+      <g opacity={opacity}>
+        <rect
+          x={x}
+          y={y}
+          width={props.w}
+          height={props.h}
+          fill="none"
+          stroke="var(--color-border)"
+          strokeWidth={1}
+        />
+        <text
+          x={x + 2}
+          y={y - 6}
+          fill="var(--color-muted-foreground)"
+          fontSize={13}
+          fontFamily="'Inter Variable', system-ui, sans-serif"
+        >
+          {props.name}
+        </text>
+      </g>
     </g>
   );
 }

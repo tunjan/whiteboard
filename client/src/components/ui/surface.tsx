@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils"
 
 /**
  * Floating chrome surface: the translucent, blurred panel used by every piece
- * of board chrome (toolbar, top bars, style panel, plot drawer).
+ * of board chrome (toolbar, top bars, style panel).
  *
  * One definition for the glass look — background, border, blur, shadow, and
  * radius all come from tokens (`--panel`, `--panel-border`) so the chrome stays

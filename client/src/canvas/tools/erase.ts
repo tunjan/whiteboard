@@ -1,85 +1,54 @@
-import {
-  type DrawPoint,
-  type DrawShape,
-  type Point,
-  distance,
-  genId,
-  pointsBounds,
-  rotatePoint,
-} from '@whiteboard/shared';
+import { type Point, isContainerType } from '@whiteboard/shared';
 import type { Editor } from '../editor';
-import { getTopIndex } from '../order';
 import { shapeRegistry } from '../shapes/shape-registry';
-import { useCameraStore } from '../use-camera-store';
-
-const ERASER_SCREEN_RADIUS = 8;
+import { spatialIndex } from '../use-document-store';
+import { segmentErasesShape } from './erase-geometry';
 
 /**
- * Slice a freehand stroke at the eraser point. Points within the eraser radius
- * are removed; each surviving run of consecutive points becomes its own stroke.
- * Returns the runs to keep, or null if the eraser didn't touch this stroke.
+ * Shapes under the start point that must survive the whole stroke: containers
+ * (frames/groups) and text boxes. When you begin a swipe on top of one of these
+ * "backgrounds", dragging across it erases the drawings on it — not the
+ * background itself. Captured once on pointer down (see {@link protectedAt}).
  */
-function sliceStroke(
-  shape: DrawShape,
-  world: Point,
-  radius: number,
-): DrawPoint[][] | null {
-  const pts = shape.props.points;
-  if (pts.length === 0) return null;
-
-  const b = pointsBounds(pts);
-  const center = {
-    x: shape.x + (b.minX + b.maxX) / 2,
-    y: shape.y + (b.minY + b.maxY) / 2,
-  };
-  const wp = shape.rotation ? rotatePoint(world, center, -shape.rotation) : world;
-  const local = { x: wp.x - shape.x, y: wp.y - shape.y };
-  const r = radius + shape.props.size / 2;
-
-  let touched = false;
-  const runs: DrawPoint[][] = [];
-  let cur: DrawPoint[] = [];
-  for (const p of pts) {
-    if (distance(p, local) <= r) {
-      touched = true;
-      if (cur.length) {
-        runs.push(cur);
-        cur = [];
-      }
-    } else {
-      cur.push(p);
-    }
+export function protectedAt(editor: Editor, p: Point, margin: number): Set<string> {
+  const out = new Set<string>();
+  for (const shape of editor.getShapes()) {
+    if (!isContainerType(shape.type) && shape.type !== 'text') continue;
+    const util = shapeRegistry.getFor(shape);
+    if (util?.hitTest(shape, p, margin)) out.add(shape.id);
   }
-  if (cur.length) runs.push(cur);
-  if (!touched) return null;
-  // Drop single-point debris.
-  return runs.filter((run) => run.length >= 2);
+  return out;
 }
 
 /**
- * Destructive erase at a world point: whole-shape delete for non-ink shapes the
- * eraser touches; ink strokes are sliced into surviving pieces.
+ * Ids of shapes the swipe segment a→b should erase.
+ *
+ * Two-stage filtering keeps this instant on dense canvases: the spatial index
+ * narrows thousands of shapes to the handful whose bounds overlap the swipe
+ * envelope (the segment's AABB grown by the collision margin), then each
+ * candidate runs a geometry-specific collision test in its own local frame.
+ * Containers and protected backgrounds are never targeted.
  */
-export function eraseAtPoint(editor: Editor, world: Point): void {
-  const radius = ERASER_SCREEN_RADIUS / useCameraStore.getState().camera.z;
-  for (const shape of editor.getShapes()) {
+export function eraseAlong(
+  editor: Editor,
+  a: Point,
+  b: Point,
+  margin: number,
+  protectedIds: Set<string>,
+): string[] {
+  const envelope = {
+    minX: Math.min(a.x, b.x) - margin,
+    minY: Math.min(a.y, b.y) - margin,
+    maxX: Math.max(a.x, b.x) + margin,
+    maxY: Math.max(a.y, b.y) + margin,
+  };
+  const out: string[] = [];
+  for (const id of spatialIndex.search(envelope)) {
+    if (protectedIds.has(id)) continue;
+    const shape = editor.getShape(id);
+    if (!shape || shape.locked || isContainerType(shape.type)) continue;
     const util = shapeRegistry.getFor(shape);
-    if (!util) continue;
-
-    if (shape.type === 'draw') {
-      const runs = sliceStroke(shape, world, radius);
-      if (runs === null) continue;
-      editor.deleteShapes([shape.id]);
-      for (const run of runs) {
-        editor.createShape({
-          ...shape,
-          id: genId(),
-          index: getTopIndex(editor.getShapes()),
-          props: { ...shape.props, points: run },
-        });
-      }
-    } else if (util.hitTest(shape, world, radius)) {
-      editor.deleteShapes([shape.id]);
-    }
+    if (util && segmentErasesShape(shape, util, a, b, margin)) out.push(id);
   }
+  return out;
 }

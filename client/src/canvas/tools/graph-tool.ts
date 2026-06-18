@@ -1,41 +1,41 @@
 import { ChartLine } from 'lucide-react';
-import { genId, type PlotProps, type Shape } from '@whiteboard/shared';
+import { genId, type GraphProps, type Shape } from '@whiteboard/shared';
 import { getTopIndex } from '../order';
+import { GRAPH_DEFAULT_SIZE } from '../shapes/graph';
 import { shapeRegistry } from '../shapes/shape-registry';
 import { useSelectionStore } from '../use-selection-store';
 import { boxFromDrag } from './drag-box';
 import type { Tool, ToolContext, ToolPointerInfo } from './types';
 
 const CLICK_THRESHOLD = 8;
-const DEFAULT_W = 360;
-const DEFAULT_H = 260;
 
-export function createPlotTool(): Tool {
+export function createGraphTool(): Tool {
   let creatingId: string | null = null;
   let start = { x: 0, y: 0 };
 
   return {
-    id: 'plot',
-    label: 'Plot',
-    hotkey: 'p',
+    id: 'graph',
+    label: 'Function',
+    hotkey: 'f',
     cursor: 'crosshair',
     icon: ChartLine,
 
     onPointerDown(info: ToolPointerInfo, ctx: ToolContext) {
       if (info.button !== 0) return;
-      const util = shapeRegistry.get('plot');
+      const util = shapeRegistry.get('graph');
       if (!util) return;
+
       start = info.point;
       const id = genId();
       creatingId = id;
-      const props: PlotProps = {
-        ...(util.getDefaultProps() as PlotProps),
+      const props: GraphProps = {
+        ...(util.getDefaultProps() as GraphProps),
         w: 0,
         h: 0,
       };
       const shape = {
         id,
-        type: 'plot',
+        type: 'graph',
         x: info.point.x,
         y: info.point.y,
         rotation: 0,
@@ -60,16 +60,19 @@ export function createPlotTool(): Tool {
       creatingId = null;
       if (!id) return;
       const shape = ctx.editor.getShape(id);
-      if (!shape || shape.type !== 'plot') return;
+      if (!shape || shape.type !== 'graph') return;
+
       if (shape.props.w < CLICK_THRESHOLD && shape.props.h < CLICK_THRESHOLD) {
         ctx.editor.updateShape(id, {
-          x: start.x - DEFAULT_W / 2,
-          y: start.y - DEFAULT_H / 2,
-          props: { w: DEFAULT_W, h: DEFAULT_H },
+          x: start.x - GRAPH_DEFAULT_SIZE.w / 2,
+          y: start.y - GRAPH_DEFAULT_SIZE.h / 2,
+          props: { w: GRAPH_DEFAULT_SIZE.w, h: GRAPH_DEFAULT_SIZE.h },
         });
       }
+
       useSelectionStore.getState().setSelection([id]);
       ctx.complete();
     },
   };
 }
+

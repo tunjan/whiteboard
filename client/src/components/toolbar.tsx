@@ -33,7 +33,7 @@ const POLYGON_KINDS: { kind: PolygonKind; label: string }[] = [
 
 const GROUP_1 = ['select', 'lasso'];
 const GROUP_2 = ['draw', 'eraser'];
-const GROUP_3 = ['text', 'plot'];
+const GROUP_3 = ['text', 'graph'];
 const GROUP_4 = ['rectangle', 'ellipse', 'line', 'arrow', 'frame'];
 
 function MiniShape({ kind }: { kind: PolygonKind }) {
@@ -219,4 +219,3 @@ export function Toolbar() {
     </TooltipProvider>
   );
 }
-

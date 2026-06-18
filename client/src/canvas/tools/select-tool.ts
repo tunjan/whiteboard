@@ -15,7 +15,7 @@ import {
   type ResizeHandleId,
 } from '../selection-geometry';
 import { isSelectable, isVisible } from '../selectable';
-import { getGridLevels } from '../grid';
+import { getSnapGridStep } from '../grid';
 import { moveTargetIds, selectionTargetId } from '../hierarchy';
 import { useEnteredGroupStore } from '../use-entered-group-store';
 import { shapeRegistry } from '../shapes/shape-registry';
@@ -156,6 +156,7 @@ function syncStyleFromSelection(editor: Editor): void {
     arrowEnd?: boolean;
   };
   const style = useStyleStore.getState();
+  style.setOpacity(typeof first.opacity === 'number' ? first.opacity : 1);
   if (typeof props.color === 'string') style.setColor(props.color);
   if (typeof props.size === 'number') style.setSize(props.size);
   if (props.fillStyle) style.setFill(props.fillStyle);
@@ -345,7 +346,7 @@ export function createSelectTool(): Tool {
               region,
             );
             const bg = useCanvasUiStore.getState().background;
-            const gridStep = bg === 'blank' ? null : getGridLevels(camera).minorStep;
+            const gridStep = getSnapGridStep(bg, camera);
             const snap = snapBounds(moving, targets, gridStep, threshold);
             dx += snap.dx;
             dy += snap.dy;

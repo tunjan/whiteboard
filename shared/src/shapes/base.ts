@@ -25,4 +25,9 @@ export interface BaseShape<Type extends string, Props> {
   locked?: boolean;
   /** Hidden is a local-only visibility toggle. */
   hidden?: boolean;
+  /**
+   * Local opacity in [0, 1] (undefined = 1 = fully opaque). The rendered
+   * opacity compounds this value with every ancestor container's opacity.
+   */
+  opacity?: number;
 }

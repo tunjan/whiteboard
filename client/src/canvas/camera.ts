@@ -16,11 +16,46 @@ export interface Camera {
 
 export const DEFAULT_CAMERA: Camera = { x: 0, y: 0, z: 1 };
 
-export const MIN_ZOOM = 0.1;
-export const MAX_ZOOM = 32;
+export const ZOOM_STEPS = [0.05, 0.1, 0.25, 0.5, 1, 2, 4, 8] as const;
+export const MIN_ZOOM = ZOOM_STEPS[0]!;
+export const MAX_ZOOM = ZOOM_STEPS[ZOOM_STEPS.length - 1]!;
+export const DEFAULT_BASE_ZOOM = 1;
+
+export type ZoomDirection = 'in' | 'out';
 
 export function clampZoom(z: number): number {
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));
+}
+
+export function discreteZoomSteps(baseZoom = DEFAULT_BASE_ZOOM): number[] {
+  const unique = new Set<number>();
+  for (const step of ZOOM_STEPS) unique.add(clampZoom(step * baseZoom));
+  return [...unique].sort((a, b) => a - b);
+}
+
+export function nextDiscreteZoom(
+  currentZoom: number,
+  direction: ZoomDirection,
+  baseZoom = DEFAULT_BASE_ZOOM,
+): number {
+  const steps = discreteZoomSteps(baseZoom);
+  const z = clampZoom(currentZoom);
+
+  if (direction === 'in') {
+    for (let i = 1; i < steps.length; i++) {
+      const z1 = steps[i - 1]!;
+      const z2 = steps[i]!;
+      if (z < (z1 + z2) / 2) return z2;
+    }
+    return steps[steps.length - 1]!;
+  }
+
+  for (let i = steps.length - 2; i >= 0; i--) {
+    const z1 = steps[i]!;
+    const z2 = steps[i + 1]!;
+    if (z > (z1 + z2) / 2) return z1;
+  }
+  return steps[0]!;
 }
 
 /**
@@ -67,6 +102,24 @@ export function zoomCameraAtScreen(
   return {
     x: world.x - anchor.x / z,
     y: world.y - anchor.y / z,
+    z,
+  };
+}
+
+/**
+ * Pinch gestures need to keep the zoom anchor stable while also letting the
+ * content follow the moving gesture midpoint. `panDelta` is in screen pixels.
+ */
+export function zoomCameraAtScreenWithPan(
+  camera: Camera,
+  anchor: Point,
+  newZ: number,
+  panDelta: Point,
+): Camera {
+  const z = clampZoom(newZ);
+  return {
+    x: camera.x - panDelta.x / camera.z + anchor.x / camera.z - anchor.x / z,
+    y: camera.y - panDelta.y / camera.z + anchor.y / camera.z - anchor.y / z,
     z,
   };
 }

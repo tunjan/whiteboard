@@ -1,4 +1,5 @@
 import type { Bounds } from '@whiteboard/shared';
+import { snapCoordinateToGrid } from './grid';
 
 /** A single alignment guide line to draw (world coordinates). */
 export interface SnapGuide {
@@ -52,7 +53,7 @@ function bestAlong(
   }
   if (gridStep && gridStep > 0) {
     for (const m of moving) {
-      const t = Math.round(m / gridStep) * gridStep;
+      const t = snapCoordinateToGrid(m, gridStep);
       const d = Math.abs(t - m);
       if (d < best.dist) best = { dist: d, offset: t - m, target: t, matched: null };
     }

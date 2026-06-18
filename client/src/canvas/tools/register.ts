@@ -11,15 +11,15 @@ import { createEraserTool } from './eraser-tool';
 import { createTextTool } from './text-tool';
 import { createPolygonTool } from './polygon-tool';
 import { createFrameTool } from './frame-tool';
-import { createPlotTool } from './plot-tool';
+import { createGraphTool } from './graph-tool';
 
 toolRegistry.register(createSelectTool());
 toolRegistry.register(createLassoTool());
 toolRegistry.register(createDrawTool());
 toolRegistry.register(createTextTool());
+toolRegistry.register(createGraphTool());
 toolRegistry.register(createPolygonTool());
 toolRegistry.register(createFrameTool());
-toolRegistry.register(createPlotTool());
 toolRegistry.register(
   createBoxTool({
     id: 'rectangle',

@@ -88,6 +88,7 @@ function shapeToY(shape: Shape): YShape {
   if (shape.parentId !== undefined) m.set('parentId', shape.parentId);
   if (shape.locked !== undefined) m.set('locked', shape.locked);
   if (shape.hidden !== undefined) m.set('hidden', shape.hidden);
+  if (shape.opacity !== undefined) m.set('opacity', shape.opacity);
   m.set('props', shape.props);
   return m;
 }
@@ -103,6 +104,7 @@ function yToShape(m: YShape): Shape {
     parentId: m.get('parentId'),
     locked: m.get('locked'),
     hidden: m.get('hidden'),
+    opacity: m.get('opacity'),
     props: m.get('props'),
   } as Shape;
 }
@@ -115,6 +117,7 @@ function applyPatchToY(m: YShape, patch: ShapePatch): void {
   if (patch.parentId !== undefined) m.set('parentId', patch.parentId);
   if (patch.locked !== undefined) m.set('locked', patch.locked);
   if (patch.hidden !== undefined) m.set('hidden', patch.hidden);
+  if (patch.opacity !== undefined) m.set('opacity', patch.opacity);
   if (patch.props) {
     m.set('props', { ...(m.get('props') as object), ...patch.props });
   }

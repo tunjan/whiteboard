@@ -82,15 +82,20 @@ export function BoardChrome({
     <>
       {/* Left Floating Panel (Back & Title) */}
       <Surface className="absolute top-4 left-4 z-20 flex h-11 items-center gap-1.5 px-1.5">
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="Back to boards"
-          onClick={onBack}
-          className="size-8 rounded-lg"
-        >
-          <ArrowLeft className="size-4" />
-        </Button>
+        {/* Back navigates to the boards list, which is tutor-only. Students join
+            via a shared link and aren't authenticated, so following it would
+            bounce them to the login page — hide it for them. */}
+        {identity?.isTutor && (
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Back to boards"
+            onClick={onBack}
+            className="size-8 rounded-lg"
+          >
+            <ArrowLeft className="size-4" />
+          </Button>
+        )}
         <span className="max-w-[140px] truncate text-sm font-semibold text-foreground">
           {title}
         </span>

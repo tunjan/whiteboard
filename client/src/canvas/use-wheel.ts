@@ -4,10 +4,9 @@ import { useCameraStore } from './use-camera-store';
 
 // Rough px-per-line for wheel events reported in line units (mouse wheels).
 const LINE_HEIGHT = 16;
-// Maps wheel delta to a zoom factor: factor = exp(-delta * sensitivity).
-const ZOOM_SENSITIVITY = 0.01;
+const WHEEL_ZOOM_SPEED = 1;
 // Bound a single event's zoom delta so one notch can't jump wildly.
-const MAX_ZOOM_DELTA = 100;
+const MAX_ZOOM_DELTA = 10;
 
 function clamp(n: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, n));
@@ -39,8 +38,11 @@ export function useWheel(ref: RefObject<HTMLElement | null>): void {
       if (e.ctrlKey || e.metaKey) {
         const lineScale = e.deltaMode === 1 ? LINE_HEIGHT : 1;
         const delta = clamp(e.deltaY * lineScale, -MAX_ZOOM_DELTA, MAX_ZOOM_DELTA);
-        const factor = Math.exp(-delta * ZOOM_SENSITIVITY);
-        store.zoomAtScreen(anchor, store.camera.z * factor);
+        const zoomDelta = -delta / 100;
+        store.zoomAtScreen(
+          anchor,
+          store.camera.z * (1 + zoomDelta * WHEEL_ZOOM_SPEED),
+        );
         return;
       }
 

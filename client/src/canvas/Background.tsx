@@ -2,6 +2,7 @@ import type { Camera } from './camera';
 import {
   type BackgroundType,
   formatAxisLabel,
+  getDotGridLayers,
   getGridLevels,
   pmod,
   tickValues,
@@ -31,6 +32,10 @@ export function Background({ type, camera, width, height }: BackgroundProps) {
   if (type === 'blank' || width === 0 || height === 0) return null;
 
   const g = getGridLevels(camera);
+  const dotLayers =
+    type === 'dot'
+      ? getDotGridLayers(camera).filter((layer) => layer.opacity > 0.01)
+      : [];
   const minorPhase = `translate(${pmod(g.originX, g.minorScreen)} ${pmod(g.originY, g.minorScreen)})`;
   const majorPhase = `translate(${pmod(g.originX, g.majorScreen)} ${pmod(g.originY, g.majorScreen)})`;
 
@@ -42,15 +47,18 @@ export function Background({ type, camera, width, height }: BackgroundProps) {
     >
       <defs>
         {type === 'dot' ? (
-          <pattern
-            id="bg-dots"
-            width={g.minorScreen}
-            height={g.minorScreen}
-            patternUnits="userSpaceOnUse"
-            patternTransform={minorPhase}
-          >
-            <circle cx={0} cy={0} r={1.1} fill={DOT} />
-          </pattern>
+          dotLayers.map((layer) => (
+            <pattern
+              key={layer.id}
+              id={`bg-${layer.id}`}
+              width={layer.screenStep}
+              height={layer.screenStep}
+              patternUnits="userSpaceOnUse"
+              patternTransform={`translate(${layer.offsetX} ${layer.offsetY})`}
+            >
+              <circle cx={0} cy={0} r={layer.radius} fill={DOT} />
+            </pattern>
+          ))
         ) : (
           <>
             <pattern
@@ -86,7 +94,15 @@ export function Background({ type, camera, width, height }: BackgroundProps) {
       </defs>
 
       {type === 'dot' ? (
-        <rect width="100%" height="100%" fill="url(#bg-dots)" />
+        dotLayers.map((layer) => (
+          <rect
+            key={layer.id}
+            width="100%"
+            height="100%"
+            fill={`url(#bg-${layer.id})`}
+            opacity={layer.opacity}
+          />
+        ))
       ) : (
         <>
           <rect width="100%" height="100%" fill="url(#bg-minor)" />

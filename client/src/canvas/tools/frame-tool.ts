@@ -3,6 +3,7 @@ import { genId, type FrameProps, type Shape } from '@whiteboard/shared';
 import { getBottomIndex } from '../order';
 import { shapeRegistry } from '../shapes/shape-registry';
 import { useSelectionStore } from '../use-selection-store';
+import { useStyleStore } from '../use-style-store';
 import { boxFromDrag } from './drag-box';
 import type { Tool, ToolContext, ToolPointerInfo } from './types';
 
@@ -46,6 +47,7 @@ export function createFrameTool(): Tool {
         x: info.point.x,
         y: info.point.y,
         rotation: 0,
+        opacity: useStyleStore.getState().opacity,
         index: getBottomIndex(ctx.editor.getShapes()),
         props,
       } as Shape;

@@ -121,26 +121,38 @@ export interface ImageProps {
   naturalHeight: number;
 }
 
-export interface PlotCurve {
-  id: string;
-  /** Math expression in terms of `x`, e.g. `sin(x)` or `x^2 - 3`. */
-  expression: string;
-  color: string;
-  enabled: boolean;
-}
-
-export interface PlotProps {
-  /** Rendered card size in world units. */
-  w: number;
-  h: number;
-  /** Visible x-domain. */
+export interface GraphViewport {
   xMin: number;
   xMax: number;
-  /** Visible y-range. */
   yMin: number;
   yMax: number;
-  curves: PlotCurve[];
-  showGrid: boolean;
+}
+
+export interface GraphExpression {
+  id: string;
+  /** Math expression in terms of `x`, with optional `y =` prefix. */
+  expression: string;
+  color: string;
+  visible: boolean;
+  dash: StrokeDash;
+}
+
+export interface GraphParameter {
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+}
+
+export interface GraphProps {
+  /** Rendered plot size in world units. */
+  w: number;
+  h: number;
+  viewport: GraphViewport;
+  expressions: GraphExpression[];
+  parameters: Record<string, GraphParameter>;
+  /** Whether tick numbers are shown along the visible axes. */
+  showAxisLabels: boolean;
 }
 
 /** A group is a pure container: no geometry of its own, bounds = children. */
@@ -162,7 +174,7 @@ export type LineShape = BaseShape<'line', LineProps>;
 export type ArrowShape = BaseShape<'arrow', ArrowProps>;
 export type TextShape = BaseShape<'text', TextProps>;
 export type ImageShape = BaseShape<'image', ImageProps>;
-export type PlotShape = BaseShape<'plot', PlotProps>;
+export type GraphShape = BaseShape<'graph', GraphProps>;
 export type GroupShape = BaseShape<'group', GroupProps>;
 export type FrameShape = BaseShape<'frame', FrameProps>;
 
@@ -180,7 +192,7 @@ export type Shape =
   | ArrowShape
   | TextShape
   | ImageShape
-  | PlotShape
+  | GraphShape
   | GroupShape
   | FrameShape;
 
@@ -196,7 +208,7 @@ export interface ShapeMap {
   arrow: ArrowShape;
   text: TextShape;
   image: ImageShape;
-  plot: PlotShape;
+  graph: GraphShape;
   group: GroupShape;
   frame: FrameShape;
 }

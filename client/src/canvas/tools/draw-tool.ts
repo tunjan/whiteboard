@@ -65,6 +65,7 @@ export function createDrawTool(): Tool {
         x: origin.x,
         y: origin.y,
         rotation: 0,
+        opacity: useStyleStore.getState().opacity,
         index: getTopIndex(ctx.editor.getShapes()),
         props: {
           ...(util.getDefaultProps() as DrawProps),

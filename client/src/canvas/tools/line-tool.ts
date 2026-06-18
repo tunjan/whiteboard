@@ -44,6 +44,7 @@ export function createLineTool(opts: LineToolOptions): Tool {
         x: start.x,
         y: start.y,
         rotation: 0,
+        opacity: style.opacity,
         index: getTopIndex(ctx.editor.getShapes()),
         props: {
           ...base,

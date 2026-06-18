@@ -55,6 +55,7 @@ export function createTextTool(): Tool {
         // Center the first line vertically on the click point.
         y: info.point.y - (props.fontSize * LINE_HEIGHT_FACTOR) / 2,
         rotation: 0,
+        opacity: style.opacity,
         index: getTopIndex(shapes),
         props,
       } as Shape;

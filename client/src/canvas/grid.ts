@@ -31,9 +31,31 @@ export interface GridLevels {
   originY: number;
 }
 
+export interface DotGridLayer {
+  /** Stable identifier for React keys / SVG pattern ids. */
+  id: string;
+  /** Grid step, in world units. */
+  step: number;
+  /** Grid step projected to screen px. */
+  screenStep: number;
+  /** Screen-space modulo phase for this layer, corrected for crisp dots. */
+  offsetX: number;
+  offsetY: number;
+  /** Visibility after density-based level-of-detail fading. */
+  opacity: number;
+  /** Screen-space dot radius. */
+  radius: number;
+}
+
 // Target on-screen spacing for minor gridlines; the actual step is snapped to a
 // 1-2-5 sequence so lines never get too dense or too sparse as you zoom.
 const TARGET_MINOR_PX = 28;
+
+export const DOT_GRID_BASE_STEP = 8;
+const DOT_GRID_STEPS = [1, 4, 16, 64].map((n) => n * DOT_GRID_BASE_STEP);
+const DOT_GRID_FADE_START_PX = 4;
+const DOT_GRID_FADE_END_PX = 16;
+const DOT_GRID_CRISP_OFFSET = 0.5;
 
 /** Snap a raw world distance to the nearest 1-2-5 x 10^n value. */
 export function niceStep(raw: number): number {
@@ -58,6 +80,55 @@ export function getGridLevels(camera: Camera): GridLevels {
     originX: -camera.x * camera.z,
     originY: -camera.y * camera.z,
   };
+}
+
+function dotLayerOpacity(screenStep: number): number {
+  if (screenStep <= DOT_GRID_FADE_START_PX) return 0;
+  if (screenStep >= DOT_GRID_FADE_END_PX) return 1;
+  return (
+    (screenStep - DOT_GRID_FADE_START_PX) /
+    (DOT_GRID_FADE_END_PX - DOT_GRID_FADE_START_PX)
+  );
+}
+
+function crispModuloOffset(originScreen: number, screenStep: number): number {
+  return pmod(originScreen + DOT_GRID_CRISP_OFFSET, screenStep);
+}
+
+/**
+ * Fixed-world dot-grid layers. The layer steps are 8/32/128/512 world units,
+ * so at 100% zoom they land on the requested pixel spacings. Each layer is
+ * phased with a positive modulo of the camera offset, keeping the wallpaper
+ * pinned to world coordinates while only rendering viewport-sized patterns.
+ */
+export function getDotGridLayers(camera: Camera): DotGridLayer[] {
+  const originX = -camera.x * camera.z;
+  const originY = -camera.y * camera.z;
+  return DOT_GRID_STEPS.map((step, index) => {
+    const screenStep = step * camera.z;
+    return {
+      id: `dot-${step}`,
+      step,
+      screenStep,
+      offsetX: crispModuloOffset(originX, screenStep),
+      offsetY: crispModuloOffset(originY, screenStep),
+      opacity: dotLayerOpacity(screenStep),
+      radius: 0.85 + index * 0.12,
+    };
+  });
+}
+
+export function getSnapGridStep(
+  background: BackgroundType,
+  camera: Camera,
+): number | null {
+  if (background === 'blank') return null;
+  if (background === 'dot') return DOT_GRID_BASE_STEP;
+  return getGridLevels(camera).minorStep;
+}
+
+export function snapCoordinateToGrid(value: number, gridStep: number): number {
+  return Math.round(value / gridStep) * gridStep;
 }
 
 /** Positive modulo (JS `%` keeps the sign of the dividend). */

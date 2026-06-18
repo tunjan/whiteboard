@@ -10,7 +10,12 @@ import './shapes/register';
 import './tools/register';
 import { Background } from './Background';
 import { CanvasControls } from './CanvasControls';
-import { cameraToTransform, screenToWorld, type Point } from './camera';
+import {
+  cameraToTransform,
+  nextDiscreteZoom,
+  screenToWorld,
+  type Point,
+} from './camera';
 import { viewportWorldBounds } from './geometry';
 import { CursorsLayer } from '@/collab/CursorsLayer';
 import { setLocalCursor, setLocalViewport } from '@/collab/presence';
@@ -45,12 +50,15 @@ import { useCanvasUiStore } from './use-canvas-ui-store';
 import { useElementSize } from './use-element-size';
 import { useSafariGestures } from './use-safari-gestures';
 import { isSelectable } from './selectable';
+import { resolveOpacity } from './opacity';
+import { useEraserStore } from './use-eraser-store';
 import { useHiddenStore } from './use-hidden-store';
 import { useSelectionStore } from './use-selection-store';
 import { useSpacePan } from './use-space-pan';
 import { useTextEditingStore } from './use-text-editing-store';
 import { useToolStore } from './use-tool-store';
 import { useToolLockStore } from './use-tool-lock-store';
+import { useTouchPinch } from './use-touch-pinch';
 import { useWheel } from './use-wheel';
 import {
   bringForward,
@@ -58,8 +66,6 @@ import {
   sendBackward,
   sendToBack,
 } from './z-order';
-
-const ZOOM_STEP = 1.25;
 
 function isTypingTarget(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null;
@@ -69,6 +75,10 @@ function isTypingTarget(target: EventTarget | null): boolean {
       el.tagName === 'TEXTAREA' ||
       el.isContentEditable)
   );
+}
+
+function isTouchPointer(e: ReactPointerEvent): boolean {
+  return e.pointerType === 'touch';
 }
 
 export function Canvas() {
@@ -82,6 +92,7 @@ export function Canvas() {
   const activeToolId = useToolStore((s) => s.activeToolId);
   const pan = useSpacePan();
   useWheel(containerRef);
+  useTouchPinch(containerRef);
   useSafariGestures(containerRef);
 
   const [pointerWorld, setPointerWorld] = useState<Point | null>(null);
@@ -106,6 +117,7 @@ export function Canvas() {
 
   const editingId = useTextEditingStore((s) => s.editingId);
   const hidden = useHiddenStore((s) => s.hidden);
+  const erasing = useEraserStore((s) => s.marked);
   const currentPageId = useDocumentStore((s) => s.currentPageId);
   const shapesRecord = useDocumentStore(
     (s) => s.doc.pages[s.currentPageId]?.shapes,
@@ -138,13 +150,20 @@ export function Canvas() {
     Object.values(shapesRecord ?? {})
       .filter((s) => s.parentId === parentId && s.id !== editingId && !hidden[s.id])
       .sort(compareIndex);
+  // Resolved render opacity per shape: ancestor compounding + any eraser dim.
+  const opacityOf = (shape: (typeof shapes)[number]): number =>
+    resolveOpacity(
+      shape,
+      (id) => shapesRecord?.[id],
+      (id) => !!erasing[id],
+    );
   const renderShape = (shape: (typeof shapes)[number]): ReactNode =>
     shape.type === 'frame' ? (
-      <FrameView key={shape.id} frame={shape}>
+      <FrameView key={shape.id} frame={shape} opacity={opacityOf(shape)}>
         {childrenSorted(shape.id).map(renderShape)}
       </FrameView>
     ) : (
-      <ShapeView key={shape.id} shape={shape} />
+      <ShapeView key={shape.id} shape={shape} opacity={opacityOf(shape)} />
     );
   const topLevelShapes = visibleShapes.filter((s) => !hasFrameAncestor(s));
 
@@ -201,6 +220,7 @@ export function Canvas() {
   const onPointerDown = useCallback(
     (e: ReactPointerEvent) => {
       if (!isSurfaceEvent(e.target)) return;
+      if (isTouchPointer(e)) return;
       if (pan.isSpaceDown) {
         stopFollowingForManualCameraChange();
         gesture.current = 'pan';
@@ -216,6 +236,7 @@ export function Canvas() {
 
   const onPointerMove = useCallback(
     (e: ReactPointerEvent) => {
+      if (isTouchPointer(e)) return;
       const rect = containerRef.current?.getBoundingClientRect();
       if (rect) {
         const world = screenToWorld(
@@ -236,6 +257,7 @@ export function Canvas() {
 
   const onPointerUp = useCallback(
     (e: ReactPointerEvent) => {
+      if (isTouchPointer(e)) return;
       if (gesture.current === 'pan') {
         pan.onPointerUp(e);
       } else if (gesture.current === 'tool') {
@@ -359,6 +381,15 @@ export function Canvas() {
     if (activeToolId !== 'select') useSelectionStore.getState().clear();
   }, [activeToolId]);
 
+  // Tool lifecycle: enter the active tool, and run the previous tool's onExit on
+  // switch (the effect cleanup). Lets a tool tear down in-progress state — e.g.
+  // the eraser cancels its pending stroke when you switch away or press Escape.
+  useEffect(() => {
+    const tool = toolRegistry.get(activeToolId);
+    tool?.onEnter?.(ctx);
+    return () => tool?.onExit?.(ctx);
+  }, [activeToolId, ctx]);
+
   // Keyboard: selection ops, z-order, delete, escape, and tool hotkeys.
   // (Full configurable shortcut sweep is Phase 27.)
   useEffect(() => {
@@ -441,14 +472,14 @@ export function Canvas() {
         e.preventDefault();
         stopFollowingForManualCameraChange();
         const s = useCameraStore.getState();
-        s.zoomAtScreen(centerRef.current, s.camera.z * ZOOM_STEP);
+        s.zoomAtScreen(centerRef.current, nextDiscreteZoom(s.camera.z, 'in'));
         return;
       }
       if (mod && e.key === '-') {
         e.preventDefault();
         stopFollowingForManualCameraChange();
         const s = useCameraStore.getState();
-        s.zoomAtScreen(centerRef.current, s.camera.z / ZOOM_STEP);
+        s.zoomAtScreen(centerRef.current, nextDiscreteZoom(s.camera.z, 'out'));
         return;
       }
       if (mod && e.key === '0') {
@@ -587,12 +618,12 @@ export function Canvas() {
   const onZoomIn = useCallback(() => {
     stopFollowingForManualCameraChange();
     const s = useCameraStore.getState();
-    s.zoomAtScreen(center(), s.camera.z * ZOOM_STEP);
+    s.zoomAtScreen(center(), nextDiscreteZoom(s.camera.z, 'in'));
   }, [center]);
   const onZoomOut = useCallback(() => {
     stopFollowingForManualCameraChange();
     const s = useCameraStore.getState();
-    s.zoomAtScreen(center(), s.camera.z / ZOOM_STEP);
+    s.zoomAtScreen(center(), nextDiscreteZoom(s.camera.z, 'out'));
   }, [center]);
   const onZoomReset = useCallback(() => {
     stopFollowingForManualCameraChange();

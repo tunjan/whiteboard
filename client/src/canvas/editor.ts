@@ -5,7 +5,10 @@ import type { Shape } from '@whiteboard/shared';
  * typed prop bag (loosely typed here; call sites pass the right shape's props).
  */
 export type ShapePatch = Partial<
-  Pick<Shape, 'x' | 'y' | 'rotation' | 'index' | 'parentId' | 'locked' | 'hidden'>
+  Pick<
+    Shape,
+    'x' | 'y' | 'rotation' | 'index' | 'parentId' | 'locked' | 'hidden' | 'opacity'
+  >
 > & {
   props?: Record<string, unknown>;
 };

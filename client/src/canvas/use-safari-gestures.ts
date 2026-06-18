@@ -22,7 +22,7 @@ export function useSafariGestures(ref: RefObject<HTMLElement | null>): void {
     if (!el) return;
 
     let startZoom = 1;
-    let anchor = { x: 0, y: 0 };
+    let lastAnchor = { x: 0, y: 0 };
 
     const anchorFrom = (e: SafariGestureEvent) => {
       const rect = el.getBoundingClientRect();
@@ -38,12 +38,19 @@ export function useSafariGestures(ref: RefObject<HTMLElement | null>): void {
       e.preventDefault();
       stopFollowingForManualCameraChange();
       startZoom = useCameraStore.getState().camera.z;
-      anchor = anchorFrom(e);
+      lastAnchor = anchorFrom(e);
     };
     const onChange = (ev: Event) => {
       const e = ev as SafariGestureEvent;
       e.preventDefault();
-      useCameraStore.getState().zoomAtScreen(anchor, startZoom * e.scale);
+      const anchor = anchorFrom(e);
+      useCameraStore.getState().zoomAtScreenWithPan(
+        anchor,
+        startZoom * e.scale,
+        anchor.x - lastAnchor.x,
+        anchor.y - lastAnchor.y,
+      );
+      lastAnchor = anchor;
     };
     const onEnd = (ev: Event) => ev.preventDefault();
 

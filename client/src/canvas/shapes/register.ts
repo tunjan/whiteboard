@@ -9,7 +9,7 @@ import { lineUtil } from './line';
 import { arrowUtil } from './arrow';
 import { textUtil } from './text';
 import { imageUtil } from './image';
-import { plotUtil } from './plot';
+import { graphUtil } from './graph';
 import { groupUtil } from './group';
 import { frameUtil } from './frame';
 
@@ -21,6 +21,6 @@ shapeRegistry.register(lineUtil);
 shapeRegistry.register(arrowUtil);
 shapeRegistry.register(textUtil);
 shapeRegistry.register(imageUtil);
-shapeRegistry.register(plotUtil);
+shapeRegistry.register(graphUtil);
 shapeRegistry.register(groupUtil);
 shapeRegistry.register(frameUtil);

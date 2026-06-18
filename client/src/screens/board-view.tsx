@@ -14,6 +14,7 @@ import {
 import { setLocalUser } from '@/collab/presence';
 import { BoardChrome } from '@/components/board-chrome';
 import { CanvasContextMenu } from '@/components/canvas-context-menu';
+import { GraphPanel } from '@/components/graph-panel';
 import { NameDialog } from '@/components/name-dialog';
 import { StylePanel } from '@/components/style-panel';
 import { Toolbar } from '@/components/toolbar';
@@ -90,6 +91,7 @@ export function BoardView({ boardId }: { boardId: string }) {
         identity={identity}
       />
       <Toolbar />
+      <GraphPanel />
       <StylePanel />
 
       <NameDialog

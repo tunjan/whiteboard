@@ -6,6 +6,7 @@ import {
   clampZoom,
   DEFAULT_CAMERA,
   zoomCameraAtScreen,
+  zoomCameraAtScreenWithPan,
 } from './camera';
 import type { Bounds } from './geometry';
 
@@ -21,6 +22,13 @@ interface CameraStore {
   panByScreen: (dxScreen: number, dyScreen: number) => void;
   /** Zoom to `newZ` keeping the world point under `anchor` (screen px) fixed. */
   zoomAtScreen: (anchor: Point, newZ: number) => void;
+  /** Zoom around `anchor` while the viewport content follows a screen drag. */
+  zoomAtScreenWithPan: (
+    anchor: Point,
+    newZ: number,
+    panDxScreen: number,
+    panDyScreen: number,
+  ) => void;
   /** Fit `bounds` into a `viewportW`x`viewportH` viewport with padding. */
   zoomToBounds: (
     bounds: Bounds,
@@ -73,6 +81,19 @@ export const useCameraStore = create<CameraStore>()(
       zoomAtScreen: (anchor, newZ) =>
         set((s) => {
           const camera = zoomCameraAtScreen(s.camera, anchor, newZ);
+          return {
+            camera,
+            cameras: s.activeKey
+              ? { ...s.cameras, [s.activeKey]: camera }
+              : s.cameras,
+          };
+        }),
+      zoomAtScreenWithPan: (anchor, newZ, panDxScreen, panDyScreen) =>
+        set((s) => {
+          const camera = zoomCameraAtScreenWithPan(s.camera, anchor, newZ, {
+            x: panDxScreen,
+            y: panDyScreen,
+          });
           return {
             camera,
             cameras: s.activeKey
