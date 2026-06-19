@@ -29,11 +29,19 @@ import { TextEditorOverlay } from './TextEditorOverlay';
 import { toolRegistry } from './tools/tool-registry';
 import type { ToolContext, ToolPointerInfo } from './tools/types';
 import { duplicateShapes, groupShapes, ungroupShapes } from './commands';
-import { copyShapes, pasteShapes } from './clipboard';
+import {
+  clipboardToken,
+  copyShapes,
+  hasClipboard,
+  pasteShapes,
+  wbClipToken,
+} from './clipboard';
+import { writeShapesToOsClipboard } from '@/board/clipboard-os';
 import { deleteTargetIds } from './hierarchy';
 import { placeImageFiles } from './place-image';
 import { useEnteredGroupStore } from './use-entered-group-store';
 import {
+  breakUndoCapture,
   compareIndex,
   editor,
   redo,
@@ -110,6 +118,8 @@ export function Canvas() {
   // Live viewport center (screen px), read by keyboard zoom shortcuts.
   const centerRef = useRef({ x: 0, y: 0 });
   centerRef.current = { x: size.width / 2, y: size.height / 2 };
+  // Last pointer position in container pixels; paste lands here (null = off-canvas).
+  const pointerRef = useRef<{ x: number; y: number } | null>(null);
 
   const ctx = useMemo<ToolContext>(
     () => ({
@@ -336,12 +346,12 @@ export function Canvas() {
     (e: ReactPointerEvent) => {
       if (isTouchPointer(e) && penActive.current) return;
       const rect = containerRef.current?.getBoundingClientRect();
+      if (rect) {
+        pointerRef.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+      }
       // Skip the presence cursor while pinching (two fingers, jittery midpoint).
       if (rect && !(isTouchPointer(e) && pinchLatch.current)) {
-        const world = screenToWorld(
-          { x: e.clientX - rect.left, y: e.clientY - rect.top },
-          useCameraStore.getState().camera,
-        );
+        const world = screenToWorld(pointerRef.current!, useCameraStore.getState().camera);
         setLocalCursor(world);
       }
       // A real drag past the slop cancels the pending long-press.
@@ -380,6 +390,7 @@ export function Canvas() {
         pan.onPointerUp(e);
       } else if (gesture.current === 'tool') {
         activeTool()?.onPointerUp?.(toInfo(e), ctx);
+        breakUndoCapture();
         if (e.currentTarget.hasPointerCapture(e.pointerId)) {
           e.currentTarget.releasePointerCapture(e.pointerId);
         }
@@ -585,24 +596,23 @@ export function Canvas() {
         if (ids.length) (e.shiftKey ? sendToBack : sendBackward)(editor, ids);
         return;
       }
-      // Clipboard.
+      // Clipboard. Copy/cut also push to the OS clipboard; paste is handled by
+      // the window 'paste' listener below so OS-image and in-app paths agree.
       if (mod && e.key === 'c') {
-        if (ids.length) copyShapes(editor, ids);
+        if (ids.length) {
+          copyShapes(editor, ids);
+          void writeShapesToOsClipboard(editor, ids, clipboardToken());
+        }
         return;
       }
       if (mod && e.key === 'x') {
         if (ids.length) {
           copyShapes(editor, ids);
+          void writeShapesToOsClipboard(editor, ids, clipboardToken());
           const cut = ids.filter((id) => !editor.getShape(id)?.locked);
           editor.deleteShapes(cut);
           useSelectionStore.getState().clear();
         }
-        return;
-      }
-      if (mod && e.key === 'v') {
-        e.preventDefault();
-        const pasted = pasteShapes(editor);
-        if (pasted.length) useSelectionStore.getState().setSelection(pasted);
         return;
       }
 
@@ -691,33 +701,52 @@ export function Canvas() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
-  // Paste images from the clipboard (placed at the viewport center).
+  // The single paste path (Cmd+V). Prefers our own tagged copy (editable
+  // shapes), then a clipboard image, then the in-app buffer as a fallback.
+  // All pastes land at the pointer (viewport center when off-canvas).
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
       if (isTypingTarget(e.target)) return;
-      const list = e.clipboardData?.items;
+      const dt = e.clipboardData;
+      const ours =
+        hasClipboard() && wbClipToken(dt?.getData('text/html') ?? '') === clipboardToken();
+
       const files: File[] = [];
-      if (list) {
-        for (let i = 0; i < list.length; i++) {
-          const item = list[i]!;
+      if (dt?.items) {
+        for (let i = 0; i < dt.items.length; i++) {
+          const item = dt.items[i]!;
           if (item.kind === 'file' && item.type.startsWith('image/')) {
             const f = item.getAsFile();
             if (f) files.push(f);
           }
         }
       }
-      if (!files.length) return;
-      e.preventDefault();
+
       const world = screenToWorld(
-        centerRef.current,
+        pointerRef.current ?? centerRef.current,
         useCameraStore.getState().camera,
       );
-      void placeImageFiles(files, world).then((ids) => {
+      const selectPasted = (ids: string[]) => {
         if (ids.length) {
           useToolStore.getState().setTool('select');
           useSelectionStore.getState().setSelection(ids);
         }
-      });
+      };
+
+      if (ours) {
+        e.preventDefault();
+        selectPasted(pasteShapes(editor, world));
+        return;
+      }
+      if (files.length) {
+        e.preventDefault();
+        void placeImageFiles(files, world).then(selectPasted);
+        return;
+      }
+      if (hasClipboard()) {
+        e.preventDefault();
+        selectPasted(pasteShapes(editor, world));
+      }
     };
     window.addEventListener('paste', onPaste);
     return () => window.removeEventListener('paste', onPaste);
@@ -798,6 +827,7 @@ export function Canvas() {
       onDrop={onDrop}
       onPointerLeave={() => {
         setLocalCursor(null);
+        pointerRef.current = null;
       }}
     >
       <Background

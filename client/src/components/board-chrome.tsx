@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { ArrowLeft, Moon, Settings2, Sun } from 'lucide-react';
+import { ArrowLeft, Download, Moon, Settings2, Sun } from 'lucide-react';
+import { exportBoardToPng } from '@/canvas/export-png';
 import type { Identity } from '@/collab/identity';
 import { usePresenceStore } from '@/collab/use-presence-store';
 import { ConnectionIndicator } from '@/components/connection-indicator';
@@ -80,7 +81,17 @@ export function BoardChrome({
     participants.length - visibleParticipants.length,
   );
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const renameTitle = identity?.isTutor ? onRenameTitle : undefined;
+
+  const onExport = async () => {
+    setExporting(true);
+    try {
+      await exportBoardToPng(title);
+    } finally {
+      setExporting(false);
+    }
+  };
 
   return (
     <>
@@ -160,6 +171,16 @@ export function BoardChrome({
           className="size-8 rounded-lg"
         >
           {theme === 'dark' ? <Sun className="size-4" /> : <Moon className="size-4" />}
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="Export as PNG"
+          onClick={() => void onExport()}
+          disabled={exporting}
+          className="size-8 rounded-lg"
+        >
+          <Download className="size-4" />
         </Button>
         <Button
           variant="ghost"

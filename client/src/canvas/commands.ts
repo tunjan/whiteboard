@@ -18,7 +18,7 @@ export function materializeClones(
   editor: Editor,
   subtree: Shape[],
   rootIds: string[],
-  offset: number,
+  offset: { x: number; y: number },
   keepExternalParent: boolean,
 ): string[] {
   const idMap = new Map<string, string>();
@@ -32,8 +32,8 @@ export function materializeClones(
       ...s,
       id: newId,
       parentId,
-      x: s.x + offset,
-      y: s.y + offset,
+      x: s.x + offset.x,
+      y: s.y + offset.y,
       index: getTopIndex(editor.getShapes()),
       props: structuredClone(s.props),
       locked: false,
@@ -58,7 +58,13 @@ export function collectSubtree(editor: Editor, ids: string[]): Shape[] {
 /** Clone shapes (and their children), offset and stacked on top. */
 export function duplicateShapes(editor: Editor, ids: string[]): string[] {
   const subtree = collectSubtree(editor, ids);
-  return materializeClones(editor, subtree, ids, DUPLICATE_OFFSET, true);
+  return materializeClones(
+    editor,
+    subtree,
+    ids,
+    { x: DUPLICATE_OFFSET, y: DUPLICATE_OFFSET },
+    true,
+  );
 }
 
 /**

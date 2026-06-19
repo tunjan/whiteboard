@@ -424,6 +424,10 @@ export function loadBoard(
 export function undo(): void {
   session?.undo.undo();
 }
+/** Force the next mutation to start a new undo entry (gesture boundary). */
+export function breakUndoCapture(): void {
+  session?.undo.stopCapturing();
+}
 export function redo(): void {
   session?.undo.redo();
 }

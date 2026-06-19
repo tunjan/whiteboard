@@ -15,6 +15,8 @@ const STREAMLINE_RAW_WEIGHT_RANGE = 0.85;
 const RAW_WEIGHT_AT_HALF_STABILIZATION = 0.425;
 export const DEFAULT_PENCIL_STABILIZATION = 0.35;
 const ENDPOINT_FILTER_POINTS = 5;
+/** Taper length (in brush widths) when endTaper is `true`. Tunable feel knob. */
+const END_TAPER_SIZE_FACTOR = 2.5;
 
 function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value));
@@ -48,8 +50,18 @@ export const DEFAULT_PENCIL_DYNAMICS = {
   smoothing: 0.5,
   streamline: pencilStabilizationToStreamline(DEFAULT_PENCIL_STABILIZATION),
   startTaper: 0,
-  endTaper: 0,
+  endTaper: true,
 } as const satisfies Required<InkStrokeDynamics>;
+
+/**
+ * Resolve a taper option into an absolute pixel length. `true` scales the taper
+ * to the brush width so thin and thick pencils both end in a proportional point.
+ */
+function resolveTaper(taper: number | boolean | undefined, size: number): number {
+  if (taper === true) return size * END_TAPER_SIZE_FACTOR;
+  if (typeof taper === 'number') return taper;
+  return 0;
+}
 
 function mid(a: number, b: number): number {
   return (a + b) / 2;
@@ -135,6 +147,7 @@ export function getInkPathData(
     p.y,
     pressureOf(p),
   ]);
+  const endTaper = resolveTaper(dynamics.endTaper, size);
   const strokeOptions: StrokeOptions = {
     size,
     last,
@@ -149,8 +162,8 @@ export function getInkPathData(
       easing: (distance) => distance * distance,
     },
     end: {
-      cap: !(dynamics.endTaper ?? 0),
-      taper: dynamics.endTaper ?? 0,
+      cap: endTaper <= 0,
+      taper: endTaper,
       easing: (distance) => --distance * distance * distance + 1,
     },
   };
