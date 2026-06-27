@@ -15,17 +15,27 @@ import { fontStack } from '@/canvas/shapes/text-measure';
 import { editor, useDocumentStore } from '@/canvas/use-document-store';
 import { useSelectionStore } from '@/canvas/use-selection-store';
 import {
-  COLOR_PALETTE,
+  PALETTES,
+  paletteColors,
   SIZE_OPTIONS,
   useStyleStore,
 } from '@/canvas/use-style-store';
 import { useToolStore } from '@/canvas/use-tool-store';
+import { useThemeStore } from '@/use-theme-store';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Separator } from '@/components/ui/separator';
 import { Slider } from '@/components/ui/slider';
 import { Surface } from '@/components/ui/surface';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { ChevronsUpDown } from 'lucide-react';
 
 
 const FILLS: FillStyle[] = ['none', 'solid', 'hatch', 'crosshatch'];
@@ -92,8 +102,11 @@ function DashPreview({ dash }: { dash: StrokeDash }) {
 /** Color, stroke width, fill, dash, and text styling — applied to the
  * selection and to new shapes. */
 export function StylePanel() {
-  const { color, size, fill, dash, opacity, arrowStart, arrowEnd, fontFamily, align } =
+  const { color, size, fill, dash, opacity, arrowStart, arrowEnd, fontFamily, align, paletteId } =
     useStyleStore();
+  const theme = useThemeStore((s) => s.theme);
+  const activePalette = PALETTES.find((p) => p.id === paletteId) ?? PALETTES[0]!;
+  const colors = paletteColors(paletteId, theme);
   const {
     setColor,
     setSize,
@@ -104,6 +117,7 @@ export function StylePanel() {
     setArrowEnd,
     setFontFamily,
     setAlign,
+    setPaletteId,
   } = useStyleStore.getState();
   const selectedIds = useSelectionStore((s) => s.selectedIds);
   const activeToolId = useToolStore((s) => s.activeToolId);
@@ -269,13 +283,62 @@ export function StylePanel() {
   };
 
   return (
-    <Surface className="absolute top-[calc(4.5rem+env(safe-area-inset-top))] right-[calc(1rem+env(safe-area-inset-right))] z-20 w-56 p-3.5">
+    <Surface className="absolute top-[calc(4.5rem+env(safe-area-inset-top))] right-[calc(1rem+env(safe-area-inset-right))] z-20 w-[min(14rem,calc(100vw-2rem))] p-3.5">
       <div className="flex flex-col">
         {/* Color + opacity — the always-present group. Label-less by design:
             the swatches and slider read on their own, keeping the panel calm. */}
         <div className="flex flex-col gap-3">
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 w-full justify-between gap-2 px-2 text-muted-foreground"
+                />
+              }
+            >
+              <span className="flex items-center gap-1.5">
+                {colors.slice(0, 4).map((c) => (
+                  <span
+                    key={c.name}
+                    className="size-2.5 rounded-full border border-foreground/15 dark:border-white/20"
+                    style={{ background: c.value }}
+                  />
+                ))}
+                <span className="text-[13px] font-medium text-foreground">
+                  {activePalette.name}
+                </span>
+              </span>
+              <ChevronsUpDown className="size-3.5 opacity-60" aria-hidden="true" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent className="w-(--anchor-width)">
+              <DropdownMenuRadioGroup
+                value={paletteId}
+                onValueChange={setPaletteId}
+              >
+                {PALETTES.map((p) => (
+                  <DropdownMenuRadioItem key={p.id} value={p.id} closeOnClick>
+                    <span className="flex items-center gap-1.5">
+                      {(theme === 'dark' ? p.dark : p.light)
+                        .slice(0, 4)
+                        .map((c) => (
+                          <span
+                            key={c.name}
+                            className="size-2.5 rounded-full border border-foreground/15 dark:border-white/20"
+                            style={{ background: c.value }}
+                          />
+                        ))}
+                      {p.name}
+                    </span>
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
           <div role="group" aria-label="Color" className="grid grid-cols-4 gap-1.5">
-            {COLOR_PALETTE.map((c) => {
+            {colors.map((c) => {
               const active = color === c.value;
               return (
                 <button

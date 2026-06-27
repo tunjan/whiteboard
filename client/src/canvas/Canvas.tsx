@@ -5,6 +5,7 @@ import type {
   PointerEvent as ReactPointerEvent,
   ReactNode,
 } from 'react';
+import { type Shape, pointInPolygon } from '@whiteboard/shared';
 import './shapes/register';
 import './tools/register';
 import { Background } from './Background';
@@ -14,9 +15,13 @@ import {
   nextDiscreteZoom,
   screenToWorld,
 } from './camera';
-import { viewportWorldBounds } from './geometry';
+import { quantizedCullRegion, viewportWorldBounds } from './geometry';
 import { CursorsLayer } from '@/collab/CursorsLayer';
-import { setLocalCursor, setLocalViewport } from '@/collab/presence';
+import {
+  setLocalCursor,
+  setLocalFollowing,
+  setLocalViewport,
+} from '@/collab/presence';
 import {
   stopFollowingForManualCameraChange,
   useFollowStore,
@@ -24,8 +29,12 @@ import {
 import { usePresenceStore } from '@/collab/use-presence-store';
 import { ShapeView } from './ShapeView';
 import { FrameView } from './shapes/frame';
+import { plotArea } from './shapes/graph';
+import { panViewport, zoomViewport } from './shapes/graph-interaction';
 import { SelectionLayer } from './SelectionLayer';
 import { TextEditorOverlay } from './TextEditorOverlay';
+import { VideoPlayerOverlay } from './VideoPlayerOverlay';
+import { ImageCropOverlay } from './ImageCropOverlay';
 import { toolRegistry } from './tools/tool-registry';
 import type { ToolContext, ToolPointerInfo } from './tools/types';
 import { duplicateShapes, groupShapes, ungroupShapes } from './commands';
@@ -39,10 +48,10 @@ import {
 import { writeShapesToOsClipboard } from '@/board/clipboard-os';
 import { deleteTargetIds } from './hierarchy';
 import { placeImageFiles } from './place-image';
+import { createYoutubeShape, parseYoutubeId } from './place-video';
 import { useEnteredGroupStore } from './use-entered-group-store';
 import {
   breakUndoCapture,
-  compareIndex,
   editor,
   redo,
   setCurrentPage,
@@ -52,9 +61,11 @@ import {
 } from './use-document-store';
 import { shapeRegistry } from './shapes/shape-registry';
 import { useCameraStore } from './use-camera-store';
+import { useCameraInteraction } from './use-camera-interaction';
 import { useCanvasUiStore } from './use-canvas-ui-store';
 import { useElementSize } from './use-element-size';
 import { useSafariGestures } from './use-safari-gestures';
+import { getSelectionInfo } from './selection-geometry';
 import { isSelectable } from './selectable';
 import { resolveOpacity } from './opacity';
 import { useEraserStore } from './use-eraser-store';
@@ -62,9 +73,17 @@ import { useHiddenStore } from './use-hidden-store';
 import { useSelectionStore } from './use-selection-store';
 import { useSpacePan } from './use-space-pan';
 import { useTextEditingStore } from './use-text-editing-store';
+import { useVideoPlayingStore } from './use-video-playing-store';
+import { useImageCroppingStore } from './use-image-cropping-store';
 import { useToolStore } from './use-tool-store';
 import { useToolLockStore } from './use-tool-lock-store';
-import { useTouchPinch } from './use-touch-pinch';
+import {
+  TOUCH_PAN_SPEED,
+  pinchGesture,
+  pruneStaleTouches,
+  zoomFromDistance,
+  type PinchState,
+} from './pinch';
 import { useWheel } from './use-wheel';
 import {
   bringForward,
@@ -87,6 +106,10 @@ function isTouchPointer(e: ReactPointerEvent): boolean {
   return e.pointerType === 'touch';
 }
 
+// A touch/pen that hasn't fired an event in this long is treated as released,
+// even without a pointerup/cancel — recovers from iOS dropping those events.
+const STALE_TOUCH_MS = 2000;
+
 export function Canvas() {
   const [containerRef, size] = useElementSize<HTMLDivElement>();
   const camera = useCameraStore((s) => s.camera);
@@ -96,19 +119,33 @@ export function Canvas() {
   const background = useCanvasUiStore((s) => s.background);
   const setBackground = useCanvasUiStore((s) => s.setBackground);
   const activeToolId = useToolStore((s) => s.activeToolId);
+  const cameraMoving = useCameraInteraction((s) => s.isMoving);
   const pan = useSpacePan();
   useWheel(containerRef);
-  useTouchPinch(containerRef);
   useSafariGestures(containerRef);
 
   // Which gesture owns the current pointer interaction.
   const gesture = useRef<'pan' | 'tool' | null>(null);
   // The pointer currently driving `gesture` (so stray pointers are ignored).
   const toolPointerId = useRef<number | null>(null);
-  // Live touch pointers on the surface — drives single- vs multi-touch routing.
-  const activeTouches = useRef<Set<number>>(new Set());
+  // Live touch pointers on the surface, id → last-seen position (container px) and
+  // timestamp. Drives single- vs multi-touch routing and the pinch math. iOS
+  // routinely drops pointerup/cancel when the OS steals a gesture, so entries are
+  // pruned by `reconcileStaleTouches` rather than trusted to clear themselves.
+  const activeTouches = useRef<Map<number, { x: number; y: number; t: number }>>(
+    new Map(),
+  );
   // A pen (Apple Pencil) is down: finger touches are palm-rejected while it is.
   const penActive = useRef(false);
+  // Last time any pen event was seen — lets a dropped pen-up self-heal.
+  const penLastSeen = useRef(0);
+  // The active two-finger pinch, or null. Owns the camera while ≥2 fingers are down.
+  const pinch = useRef<PinchState | null>(null);
+  // When a pinch begins over a selected graph, its id — the pinch then drives
+  // that graph's viewport instead of the board camera (null = board pinch).
+  const pinchGraphId = useRef<string | null>(null);
+  // Finger separation last frame, for incremental graph-viewport zoom.
+  const pinchLastDistance = useRef(0);
   // Latched once ≥2 fingers touch, cleared only when all lift — suppresses tool
   // routing for the rest of a pinch so lifting one finger never draws a stray mark.
   const pinchLatch = useRef(false);
@@ -135,58 +172,139 @@ export function Canvas() {
   );
 
   const editingId = useTextEditingStore((s) => s.editingId);
+  const playingId = useVideoPlayingStore((s) => s.playingId);
+  const croppingId = useImageCroppingStore((s) => s.croppingId);
   const hidden = useHiddenStore((s) => s.hidden);
   const erasing = useEraserStore((s) => s.marked);
   const currentPageId = useDocumentStore((s) => s.currentPageId);
   const shapesRecord = useDocumentStore(
     (s) => s.doc.pages[s.currentPageId]?.shapes,
   );
-  const shapes = useMemo(
-    () => Object.values(shapesRecord ?? {}).sort(compareIndex),
-    [shapesRecord],
+  // Shared, pre-sorted array from the store (stable across camera-only renders).
+  const shapes = useDocumentStore((s) => s.shapes);
+
+  // Shape-graph derivations that depend only on the shapes — never on the
+  // camera. Memoizing them keeps the pan/zoom hot path (which re-renders this
+  // component on every frame) from re-walking the hierarchy each time:
+  //  - `childrenByParent`: parent id → its children, already in index order
+  //    (`shapes` is globally sorted, so each bucket is sorted for free).
+  //  - `frameAncestorIds`: shapes that live under a frame, excluded from the
+  //    flat top-level pass (they render inside their frame's clip).
+  const { childrenByParent, frameAncestorIds } = useMemo(() => {
+    const childrenByParent = new Map<string, Shape[]>();
+    for (const s of shapes) {
+      if (!s.parentId) continue;
+      const bucket = childrenByParent.get(s.parentId);
+      if (bucket) bucket.push(s);
+      else childrenByParent.set(s.parentId, [s]);
+    }
+    const frameAncestorIds = new Set<string>();
+    for (const s of shapes) {
+      let cur = s.parentId ? shapesRecord?.[s.parentId] : undefined;
+      const seen = new Set<string>();
+      while (cur && !seen.has(cur.id)) {
+        if (cur.type === 'frame') {
+          frameAncestorIds.add(s.id);
+          break;
+        }
+        seen.add(cur.id);
+        cur = cur.parentId ? shapesRecord?.[cur.parentId] : undefined;
+      }
+    }
+    return { childrenByParent, frameAncestorIds };
+  }, [shapes, shapesRecord]);
+
+  // Resolved render opacity (ancestor compounding + eraser dim) per shape.
+  // Keyed on the shapes and the eraser marks only, so panning never recomputes
+  // it; ShapeView's `opacity` prop then stays referentially stable and its memo
+  // holds across camera frames.
+  const opacityById = useMemo(() => {
+    const map = new Map<string, number>();
+    const getShape = (id: string) => shapesRecord?.[id];
+    const isMarked = (id: string) => !!erasing[id];
+    for (const s of shapes) map.set(s.id, resolveOpacity(s, getShape, isMarked));
+    return map;
+  }, [shapes, shapesRecord, erasing]);
+
+  // Viewport culling. The search region is overscanned past the viewport and
+  // snapped to a coarse grid (see `quantizedCullRegion`), so panning within a
+  // grid cell reuses the same visible set instead of re-searching the spatial
+  // index and re-filtering the whole document every frame. `cullKey` is the
+  // primitive form of that region, used as the memo dependency so sub-cell
+  // camera frames don't invalidate it. `shapes` is also a dependency because the
+  // spatial index moves in lockstep with it.
+  const cullRegion =
+    size.width > 0 && size.height > 0
+      ? quantizedCullRegion(camera, size.width, size.height)
+      : null;
+  const cullKey = cullRegion
+    ? `${cullRegion.minX}:${cullRegion.minY}:${cullRegion.maxX}:${cullRegion.maxY}`
+    : '';
+
+  const visibleShapes = useMemo(() => {
+    let base = shapes;
+    if (cullRegion) {
+      const ids = new Set(spatialIndex.search(cullRegion));
+      base = shapes.filter((s) => ids.has(s.id));
+    }
+    return base.filter(
+      (s) =>
+        s.id !== editingId &&
+        s.id !== playingId &&
+        s.id !== croppingId &&
+        !hidden[s.id],
+    );
+    // `cullKey` stands in for `cullRegion` (stable across sub-cell pans).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cullKey, shapes, editingId, playingId, croppingId, hidden]);
+
+  const topLevelShapes = useMemo(
+    () => visibleShapes.filter((s) => !frameAncestorIds.has(s.id)),
+    [visibleShapes, frameAncestorIds],
   );
 
-  const viewport =
-    size.width > 0 ? viewportWorldBounds(camera, size.width, size.height) : null;
-  const visibleIds = viewport ? new Set(spatialIndex.search(viewport)) : null;
-  const visibleShapes = (
-    visibleIds ? shapes.filter((s) => visibleIds.has(s.id)) : shapes
-  ).filter((s) => s.id !== editingId && !hidden[s.id]);
-
-  // Frame children render inside their frame's clip (recursively), so they are
-  // excluded from the flat top-level pass.
-  const hasFrameAncestor = (s: { parentId?: string | null }): boolean => {
-    let cur = s.parentId ? shapesRecord?.[s.parentId] : undefined;
-    const seen = new Set<string>();
-    while (cur && !seen.has(cur.id)) {
-      if (cur.type === 'frame') return true;
-      seen.add(cur.id);
-      cur = cur.parentId ? shapesRecord?.[cur.parentId] : undefined;
-    }
-    return false;
-  };
-  const childrenSorted = (parentId: string) =>
-    Object.values(shapesRecord ?? {})
-      .filter((s) => s.parentId === parentId && s.id !== editingId && !hidden[s.id])
-      .sort(compareIndex);
-  // Resolved render opacity per shape: ancestor compounding + any eraser dim.
-  const opacityOf = (shape: (typeof shapes)[number]): number =>
-    resolveOpacity(
-      shape,
-      (id) => shapesRecord?.[id],
-      (id) => !!erasing[id],
-    );
-  const renderShape = (shape: (typeof shapes)[number]): ReactNode =>
-    shape.type === 'frame' ? (
-      <FrameView key={shape.id} frame={shape} opacity={opacityOf(shape)}>
-        {childrenSorted(shape.id).map(renderShape)}
-      </FrameView>
-    ) : (
-      <ShapeView key={shape.id} shape={shape} opacity={opacityOf(shape)} />
-    );
-  const topLevelShapes = visibleShapes.filter((s) => !hasFrameAncestor(s));
+  // The rendered element tree. Memoized so a pan/zoom that doesn't change the
+  // visible set produces a referentially-stable child array — React then skips
+  // reconciling the shape `<g>` entirely and only updates its transform.
+  const renderedShapes = useMemo(() => {
+    const renderShape = (shape: Shape): ReactNode =>
+      shape.type === 'frame' ? (
+        <FrameView
+          key={shape.id}
+          frame={shape}
+          opacity={opacityById.get(shape.id) ?? 1}
+        >
+          {(childrenByParent.get(shape.id) ?? [])
+            .filter(
+              (s) =>
+                s.id !== editingId &&
+                s.id !== playingId &&
+                s.id !== croppingId &&
+                !hidden[s.id],
+            )
+            .map(renderShape)}
+        </FrameView>
+      ) : (
+        <ShapeView
+          key={shape.id}
+          shape={shape}
+          opacity={opacityById.get(shape.id) ?? 1}
+        />
+      );
+    return topLevelShapes.map(renderShape);
+  }, [
+    topLevelShapes,
+    childrenByParent,
+    opacityById,
+    editingId,
+    playingId,
+    croppingId,
+    hidden,
+  ]);
 
   const editingShape = editingId ? shapesRecord?.[editingId] : undefined;
+  const playingShape = playingId ? shapesRecord?.[playingId] : undefined;
+  const croppingShape = croppingId ? shapesRecord?.[croppingId] : undefined;
   const tutorPeer = useMemo(() => peers.find((peer) => peer.isTutor), [peers]);
   const tutorClientId = tutorPeer?.clientId ?? null;
   const tutorViewport = tutorPeer?.viewport ?? null;
@@ -195,12 +313,15 @@ export function Canvas() {
   const summonBaselineReady = useRef(false);
 
   const toInfo = useCallback(
-    (e: ReactPointerEvent | ReactMouseEvent): ToolPointerInfo => {
+    (
+      e: ReactPointerEvent | ReactMouseEvent | PointerEvent,
+    ): ToolPointerInfo => {
       const rect = containerRef.current?.getBoundingClientRect();
       const screen = {
         x: e.clientX - (rect?.left ?? 0),
         y: e.clientY - (rect?.top ?? 0),
       };
+      const camera = useCameraStore.getState().camera;
       const pointerType =
         'pointerType' in e && typeof e.pointerType === 'string'
           ? e.pointerType
@@ -209,7 +330,10 @@ export function Canvas() {
       const pressure =
         Number.isFinite(rawPressure) && rawPressure > 0 ? rawPressure : 0.5;
       return {
-        point: screenToWorld(screen, useCameraStore.getState().camera),
+        point: screenToWorld(screen, camera),
+        screenPoint: screen,
+        timestamp: e.timeStamp,
+        zoom: camera.z,
         pressure,
         pointerType,
         shiftKey: e.shiftKey,
@@ -239,10 +363,19 @@ export function Canvas() {
   // End the active tool/pan gesture, either committing it (the pointer lifted
   // normally) or cancelling it (a pinch/pen stole the interaction).
   const endToolGesture = useCallback(
-    (target: Element, mode: 'cancel') => {
+    (target: Element, mode: 'commit' | 'cancel') => {
       const id = toolPointerId.current;
-      if (gesture.current === 'tool' && mode === 'cancel') {
-        activeTool()?.onCancel?.(ctx);
+      const wasToolGesture = gesture.current === 'tool';
+      if (wasToolGesture) {
+        const tool = activeTool();
+        // 'commit' keeps what was drawn (the OS reclaimed a pen/mouse pointer);
+        // tools without onCommit fall back to discarding via onCancel.
+        if (mode === 'commit' && tool?.onCommit) tool.onCommit(ctx);
+        else tool?.onCancel?.(ctx);
+        // `pointercancel` and `lostpointercapture` bypass the normal
+        // pointer-up path below. They still finish a gesture, so they must end
+        // Yjs's capture window or the next stroke can be merged into this one.
+        breakUndoCapture();
       }
       if (id !== null && target.hasPointerCapture(id)) {
         target.releasePointerCapture(id);
@@ -255,6 +388,9 @@ export function Canvas() {
 
   const startToolGesture = useCallback(
     (e: ReactPointerEvent) => {
+      // Make every new gesture an undo boundary as a fallback for browsers
+      // that drop a preceding pointer-up/cancel event.
+      breakUndoCapture();
       gesture.current = 'tool';
       toolPointerId.current = e.pointerId;
       e.currentTarget.setPointerCapture(e.pointerId);
@@ -262,6 +398,89 @@ export function Canvas() {
     },
     [toInfo, ctx],
   );
+
+  // A pointer position in container (canvas-relative) pixels.
+  const screenPointOf = useCallback(
+    (e: { clientX: number; clientY: number }) => {
+      const rect = containerRef.current?.getBoundingClientRect();
+      return { x: e.clientX - (rect?.left ?? 0), y: e.clientY - (rect?.top ?? 0) };
+    },
+    [containerRef],
+  );
+
+  // Publish immediately when the pointer enters or presses the board, not just
+  // after it moves. This keeps a peer marker visible for clicks and taps too.
+  const publishCursorPosition = useCallback(
+    (clientX: number, clientY: number) => {
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (
+        !rect ||
+        clientX < rect.left ||
+        clientX >= rect.right ||
+        clientY < rect.top ||
+        clientY >= rect.bottom
+      ) {
+        return;
+      }
+      const screen = { x: clientX - rect.left, y: clientY - rect.top };
+      pointerRef.current = screen;
+      setLocalCursor(screenToWorld(screen, useCameraStore.getState().camera));
+    },
+    [containerRef],
+  );
+
+  // Drop touch/pen state that no longer reflects a finger on the glass. iOS can
+  // swallow the pointerup/cancel that would normally clear it (system gesture,
+  // edge swipe, Stage Manager), which would otherwise leave the canvas latched
+  // and unresponsive. Pruning on the next interaction lets it self-heal.
+  const reconcileStaleTouches = useCallback((now: number) => {
+    pruneStaleTouches(activeTouches.current, now, STALE_TOUCH_MS);
+    if (activeTouches.current.size < 2) {
+      pinch.current = null;
+      pinchGraphId.current = null;
+    }
+    if (activeTouches.current.size === 0) pinchLatch.current = false;
+    if (penActive.current && now - penLastSeen.current > STALE_TOUCH_MS) {
+      penActive.current = false;
+    }
+  }, []);
+
+  // The sole selected graph whose plot area contains `screen` (container px), or
+  // null. Used to route a pinch to a graph viewport instead of the camera.
+  const graphAtScreenPoint = useCallback(
+    (screen: { x: number; y: number }): string | null => {
+      const sel = useSelectionStore.getState().selectedIds;
+      if (sel.length !== 1) return null;
+      const shape = editor.getShape(sel[0]!);
+      if (!shape || shape.type !== 'graph') return null;
+      const world = screenToWorld(screen, useCameraStore.getState().camera);
+      const area = plotArea(shape);
+      const inside =
+        world.x >= area.x &&
+        world.x <= area.x + area.w &&
+        world.y >= area.y &&
+        world.y <= area.y + area.h;
+      return inside ? shape.id : null;
+    },
+    [],
+  );
+
+  // Capture the start of a two-finger pinch from the two live touch points.
+  const beginPinch = useCallback(() => {
+    const pts = [...activeTouches.current.values()];
+    if (pts.length < 2) return;
+    const g = pinchGesture(pts[0]!, pts[1]!);
+    pinch.current = {
+      startDistance: g.distance,
+      startZoom: useCameraStore.getState().camera.z,
+      lastMidpoint: g.midpoint,
+    };
+    pinchLastDistance.current = g.distance;
+    // If the pinch lands inside the sole selected graph's plot, it adjusts that
+    // graph's viewport; otherwise it's a normal board pinch.
+    pinchGraphId.current = graphAtScreenPoint(g.midpoint);
+    if (!pinchGraphId.current) stopFollowingForManualCameraChange();
+  }, [graphAtScreenPoint]);
 
   const clearLongPress = useCallback(() => {
     if (longPressTimer.current !== null) {
@@ -302,16 +521,23 @@ export function Canvas() {
 
   const onPointerDown = useCallback(
     (e: ReactPointerEvent) => {
+      publishCursorPosition(e.clientX, e.clientY);
+
       // Touch: drive the active tool with one finger; two fingers = pinch/pan.
       if (isTouchPointer(e)) {
+        reconcileStaleTouches(e.timeStamp);
         if (penActive.current) return; // palm rejection while the pen is down
-        activeTouches.current.add(e.pointerId);
+        activeTouches.current.set(e.pointerId, {
+          ...screenPointOf(e),
+          t: e.timeStamp,
+        });
         if (activeTouches.current.size >= 2) {
           // Second finger down → a pinch is starting: abort the one-finger stroke
-          // (useTouchPinch owns the camera from here) and mute tool routing.
+          // (the pinch branch in onPointerMove owns the camera now) and mute tool routing.
           pinchLatch.current = true;
           clearLongPress();
           endToolGesture(e.currentTarget, 'cancel');
+          beginPinch();
           return;
         }
         if (pinchLatch.current) return; // mid-pinch: wait until all fingers lift
@@ -325,9 +551,17 @@ export function Canvas() {
       if (!isSurfaceEvent(e.target)) return;
       if (e.pointerType === 'pen') {
         penActive.current = true;
-        // A resting finger may have started a stroke first; the pen takes over.
+        penLastSeen.current = e.timeStamp;
+        // A resting finger may have started a stray stroke first — discard it.
+        // But a *pen*-started gesture still active here means the previous
+        // stroke's pointerup/lostpointercapture was dropped (common on Wacom
+        // tablets, which bump the pointerId each stroke); commit that finished
+        // stroke, don't delete it.
         if (gesture.current === 'tool' && toolPointerId.current !== e.pointerId) {
-          endToolGesture(e.currentTarget, 'cancel');
+          const priorWasTouch =
+            toolPointerId.current !== null &&
+            activeTouches.current.has(toolPointerId.current);
+          endToolGesture(e.currentTarget, priorWasTouch ? 'cancel' : 'commit');
         }
       }
       if (pan.isSpaceDown) {
@@ -339,7 +573,16 @@ export function Canvas() {
       }
       startToolGesture(e);
     },
-    [pan, isSurfaceEvent, endToolGesture, startToolGesture],
+    [
+      pan,
+      isSurfaceEvent,
+      endToolGesture,
+      startToolGesture,
+      reconcileStaleTouches,
+      screenPointOf,
+      beginPinch,
+      publishCursorPosition,
+    ],
   );
 
   const onPointerMove = useCallback(
@@ -351,8 +594,7 @@ export function Canvas() {
       }
       // Skip the presence cursor while pinching (two fingers, jittery midpoint).
       if (rect && !(isTouchPointer(e) && pinchLatch.current)) {
-        const world = screenToWorld(pointerRef.current!, useCameraStore.getState().camera);
-        setLocalCursor(world);
+        publishCursorPosition(e.clientX, e.clientY);
       }
       // A real drag past the slop cancels the pending long-press.
       if (longPressOrigin.current) {
@@ -360,14 +602,81 @@ export function Canvas() {
         const dy = e.clientY - longPressOrigin.current.y;
         if (Math.hypot(dx, dy) > 10) clearLongPress();
       }
+      if (e.pointerType === 'pen') penLastSeen.current = e.timeStamp;
+      // Keep each live finger's position fresh and, while two are down, drive the
+      // pinch directly from them (single source of truth — no separate Touch
+      // Events listener that could desync from this routing).
+      if (rect && isTouchPointer(e) && activeTouches.current.has(e.pointerId)) {
+        activeTouches.current.set(e.pointerId, {
+          x: e.clientX - rect.left,
+          y: e.clientY - rect.top,
+          t: e.timeStamp,
+        });
+        if (pinch.current && activeTouches.current.size >= 2) {
+          const pts = [...activeTouches.current.values()];
+          const g = pinchGesture(pts[0]!, pts[1]!);
+          const graphId = pinchGraphId.current;
+          if (graphId) {
+            // Drive the graph viewport: spread to zoom in, drag to pan.
+            const shape = editor.getShape(graphId);
+            if (shape && shape.type === 'graph') {
+              const camera = useCameraStore.getState().camera;
+              const area = plotArea(shape);
+              const world = screenToWorld(g.midpoint, camera);
+              const factor =
+                g.distance > 0 ? pinchLastDistance.current / g.distance : 1;
+              const zoomed = zoomViewport(
+                shape.props.viewport,
+                area,
+                world,
+                factor,
+              );
+              // Content follows the fingers → window moves opposite the midpoint.
+              const next = panViewport(
+                zoomed,
+                area,
+                -(g.midpoint.x - pinch.current.lastMidpoint.x) / camera.z,
+                -(g.midpoint.y - pinch.current.lastMidpoint.y) / camera.z,
+              );
+              editor.updateShape(graphId, { props: { viewport: next } });
+            }
+            pinch.current.lastMidpoint = g.midpoint;
+            pinchLastDistance.current = g.distance;
+            return;
+          }
+          useCameraStore
+            .getState()
+            .zoomAtScreenWithPan(
+              g.midpoint,
+              zoomFromDistance(
+                pinch.current.startZoom,
+                pinch.current.startDistance,
+                g.distance,
+              ),
+              (g.midpoint.x - pinch.current.lastMidpoint.x) * TOUCH_PAN_SPEED,
+              (g.midpoint.y - pinch.current.lastMidpoint.y) * TOUCH_PAN_SPEED,
+            );
+          pinch.current.lastMidpoint = g.midpoint;
+          return;
+        }
+      }
       if (e.pointerId !== toolPointerId.current) return;
       if (gesture.current === 'pan') {
         pan.onPointerMove(e);
       } else if (gesture.current === 'tool') {
-        activeTool()?.onPointerMove?.(toInfo(e), ctx);
+        // Pointer Events may combine high-frequency hardware samples into one
+        // dispatch. Passing every sample through preserves pen curves; the
+        // draw tool then applies its zoom-aware decimation in world space.
+        const coalesced = e.nativeEvent.getCoalescedEvents?.() ?? [];
+        const samples = coalesced.length
+          ? [...coalesced, e.nativeEvent]
+          : [e.nativeEvent];
+        for (const sample of samples) {
+          activeTool()?.onPointerMove?.(toInfo(sample), ctx);
+        }
       }
     },
-    [pan, toInfo, ctx, containerRef, clearLongPress],
+    [pan, toInfo, ctx, containerRef, clearLongPress, publishCursorPosition],
   );
 
   const releaseTouch = useCallback(
@@ -376,6 +685,14 @@ export function Canvas() {
       if (e.pointerType === 'pen') penActive.current = false;
       if (isTouchPointer(e)) {
         activeTouches.current.delete(e.pointerId);
+        if (activeTouches.current.size < 2) {
+          pinch.current = null;
+          if (pinchGraphId.current) {
+            // End the capture window so the whole pinch is one undo step.
+            breakUndoCapture();
+            pinchGraphId.current = null;
+          }
+        }
         if (activeTouches.current.size === 0) pinchLatch.current = false;
       }
     },
@@ -412,10 +729,43 @@ export function Canvas() {
         gesture.current = null;
         toolPointerId.current = null;
       } else {
-        endToolGesture(e.currentTarget, 'cancel');
+        // A pen/mouse cancel is almost always a spurious OS event, not a real
+        // gesture takeover — keep the in-progress stroke/drag. Touch keeps
+        // discarding (a genuine pinch is interrupting a one-finger gesture).
+        endToolGesture(e.currentTarget, isTouchPointer(e) ? 'cancel' : 'commit');
       }
     },
     [pan, releaseTouch, endToolGesture],
+  );
+
+  // Capture being lost (the OS reclaiming the pointer) is a second signal that a
+  // touch/pen has gone, in case its pointerup/cancel was dropped. Cleaning up here
+  // too keeps the latch from outliving the gesture. Idempotent with releaseTouch.
+  const onLostPointerCapture = useCallback(
+    (e: ReactPointerEvent) => {
+      if (e.pointerType === 'pen') penActive.current = false;
+      if (isTouchPointer(e)) {
+        activeTouches.current.delete(e.pointerId);
+        if (activeTouches.current.size < 2) {
+          pinch.current = null;
+          if (pinchGraphId.current) {
+            breakUndoCapture();
+            pinchGraphId.current = null;
+          }
+        }
+        if (activeTouches.current.size === 0) pinchLatch.current = false;
+      }
+      if (e.pointerId === toolPointerId.current) {
+        // Same rationale as onPointerCancel: a pen/mouse losing capture is a
+        // spurious OS event, so keep the stroke/drag; touch still discards.
+        if (gesture.current === 'tool') {
+          endToolGesture(e.currentTarget, isTouchPointer(e) ? 'cancel' : 'commit');
+        }
+        gesture.current = null;
+        toolPointerId.current = null;
+      }
+    },
+    [endToolGesture],
   );
 
   const onDoubleClick = useCallback(
@@ -446,8 +796,23 @@ export function Canvas() {
         }
       }
       const sel = useSelectionStore.getState();
-      if (hitId && !sel.selectedIds.includes(hitId)) sel.setSelection([hitId]);
-      else if (!hitId) sel.clear();
+      if (hitId) {
+        if (!sel.selectedIds.includes(hitId)) sel.setSelection([hitId]);
+        return;
+      }
+      // No shape under the cursor. Keep the current selection if the click lands
+      // inside its (possibly rotated) bounding box, so a multi-selection's
+      // context menu still targets it (tldraw behaviour); otherwise clear.
+      const selInfo = getSelectionInfo(
+        shapes,
+        sel.selectedIds,
+        useCameraStore.getState().camera.z,
+      );
+      if (selInfo) {
+        const { nw, ne, se, sw } = selInfo.corners;
+        if (pointInPolygon(info.point, [nw, ne, se, sw])) return;
+      }
+      sel.clear();
     },
     [toInfo, isSurfaceEvent],
   );
@@ -457,6 +822,11 @@ export function Canvas() {
     if (size.width <= 0 || size.height <= 0) return;
     setLocalViewport(camera, size);
   }, [camera, size.width, size.height]);
+
+  // Broadcast our follow state so the tutor can see who is following.
+  useEffect(() => {
+    setLocalFollowing(following);
+  }, [following]);
 
   useEffect(() => {
     if (!following) return;
@@ -743,6 +1113,12 @@ export function Canvas() {
         void placeImageFiles(files, world).then(selectPasted);
         return;
       }
+      const youtubeId = parseYoutubeId(dt?.getData('text/plain') ?? '');
+      if (youtubeId) {
+        e.preventDefault();
+        selectPasted([createYoutubeShape(youtubeId, world)]);
+        return;
+      }
       if (hasClipboard()) {
         e.preventDefault();
         selectPasted(pasteShapes(editor, world));
@@ -821,11 +1197,24 @@ export function Canvas() {
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerCancel}
+      onLostPointerCapture={onLostPointerCapture}
       onDoubleClick={onDoubleClick}
       onContextMenu={onContextMenu}
       onDragOver={onDragOver}
       onDrop={onDrop}
-      onPointerLeave={() => {
+      onPointerEnter={(e) => publishCursorPosition(e.clientX, e.clientY)}
+      onPointerLeave={(e) => {
+        const rect = containerRef.current?.getBoundingClientRect();
+        const stillInsideViewport =
+          rect &&
+          e.clientX >= rect.left &&
+          e.clientX < rect.right &&
+          e.clientY >= rect.top &&
+          e.clientY < rect.bottom;
+        // Overlay controls are siblings of the canvas, which fires a leave even
+        // though the pointer is still inside the board viewport. Keep the last
+        // cursor position until the pointer actually leaves the viewport.
+        if (stillInsideViewport) return;
         setLocalCursor(null);
         pointerRef.current = null;
       }}
@@ -839,15 +1228,28 @@ export function Canvas() {
 
       <svg className="absolute inset-0 h-full w-full">
         <g transform={cameraToTransform(camera)}>
-          {topLevelShapes.map(renderShape)}
+          {renderedShapes}
         </g>
       </svg>
+
+      {/* While the camera moves, an invisible blocker captures pointer hit-tests
+          so the browser doesn't walk the SVG shape tree every frame. Pointer and
+          wheel events still bubble to the container's handlers below it. */}
+      {cameraMoving && <div className="absolute inset-0" />}
 
       <SelectionLayer camera={camera} />
       <CursorsLayer camera={camera} />
 
       {editingShape?.type === 'text' && (
         <TextEditorOverlay shape={editingShape} camera={camera} />
+      )}
+
+      {playingShape?.type === 'video' && (
+        <VideoPlayerOverlay shape={playingShape} camera={camera} />
+      )}
+
+      {croppingShape?.type === 'image' && (
+        <ImageCropOverlay shape={croppingShape} camera={camera} />
       )}
 
       <CanvasControls

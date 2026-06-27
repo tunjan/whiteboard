@@ -22,7 +22,11 @@ export const drawUtil: ShapeUtil<'draw'> = {
 
   getBounds: (s) => {
     const b = pointsBounds(s.props.points);
-    const pad = s.props.size / 2;
+    // Negative thinning can expand a low-pressure stroke to the full brush
+    // width, so reserve that largest possible radius for indexing/culling.
+    const pad = s.props.thinning !== undefined && s.props.thinning < 0
+      ? s.props.size
+      : s.props.size / 2;
     return {
       minX: s.x + b.minX - pad,
       minY: s.y + b.minY - pad,
@@ -40,7 +44,11 @@ export const drawUtil: ShapeUtil<'draw'> = {
     const wp = s.rotation ? rotatePoint(p, center, -s.rotation) : p;
     const local = { x: wp.x - s.x, y: wp.y - s.y };
 
-    const r = tol + s.props.size / 2;
+    const radius =
+      s.props.thinning !== undefined && s.props.thinning < 0
+        ? s.props.size
+        : s.props.size / 2;
+    const r = tol + radius;
     if (pts.length === 1) return distance(local, pts[0]!) <= r;
     for (let i = 0; i < pts.length - 1; i++) {
       if (distanceToSegment(local, pts[i]!, pts[i + 1]!) <= r) return true;

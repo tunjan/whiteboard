@@ -1,11 +1,10 @@
-import { useMemo } from 'react';
 import type { Camera } from './camera';
 import { worldToScreen } from './camera';
 import {
   getSelectionInfo,
   shapeRotatedBounds,
 } from './selection-geometry';
-import { compareIndex, useDocumentStore } from './use-document-store';
+import { useDocumentStore } from './use-document-store';
 import { useSelectionStore } from './use-selection-store';
 
 const ACCENT = 'var(--color-accent-brand)';
@@ -29,11 +28,8 @@ export function SelectionLayer({ camera }: SelectionLayerProps) {
   const shapesRecord = useDocumentStore(
     (s) => s.doc.pages[s.currentPageId]?.shapes,
   );
-
-  const shapes = useMemo(
-    () => Object.values(shapesRecord ?? {}).sort(compareIndex),
-    [shapesRecord],
-  );
+  // Shared, pre-sorted array from the store — no per-render document re-sort.
+  const shapes = useDocumentStore((s) => s.shapes);
   const info = getSelectionInfo(shapes, selectedIds, camera.z);
   const single = info?.isSingle ? shapesRecord?.[info.ids[0]!] : undefined;
   const locked = !!single?.locked;
@@ -188,8 +184,9 @@ export function SelectionLayer({ camera }: SelectionLayerProps) {
       )}
 
       {marquee && (() => {
-        const tl = toScreen({ x: marquee.minX, y: marquee.minY });
-        const br = toScreen({ x: marquee.maxX, y: marquee.maxY });
+        const { bounds, mode } = marquee;
+        const tl = toScreen({ x: bounds.minX, y: bounds.minY });
+        const br = toScreen({ x: bounds.maxX, y: bounds.maxY });
         return (
           <rect
             x={tl.x}
@@ -200,7 +197,7 @@ export function SelectionLayer({ camera }: SelectionLayerProps) {
             fillOpacity={0.08}
             stroke={ACCENT}
             strokeWidth={1}
-            strokeDasharray="4 3"
+            strokeDasharray={mode === 'touch' ? '4 3' : undefined}
           />
         );
       })()}

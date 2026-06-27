@@ -29,8 +29,28 @@ export function FollowControls({ identity }: FollowControlsProps) {
   if (!identity) return null;
 
   if (identity.isTutor) {
+    const followers = peers.filter((peer) => !peer.isTutor && peer.following);
     return (
       <TooltipProvider delay={300}>
+        {followers.length > 0 ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <span className="flex items-center gap-1.5 rounded-lg px-1.5 text-xs font-medium text-foreground" />
+              }
+            >
+              <span
+                className="size-2 rounded-full"
+                style={{ background: identity.color }}
+                aria-hidden="true"
+              />
+              {followers.length} following
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              {followers.map((follower) => follower.name).join(', ')}
+            </TooltipContent>
+          </Tooltip>
+        ) : null}
         <Tooltip>
           <TooltipTrigger
             render={

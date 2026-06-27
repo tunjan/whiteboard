@@ -1,10 +1,7 @@
 import { Pencil } from 'lucide-react';
 import { genId, type DrawPoint, type DrawProps, type Shape } from '@whiteboard/shared';
 import { getTopIndex } from '../order';
-import {
-  DEFAULT_PENCIL_DYNAMICS,
-  pencilStabilizationToStreamline,
-} from '../shapes/ink';
+import { pencilStabilizationToStreamline } from '../shapes/ink';
 import { shapeRegistry } from '../shapes/shape-registry';
 import { useCanvasUiStore } from '../use-canvas-ui-store';
 import { useStyleStore } from '../use-style-store';
@@ -20,21 +17,120 @@ export function createDrawTool(): Tool {
   let id: string | null = null;
   let origin = { x: 0, y: 0 };
   let points: DrawPoint[] = [];
+  let simulatePressure = false;
+  let previousSample: { x: number; y: number; timestamp: number } | null = null;
+  // Pending rAF for the live stroke write. Pointer Events can deliver many
+  // coalesced samples per frame; without this each sample fired its own Yjs
+  // transaction → full document-snapshot rebuild → React commit. Coalescing the
+  // writes to one per frame keeps every accumulated point (so the curve is
+  // unchanged) while collapsing N pipeline runs per move into one per frame.
+  let rafId: number | null = null;
+
+  const cancelPendingFlush = (): void => {
+    if (rafId !== null) {
+      cancelAnimationFrame(rafId);
+      rafId = null;
+    }
+  };
+
+  const scheduleFlush = (ctx: ToolContext): void => {
+    if (rafId !== null) return;
+    rafId = requestAnimationFrame(() => {
+      rafId = null;
+      if (id) ctx.editor.updateShape(id, { props: { points: points.slice() } });
+    });
+  };
+
+  // Commit the accumulated points to the shape and end the stroke. Shared by
+  // pointer-up (normal finish) and commit (OS reclaimed the pointer mid-stroke).
+  const finalize = (ctx: ToolContext): void => {
+    cancelPendingFlush();
+    const sid = id;
+    id = null;
+    if (!sid) return;
+    // Final synchronous write so the committed shape has every point.
+    ctx.editor.updateShape(sid, { props: { points: points.slice() } });
+    points = [];
+    previousSample = null;
+  };
+
+  // Calibrated in screen pixels/ms so a stroke has the same pressure response
+  // at every camera zoom level (0.08 = slow, 1.25 = fast).
+  const PRESSURE_MIN_SPEED = 0.08;
+  const PRESSURE_MAX_SPEED = 1.25;
+
+  const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
+
+  const pressureFor = (info: ToolPointerInfo): number => {
+    const previous = previousSample;
+    previousSample = {
+      x: info.screenPoint.x,
+      y: info.screenPoint.y,
+      timestamp: info.timestamp,
+    };
+    if (!simulatePressure) return clamp01(info.pressure);
+    if (!previous) return 0.5;
+
+    const elapsed = Math.max(1, info.timestamp - previous.timestamp);
+    const speed =
+      Math.hypot(
+        info.screenPoint.x - previous.x,
+        info.screenPoint.y - previous.y,
+      ) / elapsed;
+    return 1 - clamp01((speed - PRESSURE_MIN_SPEED) / (PRESSURE_MAX_SPEED - PRESSURE_MIN_SPEED));
+  };
+
+  const snapToAngle = (point: DrawPoint): DrawPoint => {
+    const start = points[0];
+    if (!start) return point;
+    const dx = point.x - start.x;
+    const dy = point.y - start.y;
+    const length = Math.hypot(dx, dy);
+    if (length === 0) return point;
+    const increment = Math.PI / 12;
+    const angle = Math.atan2(dy, dx);
+    const snappedAngle = Math.round(angle / increment) * increment;
+    return {
+      ...point,
+      x: start.x + Math.cos(snappedAngle) * length,
+      y: start.y + Math.sin(snappedAngle) * length,
+    };
+  };
 
   const appendPoint = (info: ToolPointerInfo): boolean => {
-    const local = {
+    let local: DrawPoint = {
       x: info.point.x - origin.x,
       y: info.point.y - origin.y,
-      pressure: info.pressure,
+      pressure: pressureFor(info),
     };
+    if (info.shiftKey) {
+      local = snapToAngle(local);
+      const start = points[0];
+      const currentEnd = points[1];
+      if (
+        start &&
+        currentEnd &&
+        currentEnd.x === local.x &&
+        currentEnd.y === local.y &&
+        currentEnd.pressure === local.pressure
+      ) {
+        return false;
+      }
+      points = start ? [start, local] : [local];
+      return true;
+    }
+
     const last = points[points.length - 1];
-    if (
-      last &&
-      last.x === local.x &&
-      last.y === local.y &&
-      last.pressure === local.pressure
-    ) {
-      return false;
+    if (last) {
+      // Keep input density at roughly one sample per screen pixel, independent
+      // of zoom. Pressure is still merged so slow stationary strokes retain
+      // their thickness response.
+      const minDistance = 1 / Math.max(info.zoom, 0.05);
+      if (Math.hypot(last.x - local.x, last.y - local.y) < minDistance) {
+        if (last.pressure === local.pressure) return false;
+        last.pressure = local.pressure;
+        return true;
+      }
     }
     points.push(local);
     return true;
@@ -52,10 +148,15 @@ export function createDrawTool(): Tool {
       const util = shapeRegistry.get('draw');
       if (!util) return;
       origin = info.point;
-      points = [{ x: 0, y: 0, pressure: info.pressure }];
-      const simulatePressure = info.pointerType !== 'pen';
+      const pencil = useCanvasUiStore.getState();
+      // Real pens carry hardware pressure; only mouse/touch fall back to the
+      // user's velocity-based simulation preference.
+      simulatePressure =
+        info.pointerType !== 'pen' && pencil.pencilSimulatePressure;
+      previousSample = null;
+      points = [{ x: 0, y: 0, pressure: pressureFor(info) }];
       const streamline = pencilStabilizationToStreamline(
-        useCanvasUiStore.getState().pencilStabilization,
+        pencil.pencilStabilization,
       );
       const sid = genId();
       id = sid;
@@ -72,9 +173,14 @@ export function createDrawTool(): Tool {
           points: points.slice(),
           color: useStyleStore.getState().color,
           size: useStyleStore.getState().size,
-          ...DEFAULT_PENCIL_DYNAMICS,
-          simulatePressure,
+          // Pressure has been conditioned at input time, so the renderer must
+          // not simulate it again.
+          simulatePressure: false,
+          thinning: pencil.pencilThinning,
+          smoothing: pencil.pencilSmoothing,
           streamline,
+          startTaper: pencil.pencilStartTaper,
+          endTaper: pencil.pencilEndTaper,
         },
       } as Shape;
       ctx.editor.createShape(shape);
@@ -82,26 +188,28 @@ export function createDrawTool(): Tool {
 
     onPointerMove(info: ToolPointerInfo, ctx: ToolContext) {
       if (!id) return;
-      if (appendPoint(info)) {
-        ctx.editor.updateShape(id, { props: { points: points.slice() } });
-      }
+      if (appendPoint(info)) scheduleFlush(ctx);
     },
 
     onPointerUp(info: ToolPointerInfo, ctx: ToolContext) {
-      const sid = id;
-      id = null;
-      if (!sid) return;
       appendPoint(info);
-      ctx.editor.updateShape(sid, { props: { points: points.slice() } });
-      points = [];
+      finalize(ctx);
       // Stay in the draw tool; intentionally no selection of the new stroke.
+    },
+
+    // The OS reclaimed the pen/mouse mid-stroke (spurious pointercancel /
+    // lostpointercapture). Keep the ink drawn so far rather than discarding it.
+    onCommit(ctx: ToolContext) {
+      finalize(ctx);
     },
 
     // A pinch (or tool switch) mid-stroke discards the partial stroke entirely.
     onCancel(ctx: ToolContext) {
+      cancelPendingFlush();
       const sid = id;
       id = null;
       points = [];
+      previousSample = null;
       if (sid) ctx.editor.deleteShapes([sid]);
     },
   };

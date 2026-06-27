@@ -21,6 +21,12 @@ export const MIN_ZOOM = ZOOM_STEPS[0]!;
 export const MAX_ZOOM = ZOOM_STEPS[ZOOM_STEPS.length - 1]!;
 export const DEFAULT_BASE_ZOOM = 1;
 
+/**
+ * Below this zoom, expensive per-shape effects (drop shadows) are dropped — they
+ * become sub-pixel and not worth compositing. See `useLodDetail`.
+ */
+export const LOD_ZOOM_THRESHOLD = 0.4;
+
 export type ZoomDirection = 'in' | 'out';
 
 export function clampZoom(z: number): number {
@@ -80,10 +86,18 @@ export function worldToScreen(world: Point, camera: Camera): Point {
 /**
  * SVG transform for the world-space root `<g>`. A world point (wx, wy) maps to
  * ((wx - x) * z, (wy - y) * z) in screen pixels, matching {@link worldToScreen}.
+ *
+ * The translate components are snapped to the device-pixel grid (ε(s)) so the
+ * composited shape layer's origin lands on a physical pixel — the standard
+ * mitigation for blurry edges / jitter at fractional zoom (notably in Safari).
+ * Hit-testing still uses the exact, un-snapped math in {@link screenToWorld}, so
+ * this adds at most a sub-device-pixel discrepancy with the overlays.
  */
 export function cameraToTransform(camera: Camera): string {
-  const e = -camera.x * camera.z;
-  const f = -camera.y * camera.z;
+  const dpr =
+    (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
+  const e = Math.round(-camera.x * camera.z * dpr) / dpr;
+  const f = Math.round(-camera.y * camera.z * dpr) / dpr;
   return `matrix(${camera.z}, 0, 0, ${camera.z}, ${e}, ${f})`;
 }
 

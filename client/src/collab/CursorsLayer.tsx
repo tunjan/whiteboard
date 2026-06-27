@@ -22,7 +22,7 @@ export function CursorsLayer({ camera }: { camera: Camera }) {
   const peers = usePresenceStore((s) => s.peers);
   const currentPageId = useDocumentStore((s) => s.currentPageId);
   return (
-    <div className="pointer-events-none absolute inset-0 overflow-hidden">
+    <div className="pointer-events-none absolute inset-0 z-10 overflow-hidden">
       {peers.map((p) => {
         if (!p.cursor) return null;
         // Only show cursors of peers viewing the same page.

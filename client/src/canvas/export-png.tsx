@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import type { Shape } from '@whiteboard/shared';
+import { type Bounds, type Shape, unionBounds } from '@whiteboard/shared';
+import { descendantsOf } from './hierarchy';
+import { shapeRotatedBounds } from './shape-bounds';
 import { compareIndex, editor, spatialIndex } from './use-document-store';
 import { shapeRegistry } from './shapes/shape-registry';
 import { FrameView } from './shapes/frame';
@@ -21,7 +23,42 @@ const MAX_DIM = 8192;
 export async function exportBoardToPng(title: string): Promise<void> {
   const bounds = spatialIndex.totalBounds();
   if (!bounds) return; // empty board: nothing to export
+  await renderToPng(renderTree(), bounds, title);
+}
 
+/**
+ * Export just the selected shapes (and their descendants) as a PNG, sized to
+ * their combined bounds — the tldraw-style "export selection" action.
+ */
+export async function exportSelectionToPng(
+  ids: string[],
+  title: string,
+): Promise<void> {
+  if (!ids.length) return;
+  const shapes = editor.getShapes();
+  const renderSet = new Set<string>();
+  for (const id of ids) {
+    renderSet.add(id);
+    for (const d of descendantsOf(shapes, id)) renderSet.add(d.id);
+  }
+  // Bounds = union of the rotated world bounds of every rendered shape with its
+  // own geometry (groups carry none, so they're skipped).
+  let bounds: Bounds | null = null;
+  for (const s of shapes) {
+    if (!renderSet.has(s.id) || s.type === 'group') continue;
+    const b = shapeRotatedBounds(s);
+    bounds = bounds ? unionBounds(bounds, b) : b;
+  }
+  if (!bounds) return;
+  await renderToPng(renderTree(renderSet), bounds, title);
+}
+
+/** Rasterize a rendered shape tree, sized to `bounds`, and trigger a download. */
+async function renderToPng(
+  tree: ReactNode,
+  bounds: Bounds,
+  title: string,
+): Promise<void> {
   const minX = bounds.minX - PADDING;
   const minY = bounds.minY - PADDING;
   const w = bounds.maxX - bounds.minX + PADDING * 2;
@@ -33,7 +70,7 @@ export async function exportBoardToPng(title: string): Promise<void> {
   const outW = Math.ceil(w * scale);
   const outH = Math.ceil(h * scale);
 
-  const shapeMarkup = resolveCssVars(renderToStaticMarkup(renderTree()));
+  const shapeMarkup = resolveCssVars(renderToStaticMarkup(tree));
   const inlined = await inlineBlobImages(shapeMarkup);
   const bg = resolveCssVars('var(--color-background)') || '#ffffff';
   const fontFace = await interFontFace();
@@ -50,19 +87,26 @@ export async function exportBoardToPng(title: string): Promise<void> {
 }
 
 /**
- * The full shape tree for the current page, mirroring `Canvas`'s render rules:
+ * The shape tree for the current page, mirroring `Canvas`'s render rules:
  * frames clip and recurse over their direct children; every other shape (incl.
  * group members) renders flat. No viewport culling and no eraser dimming.
+ *
+ * Pass `renderSet` to restrict output to those shapes (used by the selection
+ * export); omit it to render the whole page.
  */
-function renderTree(): ReactNode {
+function renderTree(renderSet?: Set<string>): ReactNode {
   const shapes = editor.getShapes();
   const byId = new Map(shapes.map((s) => [s.id, s]));
+  const inSet = (id: string) => !renderSet || renderSet.has(id);
 
-  const hasFrameAncestor = (s: Shape): boolean => {
+  // A shape is rendered by its frame (not at top level) only when that frame is
+  // itself part of the output — otherwise a shape inside an unselected frame
+  // would never render during a selection export.
+  const hasRenderedFrameAncestor = (s: Shape): boolean => {
     let cur = s.parentId ? byId.get(s.parentId) : undefined;
     const seen = new Set<string>();
     while (cur && !seen.has(cur.id)) {
-      if (cur.type === 'frame') return true;
+      if (cur.type === 'frame' && inSet(cur.id)) return true;
       seen.add(cur.id);
       cur = cur.parentId ? byId.get(cur.parentId) : undefined;
     }
@@ -70,7 +114,9 @@ function renderTree(): ReactNode {
   };
 
   const childrenOf = (parentId: string) =>
-    shapes.filter((s) => s.parentId === parentId).sort(compareIndex);
+    shapes
+      .filter((s) => s.parentId === parentId && inSet(s.id))
+      .sort(compareIndex);
 
   const render = (shape: Shape): ReactNode => {
     if (shape.type === 'frame') {
@@ -86,7 +132,7 @@ function renderTree(): ReactNode {
 
   const topLevel = [...shapes]
     .sort(compareIndex)
-    .filter((s) => !hasFrameAncestor(s));
+    .filter((s) => inSet(s.id) && !hasRenderedFrameAncestor(s));
   return <>{topLevel.map(render)}</>;
 }
 
@@ -121,7 +167,11 @@ function resolveCssVars(input: string): string {
 /** Fetch each `/api/blobs/...` image and inline it as a data URL (canvas taint). */
 async function inlineBlobImages(svg: string): Promise<string> {
   const urls = [
-    ...new Set([...svg.matchAll(/\/api\/blobs\/[A-Za-z0-9]+/g)].map((m) => m[0])),
+    ...new Set(
+      [...svg.matchAll(/\/api\/blobs\/[a-f0-9]{64}\.(?:png|jpg|webp|gif)/g)].map(
+        (m) => m[0],
+      ),
+    ),
   ];
   let out = svg;
   for (const url of urls) {

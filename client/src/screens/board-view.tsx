@@ -88,6 +88,7 @@ export function BoardView({ boardId }: { boardId: string }) {
         <Canvas />
       </CanvasContextMenu>
       <BoardChrome
+        boardId={boardId}
         title={name}
         onBack={() => navigate('/')}
         onRenameTitle={

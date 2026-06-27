@@ -19,6 +19,7 @@ let awareness: Awareness | null = null;
 let onChange: (() => void) | null = null;
 let localUser: LocalUser | null = null;
 let localPage: string | null = null;
+let localFollowing = false;
 let lastCursorSent = 0;
 let lastViewportSent = 0;
 let lastSummonSent = 0;
@@ -42,6 +43,7 @@ function publishPeers(a: Awareness): void {
       viewport: (state.viewport as ViewportPresence | null) ?? null,
       summon: (state.summon as number | null) ?? null,
       page: (state.page as string | null) ?? null,
+      following: (state.following as boolean | undefined) ?? false,
     });
   });
   usePresenceStore.getState().setPeers(peers);
@@ -60,6 +62,7 @@ export function setActiveAwareness(next: Awareness | null): void {
   next.on('change', onChange);
   if (localUser) next.setLocalStateField('user', localUser);
   if (localPage) next.setLocalStateField('page', localPage);
+  next.setLocalStateField('following', localFollowing);
   publishPeers(next);
 }
 
@@ -72,6 +75,12 @@ export function setLocalUser(user: LocalUser): void {
 export function setLocalPage(pageId: string): void {
   localPage = pageId;
   awareness?.setLocalStateField('page', pageId);
+}
+
+/** Publish whether this client is following the tutor so the tutor can see it. */
+export function setLocalFollowing(following: boolean): void {
+  localFollowing = following;
+  awareness?.setLocalStateField('following', following);
 }
 
 export function setLocalCursor(point: Point | null): void {

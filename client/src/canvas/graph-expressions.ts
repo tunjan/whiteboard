@@ -71,12 +71,14 @@ const ALLOWED_OPERATOR_NAMES = new Set([
 ]);
 
 export const GRAPH_COLORS = [
-  '#7382c6',
-  '#c2593f',
-  '#4f8a8b',
-  '#c2913f',
-  '#829c87',
-  '#3f3f46',
+  '#274001',
+  '#828a00',
+  '#f29f05',
+  '#f25c05',
+  '#d6568c',
+  '#4d8584',
+  '#a62f03',
+  '#400d01',
 ];
 
 export const DEFAULT_GRAPH_VIEWPORT: GraphViewport = {

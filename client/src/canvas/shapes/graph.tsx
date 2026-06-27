@@ -1,10 +1,17 @@
+import { useEffect, useRef } from 'react';
 import type { GraphViewport } from '@whiteboard/shared';
+import { screenToWorld } from '../camera';
 import { formatAxisLabel, niceStep, tickValues } from '../grid';
 import {
   createDefaultGraphProps,
   sampleGraphExpression,
 } from '../graph-expressions';
+import { useLodDetail } from '../lod';
+import { useCameraStore } from '../use-camera-store';
+import { breakUndoCapture, editor } from '../use-document-store';
+import { useSelectionStore } from '../use-selection-store';
 import { boxBounds, boxHitTest, rotationTransform } from './box-geometry';
+import { panViewport, zoomViewport } from './graph-interaction';
 import { strokeDashArray, strokeLineCap } from './render-style';
 import type { ShapeUtil } from './types';
 
@@ -14,12 +21,21 @@ const MIN_W = 220;
 const MIN_H = 160;
 const PLOT_PADDING = 16;
 const CURVE_WIDTH = 2.25;
+// Wheel-zoom feel, mirrored from the board camera (use-wheel.ts).
+const WHEEL_LINE_HEIGHT = 16;
+const WHEEL_MAX_ZOOM_DELTA = 10;
+// Continuous wheel gestures coalesce into one undo step until this idle gap.
+const WHEEL_UNDO_IDLE_MS = 300;
+
+function clampNum(n: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, n));
+}
 
 function safeId(id: string): string {
   return id.replace(/[^A-Za-z0-9_-]/g, '-');
 }
 
-function plotArea(shape: { x: number; y: number; props: { w: number; h: number } }) {
+export function plotArea(shape: { x: number; y: number; props: { w: number; h: number } }) {
   const x = shape.x + PLOT_PADDING;
   const y = shape.y + PLOT_PADDING;
   const w = Math.max(1, shape.props.w - PLOT_PADDING * 2);
@@ -81,6 +97,66 @@ export const graphUtil: ShapeUtil<'graph'> = {
 
   Component: ({ shape }) => {
     const props = shape.props;
+    const detail = useLodDetail();
+    const groupRef = useRef<SVGGElement>(null);
+    const shapeId = shape.id;
+
+    // While this graph is the sole selection, the wheel drives its viewport
+    // instead of the board camera: ctrl/⌘+wheel (and trackpad pinch) zooms about
+    // the cursor, plain wheel pans. stopPropagation keeps the canvas's own native
+    // wheel listener (which moves the camera) from also firing.
+    useEffect(() => {
+      const el = groupRef.current;
+      if (!el) return;
+      let undoTimer: number | null = null;
+      const onWheel = (e: WheelEvent) => {
+        const selected = useSelectionStore.getState().selectedIds;
+        if (selected.length !== 1 || selected[0] !== shapeId) return;
+        const current = editor.getShape(shapeId);
+        if (!current || current.type !== 'graph') return;
+        e.preventDefault();
+        e.stopPropagation();
+
+        const camera = useCameraStore.getState().camera;
+        const rect = el.ownerSVGElement?.getBoundingClientRect();
+        const screen = {
+          x: e.clientX - (rect?.left ?? 0),
+          y: e.clientY - (rect?.top ?? 0),
+        };
+        const world = screenToWorld(screen, camera);
+        const area = plotArea(current);
+        const viewport = current.props.viewport;
+
+        let next: GraphViewport;
+        if (e.ctrlKey || e.metaKey) {
+          const lineScale = e.deltaMode === 1 ? WHEEL_LINE_HEIGHT : 1;
+          const delta = clampNum(
+            e.deltaY * lineScale,
+            -WHEEL_MAX_ZOOM_DELTA,
+            WHEEL_MAX_ZOOM_DELTA,
+          );
+          // Match the camera direction: scroll up = zoom in = smaller range.
+          const factor = 1 / (1 - delta / 100);
+          next = zoomViewport(viewport, area, world, factor);
+        } else {
+          const scale = (e.deltaMode === 1 ? WHEEL_LINE_HEIGHT : 1) / camera.z;
+          next = panViewport(viewport, area, e.deltaX * scale, e.deltaY * scale);
+        }
+
+        editor.updateShape(shapeId, { props: { viewport: next } });
+        if (undoTimer !== null) window.clearTimeout(undoTimer);
+        undoTimer = window.setTimeout(() => {
+          undoTimer = null;
+          breakUndoCapture();
+        }, WHEEL_UNDO_IDLE_MS);
+      };
+      el.addEventListener('wheel', onWheel, { passive: false });
+      return () => {
+        el.removeEventListener('wheel', onWheel);
+        if (undoTimer !== null) window.clearTimeout(undoTimer);
+      };
+    }, [shapeId]);
+
     const area = plotArea(shape);
     const viewport = props.viewport;
     const xStep = stepFor(viewport.xMax - viewport.xMin, area.w);
@@ -93,6 +169,8 @@ export const graphUtil: ShapeUtil<'graph'> = {
     const clippedYAxis = Math.max(area.x, Math.min(area.x + area.w, yAxis));
     const clipId = `graph-clip-${safeId(shape.id)}`;
     const shadowId = `graph-shadow-${safeId(shape.id)}`;
+    // Zoomed far out the card drop shadow is sub-pixel; skip it (and its filter).
+    const shadow = detail === 'high';
     const samples = Math.max(180, Math.round(area.w * 1.4));
     const showAxisLabels = props.showAxisLabels !== false;
     const xLabelsBelow = clippedXAxis <= area.y + area.h - 18;
@@ -109,25 +187,30 @@ export const graphUtil: ShapeUtil<'graph'> = {
     };
 
     return (
-      <g transform={rotationTransform(shape.x, shape.y, props.w, props.h, shape.rotation)}>
+      <g
+        ref={groupRef}
+        transform={rotationTransform(shape.x, shape.y, props.w, props.h, shape.rotation)}
+      >
         <defs>
-          <filter
-            id={shadowId}
-            x={shape.x - 28}
-            y={shape.y - 20}
-            width={props.w + 56}
-            height={props.h + 64}
-            filterUnits="userSpaceOnUse"
-            colorInterpolationFilters="sRGB"
-          >
-            <feDropShadow
-              dx={0}
-              dy={8}
-              stdDeviation={8}
-              floodColor="black"
-              floodOpacity={0.13}
-            />
-          </filter>
+          {shadow && (
+            <filter
+              id={shadowId}
+              x={shape.x - 28}
+              y={shape.y - 20}
+              width={props.w + 56}
+              height={props.h + 64}
+              filterUnits="userSpaceOnUse"
+              colorInterpolationFilters="sRGB"
+            >
+              <feDropShadow
+                dx={0}
+                dy={8}
+                stdDeviation={8}
+                floodColor="black"
+                floodOpacity={0.13}
+              />
+            </filter>
+          )}
           <clipPath id={clipId}>
             <rect x={area.x} y={area.y} width={area.w} height={area.h} rx={4} />
           </clipPath>
@@ -143,7 +226,7 @@ export const graphUtil: ShapeUtil<'graph'> = {
           stroke="var(--color-border)"
           strokeWidth={1}
           vectorEffect="non-scaling-stroke"
-          filter={`url(#${shadowId})`}
+          filter={shadow ? `url(#${shadowId})` : undefined}
         />
 
         <rect

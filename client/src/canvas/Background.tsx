@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import type { Camera } from './camera';
 import {
   type BackgroundType,
@@ -28,7 +29,16 @@ const LABEL = 'var(--color-muted-foreground)';
  * gridlines are always exactly 1px and perfectly crisp at any zoom. Grid phase
  * and spacing are derived from the camera.
  */
-export function Background({ type, camera, width, height }: BackgroundProps) {
+// Memoized: the canvas re-renders on every draw sample, selection change, and
+// peer-cursor update, but the grid only depends on these props. `camera` is a
+// stable reference except during an actual pan/zoom (where the grid genuinely
+// must redraw), so a shallow prop check skips all the unrelated re-renders.
+export const Background = memo(function Background({
+  type,
+  camera,
+  width,
+  height,
+}: BackgroundProps) {
   if (type === 'blank' || width === 0 || height === 0) return null;
 
   const g = getGridLevels(camera);
@@ -115,7 +125,7 @@ export function Background({ type, camera, width, height }: BackgroundProps) {
       )}
     </svg>
   );
-}
+});
 
 interface AxesProps {
   camera: Camera;

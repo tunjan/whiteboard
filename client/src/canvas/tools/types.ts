@@ -6,6 +6,12 @@ import type { Editor } from '../editor';
 export interface ToolPointerInfo {
   /** Pointer position in world coordinates. */
   point: Point;
+  /** Pointer position in container-relative screen pixels. */
+  screenPoint: Point;
+  /** Event timestamp in milliseconds, used for velocity-sensitive tools. */
+  timestamp: number;
+  /** Current screen-pixel-per-world-unit scale. */
+  zoom: number;
   /** Pointer pressure 0..1 (0.5 for mouse without real pressure). */
   pressure: number;
   /** Browser pointer type, used by tools that distinguish mouse from pen input. */
@@ -54,6 +60,13 @@ export interface Tool {
    * Tools should discard any pending shape/edit and restore pre-gesture state.
    */
   onCancel?(ctx: ToolContext): void;
+  /**
+   * Finalize the in-progress interaction, keeping what's been drawn — used when
+   * the OS reclaims a pen/mouse pointer mid-stroke (a spurious pointercancel /
+   * lostpointercapture). The canvas falls back to onCancel for tools that don't
+   * implement this.
+   */
+  onCommit?(ctx: ToolContext): void;
   onDoubleClick?(info: ToolPointerInfo, ctx: ToolContext): void;
   onKeyDown?(e: KeyboardEvent, ctx: ToolContext): void;
 }

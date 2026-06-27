@@ -23,6 +23,8 @@ export interface PeerPresence {
   summon: number | null;
   /** Id of the page the peer is currently viewing, or null until published. */
   page: string | null;
+  /** Whether this peer is currently following the tutor's view. */
+  following: boolean;
 }
 
 interface PresenceStore {

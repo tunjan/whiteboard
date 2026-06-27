@@ -119,6 +119,19 @@ export interface ImageProps {
   /** Intrinsic pixel dimensions (for aspect ratio / re-fit). */
   naturalWidth: number;
   naturalHeight: number;
+  /**
+   * Visible sub-rectangle of the source image, as fractions in [0..1]. Omitted
+   * means the full image is shown. Scale-invariant, so it survives resizing.
+   */
+  crop?: { x: number; y: number; w: number; h: number };
+}
+
+export interface VideoProps {
+  /** YouTube video id (e.g. "dQw4w9WgXcQ"). */
+  videoId: string;
+  /** Rendered size in world units. */
+  w: number;
+  h: number;
 }
 
 export interface GraphViewport {
@@ -174,6 +187,7 @@ export type LineShape = BaseShape<'line', LineProps>;
 export type ArrowShape = BaseShape<'arrow', ArrowProps>;
 export type TextShape = BaseShape<'text', TextProps>;
 export type ImageShape = BaseShape<'image', ImageProps>;
+export type VideoShape = BaseShape<'video', VideoProps>;
 export type GraphShape = BaseShape<'graph', GraphProps>;
 export type GroupShape = BaseShape<'group', GroupProps>;
 export type FrameShape = BaseShape<'frame', FrameProps>;
@@ -192,6 +206,7 @@ export type Shape =
   | ArrowShape
   | TextShape
   | ImageShape
+  | VideoShape
   | GraphShape
   | GroupShape
   | FrameShape;
@@ -208,6 +223,7 @@ export interface ShapeMap {
   arrow: ArrowShape;
   text: TextShape;
   image: ImageShape;
+  video: VideoShape;
   graph: GraphShape;
   group: GroupShape;
   frame: FrameShape;

@@ -17,9 +17,11 @@ import {
   groupShapes,
   ungroupShapes,
 } from '@/canvas/commands';
+import { exportSelectionToPng } from '@/canvas/export-png';
 import { deleteTargetIds } from '@/canvas/hierarchy';
 import { editor } from '@/canvas/use-document-store';
 import { useHiddenStore } from '@/canvas/use-hidden-store';
+import { useImageCroppingStore } from '@/canvas/use-image-cropping-store';
 import { useSelectionStore } from '@/canvas/use-selection-store';
 import {
   bringForward,
@@ -43,6 +45,10 @@ export function CanvasContextMenu({ children }: { children: ReactNode }) {
   const canDistribute = selectedIds.length >= 3;
   const canGroup = selectedIds.length >= 2;
   const hasGroup = selectedIds.some((id) => editor.getShape(id)?.type === 'group');
+  const singleImageId =
+    selectedIds.length === 1 && editor.getShape(selectedIds[0]!)?.type === 'image'
+      ? selectedIds[0]!
+      : null;
   const align = (edge: Parameters<typeof alignShapes>[2]) =>
     alignShapes(editor, selectedIds, edge);
 
@@ -100,6 +106,19 @@ export function CanvasContextMenu({ children }: { children: ReactNode }) {
           Paste
           <ContextMenuShortcut>⌘V</ContextMenuShortcut>
         </ContextMenuItem>
+        <ContextMenuItem
+          disabled={!has}
+          onClick={() => void exportSelectionToPng(selectedIds, 'selection')}
+        >
+          Export as PNG
+        </ContextMenuItem>
+        {singleImageId && (
+          <ContextMenuItem
+            onClick={() => useImageCroppingStore.getState().start(singleImageId)}
+          >
+            Crop
+          </ContextMenuItem>
+        )}
 
         <ContextMenuSeparator />
 

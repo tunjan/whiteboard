@@ -14,6 +14,7 @@ import {
 import type { Editor, ShapePatch } from './editor';
 import { generateKeyBetween } from './order';
 import { shapeRegistry } from './shapes/shape-registry';
+import { shapeRotatedBounds } from './shape-bounds';
 import { SpatialIndex } from './spatial-index';
 import { useCameraStore } from './use-camera-store';
 import { useSelectionStore } from './use-selection-store';
@@ -160,10 +161,29 @@ interface Session {
 let session: Session | null = null;
 
 const shapeCache = new Map<string, Shape>();
+// Lazily-built, z-sorted view of `shapeCache` for `editor.getShapes()`. The
+// cache stays in sync with `shapeCache` (invalidated wherever it mutates), so
+// reads avoid re-deserializing the whole Yjs map and re-sorting on every call —
+// tools hit this many times per pointer event. The array is shared; callers
+// treat it as read-only (none mutate it in place).
+let sortedShapesCache: Shape[] | null = null;
+
+/** Current page's shapes, z-sorted. One shared array for `getShapes()` and the
+ *  store snapshot, so consumers never re-sort the document themselves. */
+function currentSortedShapes(): Shape[] {
+  if (!sortedShapesCache) {
+    sortedShapesCache = [...shapeCache.values()].sort(compareIndex);
+  }
+  return sortedShapesCache;
+}
 
 interface DocStore {
   boardId: string;
   doc: WhiteboardDocument;
+  /** Current page's shapes, z-sorted. Reference is stable until a shape
+   *  mutates, so camera-only renders don't invalidate consumers' memos and no
+   *  component re-derives `Object.values(...).sort(...)` per render. */
+  shapes: Shape[];
   currentPageId: string;
 }
 
@@ -172,6 +192,7 @@ const EMPTY_SNAPSHOT: WhiteboardDocument = { pages: {}, pageOrder: [] };
 export const useDocumentStore = create<DocStore>(() => ({
   boardId: '',
   doc: EMPTY_SNAPSHOT,
+  shapes: [],
   currentPageId: DEFAULT_PAGE_ID,
 }));
 
@@ -207,6 +228,7 @@ function rebuildSnapshot(): void {
 
   useDocumentStore.setState({
     doc: { pages, pageOrder },
+    shapes: currentSortedShapes(),
     currentPageId: session.currentPageId,
   });
 }
@@ -257,24 +279,29 @@ function applyAffected(ids: Set<string>): void {
       shapeCache.set(id, shape);
       const util = shapeRegistry.getFor(shape);
       // Groups have no geometry of their own — keep them out of the index.
-      if (util && shape.type !== 'group') spatialIndex.insert(id, util.getBounds(shape));
+      if (util && shape.type !== 'group')
+        spatialIndex.insert(id, shapeRotatedBounds(shape));
     } else {
       shapeCache.delete(id);
       spatialIndex.remove(id);
     }
   }
+  sortedShapesCache = null;
   rebuildSnapshot();
 }
 
 function fullResync(): void {
   if (!session) return;
   shapeCache.clear();
+  sortedShapesCache = null;
   spatialIndex.clear();
   for (const [id, m] of session.currentShapes) {
     const shape = yToShape(m);
     shapeCache.set(id, shape);
     const util = shapeRegistry.getFor(shape);
-    if (util) spatialIndex.insert(id, util.getBounds(shape));
+    // Groups have no geometry of their own — keep them out of the index.
+    if (util && shape.type !== 'group')
+      spatialIndex.insert(id, shapeRotatedBounds(shape));
   }
   rebuildSnapshot();
 }
@@ -322,6 +349,7 @@ export function loadBoard(
   useDocumentStore.setState({
     boardId,
     doc: EMPTY_SNAPSHOT,
+    shapes: [],
     currentPageId: DEFAULT_PAGE_ID,
   });
   useMusicPlaybackStore.getState().reset();
@@ -391,7 +419,7 @@ export function loadBoard(
       session?.currentShapes.unobserveDeep(session.shapesObserver);
       pages.unobserve(pagesObserver);
       music.unobserve(musicObserver);
-      undo.destroy();
+      session?.undo.destroy();
       provider?.destroy();
       persistence?.destroy();
       doc.destroy();
@@ -579,7 +607,9 @@ export const editor: Editor = {
   },
   getShapes: () => {
     if (!session) return [];
-    return [...session.currentShapes.values()].map(yToShape).sort(compareIndex);
+    // Served from the live shape cache (kept in sync by the Yjs observer), so
+    // repeated per-gesture calls skip re-reading and re-sorting the whole map.
+    return currentSortedShapes();
   },
   createShape: (shape) =>
     transactLocal(() => session?.currentShapes.set(shape.id, shapeToY(shape))),
@@ -592,4 +622,8 @@ export const editor: Editor = {
     transactLocal(() => {
       for (const id of ids) session?.currentShapes.delete(id);
     }),
+  // Yjs transactions are reentrant: the inner `transactLocal` calls made by
+  // `updateShape` join this one, so the deep observer fires (and the snapshot
+  // rebuilds) exactly once for the whole batch.
+  transact: (fn) => transactLocal(fn),
 };

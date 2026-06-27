@@ -1,8 +1,16 @@
 import { useState } from 'react';
-import { ArrowLeft, Download, Moon, Settings2, Sun } from 'lucide-react';
+import {
+  ArrowLeft,
+  Download,
+  Moon,
+  NotebookPen,
+  Settings2,
+  Sun,
+} from 'lucide-react';
 import { exportBoardToPng } from '@/canvas/export-png';
 import type { Identity } from '@/collab/identity';
 import { usePresenceStore } from '@/collab/use-presence-store';
+import { BoardNotesDialog } from '@/components/board-notes-dialog';
 import { ConnectionIndicator } from '@/components/connection-indicator';
 import { FollowControls } from '@/components/follow-controls';
 import { MusicPlayer } from '@/music/music-player';
@@ -51,11 +59,13 @@ function OverflowAvatar({ count }: { count: number }) {
  * Docked top chrome header for a board. A single, full-width top header docked at the top edge.
  */
 export function BoardChrome({
+  boardId,
   title,
   onBack,
   onRenameTitle,
   identity,
 }: {
+  boardId: string;
   title: string;
   onBack: () => void;
   onRenameTitle?: () => void;
@@ -81,6 +91,7 @@ export function BoardChrome({
     participants.length - visibleParticipants.length,
   );
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [notesOpen, setNotesOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
   const renameTitle = identity?.isTutor ? onRenameTitle : undefined;
 
@@ -137,7 +148,7 @@ export function BoardChrome({
       </Surface>
 
       {/* Center Floating Panel (Collab & Presence) */}
-      <Surface className="absolute top-[calc(1rem+env(safe-area-inset-top))] left-1/2 -translate-x-1/2 z-20 flex h-11 items-center gap-3 px-3.5">
+      <Surface className="absolute top-[calc(1rem+env(safe-area-inset-top))] left-1/2 -translate-x-1/2 z-20 flex h-11 items-center gap-2.5 px-3">
         <ConnectionIndicator />
         <div className="h-5 w-px bg-border" />
         <div className="flex items-center gap-2">
@@ -182,6 +193,17 @@ export function BoardChrome({
         >
           <Download className="size-4" />
         </Button>
+        {identity?.isTutor && (
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Student notes"
+            onClick={() => setNotesOpen(true)}
+            className="size-8 rounded-lg"
+          >
+            <NotebookPen className="size-4" />
+          </Button>
+        )}
         <Button
           variant="ghost"
           size="icon"
@@ -196,6 +218,13 @@ export function BoardChrome({
       </Surface>
 
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+      {identity?.isTutor && (
+        <BoardNotesDialog
+          boardId={boardId}
+          open={notesOpen}
+          onOpenChange={setNotesOpen}
+        />
+      )}
     </>
   );
 }

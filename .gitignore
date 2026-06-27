@@ -9,5 +9,7 @@ build/
 *.log
 client/dist/
 server/dist/
+server/data/blobs/*
+!server/data/blobs/.gitkeep
 server/data/music/*
 !server/data/music/.gitkeep

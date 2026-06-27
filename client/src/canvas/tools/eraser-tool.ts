@@ -44,6 +44,15 @@ export function createEraserTool(): Tool {
     useEraserStore.getState().set([...queue]);
   }
 
+  /** Commit the queued targets when a stroke finishes normally or is reclaimed. */
+  function commit(ctx: ToolContext) {
+    if (!erasing) return;
+    const ids = [...queue];
+    // One batched delete = one undo step for the whole erase stroke.
+    if (ids.length) ctx.editor.deleteShapes(ids);
+    reset();
+  }
+
   return {
     id: 'eraser',
     label: 'Eraser',
@@ -69,11 +78,13 @@ export function createEraserTool(): Tool {
     },
 
     onPointerUp(_info: ToolPointerInfo, ctx: ToolContext) {
-      if (!erasing) return;
-      const ids = [...queue];
-      // One batched delete = one undo step for the whole erase stroke.
-      if (ids.length) ctx.editor.deleteShapes(ids);
-      reset();
+      commit(ctx);
+    },
+
+    // A pen/mouse pointer can be reclaimed without a pointerup. The canvas
+    // treats that as a committed gesture, so the pending erase must persist.
+    onCommit(ctx: ToolContext) {
+      commit(ctx);
     },
 
     // Escape / tool switch / pinch mid-stroke cancels: the highlighted shapes

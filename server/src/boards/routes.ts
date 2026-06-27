@@ -58,6 +58,31 @@ boardRoutes.patch('/:id', async (c) => {
   return c.json(toMeta(row));
 });
 
+// Tutor-only private notes about the student. Stored relationally and served
+// only here (behind requireTutor) so they never reach a student client.
+boardRoutes.get('/:id/notes', async (c) => {
+  const id = c.req.param('id');
+  const [row] = await db
+    .select({ privateNotes: boards.privateNotes })
+    .from(boards)
+    .where(eq(boards.id, id));
+  if (!row) return c.json({ error: 'not found' }, 404);
+  return c.json({ notes: row.privateNotes });
+});
+
+boardRoutes.put('/:id/notes', async (c) => {
+  const id = c.req.param('id');
+  const body = (await c.req.json().catch(() => ({}))) as { notes?: string };
+  const notes = typeof body.notes === 'string' ? body.notes : '';
+  const [row] = await db
+    .update(boards)
+    .set({ privateNotes: notes })
+    .where(eq(boards.id, id))
+    .returning({ id: boards.id });
+  if (!row) return c.json({ error: 'not found' }, 404);
+  return c.json({ ok: true });
+});
+
 boardRoutes.delete('/:id', async (c) => {
   const id = c.req.param('id');
   await db.delete(boardDocuments).where(eq(boardDocuments.boardId, id));

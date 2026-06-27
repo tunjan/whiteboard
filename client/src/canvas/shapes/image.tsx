@@ -1,4 +1,5 @@
 import { blobUrl } from '../../board/blobs';
+import { useLodDetail } from '../lod';
 import { boxBounds, boxHitTest, rotationTransform } from './box-geometry';
 import type { ShapeUtil } from './types';
 
@@ -35,11 +36,20 @@ export const imageUtil: ShapeUtil<'image'> = {
   }),
 
   Component: ({ shape }) => {
-    const { blobId, w, h } = shape.props;
+    const { blobId, w, h, crop } = shape.props;
+    const detail = useLodDetail();
     if (!blobId) return null;
+    // With a crop, draw the full source scaled so the crop sub-rect fills the
+    // box; the clipPath below keeps only the box region visible.
+    const fullW = crop ? w / crop.w : w;
+    const fullH = crop ? h / crop.h : h;
+    const imgX = crop ? shape.x - crop.x * fullW : shape.x;
+    const imgY = crop ? shape.y - crop.y * fullH : shape.y;
     const clipId = `image-clip-${shape.id}`;
     const shadowId = `image-shadow-${shape.id}`;
     const radius = Math.min(IMAGE_CORNER_RADIUS, w / 4, h / 4);
+    // Zoomed far out the drop shadow is sub-pixel; skip it (and its filter).
+    const shadow = detail === 'high';
     return (
       <g transform={rotationTransform(shape.x, shape.y, w, h, shape.rotation)}>
         <defs>
@@ -53,30 +63,32 @@ export const imageUtil: ShapeUtil<'image'> = {
               ry={radius}
             />
           </clipPath>
-          <filter
-            id={shadowId}
-            x={shape.x - IMAGE_SHADOW_MARGIN}
-            y={shape.y - IMAGE_SHADOW_MARGIN}
-            width={w + IMAGE_SHADOW_MARGIN * 2}
-            height={h + IMAGE_SHADOW_MARGIN * 2}
-            filterUnits="userSpaceOnUse"
-          >
-            <feDropShadow
-              dx={0}
-              dy={IMAGE_SHADOW_DY}
-              stdDeviation={IMAGE_SHADOW_BLUR}
-              floodColor="#0f172a"
-              floodOpacity={0.18}
-            />
-          </filter>
+          {shadow && (
+            <filter
+              id={shadowId}
+              x={shape.x - IMAGE_SHADOW_MARGIN}
+              y={shape.y - IMAGE_SHADOW_MARGIN}
+              width={w + IMAGE_SHADOW_MARGIN * 2}
+              height={h + IMAGE_SHADOW_MARGIN * 2}
+              filterUnits="userSpaceOnUse"
+            >
+              <feDropShadow
+                dx={0}
+                dy={IMAGE_SHADOW_DY}
+                stdDeviation={IMAGE_SHADOW_BLUR}
+                floodColor="#0f172a"
+                floodOpacity={0.18}
+              />
+            </filter>
+          )}
         </defs>
-        <g filter={`url(#${shadowId})`}>
+        <g filter={shadow ? `url(#${shadowId})` : undefined}>
           <image
             href={blobUrl(blobId)}
-            x={shape.x}
-            y={shape.y}
-            width={w}
-            height={h}
+            x={imgX}
+            y={imgY}
+            width={fullW}
+            height={fullH}
             preserveAspectRatio="none"
             clipPath={`url(#${clipId})`}
           />

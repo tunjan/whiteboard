@@ -33,12 +33,24 @@ export interface TextMetrics {
   height: number;
 }
 
+// Memoize measurements: `measureText` is called from getBounds (every text
+// mutation, via the spatial index), hitTest, and the SVG render path, almost
+// always with identical (text, size, family) tuples. canvas `measureText` is
+// the per-glyph cost we want to pay once. Bounded so live editing (a fresh key
+// per keystroke) can't grow it without limit.
+const measureCache = new Map<string, TextMetrics>();
+const MEASURE_CACHE_MAX = 2000;
+
 /** Measure multi-line text (split on \n) in world units. */
 export function measureText(
   text: string,
   fontSize: number,
   family?: FontFamily,
 ): TextMetrics {
+  const cacheKey = `${family ?? 'sans'}|${fontSize}|${text}`;
+  const cached = measureCache.get(cacheKey);
+  if (cached) return cached;
+
   const lines = text.length ? text.split('\n') : [''];
   const c = getCtx();
   let maxW = 0;
@@ -51,8 +63,15 @@ export function measureText(
   } else {
     maxW = (Math.max(...lines.map((l) => l.length)) || 1) * fontSize * 0.6;
   }
-  return {
+  const metrics: TextMetrics = {
     width: Math.max(maxW, fontSize * 0.5),
     height: lines.length * fontSize * LINE_HEIGHT_FACTOR,
   };
+  // Cheap FIFO eviction: drop the oldest entry once over the cap.
+  if (measureCache.size >= MEASURE_CACHE_MAX) {
+    const oldest = measureCache.keys().next().value;
+    if (oldest !== undefined) measureCache.delete(oldest);
+  }
+  measureCache.set(cacheKey, metrics);
+  return metrics;
 }

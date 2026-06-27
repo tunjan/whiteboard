@@ -27,4 +27,11 @@ export interface Editor {
   createShape(shape: Shape): void;
   updateShape(id: string, patch: ShapePatch): void;
   deleteShapes(ids: string[]): void;
+  /**
+   * Run several mutations as one atomic change: a single document update and a
+   * single re-render. Without this, each `updateShape` is its own transaction —
+   * dragging a large selection rebuilds the whole snapshot once per shape per
+   * frame, which is pathologically slow on a busy canvas.
+   */
+  transact(fn: () => void): void;
 }

@@ -1,12 +1,15 @@
+import { useEffect, useState } from 'react';
 import { Eye, EyeOff, Plus, RotateCcw, Trash2 } from 'lucide-react';
 import type {
   GraphExpression,
   GraphParameter,
   GraphProps,
+  GraphViewport,
   StrokeDash,
 } from '@whiteboard/shared';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
 import {
   InputGroup,
   InputGroupAddon,
@@ -147,6 +150,77 @@ function SliderRow({
   );
 }
 
+const VIEWPORT_FIELDS: { key: keyof GraphViewport; label: string }[] = [
+  { key: 'xMin', label: 'X min' },
+  { key: 'xMax', label: 'X max' },
+  { key: 'yMin', label: 'Y min' },
+  { key: 'yMax', label: 'Y max' },
+];
+
+function ViewRange({
+  viewport,
+  onChange,
+}: {
+  viewport: GraphViewport;
+  onChange: (viewport: GraphViewport) => void;
+}) {
+  const toDraft = (v: GraphViewport) => ({
+    xMin: String(v.xMin),
+    xMax: String(v.xMax),
+    yMin: String(v.yMin),
+    yMax: String(v.yMax),
+  });
+  const [draft, setDraft] = useState(() => toDraft(viewport));
+
+  // Re-sync when the viewport changes elsewhere (scroll zoom, Reset).
+  useEffect(() => {
+    setDraft(toDraft(viewport));
+  }, [viewport.xMin, viewport.xMax, viewport.yMin, viewport.yMax]);
+
+  const commit = (key: keyof GraphViewport) => {
+    const value = Number(draft[key]);
+    const next = { ...viewport, [key]: value };
+    const valid =
+      Number.isFinite(value) && next.xMin < next.xMax && next.yMin < next.yMax;
+    if (valid) onChange(next);
+    else setDraft((d) => ({ ...d, [key]: String(viewport[key]) }));
+  };
+
+  return (
+    <FieldGroup className="gap-2">
+      <div className="text-sm font-medium leading-none text-foreground select-none">
+        View range
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        {VIEWPORT_FIELDS.map(({ key, label }) => (
+          <Field key={key} orientation="horizontal" className="gap-2">
+            <FieldLabel className="w-10 shrink-0 text-xs text-muted-foreground">
+              {label}
+            </FieldLabel>
+            <Input
+              type="number"
+              inputMode="decimal"
+              aria-label={label}
+              value={draft[key]}
+              onChange={(event) =>
+                setDraft((d) => ({ ...d, [key]: event.currentTarget.value }))
+              }
+              onBlur={() => commit(key)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  commit(key);
+                  event.currentTarget.blur();
+                }
+              }}
+            />
+          </Field>
+        ))}
+      </div>
+    </FieldGroup>
+  );
+}
+
 export function GraphPanel() {
   const selectedIds = useSelectionStore((s) => s.selectedIds);
   const shapesRecord = useDocumentStore(
@@ -199,7 +273,7 @@ export function GraphPanel() {
   );
 
   return (
-    <Surface className="touch-targets absolute top-[calc(4.5rem+env(safe-area-inset-top))] right-[calc(1rem+env(safe-area-inset-right))] z-20 flex max-h-[calc(100dvh-7rem-env(safe-area-inset-top))] w-80 flex-col gap-3 overflow-y-auto p-3.5">
+    <Surface className="touch-targets absolute top-[calc(4.5rem+env(safe-area-inset-top))] right-[calc(1rem+env(safe-area-inset-right))] z-20 flex max-h-[calc(100dvh-7rem-env(safe-area-inset-top))] w-[min(20rem,calc(100vw-2rem))] flex-col gap-3 overflow-y-auto p-3.5">
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
           <div className="text-sm font-semibold text-foreground">Function</div>
@@ -234,6 +308,13 @@ export function GraphPanel() {
           <ToggleGroupItem value="off">Off</ToggleGroupItem>
         </ToggleGroup>
       </Field>
+
+      <Separator />
+
+      <ViewRange
+        viewport={props.viewport}
+        onChange={(viewport) => updateGraph({ viewport })}
+      />
 
       <Separator />
 

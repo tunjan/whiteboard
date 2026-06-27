@@ -45,12 +45,16 @@ export function pencilStabilizationToStreamline(stabilization: number): number {
 }
 
 export const DEFAULT_PENCIL_DYNAMICS = {
-  simulatePressure: true,
+  // Mouse and touch do not provide meaningful pressure. A predictable pencil
+  // line is a better default than turning small speed changes into a brush.
+  simulatePressure: false,
   thinning: 0.5,
   smoothing: 0.5,
   streamline: pencilStabilizationToStreamline(DEFAULT_PENCIL_STABILIZATION),
   startTaper: 0,
-  endTaper: true,
+  // Round caps make a pencil stop where the pointer stops. The pointed brush
+  // finish remains available in Settings for people who want it.
+  endTaper: false,
 } as const satisfies Required<InkStrokeDynamics>;
 
 /**

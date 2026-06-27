@@ -11,7 +11,20 @@ import { shapeRegistry } from './shapes/shape-registry';
 export function shapeRotatedBounds(shape: Shape): Bounds {
   const util = shapeRegistry.getFor(shape);
   if (!util) return { minX: shape.x, minY: shape.y, maxX: shape.x, maxY: shape.y };
-  const b = util.getBounds(shape);
+  const raw = util.getBounds(shape);
+  // Registry bounds describe the model geometry. Expand the box-like outlines
+  // here so the spatial index remains a conservative broad phase for the
+  // pixels that users can actually select at the edge of a stroke.
+  const strokeRadius =
+    shape.type === 'rectangle' || shape.type === 'ellipse' || shape.type === 'polygon'
+      ? shape.props.size / 2
+      : 0;
+  const b = {
+    minX: raw.minX - strokeRadius,
+    minY: raw.minY - strokeRadius - (shape.type === 'frame' ? 20 : 0),
+    maxX: raw.maxX + strokeRadius,
+    maxY: raw.maxY + strokeRadius,
+  };
   if (!shape.rotation) return b;
   const c = boundsCenter(b);
   const corners = [
