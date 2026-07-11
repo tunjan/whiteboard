@@ -139,6 +139,29 @@ function outlineToPath(points: number[][]): string {
   return `${d} Z`;
 }
 
+/**
+ * Smoothed centerline path (quadratic through midpoints) for an ink stroke.
+ * Used for dashed/dotted pencils, which stroke a uniform-width line instead of
+ * filling the variable-width perfect-freehand outline.
+ */
+export function getInkCenterlinePath(points: DrawPoint[]): string {
+  const len = points.length;
+  if (len < 2) return '';
+  const first = points[0]!;
+  if (len === 2) {
+    const b = points[1]!;
+    return `M ${first.x.toFixed(2)} ${first.y.toFixed(2)} L ${b.x.toFixed(2)} ${b.y.toFixed(2)}`;
+  }
+  let d = `M ${first.x.toFixed(2)} ${first.y.toFixed(2)} Q`;
+  for (let i = 1; i < len - 1; i++) {
+    const a = points[i]!;
+    const b = points[i + 1]!;
+    d += ` ${a.x.toFixed(2)} ${a.y.toFixed(2)} ${mid(a.x, b.x).toFixed(2)} ${mid(a.y, b.y).toFixed(2)}`;
+  }
+  const last = points[len - 1]!;
+  return `${d} L ${last.x.toFixed(2)} ${last.y.toFixed(2)}`;
+}
+
 /** SVG path data for an ink stroke (local coordinates). */
 export function getInkPathData(
   points: DrawPoint[],

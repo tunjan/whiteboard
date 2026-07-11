@@ -5,7 +5,12 @@ import {
   rotatePoint,
 } from '@whiteboard/shared';
 import { DEFAULT_SHAPE_STYLE, DEFAULT_INK_SIZE } from './style';
-import { DEFAULT_PENCIL_DYNAMICS, getInkPathData } from './ink';
+import {
+  DEFAULT_PENCIL_DYNAMICS,
+  getInkCenterlinePath,
+  getInkPathData,
+} from './ink';
+import { strokeDashArray } from './render-style';
 import type { ShapeUtil } from './types';
 
 export const drawUtil: ShapeUtil<'draw'> = {
@@ -17,6 +22,7 @@ export const drawUtil: ShapeUtil<'draw'> = {
     isClosed: false,
     color: DEFAULT_SHAPE_STYLE.color,
     size: DEFAULT_INK_SIZE,
+    dash: 'solid',
     ...DEFAULT_PENCIL_DYNAMICS,
   }),
 
@@ -81,6 +87,7 @@ export const drawUtil: ShapeUtil<'draw'> = {
       points,
       color,
       size,
+      dash,
       simulatePressure,
       thinning,
       smoothing,
@@ -89,6 +96,31 @@ export const drawUtil: ShapeUtil<'draw'> = {
       endTaper,
     } = shape.props;
     if (points.length === 0) return null;
+    const b = pointsBounds(points);
+    const cx = (b.minX + b.maxX) / 2;
+    const cy = (b.minY + b.maxY) / 2;
+    const rotate = shape.rotation
+      ? ` rotate(${(shape.rotation * 180) / Math.PI} ${cx} ${cy})`
+      : '';
+    const transform = `translate(${shape.x} ${shape.y})${rotate}`;
+
+    // Dashed/dotted ink strokes a uniform-width centerline (like lines and
+    // polygons); solid keeps the variable-width perfect-freehand fill.
+    if (dash && dash !== 'solid' && points.length >= 2) {
+      return (
+        <path
+          d={getInkCenterlinePath(points)}
+          fill="none"
+          stroke={color}
+          strokeWidth={size}
+          strokeDasharray={strokeDashArray(dash, size)}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          transform={transform}
+        />
+      );
+    }
+
     const d = getInkPathData(points, size, true, {
       simulatePressure,
       thinning,
@@ -97,14 +129,6 @@ export const drawUtil: ShapeUtil<'draw'> = {
       startTaper,
       endTaper,
     });
-    const b = pointsBounds(points);
-    const cx = (b.minX + b.maxX) / 2;
-    const cy = (b.minY + b.maxY) / 2;
-    const rotate = shape.rotation
-      ? ` rotate(${(shape.rotation * 180) / Math.PI} ${cx} ${cy})`
-      : '';
-    return (
-      <path d={d} fill={color} transform={`translate(${shape.x} ${shape.y})${rotate}`} />
-    );
+    return <path d={d} fill={color} transform={transform} />;
   },
 };

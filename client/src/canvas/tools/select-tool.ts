@@ -25,6 +25,8 @@ import { getSnapGridStep } from '../grid';
 import { isSelectable, isVisible } from '../selectable';
 import { useEnteredGroupStore } from '../use-entered-group-store';
 import { shapeRegistry } from '../shapes/shape-registry';
+import { textIndexAtWorldPoint } from '../shapes/text';
+import { layoutTextProps, MIN_TEXT_WIDTH } from '../shapes/text-measure';
 import type { ShapeUtil } from '../shapes/types';
 import { snapBounds } from '../snapping';
 import { spatialIndex } from '../use-document-store';
@@ -284,7 +286,10 @@ export function createSelectTool(): Tool {
       if (movingIds.has(id)) continue;
       const shape = editor.getShape(id);
       if (!shape || !isVisible(shape)) continue;
-      targets.push(shapeRotatedBounds(shape));
+      // The spatial index already holds this shape's rotated world bounds (it's
+      // what `search` matched on), so reuse them instead of recomputing.
+      const bounds = spatialIndex.getBounds(id);
+      if (bounds) targets.push(bounds);
     }
     return targets;
   }
@@ -585,8 +590,30 @@ export function createSelectTool(): Tool {
             state.util,
             state.handle,
             info.point,
-            info.shiftKey,
+            info.shiftKey ||
+              (state.initial.type === 'text' && state.handle.length === 2),
           );
+          if (
+            state.initial.type === 'text' &&
+            (state.handle === 'e' || state.handle === 'w')
+          ) {
+            const props = {
+              ...state.initial.props,
+              sizingMode: 'fixed' as const,
+              width: Math.max(MIN_TEXT_WIDTH, bounds.maxX - bounds.minX),
+            };
+            const nextLayout = layoutTextProps(props);
+            const targetCenterY = (bounds.minY + bounds.maxY) / 2;
+            ctx.editor.updateShape(state.initial.id, {
+              x: bounds.minX,
+              // Width reflow owns height. Centering the new dynamic height on
+              // the drag box preserves the stationary side handle's pivot,
+              // including when the text shape is rotated.
+              y: targetCenterY - nextLayout.height / 2,
+              props,
+            });
+            return;
+          }
           const resized = state.util.resize(state.initial as never, bounds);
           ctx.editor.updateShape(state.initial.id, {
             x: resized.x,
@@ -683,9 +710,11 @@ export function createSelectTool(): Tool {
           useSelectionStore.getState().setSelection(cancelled.selectionBefore);
           return;
         case 'move':
-          for (const [id, initial] of cancelled.initial) {
-            ctx.editor.updateShape(id, { x: initial.x, y: initial.y });
-          }
+          ctx.editor.transact(() => {
+            for (const [id, initial] of cancelled.initial) {
+              ctx.editor.updateShape(id, { x: initial.x, y: initial.y });
+            }
+          });
           useSelectionStore.getState().setSelection(cancelled.selectionBefore);
           return;
         case 'resize':
@@ -707,11 +736,52 @@ export function createSelectTool(): Tool {
     onDoubleClick(info: ToolPointerInfo, ctx: ToolContext) {
       const zoom = useCameraStore.getState().camera.z;
       const shapes = ctx.editor.getShapes();
+      const selection = useSelectionStore.getState();
+      const selectionInfo = getSelectionInfo(shapes, selection.selectedIds, zoom);
+
+      // A double click on either text width handle releases the constraint and
+      // returns to content-driven auto sizing. Keep the opposite side's center
+      // as the visual pivot so rotated text does not jump.
+      if (selectionInfo?.isSingle) {
+        const handle = selectionInfo.handles.find(
+          (candidate) =>
+            (candidate.id === 'e' || candidate.id === 'w') &&
+            distance(info.point, candidate.point) <= HANDLE_HIT_SCREEN / zoom,
+        );
+        const selected = ctx.editor.getShape(selectionInfo.ids[0]!);
+        if (
+          handle &&
+          selected?.type === 'text' &&
+          (selected.props.sizingMode === 'fixed' || selected.props.width > 0)
+        ) {
+          const before = layoutTextProps(selected.props);
+          const props = {
+            ...selected.props,
+            sizingMode: 'auto' as const,
+            width: 0,
+          };
+          const after = layoutTextProps(props);
+          ctx.editor.updateShape(selected.id, {
+            x:
+              handle.id === 'e'
+                ? selected.x
+                : selected.x + before.width - after.width,
+            y: selected.y + (before.height - after.height) / 2,
+            props,
+          });
+          return;
+        }
+      }
+
       const hitLeaf = topmostHit(shapes, info.point, SHAPE_HIT_SCREEN / zoom);
       if (!hitLeaf) return;
       const hitShape = ctx.editor.getShape(hitLeaf);
       if (hitShape?.type === 'text') {
-        useTextEditingStore.getState().start(hitShape.id);
+        const index = textIndexAtWorldPoint(hitShape, info.point);
+        useSelectionStore.getState().setSelection([hitShape.id]);
+        useTextEditingStore
+          .getState()
+          .start(hitShape.id, { anchor: index, head: index });
         return;
       }
       if (hitShape?.type === 'video') {

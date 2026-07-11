@@ -8,16 +8,20 @@ import {
 import { Cloud, CloudOff, Loader2 } from 'lucide-react';
 
 const STATUS = {
-  connected: { label: 'Connected', Icon: Cloud, colorClass: 'text-green-700' },
+  connected: {
+    label: 'Connected',
+    Icon: Cloud,
+    colorClass: 'text-[var(--content-success)]',
+  },
   connecting: {
-    label: 'Connecting...',
+    label: 'Connecting',
     Icon: Loader2,
-    colorClass: 'text-amber-600 animate-spin',
+    colorClass: 'text-[var(--content-attention)] animate-spin',
   },
   disconnected: {
     label: 'Disconnected',
     Icon: CloudOff,
-    colorClass: 'text-red-700',
+    colorClass: 'text-[var(--content-error)]',
   },
 } as const;
 
@@ -34,7 +38,7 @@ export function ConnectionIndicator() {
             <div
               aria-label={info.label}
               aria-live="polite"
-              className="flex size-5 items-center justify-center text-xs select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground focus-visible:ring-offset-2"
+              className="flex size-5 items-center justify-center text-xs select-none focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-border-subtle"
               role="status"
               tabIndex={0}
               title={info.label}

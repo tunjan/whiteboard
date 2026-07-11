@@ -13,6 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { Field, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 
 /** Prompt for a YouTube URL and drop a video shape at the viewport center. */
@@ -57,27 +58,30 @@ export function YouTubeDialog({
             Paste a YouTube link to embed and play it on the board.
           </DialogDescription>
         </DialogHeader>
-        <Input
-          autoFocus
-          value={url}
-          placeholder="https://www.youtube.com/watch?v=…"
-          onChange={(e) => {
-            setUrl(e.target.value);
-            if (error) setError(false);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault();
-              submit();
-            }
-          }}
-          aria-invalid={error}
-        />
-        {error && (
-          <p className="text-xs text-destructive">
-            That doesn't look like a YouTube link.
-          </p>
-        )}
+        <FieldGroup>
+          <Field data-invalid={error ? true : undefined}>
+            <FieldLabel className="sr-only">YouTube link</FieldLabel>
+            <Input
+              autoFocus
+              value={url}
+              placeholder="https://www.youtube.com/watch?v=…"
+              onChange={(e) => {
+                setUrl(e.target.value);
+                if (error) setError(false);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  submit();
+                }
+              }}
+              aria-invalid={error}
+            />
+            {error ? (
+              <FieldError>That does not look like a YouTube link.</FieldError>
+            ) : null}
+          </Field>
+        </FieldGroup>
         <DialogFooter>
           <Button variant="outline" onClick={close}>
             Cancel

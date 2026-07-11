@@ -17,8 +17,12 @@ import {
   useDocumentStore,
 } from '@/canvas/use-document-store';
 import { Button } from '@/components/ui/button';
+import { Separator } from '@/components/ui/separator';
 import { Surface } from '@/components/ui/surface';
 import { cn } from '@/lib/utils';
+
+const ACTIVE_PAGE_CLASS =
+  'bg-bg-muted font-medium text-content-emphasis';
 
 /**
  * Page switcher for a board, docked in the top-left chrome. Lists every page
@@ -43,6 +47,10 @@ export function PageMenu() {
     if (!open) return;
     const onPointerDown = (e: PointerEvent) => {
       if (!rootRef.current?.contains(e.target as Node)) {
+        // Commit any in-progress rename (via its onBlur handler) before the
+        // click's re-render unmounts the input — unmounting alone would
+        // silently discard the typed value.
+        (document.activeElement as HTMLElement | null)?.blur();
         setOpen(false);
         setEditingId(null);
       }
@@ -69,18 +77,15 @@ export function PageMenu() {
         aria-label="Pages"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        className="h-8 max-w-[180px] gap-1.5 rounded-lg px-2 font-semibold"
+        className="max-w-[clamp(4.5rem,18vw,11.25rem)] rounded-lg px-2 font-medium"
       >
         <span className="truncate">{current?.name ?? 'Page 1'}</span>
-        <ChevronDown className="size-3.5 opacity-60" />
+        <ChevronDown className="opacity-60" />
       </Button>
 
       {open ? (
-        <Surface className="touch-targets absolute top-10 left-0 z-30 flex w-64 flex-col gap-0.5 p-1.5">
-          <div className="px-1.5 py-1 text-xs font-medium text-muted-foreground">
-            Pages
-          </div>
-          <div className="flex max-h-[50vh] flex-col gap-0.5 overflow-y-auto">
+        <Surface className="touch-targets absolute top-10 left-0 z-30 flex w-64 flex-col gap-1 p-2 shadow-hover">
+          <div className="flex max-h-[50vh] flex-col gap-1 overflow-y-auto">
             {ordered.map((page, i) => {
               const active = page.id === currentPageId;
               if (editingId === page.id) {
@@ -100,8 +105,8 @@ export function PageMenu() {
                 <div
                   key={page.id}
                   className={cn(
-                    'group flex items-center gap-0.5 rounded-md pl-1.5 pr-1',
-                    active ? 'bg-accent text-accent-foreground' : 'hover:bg-muted',
+                    'group flex items-center gap-1 rounded-md pl-2 pr-1',
+                    active ? ACTIVE_PAGE_CLASS : 'hover:bg-bg-muted',
                   )}
                 >
                   <button
@@ -110,12 +115,14 @@ export function PageMenu() {
                       setCurrentPage(page.id);
                       setOpen(false);
                     }}
-                    className="flex min-w-0 flex-1 items-center gap-1.5 py-1.5 text-left text-sm"
+                    className="flex min-w-0 flex-1 items-center gap-2 py-2 text-left text-sm"
                   >
                     <Check
                       className={cn(
                         'size-3.5 shrink-0',
-                        active ? 'opacity-100' : 'opacity-0',
+                        active
+                          ? 'text-content-info opacity-100'
+                          : 'opacity-0',
                       )}
                     />
                     <span className="truncate">{page.name}</span>
@@ -162,7 +169,7 @@ export function PageMenu() {
               );
             })}
           </div>
-          <div className="my-1 h-px bg-border" />
+          <Separator className="my-1" />
           <Button
             variant="ghost"
             size="sm"
@@ -170,9 +177,9 @@ export function PageMenu() {
               createPage();
               setOpen(false);
             }}
-            className="justify-start gap-1.5"
+            className="justify-start gap-2"
           >
-            <Plus className="size-4" />
+            <Plus />
             New page
           </Button>
         </Surface>
@@ -208,7 +215,7 @@ function PageRenameRow({
         else if (e.key === 'Escape') onCancel();
       }}
       onBlur={() => onCommit(value)}
-      className="h-8 w-full rounded-md border border-input bg-transparent px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-foreground"
+      className="h-8 w-full rounded-md border border-border-subtle bg-bg-default px-2 text-sm text-content-emphasis outline-none focus-visible:border-border-emphasis focus-visible:ring-4 focus-visible:ring-border-subtle"
     />
   );
 }

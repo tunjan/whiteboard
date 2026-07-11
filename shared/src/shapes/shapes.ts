@@ -19,6 +19,9 @@ export type FontFamily = 'sans' | 'serif' | 'mono';
 /** Horizontal text alignment. */
 export type TextAlign = 'start' | 'middle' | 'end';
 
+/** Whether text grows to its content or wraps inside a user-defined width. */
+export type TextSizingMode = 'auto' | 'fixed';
+
 export interface DrawPoint {
   /** Local x, relative to the shape's origin. */
   x: number;
@@ -34,6 +37,8 @@ export interface DrawProps {
   isClosed: boolean;
   color: string;
   size: number;
+  /** Stroke dash style. Undefined preserves legacy solid ink. */
+  dash?: StrokeDash;
   /** Whether to derive pressure from pointer velocity instead of hardware pressure. */
   simulatePressure?: boolean;
   /** Pressure-to-width multiplier. Undefined preserves legacy uniform strokes. */
@@ -105,8 +110,12 @@ export interface TextProps {
   color: string;
   fontSize: number;
   fontFamily: FontFamily;
-  /** Fixed wrap width in world units (0 = auto-grow to content). */
+  /** Explicit geometry state. Omitted on legacy shapes; inferred from width. */
+  sizingMode?: TextSizingMode;
+  /** Fixed wrap width in world units. Ignored while sizingMode is auto. */
   width: number;
+  /** Unitless line-height multiplier. Omitted legacy values use 1.2. */
+  lineHeight?: number;
   align: TextAlign;
 }
 
@@ -143,7 +152,7 @@ export interface GraphViewport {
 
 export interface GraphExpression {
   id: string;
-  /** Math expression in terms of `x`, with optional `y =` prefix. */
+  /** Explicit expression in `x`, or an implicit equation in `x` and `y`. */
   expression: string;
   color: string;
   visible: boolean;

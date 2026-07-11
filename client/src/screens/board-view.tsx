@@ -9,6 +9,7 @@ import {
 import {
   type Identity,
   resolveIdentity,
+  setStoredAvatar,
   setStoredName,
 } from '@/collab/identity';
 import { setLocalUser } from '@/collab/presence';
@@ -27,6 +28,8 @@ export function BoardView({ boardId }: { boardId: string }) {
   const [identity, setIdentity] = useState<Identity | null>(null);
   const [needsName, setNeedsName] = useState(false);
   const [assignedColor, setAssignedColor] = useState('#2f6df6');
+  const [assignedAvatar, setAssignedAvatar] = useState('');
+  const [editingIdentity, setEditingIdentity] = useState(false);
   const [renamingBoard, setRenamingBoard] = useState(false);
 
   // The page id requested by the share link (`?p=`), pending until it syncs in.
@@ -69,6 +72,7 @@ export function BoardView({ boardId }: { boardId: string }) {
     void resolveIdentity().then((r) => {
       if (cancelled) return;
       setAssignedColor(r.color);
+      setAssignedAvatar(r.avatar);
       if (r.identity) setIdentity(r.identity);
       else setNeedsName(true);
     });
@@ -83,7 +87,7 @@ export function BoardView({ boardId }: { boardId: string }) {
   }, [identity]);
 
   return (
-    <div className="relative h-[100dvh] w-screen overflow-hidden overscroll-none bg-background text-foreground">
+    <div className="relative h-[100dvh] w-screen overflow-hidden overscroll-none bg-bg-muted text-content-emphasis">
       <CanvasContextMenu>
         <Canvas />
       </CanvasContextMenu>
@@ -94,6 +98,7 @@ export function BoardView({ boardId }: { boardId: string }) {
         onRenameTitle={
           identity?.isTutor ? () => setRenamingBoard(true) : undefined
         }
+        onEditIdentity={identity ? () => setEditingIdentity(true) : undefined}
         identity={identity}
       />
       <Toolbar />
@@ -101,19 +106,28 @@ export function BoardView({ boardId }: { boardId: string }) {
       <StylePanel />
 
       <NameDialog
-        open={needsName}
-        color={assignedColor}
-        onSubmit={(n) => {
+        open={needsName || editingIdentity}
+        editing={editingIdentity}
+        initialName={identity?.name ?? ''}
+        initialAvatar={identity?.avatar ?? assignedAvatar}
+        onSubmit={(n, avatar) => {
           setStoredName(n);
-          setIdentity({ name: n, color: assignedColor, isTutor: false });
+          setStoredAvatar(avatar);
+          setIdentity({
+            name: n,
+            color: identity?.color ?? assignedColor,
+            isTutor: identity?.isTutor ?? false,
+            avatar,
+          });
           setNeedsName(false);
+          setEditingIdentity(false);
         }}
       />
       <BoardTitleDialog
         open={renamingBoard}
         heading="Rename board"
         initialValue={name}
-        submitLabel="Save"
+        submitLabel="Save changes"
         onOpenChange={setRenamingBoard}
         onSubmit={async (title) => {
           await boardRepository.rename(boardId, title);

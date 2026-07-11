@@ -22,6 +22,28 @@ export function createLineTool(opts: LineToolOptions): Tool {
   let creatingId: string | null = null;
   let start = { x: 0, y: 0 };
 
+  // Finish the in-flight line/arrow. Shared by pointer-up (normal finish) and
+  // commit (OS reclaimed the pointer mid-create — keep what was drawn). Length is
+  // read from the shape's own endpoints so it works without a pointer position.
+  function finalize(ctx: ToolContext): void {
+    const id = creatingId;
+    creatingId = null;
+    if (!id) return;
+    const shape = ctx.editor.getShape(id);
+    const z = useCameraStore.getState().camera.z;
+    let len = 0;
+    if (shape && (shape.type === 'line' || shape.type === 'arrow')) {
+      const pts = shape.props.points;
+      const a = pts[0];
+      const b = pts[pts.length - 1];
+      if (a && b) len = Math.hypot(b.x - a.x, b.y - a.y);
+    }
+    // Discard a zero-length click — an empty line/arrow is useless.
+    if (len < CLICK_SCREEN_THRESHOLD / z) ctx.editor.deleteShapes([id]);
+    else useSelectionStore.getState().setSelection([id]);
+    ctx.complete();
+  }
+
   return {
     id: opts.id,
     label: opts.label,
@@ -66,26 +88,32 @@ export function createLineTool(opts: LineToolOptions): Tool {
 
     onPointerMove(info: ToolPointerInfo, ctx: ToolContext) {
       if (!creatingId) return;
+      let dx = info.point.x - start.x;
+      let dy = info.point.y - start.y;
+      // Hold Shift to lock the line/arrow to perfectly horizontal or vertical,
+      // whichever axis the drag is closer to.
+      if (info.shiftKey) {
+        if (Math.abs(dx) >= Math.abs(dy)) dy = 0;
+        else dx = 0;
+      }
       ctx.editor.updateShape(creatingId, {
         props: {
           points: [
             { x: 0, y: 0 },
-            { x: info.point.x - start.x, y: info.point.y - start.y },
+            { x: dx, y: dy },
           ],
         },
       });
     },
 
-    onPointerUp(info: ToolPointerInfo, ctx: ToolContext) {
-      const id = creatingId;
-      creatingId = null;
-      if (!id) return;
-      const z = useCameraStore.getState().camera.z;
-      const len = Math.hypot(info.point.x - start.x, info.point.y - start.y);
-      // Discard a zero-length click — an empty line/arrow is useless.
-      if (len < CLICK_SCREEN_THRESHOLD / z) ctx.editor.deleteShapes([id]);
-      else useSelectionStore.getState().setSelection([id]);
-      ctx.complete();
+    onPointerUp(_info: ToolPointerInfo, ctx: ToolContext) {
+      finalize(ctx);
+    },
+
+    // The OS reclaimed the pointer mid-create (spurious pointercancel /
+    // lostpointercapture). Keep the line drawn so far rather than discarding it.
+    onCommit(ctx: ToolContext) {
+      finalize(ctx);
     },
 
     // Pinch-to-zoom mid-create: drop the in-flight shape, stay in the tool.

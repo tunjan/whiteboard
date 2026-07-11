@@ -39,28 +39,30 @@ export function alignShapes(editor: Editor, ids: string[], edge: AlignEdge): voi
     }),
     { ...list[0]!.bounds },
   );
-  for (const { shape, bounds } of list) {
-    switch (edge) {
-      case 'left':
-        move(editor, shape, union.minX - bounds.minX, 0);
-        break;
-      case 'right':
-        move(editor, shape, union.maxX - bounds.maxX, 0);
-        break;
-      case 'centerX':
-        move(editor, shape, (union.minX + union.maxX) / 2 - (bounds.minX + bounds.maxX) / 2, 0);
-        break;
-      case 'top':
-        move(editor, shape, 0, union.minY - bounds.minY);
-        break;
-      case 'bottom':
-        move(editor, shape, 0, union.maxY - bounds.maxY);
-        break;
-      case 'centerY':
-        move(editor, shape, 0, (union.minY + union.maxY) / 2 - (bounds.minY + bounds.maxY) / 2);
-        break;
+  editor.transact(() => {
+    for (const { shape, bounds } of list) {
+      switch (edge) {
+        case 'left':
+          move(editor, shape, union.minX - bounds.minX, 0);
+          break;
+        case 'right':
+          move(editor, shape, union.maxX - bounds.maxX, 0);
+          break;
+        case 'centerX':
+          move(editor, shape, (union.minX + union.maxX) / 2 - (bounds.minX + bounds.maxX) / 2, 0);
+          break;
+        case 'top':
+          move(editor, shape, 0, union.minY - bounds.minY);
+          break;
+        case 'bottom':
+          move(editor, shape, 0, union.maxY - bounds.maxY);
+          break;
+        case 'centerY':
+          move(editor, shape, 0, (union.minY + union.maxY) / 2 - (bounds.minY + bounds.maxY) / 2);
+          break;
+      }
     }
-  }
+  });
 }
 
 /** Even spacing between selected shapes along an axis (needs 3+). */
@@ -81,10 +83,12 @@ export function distributeShapes(
   const span = hi(last.bounds) - lo(first.bounds);
   const gap = (span - totalSize) / (sorted.length - 1);
   let cursor = lo(first.bounds);
-  for (const it of sorted) {
-    const size = hi(it.bounds) - lo(it.bounds);
-    const delta = cursor - lo(it.bounds);
-    move(editor, it.shape, horizontal ? delta : 0, horizontal ? 0 : delta);
-    cursor += size + gap;
-  }
+  editor.transact(() => {
+    for (const it of sorted) {
+      const size = hi(it.bounds) - lo(it.bounds);
+      const delta = cursor - lo(it.bounds);
+      move(editor, it.shape, horizontal ? delta : 0, horizontal ? 0 : delta);
+      cursor += size + gap;
+    }
+  });
 }

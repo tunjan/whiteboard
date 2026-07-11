@@ -23,6 +23,8 @@ interface CanvasUiStore {
   pencilStartTaper: number;
   /** Whether newly drawn strokes taper to a point at the end. */
   pencilEndTaper: boolean;
+  /** Whether the on-canvas performance overlay (FPS/frame time) is shown. */
+  debugPerformance: boolean;
   setBackground: (background: BackgroundType) => void;
   setPencilStabilization: (pencilStabilization: number) => void;
   setPencilThinning: (pencilThinning: number) => void;
@@ -30,6 +32,7 @@ interface CanvasUiStore {
   setPencilSimulatePressure: (pencilSimulatePressure: boolean) => void;
   setPencilStartTaper: (pencilStartTaper: number) => void;
   setPencilEndTaper: (pencilEndTaper: boolean) => void;
+  setDebugPerformance: (debugPerformance: boolean) => void;
   resetPencil: () => void;
 }
 
@@ -74,6 +77,7 @@ export const useCanvasUiStore = create<CanvasUiStore>()(
   persist(
     (set) => ({
       background: 'graph',
+      debugPerformance: false,
       ...PENCIL_DEFAULTS,
       setBackground: (background) => set({ background }),
       setPencilStabilization: (pencilStabilization) =>
@@ -84,6 +88,7 @@ export const useCanvasUiStore = create<CanvasUiStore>()(
         set({ pencilSimulatePressure }),
       setPencilStartTaper: (pencilStartTaper) => set({ pencilStartTaper }),
       setPencilEndTaper: (pencilEndTaper) => set({ pencilEndTaper }),
+      setDebugPerformance: (debugPerformance) => set({ debugPerformance }),
       resetPencil: () => set({ ...PENCIL_DEFAULTS }),
     }),
     {

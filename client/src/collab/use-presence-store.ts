@@ -10,11 +10,19 @@ export interface ViewportPresence {
   };
 }
 
+export interface TextSelectionPresence {
+  shapeId: string;
+  anchor: number;
+  head: number;
+}
+
 export interface PeerPresence {
   clientId: number;
   name: string;
   color: string;
   isTutor: boolean;
+  /** Seed for this peer's hand-drawn doodle avatar. */
+  avatar: string;
   /** Cursor position in world coordinates, or null when off-canvas. */
   cursor: Point | null;
   /** Viewport camera and pixel size, or null until the peer publishes it. */
@@ -25,6 +33,8 @@ export interface PeerPresence {
   page: string | null;
   /** Whether this peer is currently following the tutor's view. */
   following: boolean;
+  /** Ephemeral caret/selection inside an actively edited text shape. */
+  textSelection: TextSelectionPresence | null;
 }
 
 interface PresenceStore {

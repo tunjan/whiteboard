@@ -8,6 +8,8 @@ function isTypingTarget(target: EventTarget | null): boolean {
   return (
     el.tagName === 'INPUT' ||
     el.tagName === 'TEXTAREA' ||
+    // MathLive's <math-field> edits in shadow DOM; events retarget to the host.
+    !!el.closest?.('math-field') ||
     el.isContentEditable
   );
 }

@@ -1,19 +1,31 @@
-import { rotatePoint, type TextAlign } from '@whiteboard/shared';
+import { rotatePoint } from '@whiteboard/shared';
+import type { Point, TextShape } from '@whiteboard/shared';
 import { DEFAULT_SHAPE_STYLE } from './style';
 import {
   LINE_HEIGHT_FACTOR,
   fontStack,
-  measureText,
+  layoutTextProps,
+  textIndexAtPoint,
 } from './text-measure';
 import type { ShapeUtil } from './types';
 
 export const DEFAULT_FONT_SIZE = 24;
 
-/** SVG text-anchor + the x within [x0, x0+width] for a given alignment. */
-function anchorFor(align: TextAlign, x0: number, width: number) {
-  if (align === 'middle') return { anchor: 'middle' as const, x: x0 + width / 2 };
-  if (align === 'end') return { anchor: 'end' as const, x: x0 + width };
-  return { anchor: 'start' as const, x: x0 };
+/** Convert a world point into the unrotated text box's local coordinates. */
+export function textWorldToLocal(shape: TextShape, point: Point): Point {
+  const layout = layoutTextProps(shape.props);
+  const center = {
+    x: shape.x + layout.width / 2,
+    y: shape.y + layout.height / 2,
+  };
+  const unrotated = shape.rotation
+    ? rotatePoint(point, center, -shape.rotation)
+    : point;
+  return { x: unrotated.x - shape.x, y: unrotated.y - shape.y };
+}
+
+export function textIndexAtWorldPoint(shape: TextShape, point: Point): number {
+  return textIndexAtPoint(layoutTextProps(shape.props), textWorldToLocal(shape, point));
 }
 
 export const textUtil: ShapeUtil<'text'> = {
@@ -25,83 +37,76 @@ export const textUtil: ShapeUtil<'text'> = {
     color: DEFAULT_SHAPE_STYLE.color,
     fontSize: DEFAULT_FONT_SIZE,
     fontFamily: 'sans',
+    sizingMode: 'auto',
     width: 0,
+    lineHeight: LINE_HEIGHT_FACTOR,
     align: 'start',
   }),
 
-  getBounds: (s) => {
-    const { width, height } = measureText(
-      s.props.text,
-      s.props.fontSize,
-      s.props.fontFamily,
-    );
-    return { minX: s.x, minY: s.y, maxX: s.x + width, maxY: s.y + height };
-  },
-
-  hitTest: (s, p, tol) => {
-    const { width, height } = measureText(
-      s.props.text,
-      s.props.fontSize,
-      s.props.fontFamily,
-    );
-    const center = { x: s.x + width / 2, y: s.y + height / 2 };
-    const wp = s.rotation ? rotatePoint(p, center, -s.rotation) : p;
-    return (
-      wp.x >= s.x - tol &&
-      wp.x <= s.x + width + tol &&
-      wp.y >= s.y - tol &&
-      wp.y <= s.y + height + tol
-    );
-  },
-
-  // Text scales by font size (height drives it; width follows the glyphs).
-  resize: (initial, nb) => {
-    const { height } = measureText(
-      initial.props.text,
-      initial.props.fontSize,
-      initial.props.fontFamily,
-    );
-    const sy = height > 0 ? (nb.maxY - nb.minY) / height : 1;
+  getBounds: (shape) => {
+    const layout = layoutTextProps(shape.props);
     return {
-      x: nb.minX,
-      y: nb.minY,
+      minX: shape.x,
+      minY: shape.y,
+      maxX: shape.x + layout.width,
+      maxY: shape.y + layout.height,
+    };
+  },
+
+  hitTest: (shape, point, tolerance) => {
+    const layout = layoutTextProps(shape.props);
+    const local = textWorldToLocal(shape, point);
+    return (
+      local.x >= -tolerance &&
+      local.x <= layout.width + tolerance &&
+      local.y >= -tolerance &&
+      local.y <= layout.height + tolerance
+    );
+  },
+
+  // Corner handles scale typography and geometry together. Horizontal side
+  // handles are intercepted by the selection tool and change only wrap width.
+  resize: (initial, bounds) => {
+    const layout = layoutTextProps(initial.props);
+    const targetHeight = bounds.maxY - bounds.minY;
+    const scale = layout.height > 0 ? targetHeight / layout.height : 1;
+    const fixed = initial.props.sizingMode === 'fixed' || initial.props.width > 0;
+    return {
+      x: bounds.minX,
+      y: bounds.minY,
       props: {
         ...initial.props,
-        fontSize: Math.max(4, initial.props.fontSize * sy),
+        fontSize: Math.max(4, initial.props.fontSize * scale),
+        width: fixed ? Math.max(8, initial.props.width * scale) : 0,
+        sizingMode: fixed ? 'fixed' : 'auto',
       },
     };
   },
 
   Component: ({ shape }) => {
-    const { text, color, fontSize, fontFamily, align } = shape.props;
-    if (!text) return null;
-    const lines = text.split('\n');
-    const { width, height } = measureText(text, fontSize, fontFamily);
-    const { anchor, x } = anchorFor(align, shape.x, width);
-    const cx = shape.x + width / 2;
-    const cy = shape.y + height / 2;
-    const rot = shape.rotation
+    const layout = layoutTextProps(shape.props);
+    if (!shape.props.text) return null;
+    const cx = shape.x + layout.width / 2;
+    const cy = shape.y + layout.height / 2;
+    const transform = shape.rotation
       ? `rotate(${(shape.rotation * 180) / Math.PI} ${cx} ${cy})`
       : undefined;
+
     return (
       <text
-        x={x}
-        y={shape.y}
-        fill={color}
-        fontSize={fontSize}
-        fontFamily={fontStack(fontFamily)}
-        textAnchor={anchor}
-        dominantBaseline="hanging"
-        transform={rot}
+        fill={shape.props.color}
+        fontSize={shape.props.fontSize}
+        fontFamily={fontStack(shape.props.fontFamily)}
+        transform={transform}
+        xmlSpace="preserve"
       >
-        {lines.map((line, i) => (
+        {layout.lines.map((line) => (
           <tspan
-            // eslint-disable-next-line react/no-array-index-key -- lines are positional
-            key={i}
-            x={x}
-            dy={i === 0 ? 0 : fontSize * LINE_HEIGHT_FACTOR}
+            key={`${line.start}:${line.end}:${line.y}`}
+            x={shape.x + line.x}
+            y={shape.y + line.baseline}
           >
-            {line || ' '}
+            {line.text || ' '}
           </tspan>
         ))}
       </text>

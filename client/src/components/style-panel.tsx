@@ -41,7 +41,7 @@ import { ChevronsUpDown } from 'lucide-react';
 const FILLS: FillStyle[] = ['none', 'solid', 'hatch', 'crosshatch'];
 const DASHES: StrokeDash[] = ['solid', 'dashed', 'dotted'];
 const FILLABLE = new Set(['rectangle', 'ellipse', 'polygon']);
-const DASHABLE = new Set(['rectangle', 'ellipse', 'polygon', 'line', 'arrow']);
+const DASHABLE = new Set(['rectangle', 'ellipse', 'polygon', 'line', 'arrow', 'draw']);
 
 const FONTS: { family: FontFamily; label: string }[] = [
   { family: 'sans', label: 'Aa' },
@@ -189,6 +189,7 @@ export function StylePanel() {
     targetType === 'mixed';
 
   const showDash =
+    targetType === 'draw' ||
     targetType === 'line' ||
     targetType === 'arrow' ||
     targetType === 'rectangle' ||
@@ -283,7 +284,7 @@ export function StylePanel() {
   };
 
   return (
-    <Surface className="absolute top-[calc(4.5rem+env(safe-area-inset-top))] right-[calc(1rem+env(safe-area-inset-right))] z-20 w-[min(14rem,calc(100vw-2rem))] p-3.5">
+    <Surface className="absolute top-[calc(3.75rem+env(safe-area-inset-top))] right-[calc(1rem+env(safe-area-inset-right))] z-20 w-[min(14rem,calc(100vw-2rem))] p-4 shadow-floating">
       <div className="flex flex-col">
         {/* Color + opacity — the always-present group. Label-less by design:
             the swatches and slider read on their own, keeping the panel calm. */}
@@ -294,7 +295,7 @@ export function StylePanel() {
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="h-8 w-full justify-between gap-2 px-2 text-muted-foreground"
+                  className="h-8 w-full justify-between gap-2 px-2 text-content-subtle"
                 />
               }
             >
@@ -302,15 +303,15 @@ export function StylePanel() {
                 {colors.slice(0, 4).map((c) => (
                   <span
                     key={c.name}
-                    className="size-2.5 rounded-full border border-foreground/15 dark:border-white/20"
+                    className="size-3 rounded-full border border-border-default"
                     style={{ background: c.value }}
                   />
                 ))}
-                <span className="text-[13px] font-medium text-foreground">
+                <span className="text-[13px] font-medium text-content-emphasis">
                   {activePalette.name}
                 </span>
               </span>
-              <ChevronsUpDown className="size-3.5 opacity-60" aria-hidden="true" />
+              <ChevronsUpDown className="size-3.5 text-content-subtle" aria-hidden="true" />
             </DropdownMenuTrigger>
             <DropdownMenuContent className="w-(--anchor-width)">
               <DropdownMenuRadioGroup
@@ -325,7 +326,7 @@ export function StylePanel() {
                         .map((c) => (
                           <span
                             key={c.name}
-                            className="size-2.5 rounded-full border border-foreground/15 dark:border-white/20"
+                            className="size-3 rounded-full border border-border-default"
                             style={{ background: c.value }}
                           />
                         ))}
@@ -337,7 +338,7 @@ export function StylePanel() {
             </DropdownMenuContent>
           </DropdownMenu>
 
-          <div role="group" aria-label="Color" className="grid grid-cols-4 gap-1.5">
+          <div role="group" aria-label="Color" className="grid grid-cols-4 gap-2">
             {colors.map((c) => {
               const active = color === c.value;
               return (
@@ -349,12 +350,12 @@ export function StylePanel() {
                   aria-pressed={active}
                   onClick={() => applyColor(c.value)}
                   className={cn(
-                    'flex items-center justify-center rounded-lg p-1 transition-colors cursor-pointer',
-                    active ? 'bg-muted' : 'hover:bg-muted/60',
+                    'flex cursor-pointer items-center justify-center rounded-lg p-1 transition-colors',
+                    active ? 'bg-bg-muted' : 'hover:bg-bg-muted',
                   )}
                 >
                   <span
-                    className="size-8 rounded-full border border-foreground/15 dark:border-white/20 transition-transform active:scale-95"
+                    className="size-8 rounded-full border border-border-default transition-transform active:scale-95"
                     style={{ background: c.value }}
                   />
                 </button>
@@ -379,8 +380,8 @@ export function StylePanel() {
         {/* Segmented property controls for the current tool/selection. */}
         {hasShapeControls && (
           <>
-            <Separator className="my-3.5" />
-            <div className="flex flex-col gap-2.5">
+            <Separator className="my-4" />
+            <div className="flex flex-col gap-3">
               {showFill && (
                 <ToggleGroup
                   aria-label="Fill style"
@@ -461,9 +462,9 @@ export function StylePanel() {
         {/* Contextual row: arrowhead ends (arrows only). */}
         {showArrows && (
           <>
-            <Separator className="my-3.5" />
+            <Separator className="my-4" />
             <div className="flex items-center justify-between">
-              <span className="text-[13px] font-medium text-foreground select-none">
+              <span className="text-[13px] font-medium text-content-emphasis select-none">
                 Arrows
               </span>
               <div className="flex items-center gap-1">

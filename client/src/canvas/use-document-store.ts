@@ -102,14 +102,37 @@ function shapeToY(shape: Shape): YShape {
   if (shape.locked !== undefined) m.set('locked', shape.locked);
   if (shape.hidden !== undefined) m.set('hidden', shape.hidden);
   if (shape.opacity !== undefined) m.set('opacity', shape.opacity);
-  m.set('props', shape.props);
+  if (shape.type === 'text') {
+    // Text is a sequence CRDT, not a scalar property. Concurrent insert/delete
+    // operations then merge by character identity instead of overwriting the
+    // entire string with whichever client wrote last.
+    const { text, ...props } = shape.props;
+    m.set('props', props);
+    m.set('text', new Y.Text(text));
+  } else {
+    m.set('props', shape.props);
+  }
   return m;
 }
 
 function yToShape(m: YShape): Shape {
+  const type = m.get('type');
+  const storedProps = (m.get('props') as Record<string, unknown> | undefined) ?? {};
+  const props =
+    type === 'text'
+      ? {
+          ...storedProps,
+          text:
+            m.get('text') instanceof Y.Text
+              ? (m.get('text') as Y.Text).toString()
+              : typeof storedProps.text === 'string'
+                ? storedProps.text
+                : '',
+        }
+      : storedProps;
   return {
     id: m.get('id'),
-    type: m.get('type'),
+    type,
     x: m.get('x'),
     y: m.get('y'),
     rotation: m.get('rotation'),
@@ -118,8 +141,32 @@ function yToShape(m: YShape): Shape {
     locked: m.get('locked'),
     hidden: m.get('hidden'),
     opacity: m.get('opacity'),
-    props: m.get('props'),
+    props,
   } as Shape;
+}
+
+/** Apply the smallest contiguous replacement between two strings to Y.Text. */
+function syncYText(text: Y.Text, next: string): void {
+  const current = text.toString();
+  if (current === next) return;
+
+  let prefix = 0;
+  const limit = Math.min(current.length, next.length);
+  while (prefix < limit && current[prefix] === next[prefix]) prefix++;
+
+  let suffix = 0;
+  while (
+    suffix < current.length - prefix &&
+    suffix < next.length - prefix &&
+    current[current.length - 1 - suffix] === next[next.length - 1 - suffix]
+  ) {
+    suffix++;
+  }
+
+  const remove = current.length - prefix - suffix;
+  if (remove > 0) text.delete(prefix, remove);
+  const insert = next.slice(prefix, next.length - suffix);
+  if (insert) text.insert(prefix, insert);
 }
 
 function applyPatchToY(m: YShape, patch: ShapePatch): void {
@@ -132,7 +179,30 @@ function applyPatchToY(m: YShape, patch: ShapePatch): void {
   if (patch.hidden !== undefined) m.set('hidden', patch.hidden);
   if (patch.opacity !== undefined) m.set('opacity', patch.opacity);
   if (patch.props) {
-    m.set('props', { ...(m.get('props') as object), ...patch.props });
+    const nextProps = { ...patch.props };
+    if (m.get('type') === 'text' && typeof nextProps.text === 'string') {
+      const existing = m.get('text');
+      let text: Y.Text;
+      if (existing instanceof Y.Text) {
+        text = existing;
+      } else {
+        const legacy = m.get('props') as { text?: unknown } | undefined;
+        text = new Y.Text(typeof legacy?.text === 'string' ? legacy.text : '');
+        m.set('text', text);
+      }
+      syncYText(text, nextProps.text);
+      delete nextProps.text;
+    }
+    if (Object.keys(nextProps).length > 0) {
+      const current =
+        (m.get('props') as Record<string, unknown> | undefined) ?? {};
+      const merged = { ...current, ...nextProps };
+      // Once a legacy shape has a Y.Text, remove its stale scalar copy.
+      if (m.get('type') === 'text' && m.get('text') instanceof Y.Text) {
+        delete merged.text;
+      }
+      m.set('props', merged);
+    }
   }
 }
 
@@ -149,6 +219,8 @@ interface Session {
   currentShapes: Y.Map<YShape>;
   currentPageId: string;
   undo: Y.UndoManager;
+  /** Detaches the undo-state listeners; swapped on page switch. */
+  unbindUndoState: () => void;
   /** Deep observer bound to `currentShapes`; swapped on page switch. */
   shapesObserver: (events: Y.YEvent<Y.AbstractType<unknown>>[]) => void;
   pagesObserver: () => void;
@@ -196,20 +268,48 @@ export const useDocumentStore = create<DocStore>(() => ({
   currentPageId: DEFAULT_PAGE_ID,
 }));
 
-function rebuildSnapshot(): void {
-  if (!session) return;
-  const shapes: Record<string, Shape> = {};
-  for (const [id, shape] of shapeCache) shapes[id] = shape;
+/** Reactive availability of undo/redo for toolbar buttons. */
+export const useUndoStore = create<{ canUndo: boolean; canRedo: boolean }>(
+  () => ({ canUndo: false, canRedo: false }),
+);
 
+/** Mirror an UndoManager's stack depth into useUndoStore. Returns a cleanup. */
+function bindUndoState(manager: Y.UndoManager): () => void {
+  const sync = () =>
+    useUndoStore.setState({
+      canUndo: manager.undoStack.length > 0,
+      canRedo: manager.redoStack.length > 0,
+    });
+  sync();
+  manager.on('stack-item-added', sync);
+  manager.on('stack-item-popped', sync);
+  manager.on('stack-cleared', sync);
+  return () => {
+    manager.off('stack-item-added', sync);
+    manager.off('stack-item-popped', sync);
+    manager.off('stack-cleared', sync);
+  };
+}
+
+// Cached page skeleton (ids, names, order) with empty shape maps. Rebuilt only
+// when the pages registry actually changes — shape-only mutations (draw/drag)
+// reuse it instead of re-reading the registry and re-sorting the page order on
+// every frame. The current page's live shapes are injected in `rebuildSnapshot`.
+let cachedPages: Record<string, Page> = {};
+let cachedPageOrder: string[] = [];
+
+/** Recompute the cached page skeleton from the registry. Cheap in the number of
+ *  pages; call only when the pages map changes or the active page switches. */
+function rebuildPagesCache(): void {
+  if (!session) {
+    cachedPages = {};
+    cachedPageOrder = [];
+    return;
+  }
   const metas = readPages(session.pages);
   const pages: Record<string, Page> = {};
   for (const meta of metas) {
-    // Only the current page carries live shapes; others render nothing.
-    pages[meta.id] = {
-      id: meta.id,
-      name: meta.name,
-      shapes: meta.id === session.currentPageId ? shapes : {},
-    };
+    pages[meta.id] = { id: meta.id, name: meta.name, shapes: {} };
   }
   // Before the registry is seeded (legacy/new board), still present the current
   // page so the canvas + page menu have something to render.
@@ -217,17 +317,38 @@ function rebuildSnapshot(): void {
     pages[session.currentPageId] = {
       id: session.currentPageId,
       name: DEFAULT_PAGE_NAME,
-      shapes,
+      shapes: {},
     };
   }
-  const pageOrder = Object.keys(pages).sort((a, b) => {
+  cachedPages = pages;
+  // `metas` is already index-sorted; keep that order and append the unseeded
+  // fallback page (if any) at the front so it stays deterministic.
+  cachedPageOrder = Object.keys(pages).sort((a, b) => {
     const ia = metas.find((m) => m.id === a)?.index ?? '';
     const ib = metas.find((m) => m.id === b)?.index ?? '';
     return ia < ib ? -1 : ia > ib ? 1 : 0;
   });
+}
+
+function rebuildSnapshot(): void {
+  if (!session) return;
+  const shapes: Record<string, Shape> = {};
+  for (const [id, shape] of shapeCache) shapes[id] = shape;
+
+  // Reuse the cached skeleton, swapping the live shapes into the current page
+  // only. Other pages keep their stable (empty) entries, so page order and
+  // metadata identities don't churn on shape mutations.
+  const pages: Record<string, Page> = {};
+  for (const id in cachedPages) {
+    const p = cachedPages[id]!;
+    pages[id] =
+      id === session.currentPageId
+        ? { id: p.id, name: p.name, shapes }
+        : p;
+  }
 
   useDocumentStore.setState({
-    doc: { pages, pageOrder },
+    doc: { pages, pageOrder: cachedPageOrder },
     shapes: currentSortedShapes(),
     currentPageId: session.currentPageId,
   });
@@ -272,21 +393,36 @@ function asMusicStatus(value: unknown): MusicPlaybackStatus {
 
 function applyAffected(ids: Set<string>): void {
   if (!session) return;
+  // A stroke or drag mutates a shape's props/position but never its z-`index`
+  // or the set of shapes, so the sorted order is unchanged. Track whether any
+  // affected id was added, removed, or re-indexed; if not, we can build the next
+  // sorted array by swapping the changed entries in place (O(N), no re-sort).
+  let orderChanged = false;
+  const updated = new Map<string, Shape>();
   for (const id of ids) {
     const m = session.currentShapes.get(id);
     if (m) {
+      const prev = shapeCache.get(id);
       const shape = yToShape(m);
       shapeCache.set(id, shape);
       const util = shapeRegistry.getFor(shape);
       // Groups have no geometry of their own — keep them out of the index.
       if (util && shape.type !== 'group')
         spatialIndex.insert(id, shapeRotatedBounds(shape));
+      if (!prev || prev.index !== shape.index) orderChanged = true;
+      else updated.set(id, shape);
     } else {
       shapeCache.delete(id);
       spatialIndex.remove(id);
+      orderChanged = true;
     }
   }
-  sortedShapesCache = null;
+  if (orderChanged || !sortedShapesCache) {
+    sortedShapesCache = null;
+  } else {
+    // Same membership and order — replace just the changed shapes by id.
+    sortedShapesCache = sortedShapesCache.map((s) => updated.get(s.id) ?? s);
+  }
   rebuildSnapshot();
 }
 
@@ -303,6 +439,7 @@ function fullResync(): void {
     if (util && shape.type !== 'group')
       spatialIndex.insert(id, shapeRotatedBounds(shape));
   }
+  rebuildPagesCache();
   rebuildSnapshot();
 }
 
@@ -345,7 +482,10 @@ export function loadBoard(
   session?.cleanup();
   session = null;
   shapeCache.clear();
+  sortedShapesCache = null;
   spatialIndex.clear();
+  cachedPages = {};
+  cachedPageOrder = [];
   useDocumentStore.setState({
     boardId,
     doc: EMPTY_SNAPSHOT,
@@ -375,9 +515,10 @@ export function loadBoard(
         return;
       }
     }
+    rebuildPagesCache();
     rebuildSnapshot();
   };
-  pages.observe(pagesObserver);
+  pages.observeDeep(pagesObserver);
 
   const musicObserver = () => publishMusicPlayback();
   music.observe(musicObserver);
@@ -409,6 +550,7 @@ export function loadBoard(
     currentShapes,
     currentPageId: DEFAULT_PAGE_ID,
     undo,
+    unbindUndoState: bindUndoState(undo),
     shapesObserver,
     pagesObserver,
     musicObserver,
@@ -417,8 +559,9 @@ export function loadBoard(
     cleanup: () => {
       setActiveAwareness(null);
       session?.currentShapes.unobserveDeep(session.shapesObserver);
-      pages.unobserve(pagesObserver);
+      pages.unobserveDeep(pagesObserver);
       music.unobserve(musicObserver);
+      session?.unbindUndoState();
       session?.undo.destroy();
       provider?.destroy();
       persistence?.destroy();
@@ -466,6 +609,7 @@ export function redo(): void {
 function switchToPageInternal(pageId: string): void {
   if (!session) return;
   session.currentShapes.unobserveDeep(session.shapesObserver);
+  session.unbindUndoState();
   session.undo.destroy();
 
   const map = getShapesMap(session.doc, pageId);
@@ -476,6 +620,7 @@ function switchToPageInternal(pageId: string): void {
   session.undo = new Y.UndoManager(map, {
     trackedOrigins: new Set([LOCAL_ORIGIN]),
   });
+  session.unbindUndoState = bindUndoState(session.undo);
 
   useSelectionStore.getState().clear();
   useCameraStore.getState().switchTo(session.boardId, pageId);
@@ -596,12 +741,30 @@ export function setMusicPlayback(
 
 // --- Editor (stable; mutates the current page's Yjs map) ---
 
+// Depth of nested local transactions currently open. While > 0 the `shapeCache`
+// is stale relative to `currentShapes` (the deep observer that refreshes it only
+// fires when the outermost transaction commits), so `getShape` must read the
+// Yjs map directly. At depth 0 the cache is authoritative and reads are free.
+let transactDepth = 0;
+
 function transactLocal(fn: () => void): void {
-  session?.doc.transact(fn, LOCAL_ORIGIN);
+  transactDepth++;
+  try {
+    session?.doc.transact(fn, LOCAL_ORIGIN);
+  } finally {
+    transactDepth--;
+  }
 }
 
 export const editor: Editor = {
   getShape: (id) => {
+    // Outside a transaction the cache mirrors the document, so hot read paths
+    // (snap targeting, marquee, erase, reparent — each looping over many shapes
+    // per drag frame) skip the per-call `yToShape` allocation and Yjs map reads.
+    if (transactDepth === 0) {
+      const cached = shapeCache.get(id);
+      if (cached) return cached;
+    }
     const m = session?.currentShapes.get(id);
     return m ? yToShape(m) : undefined;
   },

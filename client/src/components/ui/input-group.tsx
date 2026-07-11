@@ -7,7 +7,7 @@ function InputGroup({ className, ...props }: React.ComponentProps<"div">) {
     <div
       data-slot="input-group"
       className={cn(
-        "relative flex items-center w-full rounded-lg border border-input bg-transparent transition-colors outline-none focus-within:ring-2 focus-within:ring-foreground focus-within:ring-offset-2 disabled:bg-input/50 disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:bg-input/30 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40",
+        "relative flex w-full items-center rounded-md border border-border-subtle bg-bg-default text-content-emphasis transition-colors outline-none focus-within:border-border-emphasis focus-within:ring-4 focus-within:ring-border-subtle disabled:bg-bg-subtle disabled:text-content-muted disabled:opacity-100 aria-invalid:border-content-error aria-invalid:ring-4 aria-invalid:ring-bg-error",
         className
       )}
       {...props}
@@ -21,7 +21,7 @@ function InputGroupInput({ className, type, ...props }: React.ComponentProps<"in
       type={type}
       data-slot="input-group-input"
       className={cn(
-        "h-8 w-full min-w-0 bg-transparent px-2.5 py-1 text-base placeholder:text-muted-foreground outline-none border-0 focus:outline-none focus:ring-0 focus-visible:ring-0 focus-visible:ring-offset-0 disabled:pointer-events-none disabled:cursor-not-allowed md:text-sm flex-1",
+        "h-8 w-full min-w-0 flex-1 border-0 bg-transparent px-2.5 py-1 text-sm placeholder:text-content-muted outline-none focus:outline-none focus:ring-0 focus-visible:ring-0 disabled:pointer-events-none disabled:cursor-not-allowed",
         className
       )}
       {...props}
@@ -34,7 +34,7 @@ function InputGroupAddon({ className, ...props }: React.ComponentProps<"div">) {
     <div
       data-slot="input-group-addon"
       className={cn(
-        "flex items-center shrink-0 px-2 text-muted-foreground select-none",
+        "flex shrink-0 items-center px-2 text-content-subtle select-none",
         className
       )}
       {...props}

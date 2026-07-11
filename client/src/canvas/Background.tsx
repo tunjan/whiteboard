@@ -22,7 +22,7 @@ const MINOR = 'var(--grid-minor)';
 const MAJOR = 'var(--grid-major)';
 const DOT = 'var(--grid-dot)';
 const AXIS = 'var(--grid-axis)';
-const LABEL = 'var(--color-muted-foreground)';
+const LABEL = 'var(--content-subtle)';
 
 /**
  * Infinite background rendered in **screen space** (no camera transform) so

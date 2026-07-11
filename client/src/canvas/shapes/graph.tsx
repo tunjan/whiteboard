@@ -172,6 +172,7 @@ export const graphUtil: ShapeUtil<'graph'> = {
     // Zoomed far out the card drop shadow is sub-pixel; skip it (and its filter).
     const shadow = detail === 'high';
     const samples = Math.max(180, Math.round(area.w * 1.4));
+    const verticalSamples = Math.max(120, Math.round(area.h * 1.4));
     const showAxisLabels = props.showAxisLabels !== false;
     const xLabelsBelow = clippedXAxis <= area.y + area.h - 18;
     const xLabelY = xLabelsBelow ? clippedXAxis + 13 : clippedXAxis - 7;
@@ -296,6 +297,7 @@ export const graphUtil: ShapeUtil<'graph'> = {
               viewport,
               props.parameters,
               samples,
+              verticalSamples,
             );
             if (!result.ok || !result.segments.length) return null;
             return result.segments.map((segment, index) => (

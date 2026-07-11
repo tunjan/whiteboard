@@ -18,6 +18,7 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { cn } from '@/lib/utils';
 import { type Theme, useThemeStore } from '@/use-theme-store';
 import {
+  Gauge,
   Keyboard,
   Monitor,
   PenTool,
@@ -39,7 +40,12 @@ interface Shortcut {
   keys: string;
 }
 
-type SettingsPage = 'general' | 'pencil' | 'shortcuts' | 'connection';
+type SettingsPage =
+  | 'general'
+  | 'pencil'
+  | 'shortcuts'
+  | 'connection'
+  | 'debug';
 
 interface SettingsNavItem {
   id: SettingsPage;
@@ -52,7 +58,11 @@ const SETTINGS_NAV: SettingsNavItem[] = [
   { id: 'pencil', label: 'Pencil', icon: PenTool },
   { id: 'shortcuts', label: 'Shortcuts', icon: Keyboard },
   { id: 'connection', label: 'Connection', icon: Wifi },
+  { id: 'debug', label: 'Debug', icon: Gauge },
 ];
+
+const ACTIVE_SECTION_CLASS =
+  'bg-bg-info text-content-info hover:bg-bg-info hover:text-content-info';
 
 const ACTION_SHORTCUTS: Shortcut[] = [
   { label: 'Undo', keys: `${MOD} Z` },
@@ -85,11 +95,11 @@ function PreferenceRow({
     <Field
       orientation="horizontal"
       className={cn(
-        'min-h-20 border-b border-border/70 px-6 py-4 sm:px-8 max-sm:flex-col max-sm:items-stretch',
+        'min-h-20 rounded-xl border border-border-subtle bg-bg-default p-4 sm:p-5 max-sm:flex-col max-sm:items-stretch',
         className,
       )}
     >
-      <FieldLabel className="text-[15px] font-medium">{label}</FieldLabel>
+      <FieldLabel className="text-sm font-medium">{label}</FieldLabel>
       {children}
     </Field>
   );
@@ -135,7 +145,7 @@ function SliderField({
 
 function Kbd({ children }: { children: React.ReactNode }) {
   return (
-    <kbd className="shrink-0 rounded-md border border-border/80 bg-muted/60 px-2 py-1 font-mono text-[11px] text-muted-foreground">
+    <kbd className="shrink-0 rounded-sm border border-border-subtle bg-bg-muted px-2 py-1 font-mono text-[10px] text-content-subtle">
       {children}
     </kbd>
   );
@@ -165,7 +175,7 @@ function SettingsNavigation({
             onClick={() => onPageChange(id)}
             className={cn(
               'h-11 w-full justify-start gap-3 px-3.5 text-left',
-              isActive && 'bg-muted text-foreground hover:bg-muted',
+              isActive && ACTIVE_SECTION_CLASS,
             )}
           >
             <Icon aria-hidden="true" data-icon="inline-start" />
@@ -184,7 +194,7 @@ function GeneralSettings() {
   const setBackground = useCanvasUiStore((state) => state.setBackground);
 
   return (
-    <div>
+    <div className="flex flex-col gap-4 p-4 sm:p-6">
       <PreferenceRow label="Theme">
         <ToggleGroup
           className="w-full max-w-56"
@@ -254,7 +264,7 @@ function PencilSettings() {
   )}%`;
 
   return (
-    <div>
+    <div className="flex flex-col gap-4 p-4 sm:p-6">
       <SliderField
         label="Stroke stabilisation"
         value={pencilStabilization}
@@ -303,7 +313,7 @@ function PencilSettings() {
           onCheckedChange={setPencilSimulatePressure}
         />
       </PreferenceRow>
-      <div className="border-b border-border/70 px-6 py-5 sm:px-8">
+      <div className="rounded-xl border border-border-subtle bg-bg-default p-4 sm:p-5">
         <Button variant="outline" size="sm" onClick={resetPencil}>
           Restore defaults
         </Button>
@@ -314,13 +324,13 @@ function PencilSettings() {
 
 function ShortcutList({ shortcuts }: { shortcuts: Shortcut[] }) {
   return (
-    <div className="flex flex-col divide-y divide-border/70 rounded-lg border border-border/70">
+    <div className="flex flex-col divide-y divide-border-muted rounded-xl border border-border-subtle bg-bg-default">
       {shortcuts.map((shortcut) => (
         <div
           key={shortcut.label}
           className="flex min-h-10 items-center justify-between gap-3 px-3.5 py-2"
         >
-          <span className="min-w-0 leading-5 text-foreground">
+          <span className="min-w-0 leading-5 text-content-default">
             {shortcut.label}
           </span>
           <Kbd>{shortcut.keys}</Kbd>
@@ -337,15 +347,15 @@ function ShortcutsSettings() {
     .map((tool) => ({ label: tool.label, keys: tool.hotkey!.toUpperCase() }));
 
   return (
-    <div className="grid gap-8 p-6 sm:p-8 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+    <div className="grid gap-6 p-4 sm:p-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
       <section className="flex min-w-0 flex-col gap-3">
-        <PanelLabel as="h3" className="text-foreground">
+        <PanelLabel as="h3" className="text-content-muted">
           Tools
         </PanelLabel>
         <ShortcutList shortcuts={toolShortcuts} />
       </section>
       <section className="flex min-w-0 flex-col gap-3">
-        <PanelLabel as="h3" className="text-foreground">
+        <PanelLabel as="h3" className="text-content-muted">
           Actions
         </PanelLabel>
         <ShortcutList shortcuts={ACTION_SHORTCUTS} />
@@ -356,12 +366,34 @@ function ShortcutsSettings() {
 
 function ConnectionSettings() {
   return (
-    <div>
+    <div className="flex flex-col gap-4 p-4 sm:p-6">
       <PreferenceRow label="Board connection">
-        <div className="flex size-8 items-center justify-center rounded-full bg-muted">
+        <div className="flex size-8 items-center justify-center rounded-full bg-bg-subtle">
           <ConnectionIndicator />
         </div>
       </PreferenceRow>
+    </div>
+  );
+}
+
+function DebugSettings() {
+  const debugPerformance = useCanvasUiStore((state) => state.debugPerformance);
+  const setDebugPerformance = useCanvasUiStore(
+    (state) => state.setDebugPerformance,
+  );
+
+  return (
+    <div className="flex flex-col gap-4 p-4 sm:p-6">
+      <PreferenceRow label="Performance overlay">
+        <Switch
+          checked={debugPerformance}
+          onCheckedChange={setDebugPerformance}
+        />
+      </PreferenceRow>
+      <p className="px-1 text-sm text-content-subtle">
+        Shows a live readout of frame rate, worst frame time, shape count, and
+        heap usage in the top-left corner of the canvas.
+      </p>
     </div>
   );
 }
@@ -380,9 +412,9 @@ export function SettingsDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         showCloseButton={false}
-        className="!flex h-[min(44rem,calc(100dvh-2rem))] w-[calc(100%_-_2rem)] max-w-none gap-0 overflow-hidden rounded-[1.75rem] bg-popover/95 p-0 ring-1 ring-foreground/8 sm:w-[min(68rem,calc(100%_-_4rem))] sm:max-w-none"
+        className="!flex h-[min(44rem,calc(100dvh-2rem))] w-[calc(100%_-_2rem)] max-w-none gap-0 overflow-hidden rounded-2xl border-border-subtle bg-bg-default p-0 sm:w-[min(68rem,calc(100%_-_4rem))] sm:max-w-none"
       >
-        <aside className="hidden w-56 shrink-0 flex-col border-r border-border/70 bg-muted/20 p-3 sm:flex">
+        <aside className="hidden w-56 shrink-0 flex-col border-r border-border-subtle bg-bg-muted p-3 sm:flex">
           <SettingsNavigation
             activePage={activePage}
             onPageChange={setActivePage}
@@ -391,7 +423,7 @@ export function SettingsDialog({
         </aside>
 
         <div className="flex min-w-0 flex-1 flex-col">
-          <div className="border-b border-border/70 px-2 py-2 sm:hidden">
+          <div className="border-b border-border-subtle bg-bg-muted px-2 py-2 sm:hidden">
             <SettingsNavigation
               activePage={activePage}
               onPageChange={setActivePage}
@@ -399,7 +431,7 @@ export function SettingsDialog({
             />
           </div>
 
-          <DialogHeader className="flex-row items-center justify-between gap-4 border-b border-border/70 px-6 py-5 sm:px-8 sm:py-6">
+          <DialogHeader className="flex-row items-center justify-between gap-4 border-b border-border-subtle bg-bg-default px-6 py-5 sm:px-8 sm:py-6">
             <DialogTitle className="text-2xl font-semibold tracking-[-0.02em]">
               {activeItem.label}
             </DialogTitle>
@@ -417,11 +449,12 @@ export function SettingsDialog({
             </DialogClose>
           </DialogHeader>
 
-          <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="min-h-0 flex-1 overflow-y-auto bg-bg-muted">
             {activePage === 'general' ? <GeneralSettings /> : null}
             {activePage === 'pencil' ? <PencilSettings /> : null}
             {activePage === 'shortcuts' ? <ShortcutsSettings /> : null}
             {activePage === 'connection' ? <ConnectionSettings /> : null}
+            {activePage === 'debug' ? <DebugSettings /> : null}
           </div>
         </div>
       </DialogContent>

@@ -30,13 +30,15 @@ export function FollowControls({ identity }: FollowControlsProps) {
 
   if (identity.isTutor) {
     const followers = peers.filter((peer) => !peer.isTutor && peer.following);
+    if (!hasStudents) return null;
+
     return (
       <TooltipProvider delay={300}>
         {followers.length > 0 ? (
           <Tooltip>
             <TooltipTrigger
               render={
-                <span className="flex items-center gap-1.5 rounded-lg px-1.5 text-xs font-medium text-foreground" />
+                <span className="flex items-center gap-2 rounded-lg px-2 text-xs font-medium text-content-emphasis" />
               }
             >
               <span
@@ -56,20 +58,16 @@ export function FollowControls({ identity }: FollowControlsProps) {
             render={
               <Button
                 variant="ghost"
-                size="icon"
+                size="icon-sm"
                 aria-label="Bring everyone to my view"
-                disabled={!hasStudents}
                 onClick={summonAll}
-                className="size-8 rounded-lg"
               />
             }
           >
             <Users />
           </TooltipTrigger>
           <TooltipContent side="bottom">
-            {hasStudents
-              ? 'Bring everyone to my view'
-              : 'No students connected'}
+            Bring everyone to my view
           </TooltipContent>
         </Tooltip>
       </TooltipProvider>
@@ -96,9 +94,9 @@ export function FollowControls({ identity }: FollowControlsProps) {
                 aria-pressed={following}
                 onClick={toggle}
                 className={cn(
-                  'h-8 rounded-lg',
+                  'rounded-lg',
                   following &&
-                    'border-[var(--follow-color)] bg-[color-mix(in_oklch,var(--follow-color),transparent_84%)] text-foreground hover:bg-[color-mix(in_oklch,var(--follow-color),transparent_78%)]',
+                    'border-[var(--follow-color)] bg-[color-mix(in_oklch,var(--follow-color),transparent_84%)] text-content-emphasis hover:bg-[color-mix(in_oklch,var(--follow-color),transparent_78%)]',
                 )}
                 style={following ? activeStyle : undefined}
               />
@@ -122,8 +120,8 @@ export function FollowControls({ identity }: FollowControlsProps) {
             style={{ background: tutorColor }}
             aria-hidden="true"
           />
-          <span className="text-xs font-medium text-foreground">
-            Following tutor - move to exit
+          <span className="text-xs font-medium text-content-emphasis">
+            Following tutor. Move to exit.
           </span>
         </Surface>
       ) : null}

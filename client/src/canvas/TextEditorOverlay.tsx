@@ -1,21 +1,22 @@
 import { useEffect, useRef } from 'react';
 import type { TextShape } from '@whiteboard/shared';
+import { setLocalTextSelection } from '@/collab/presence';
 import type { Camera } from './camera';
 import { worldToScreen } from './camera';
-import { LINE_HEIGHT_FACTOR, fontStack } from './shapes/text-measure';
+import {
+  fontStack,
+  layoutTextProps,
+  textLineHeight,
+} from './shapes/text-measure';
 import { editor } from './use-document-store';
+import { useSelectionStore } from './use-selection-store';
 import { useTextEditingStore } from './use-text-editing-store';
 import { useToolStore } from './use-tool-store';
 
-/** Normalize contentEditable text (drop a trailing newline browsers add). */
-function readText(el: HTMLElement): string {
-  return el.innerText.replace(/\n$/, '');
-}
-
 /**
- * HTML editing overlay for a text shape. Shown only while editing; the shape's
- * SVG text is hidden underneath. Writes live back into the document so content
- * persists, and deletes the shape if committed empty.
+ * Native editing half of the text tool's dual renderer. The SVG shape is
+ * removed while this textarea is mounted, so browsers own caret movement,
+ * selections, clipboard behavior, spellcheck, undo, and IME composition.
  */
 export function TextEditorOverlay({
   shape,
@@ -24,96 +25,151 @@ export function TextEditorOverlay({
   shape: TextShape;
   camera: Camera;
 }) {
-  const ref = useRef<HTMLDivElement>(null);
+  const ref = useRef<HTMLTextAreaElement>(null);
   const mountedAt = useRef(0);
-  const stop = useTextEditingStore((s) => s.stop);
+  const composing = useRef(false);
+  const stop = useTextEditingStore((state) => state.stop);
+  const requestedAnchor = useTextEditingStore((state) => state.anchor);
+  const requestedHead = useTextEditingStore((state) => state.head);
+  const layout = layoutTextProps(shape.props);
+  const fixed = layout.mode === 'fixed';
 
-  // Seed content + caret once on mount. The DOM text is managed imperatively
-  // (no children prop) so re-renders never reset the caret.
-  //
-  // Focus is deferred to the next frame: the creating pointerdown/click on the
-  // canvas (which holds pointer capture) would otherwise steal focus from the
-  // overlay the instant it mounts. By the next frame that interaction is done.
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    el.textContent = shape.props.text;
-    mountedAt.current = Date.now();
-    const raf = requestAnimationFrame(() => {
-      el.focus();
-      const range = document.createRange();
-      range.selectNodeContents(el);
-      range.collapse(false);
-      const sel = window.getSelection();
-      sel?.removeAllRanges();
-      sel?.addRange(range);
+  const publishSelection = (element: HTMLTextAreaElement | null) => {
+    if (!element) return;
+    setLocalTextSelection({
+      shapeId: shape.id,
+      anchor: element.selectionStart ?? 0,
+      head: element.selectionEnd ?? element.selectionStart ?? 0,
     });
-    return () => cancelAnimationFrame(raf);
+  };
+
+  // Seed content and the mapped caret after the pointer event that created or
+  // opened the editor has released capture from the canvas.
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    element.value = shape.props.text;
+    mountedAt.current = Date.now();
+    const frame = requestAnimationFrame(() => {
+      element.focus({ preventScroll: true });
+      const fallback = shape.props.text.length;
+      const anchor = Math.max(
+        0,
+        Math.min(shape.props.text.length, requestedAnchor ?? fallback),
+      );
+      const head = Math.max(
+        0,
+        Math.min(shape.props.text.length, requestedHead ?? anchor),
+      );
+      element.setSelectionRange(Math.min(anchor, head), Math.max(anchor, head));
+      publishSelection(element);
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      setLocalTextSelection(null);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- mount only
   }, []);
 
+  // A Y.Text update from a peer can arrive while this native editor is open.
+  // Apply it imperatively without turning the textarea into a controlled input
+  // (which would reset IME/caret state on every local keystroke).
+  useEffect(() => {
+    const element = ref.current;
+    if (!element || composing.current || element.value === shape.props.text) return;
+    const start = Math.min(element.selectionStart ?? 0, shape.props.text.length);
+    const end = Math.min(element.selectionEnd ?? start, shape.props.text.length);
+    element.value = shape.props.text;
+    element.setSelectionRange(start, end);
+  }, [shape.props.text]);
+
   const commit = () => {
-    const el = ref.current;
-    const text = el ? readText(el) : '';
-    if (text.trim() === '') editor.deleteShapes([shape.id]);
-    else editor.updateShape(shape.id, { props: { text } });
+    const value = ref.current?.value ?? shape.props.text;
+    setLocalTextSelection(null);
+    if (value.trim() === '') {
+      editor.deleteShapes([shape.id]);
+      useSelectionStore.getState().clear();
+    } else {
+      editor.updateShape(shape.id, { props: { text: value } });
+      useSelectionStore.getState().setSelection([shape.id]);
+    }
     stop();
     useToolStore.getState().setTool('select');
   };
 
-  const onInput = () => {
-    const el = ref.current;
-    if (el) editor.updateShape(shape.id, { props: { text: readText(el) } });
-  };
-
-  const onBlur = () => {
-    // Ignore the spurious blur right after mount (focus juggling around the
-    // creating click) — re-focus instead of committing an empty editor.
-    if (Date.now() - mountedAt.current < 250) {
-      requestAnimationFrame(() => ref.current?.focus());
-      return;
-    }
-    commit();
-  };
-
   const screen = worldToScreen(shape, camera);
-  const fontPx = shape.props.fontSize * camera.z;
-  const textAlign =
-    shape.props.align === 'middle'
-      ? 'center'
-      : shape.props.align === 'end'
-        ? 'right'
-        : 'left';
+  const zoom = camera.z;
+  const fontSize = shape.props.fontSize * zoom;
 
   return (
-    <div
+    <textarea
       ref={ref}
-      contentEditable
-      suppressContentEditableWarning
-      role="textbox"
+      data-ui-layer
       aria-label="Edit text"
-      onInput={onInput}
-      onBlur={onBlur}
-      onKeyDown={(e) => {
-        e.stopPropagation();
-        if (e.key === 'Escape') {
-          e.preventDefault();
+      defaultValue={shape.props.text}
+      wrap={fixed ? 'soft' : 'off'}
+      spellCheck
+      autoCapitalize="sentences"
+      onInput={(event) => {
+        const value = event.currentTarget.value.replace(/\r\n?/g, '\n');
+        editor.updateShape(shape.id, { props: { text: value } });
+        publishSelection(event.currentTarget);
+      }}
+      onSelect={(event) => publishSelection(event.currentTarget)}
+      onCompositionStart={() => {
+        composing.current = true;
+      }}
+      onCompositionEnd={(event) => {
+        composing.current = false;
+        editor.updateShape(shape.id, {
+          props: { text: event.currentTarget.value.replace(/\r\n?/g, '\n') },
+        });
+        publishSelection(event.currentTarget);
+      }}
+      onBlur={() => {
+        // Focus juggling around the creating click can emit one immediate blur.
+        if (Date.now() - mountedAt.current < 180) {
+          requestAnimationFrame(() => ref.current?.focus({ preventScroll: true }));
+          return;
+        }
+        commit();
+      }}
+      onKeyDown={(event) => {
+        event.stopPropagation();
+        if (event.key === 'Escape') {
+          event.preventDefault();
           commit();
         }
       }}
-      onPointerDown={(e) => e.stopPropagation()}
-      className="absolute whitespace-pre outline-none"
+      onPointerDown={(event) => event.stopPropagation()}
+      className="absolute m-0 block resize-none overflow-hidden border-0 bg-transparent p-0 outline-none"
       style={{
         left: screen.x,
         top: screen.y,
+        width: layout.width * zoom,
+        height: layout.height * zoom,
+        minWidth: layout.width * zoom,
+        minHeight: layout.height * zoom,
+        boxSizing: 'border-box',
         fontFamily: fontStack(shape.props.fontFamily),
-        fontSize: fontPx,
-        lineHeight: LINE_HEIGHT_FACTOR,
-        textAlign,
+        fontSize,
+        lineHeight: textLineHeight(shape.props),
+        textAlign:
+          shape.props.align === 'middle'
+            ? 'center'
+            : shape.props.align === 'end'
+              ? 'right'
+              : 'left',
+        whiteSpace: fixed ? 'pre-wrap' : 'pre',
+        overflowWrap: fixed ? 'anywhere' : 'normal',
         color: shape.props.color,
-        transformOrigin: 'top left',
-        minWidth: '1ch',
         caretColor: 'currentColor',
+        transform: shape.rotation ? `rotate(${shape.rotation}rad)` : undefined,
+        transformOrigin: 'center center',
+        boxShadow: fixed
+          ? 'inset 0 0 0 1px var(--color-accent-brand)'
+          : undefined,
+        opacity: shape.opacity ?? 1,
       }}
     />
   );

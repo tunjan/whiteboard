@@ -5,7 +5,9 @@ import {
   Pause,
   Play,
   RotateCcw,
+  Volume1,
   Volume2,
+  VolumeX,
 } from 'lucide-react';
 import type { MusicLibraryResponse, MusicTrack } from '@whiteboard/shared';
 import { setMusicPlayback } from '@/canvas/use-document-store';
@@ -20,11 +22,23 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 import { Separator } from '@/components/ui/separator';
+import { Slider } from '@/components/ui/slider';
 import { cn } from '@/lib/utils';
 import { useMusicPlaybackStore } from './use-music-playback-store';
 
 interface MusicPlayerProps {
   identity: Identity | null;
+}
+
+// Volume is a per-user, device-local preference — it must not be synced with
+// the shared playback state. Persisted so it survives reloads.
+const VOLUME_STORAGE_KEY = 'whiteboard:music-volume';
+
+function readStoredVolume(): number {
+  if (typeof window === 'undefined') return 1;
+  const raw = window.localStorage.getItem(VOLUME_STORAGE_KEY);
+  const parsed = raw === null ? NaN : Number(raw);
+  return Number.isFinite(parsed) ? Math.min(1, Math.max(0, parsed)) : 1;
 }
 
 export function MusicPlayer({ identity }: MusicPlayerProps) {
@@ -36,6 +50,8 @@ export function MusicPlayer({ identity }: MusicPlayerProps) {
   const [audioBlocked, setAudioBlocked] = useState(false);
   const [duration, setDuration] = useState(0);
   const [localTime, setLocalTime] = useState(0);
+  const [volume, setVolume] = useState(readStoredVolume);
+  const lastNonZeroVolume = useRef(volume > 0 ? volume : 1);
 
   useEffect(() => {
     let cancelled = false;
@@ -136,6 +152,19 @@ export function MusicPlayer({ identity }: MusicPlayerProps) {
     return () => window.clearInterval(timer);
   }, [currentTrack, playback]);
 
+  useEffect(() => {
+    if (audioRef.current) audioRef.current.volume = volume;
+    if (volume > 0) lastNonZeroVolume.current = volume;
+    window.localStorage.setItem(VOLUME_STORAGE_KEY, String(volume));
+  }, [volume, currentTrack]);
+
+  const muted = volume === 0;
+  const VolumeIcon = muted ? VolumeX : volume < 0.5 ? Volume1 : Volume2;
+
+  function toggleMute() {
+    setVolume(muted ? lastNonZeroVolume.current : 0);
+  }
+
   function publishRequester() {
     return identity?.name ?? 'Someone';
   }
@@ -195,10 +224,9 @@ export function MusicPlayer({ identity }: MusicPlayerProps) {
           render={
             <Button
               variant={isPlaying ? 'outline' : 'ghost'}
-              size="icon"
+              size="icon-sm"
               aria-label="Music player"
               aria-pressed={isPlaying}
-              className="size-8 rounded-lg"
             />
           }
         >
@@ -219,30 +247,30 @@ export function MusicPlayer({ identity }: MusicPlayerProps) {
             </PopoverDescription>
           </PopoverHeader>
 
-          <div className="flex flex-col gap-2 rounded-lg bg-muted/45 p-2.5">
+          <div className="flex flex-col gap-2 rounded-lg bg-bg-muted p-3">
             <div className="flex min-w-0 items-center gap-2">
-              <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-background text-muted-foreground">
+              <div className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border-subtle bg-bg-default text-content-subtle">
                 {isPlaying ? <Volume2 className="size-4" /> : <Music2 className="size-4" />}
               </div>
               <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-semibold">
+                <div className="truncate text-sm font-semibold text-content-emphasis">
                   {currentTrack?.title ?? 'Ready when you are'}
                 </div>
-                <div className="truncate text-xs text-muted-foreground">
+                <div className="truncate text-xs text-content-subtle">
                   {currentTrack?.artist ?? currentTrack?.playlist ?? 'Choose a song'}
                 </div>
               </div>
             </div>
             <div
-              className="h-1.5 overflow-hidden rounded-full bg-background"
+              className="h-1.5 overflow-hidden rounded-full bg-bg-subtle"
               aria-hidden="true"
             >
               <div
-                className="h-full rounded-full bg-primary transition-[width]"
+                className="h-full rounded-full bg-bg-inverted transition-[width]"
                 style={{ width: `${progress}%` }}
               />
             </div>
-            <div className="flex items-center justify-between text-[11px] tabular-nums text-muted-foreground">
+            <div className="flex items-center justify-between text-[11px] tabular-nums text-content-subtle">
               <span>{formatTime(displayTime)}</span>
               <span>{duration > 0 ? formatTime(duration) : '--:--'}</span>
             </div>
@@ -267,10 +295,31 @@ export function MusicPlayer({ identity }: MusicPlayerProps) {
                 <RotateCcw />
               </Button>
               {playback.requestedBy ? (
-                <span className="min-w-0 flex-1 truncate text-right text-[11px] text-muted-foreground">
+                <span className="min-w-0 flex-1 truncate text-right text-[11px] text-content-subtle">
                   by {playback.requestedBy}
                 </span>
               ) : null}
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label={muted ? 'Unmute' : 'Mute'}
+                onClick={toggleMute}
+              >
+                <VolumeIcon />
+              </Button>
+              <Slider
+                aria-label="Volume"
+                min={0}
+                max={1}
+                step={0.01}
+                value={volume}
+                onValueChange={(next) =>
+                  setVolume(Array.isArray(next) ? next[0]! : next)
+                }
+              />
             </div>
             {audioBlocked ? (
               <Button type="button" variant="outline" size="sm" onClick={enableAudio}>
@@ -283,11 +332,11 @@ export function MusicPlayer({ identity }: MusicPlayerProps) {
           <Separator />
 
           {libraryError ? (
-            <div className="rounded-lg bg-muted/45 p-3 text-sm text-muted-foreground">
+            <div className="rounded-lg bg-bg-muted p-3 text-sm text-content-subtle">
               Music library unavailable.
             </div>
           ) : playlists.length === 0 ? (
-            <div className="rounded-lg bg-muted/45 p-3 text-sm text-muted-foreground">
+            <div className="rounded-lg bg-bg-muted p-3 text-sm text-content-subtle">
               No tracks found in the local music folder.
             </div>
           ) : (
@@ -321,21 +370,33 @@ export function MusicPlayer({ identity }: MusicPlayerProps) {
                       aria-pressed={active}
                       onClick={() => playTrack(track)}
                       className={cn(
-                        'flex min-h-11 w-full items-center gap-2 rounded-lg px-2 text-left transition-colors outline-none focus-visible:ring-2 focus-visible:ring-foreground focus-visible:ring-offset-2',
-                        active ? 'bg-muted text-foreground' : 'hover:bg-muted/60',
+                        'flex min-h-11 w-full items-center gap-2 rounded-lg px-2 text-left transition-colors outline-none focus-visible:ring-4 focus-visible:ring-border',
+                        active
+                          ? 'bg-bg-info text-content-info'
+                          : 'hover:bg-bg-muted',
                       )}
                     >
-                      <Music2 className="size-4 shrink-0 text-muted-foreground" />
+                      <Music2
+                        className={cn(
+                          'size-4 shrink-0',
+                          active ? 'text-content-info' : 'text-content-subtle',
+                        )}
+                      />
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-sm font-medium">
                           {track.title}
                         </span>
-                        <span className="block truncate text-xs text-muted-foreground">
+                        <span
+                          className={cn(
+                            'block truncate text-xs',
+                            active ? 'text-content-info' : 'text-content-subtle',
+                          )}
+                        >
                           {track.artist ?? track.playlist}
                         </span>
                       </span>
                       {active ? (
-                        <Volume2 className="size-4 shrink-0 text-muted-foreground" />
+                        <Volume2 className="size-4 shrink-0 text-content-info" />
                       ) : null}
                     </button>
                   );

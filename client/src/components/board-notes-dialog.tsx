@@ -82,7 +82,7 @@ export function BoardNotesDialog({
                 loading ? 'Loading…' : 'Notes about this student…'
               }
               className={cn(
-                'min-h-[12rem] w-full resize-y rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-base transition-colors outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-foreground focus-visible:ring-offset-2 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm dark:bg-input/30',
+                'min-h-[12rem] w-full resize-y rounded-md border border-border-subtle bg-bg-default px-3 py-2 text-base text-content-emphasis transition-colors outline-none placeholder:text-content-muted focus-visible:border-border-emphasis focus-visible:ring-4 focus-visible:ring-border-subtle disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-bg-subtle disabled:text-content-muted disabled:opacity-100 md:text-sm',
               )}
               autoFocus
             />

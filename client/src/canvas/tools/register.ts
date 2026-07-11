@@ -3,6 +3,7 @@
 import { ArrowUpRight, Circle, Slash, Square } from 'lucide-react';
 import { toolRegistry } from './tool-registry';
 import { createSelectTool } from './select-tool';
+import { createHandTool } from './hand-tool';
 import { createLassoTool } from './lasso-tool';
 import { createBoxTool } from './box-tool';
 import { createDrawTool } from './draw-tool';
@@ -14,6 +15,7 @@ import { createFrameTool } from './frame-tool';
 import { createGraphTool } from './graph-tool';
 
 toolRegistry.register(createSelectTool());
+toolRegistry.register(createHandTool());
 toolRegistry.register(createLassoTool());
 toolRegistry.register(createDrawTool());
 toolRegistry.register(createTextTool());

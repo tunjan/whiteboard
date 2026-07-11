@@ -42,6 +42,12 @@ export class SpatialIndex {
     return this.byId.has(id);
   }
 
+  /** The stored world bounds for a shape, or undefined if not indexed. Callers
+   *  must treat the result as read-only (it is the live tree item). */
+  getBounds(id: string): Bounds | undefined {
+    return this.byId.get(id);
+  }
+
   get size(): number {
     return this.byId.size;
   }

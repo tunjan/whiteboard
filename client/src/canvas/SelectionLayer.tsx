@@ -103,6 +103,23 @@ export function SelectionLayer({ camera }: SelectionLayerProps) {
               .filter((h) => h.id !== 'rotate')
               .map((h) => {
                 const p = toScreen(h.point);
+                const isTextWidthHandle =
+                  single?.type === 'text' && (h.id === 'e' || h.id === 'w');
+                if (isTextWidthHandle) {
+                  return (
+                    <rect
+                      key={h.id}
+                      x={p.x - 3}
+                      y={p.y - 8}
+                      width={6}
+                      height={16}
+                      rx={3}
+                      fill="var(--color-background)"
+                      stroke={ACCENT}
+                      strokeWidth={1.5}
+                    />
+                  );
+                }
                 return (
                   <rect
                     key={h.id}

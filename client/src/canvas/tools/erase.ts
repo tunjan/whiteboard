@@ -1,5 +1,6 @@
 import { type Point, isContainerType } from '@whiteboard/shared';
 import type { Editor } from '../editor';
+import { isVisible } from '../selectable';
 import { shapeRegistry } from '../shapes/shape-registry';
 import { spatialIndex } from '../use-document-store';
 import { segmentErasesShape } from './erase-geometry';
@@ -14,6 +15,7 @@ export function protectedAt(editor: Editor, p: Point, margin: number): Set<strin
   const out = new Set<string>();
   for (const shape of editor.getShapes()) {
     if (!isContainerType(shape.type) && shape.type !== 'text') continue;
+    if (!isVisible(shape)) continue;
     const util = shapeRegistry.getFor(shape);
     if (util?.hitTest(shape, p, margin)) out.add(shape.id);
   }
@@ -47,6 +49,8 @@ export function eraseAlong(
     if (protectedIds.has(id)) continue;
     const shape = editor.getShape(id);
     if (!shape || shape.locked || isContainerType(shape.type)) continue;
+    // Hidden shapes are invisible — never erase what the user can't see.
+    if (!isVisible(shape)) continue;
     const util = shapeRegistry.getFor(shape);
     if (util && segmentErasesShape(shape, util, a, b, margin)) out.push(id);
   }

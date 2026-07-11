@@ -64,32 +64,32 @@ export function ShareButton() {
   return (
     <div ref={rootRef} className="relative" data-ui-layer>
       <Button
-        variant="default"
+        variant="outline"
         size="sm"
         aria-label="Share board"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        className="h-8 rounded-lg"
+        className="rounded-lg"
       >
         <Share2 data-icon="inline-start" />
         <span className="hidden sm:inline">Share</span>
       </Button>
 
       {open ? (
-        <Surface className="absolute top-10 right-0 z-30 flex w-80 flex-col gap-2 p-3">
-          <div className="text-sm font-semibold text-foreground">
+        <Surface className="absolute top-10 right-0 z-30 flex w-80 flex-col gap-3 p-3 shadow-floating">
+          <div className="text-sm font-semibold text-content-emphasis">
             Share this board
           </div>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs leading-5 text-content-subtle">
             Anyone with the link can view and edit. It opens to the page you're
             on now.
           </p>
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-2">
             <input
               readOnly
               value={link}
               onFocus={(e) => e.currentTarget.select()}
-              className="h-8 w-full min-w-0 flex-1 rounded-md border border-input bg-transparent px-2 text-xs text-foreground outline-none focus-visible:ring-2 focus-visible:ring-foreground"
+              className="h-8 w-full min-w-0 flex-1 rounded-md border border-border-subtle bg-bg-default px-2 font-mono text-xs text-content-emphasis outline-none focus-visible:border-border-emphasis focus-visible:ring-4 focus-visible:ring-border-subtle"
             />
             <Button
               variant={copied ? 'outline' : 'default'}

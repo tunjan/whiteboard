@@ -10,12 +10,14 @@ import './shapes/register';
 import './tools/register';
 import { Background } from './Background';
 import { CanvasControls } from './CanvasControls';
+import { UndoControls } from './UndoControls';
 import {
   cameraToTransform,
   nextDiscreteZoom,
   screenToWorld,
 } from './camera';
 import { quantizedCullRegion, viewportWorldBounds } from './geometry';
+import { PerformanceOverlay } from '@/components/performance-overlay';
 import { CursorsLayer } from '@/collab/CursorsLayer';
 import {
   setLocalCursor,
@@ -32,6 +34,7 @@ import { FrameView } from './shapes/frame';
 import { plotArea } from './shapes/graph';
 import { panViewport, zoomViewport } from './shapes/graph-interaction';
 import { SelectionLayer } from './SelectionLayer';
+import { SelectionToolbar } from './SelectionToolbar';
 import { TextEditorOverlay } from './TextEditorOverlay';
 import { VideoPlayerOverlay } from './VideoPlayerOverlay';
 import { ImageCropOverlay } from './ImageCropOverlay';
@@ -58,6 +61,7 @@ import {
   spatialIndex,
   undo,
   useDocumentStore,
+  useUndoStore,
 } from './use-document-store';
 import { shapeRegistry } from './shapes/shape-registry';
 import { useCameraStore } from './use-camera-store';
@@ -98,6 +102,9 @@ function isTypingTarget(target: EventTarget | null): boolean {
     !!el &&
     (el.tagName === 'INPUT' ||
       el.tagName === 'TEXTAREA' ||
+      // The graph panel's MathLive field edits inside its shadow DOM, so events
+      // retarget to the <math-field> host rather than a focusable input.
+      !!el.closest?.('math-field') ||
       el.isContentEditable)
   );
 }
@@ -113,11 +120,11 @@ const STALE_TOUCH_MS = 2000;
 export function Canvas() {
   const [containerRef, size] = useElementSize<HTMLDivElement>();
   const camera = useCameraStore((s) => s.camera);
-  const peers = usePresenceStore((s) => s.peers);
   const following = useFollowStore((s) => s.following);
   const lastSummonApplied = useFollowStore((s) => s.lastSummonApplied);
   const background = useCanvasUiStore((s) => s.background);
   const setBackground = useCanvasUiStore((s) => s.setBackground);
+  const debugPerformance = useCanvasUiStore((s) => s.debugPerformance);
   const activeToolId = useToolStore((s) => s.activeToolId);
   const cameraMoving = useCameraInteraction((s) => s.isMoving);
   const pan = useSpacePan();
@@ -182,6 +189,8 @@ export function Canvas() {
   );
   // Shared, pre-sorted array from the store (stable across camera-only renders).
   const shapes = useDocumentStore((s) => s.shapes);
+  const canUndo = useUndoStore((s) => s.canUndo);
+  const canRedo = useUndoStore((s) => s.canRedo);
 
   // Shape-graph derivations that depend only on the shapes — never on the
   // camera. Memoizing them keeps the pan/zoom hot path (which re-renders this
@@ -201,6 +210,8 @@ export function Canvas() {
     const frameAncestorIds = new Set<string>();
     for (const s of shapes) {
       let cur = s.parentId ? shapesRecord?.[s.parentId] : undefined;
+      // Most shapes have no parent — skip the per-shape Set until a walk starts.
+      if (!cur) continue;
       const seen = new Set<string>();
       while (cur && !seen.has(cur.id)) {
         if (cur.type === 'frame') {
@@ -305,7 +316,12 @@ export function Canvas() {
   const editingShape = editingId ? shapesRecord?.[editingId] : undefined;
   const playingShape = playingId ? shapesRecord?.[playingId] : undefined;
   const croppingShape = croppingId ? shapesRecord?.[croppingId] : undefined;
-  const tutorPeer = useMemo(() => peers.find((peer) => peer.isTutor), [peers]);
+  // Select only the tutor peer. publishPeers keeps unchanged peer objects
+  // reference-stable, so this selector holds (no Canvas re-render) while other
+  // peers' cursors stream in — only the tutor's own updates flow through.
+  const tutorPeer = usePresenceStore(
+    (s) => s.peers.find((peer) => peer.isTutor) ?? null,
+  );
   const tutorClientId = tutorPeer?.clientId ?? null;
   const tutorViewport = tutorPeer?.viewport ?? null;
   const tutorSummon = tutorPeer?.summon ?? null;
@@ -315,11 +331,16 @@ export function Canvas() {
   const toInfo = useCallback(
     (
       e: ReactPointerEvent | ReactMouseEvent | PointerEvent,
+      // Optional pre-read container rect. `getBoundingClientRect` forces a
+      // synchronous reflow while React is committing shape frames, so callers
+      // that process many coalesced samples per event read it once and pass it
+      // in rather than paying that cost on every sample.
+      rect?: DOMRect,
     ): ToolPointerInfo => {
-      const rect = containerRef.current?.getBoundingClientRect();
+      const r = rect ?? containerRef.current?.getBoundingClientRect();
       const screen = {
-        x: e.clientX - (rect?.left ?? 0),
-        y: e.clientY - (rect?.top ?? 0),
+        x: e.clientX - (r?.left ?? 0),
+        y: e.clientY - (r?.top ?? 0),
       };
       const camera = useCameraStore.getState().camera;
       const pointerType =
@@ -411,18 +432,18 @@ export function Canvas() {
   // Publish immediately when the pointer enters or presses the board, not just
   // after it moves. This keeps a peer marker visible for clicks and taps too.
   const publishCursorPosition = useCallback(
-    (clientX: number, clientY: number) => {
-      const rect = containerRef.current?.getBoundingClientRect();
+    (clientX: number, clientY: number, rect?: DOMRect) => {
+      const r = rect ?? containerRef.current?.getBoundingClientRect();
       if (
-        !rect ||
-        clientX < rect.left ||
-        clientX >= rect.right ||
-        clientY < rect.top ||
-        clientY >= rect.bottom
+        !r ||
+        clientX < r.left ||
+        clientX >= r.right ||
+        clientY < r.top ||
+        clientY >= r.bottom
       ) {
         return;
       }
-      const screen = { x: clientX - rect.left, y: clientY - rect.top };
+      const screen = { x: clientX - r.left, y: clientY - r.top };
       pointerRef.current = screen;
       setLocalCursor(screenToWorld(screen, useCameraStore.getState().camera));
     },
@@ -594,7 +615,7 @@ export function Canvas() {
       }
       // Skip the presence cursor while pinching (two fingers, jittery midpoint).
       if (rect && !(isTouchPointer(e) && pinchLatch.current)) {
-        publishCursorPosition(e.clientX, e.clientY);
+        publishCursorPosition(e.clientX, e.clientY, rect);
       }
       // A real drag past the slop cancels the pending long-press.
       if (longPressOrigin.current) {
@@ -672,7 +693,7 @@ export function Canvas() {
           ? [...coalesced, e.nativeEvent]
           : [e.nativeEvent];
         for (const sample of samples) {
-          activeTool()?.onPointerMove?.(toInfo(sample), ctx);
+          activeTool()?.onPointerMove?.(toInfo(sample, rect), ctx);
         }
       }
     },
@@ -1020,10 +1041,12 @@ export function Canvas() {
         const step = e.shiftKey ? 10 : 1;
         const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
         const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
-        for (const id of ids) {
-          const s = editor.getShape(id);
-          if (s && !s.locked) editor.updateShape(id, { x: s.x + dx, y: s.y + dy });
-        }
+        editor.transact(() => {
+          for (const id of ids) {
+            const s = editor.getShape(id);
+            if (s && !s.locked) editor.updateShape(id, { x: s.x + dx, y: s.y + dy });
+          }
+        });
         return;
       }
 
@@ -1038,6 +1061,19 @@ export function Canvas() {
         }
         return;
       }
+      if (e.key === 'Enter' && ids.length === 1) {
+        const shape = editor.getShape(ids[0]!);
+        if (shape?.type === 'text' && !shape.locked) {
+          e.preventDefault();
+          useTextEditingStore
+            .getState()
+            .start(shape.id, {
+              anchor: shape.props.text.length,
+              head: shape.props.text.length,
+            });
+          return;
+        }
+      }
       if (e.key === 'Escape') {
         useEnteredGroupStore.getState().exit();
         useSelectionStore.getState().clear();
@@ -1051,7 +1087,9 @@ export function Canvas() {
         e.preventDefault();
         if (ids.length) {
           const allLocked = ids.every((id) => editor.getShape(id)?.locked);
-          for (const id of ids) editor.updateShape(id, { locked: !allLocked });
+          editor.transact(() => {
+            for (const id of ids) editor.updateShape(id, { locked: !allLocked });
+          });
         }
         return;
       }
@@ -1237,7 +1275,8 @@ export function Canvas() {
           wheel events still bubble to the container's handlers below it. */}
       {cameraMoving && <div className="absolute inset-0" />}
 
-      <SelectionLayer camera={camera} />
+      {!editingShape && <SelectionLayer camera={camera} />}
+      {!editingShape && <SelectionToolbar camera={camera} />}
       <CursorsLayer camera={camera} />
 
       {editingShape?.type === 'text' && (
@@ -1252,6 +1291,13 @@ export function Canvas() {
         <ImageCropOverlay shape={croppingShape} camera={camera} />
       )}
 
+      <UndoControls
+        canUndo={canUndo}
+        canRedo={canRedo}
+        onUndo={undo}
+        onRedo={redo}
+      />
+
       <CanvasControls
         zoom={camera.z}
         background={background}
@@ -1261,6 +1307,8 @@ export function Canvas() {
         onZoomReset={onZoomReset}
         onZoomToFit={onZoomToFit}
       />
+
+      {debugPerformance && <PerformanceOverlay />}
     </div>
   );
 }

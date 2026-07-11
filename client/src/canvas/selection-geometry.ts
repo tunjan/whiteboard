@@ -132,7 +132,15 @@ export function getSelectionInfo(
 
     let handles: { id: HandleId; point: Point }[] = [];
     if (!noHandles && !customHandles) {
-      handles = RESIZE_HANDLES.map((id) => ({ id, point: handlePts[id] }));
+      // Text has two intentional resize gestures: corners scale typography;
+      // horizontal side handles set a fixed wrap width. Vertical-only handles
+      // would imply a height constraint the text model deliberately does not
+      // have, so they are omitted.
+      const resizeHandles =
+        shape.type === 'text'
+          ? (['nw', 'ne', 'e', 'se', 'sw', 'w'] as ResizeHandleId[])
+          : RESIZE_HANDLES;
+      handles = resizeHandles.map((id) => ({ id, point: handlePts[id] }));
       if (shape.type !== 'frame') {
         handles.push({
           id: 'rotate',

@@ -20,7 +20,7 @@ function PanelLabel({
     <Comp
       data-slot="panel-label"
       className={cn(
-        "block text-[11px] leading-4 font-semibold tracking-wide text-muted-foreground uppercase select-none",
+        "block text-[11px] leading-4 font-semibold tracking-wide text-content-muted uppercase select-none",
         className
       )}
       {...props}

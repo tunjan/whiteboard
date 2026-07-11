@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
-import { Eye, EyeOff, Plus, RotateCcw, Trash2 } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import type { MathfieldElement } from 'mathlive';
+import { Eye, EyeOff, Pause, Play, Plus, RotateCcw, Trash2 } from 'lucide-react';
 import type {
   GraphExpression,
   GraphParameter,
@@ -10,11 +11,8 @@ import type {
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-} from '@/components/ui/input-group';
+import { InputGroup, InputGroupAddon } from '@/components/ui/input-group';
+import { MathField } from '@/components/ui/math-field';
 import {
   Popover,
   PopoverContent,
@@ -32,7 +30,7 @@ import {
   parseGraphExpression,
   reconcileGraphParameters,
 } from '@/canvas/graph-expressions';
-import { editor, useDocumentStore } from '@/canvas/use-document-store';
+import { breakUndoCapture, editor, useDocumentStore } from '@/canvas/use-document-store';
 import { useSelectionStore } from '@/canvas/use-selection-store';
 import { cn } from '@/lib/utils';
 
@@ -78,10 +76,10 @@ function ColorPicker({
     <Popover>
       <PopoverTrigger
         aria-label="Curve color"
-        className="flex size-6 items-center justify-center rounded-md transition-colors hover:bg-muted"
+        className="flex size-6 items-center justify-center rounded-md transition-colors hover:bg-bg-muted"
       >
         <span
-          className="size-3.5 rounded-full border border-foreground/15"
+          className="size-4 rounded-full border border-border-default"
           style={{ background: expression.color }}
         />
       </PopoverTrigger>
@@ -99,11 +97,11 @@ function ColorPicker({
                 onClick={() => onColorChange(color)}
                 className={cn(
                   'flex size-6 items-center justify-center rounded-md transition-colors',
-                  active ? 'bg-muted' : 'hover:bg-muted/60',
+                  active ? 'bg-bg-muted' : 'hover:bg-bg-muted',
                 )}
               >
                 <span
-                  className="size-3.5 rounded-full border border-foreground/15"
+                  className="size-4 rounded-full border border-border-default"
                   style={{ background: color }}
                 />
               </button>
@@ -124,11 +122,89 @@ function SliderRow({
   parameter: GraphParameter;
   onChange: (parameter: GraphParameter) => void;
 }) {
+  const [minDraft, setMinDraft] = useState(String(parameter.min));
+  const [maxDraft, setMaxDraft] = useState(String(parameter.max));
+  const [playing, setPlaying] = useState(false);
+
+  // Re-sync when the parameter changes elsewhere.
+  useEffect(() => setMinDraft(String(parameter.min)), [parameter.min]);
+  useEffect(() => setMaxDraft(String(parameter.max)), [parameter.max]);
+
+  // Latest parameter/onChange reachable from the animation loop without
+  // restarting it on every value write.
+  const paramRef = useRef(parameter);
+  paramRef.current = parameter;
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+
+  // Ping-pong the value between min and max (full sweep ~4s), like a Desmos
+  // animated slider. Writes are throttled to ~30fps to limit collab/undo churn.
+  useEffect(() => {
+    if (!playing) return;
+    breakUndoCapture();
+    let raf = 0;
+    let last = performance.now();
+    let lastWrite = 0;
+    let dir = 1;
+    let v = paramRef.current.value;
+    const tick = (now: number) => {
+      const p = paramRef.current;
+      const span = p.max - p.min || 1;
+      const dt = Math.min(0.05, (now - last) / 1000);
+      last = now;
+      v += dir * (span / 4) * dt;
+      if (v >= p.max) {
+        v = p.max;
+        dir = -1;
+      } else if (v <= p.min) {
+        v = p.min;
+        dir = 1;
+      }
+      if (now - lastWrite >= 33) {
+        lastWrite = now;
+        onChangeRef.current({ ...p, value: v });
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [playing]);
+
+  const commitBound = (bound: 'min' | 'max', raw: string) => {
+    const value = Number(raw);
+    const next =
+      bound === 'min'
+        ? { min: value, max: parameter.max }
+        : { min: parameter.min, max: value };
+    if (Number.isFinite(value) && next.min < next.max) {
+      onChange({
+        ...parameter,
+        ...next,
+        value: Math.min(next.max, Math.max(next.min, parameter.value)),
+      });
+    } else if (bound === 'min') {
+      setMinDraft(String(parameter.min));
+    } else {
+      setMaxDraft(String(parameter.max));
+    }
+  };
+
   return (
     <Field>
       <div className="flex items-center justify-between gap-3">
-        <FieldLabel className="font-mono">{name}</FieldLabel>
-        <span className="font-mono text-xs tabular-nums text-muted-foreground">
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            aria-label={playing ? `Pause ${name}` : `Animate ${name}`}
+            aria-pressed={playing}
+            className={cn(buttonVariants({ variant: 'ghost', size: 'icon-xs' }))}
+            onClick={() => setPlaying((p) => !p)}
+          >
+            {playing ? <Pause /> : <Play />}
+          </button>
+          <FieldLabel className="font-mono">{name}</FieldLabel>
+        </div>
+        <span className="font-mono text-xs tabular-nums text-content-subtle">
           {Number(parameter.value.toPrecision(4))}
         </span>
       </div>
@@ -142,11 +218,55 @@ function SliderRow({
           onChange({ ...parameter, value: valueFromSlider(value) })
         }
       />
-      <div className="flex items-center justify-between font-mono text-[10px] text-muted-foreground">
-        <span>{parameter.min}</span>
-        <span>{parameter.max}</span>
+      <div className="flex items-center justify-between gap-2">
+        <BoundInput
+          label={`${name} minimum`}
+          value={minDraft}
+          onChange={setMinDraft}
+          onCommit={(raw) => commitBound('min', raw)}
+        />
+        <BoundInput
+          label={`${name} maximum`}
+          value={maxDraft}
+          onChange={setMaxDraft}
+          onCommit={(raw) => commitBound('max', raw)}
+          className="text-right"
+        />
       </div>
     </Field>
+  );
+}
+
+function BoundInput({
+  label,
+  value,
+  onChange,
+  onCommit,
+  className,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  onCommit: (value: string) => void;
+  className?: string;
+}) {
+  return (
+    <Input
+      type="number"
+      inputMode="decimal"
+      aria-label={label}
+      value={value}
+      onChange={(event) => onChange(event.currentTarget.value)}
+      onBlur={(event) => onCommit(event.currentTarget.value)}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          onCommit(event.currentTarget.value);
+          event.currentTarget.blur();
+        }
+      }}
+      className={cn('h-7 w-16 px-2 font-mono text-xs', className)}
+    />
   );
 }
 
@@ -188,13 +308,13 @@ function ViewRange({
 
   return (
     <FieldGroup className="gap-2">
-      <div className="text-sm font-medium leading-none text-foreground select-none">
+      <div className="text-sm font-medium leading-none text-content-emphasis select-none">
         View range
       </div>
       <div className="grid grid-cols-2 gap-2">
         {VIEWPORT_FIELDS.map(({ key, label }) => (
           <Field key={key} orientation="horizontal" className="gap-2">
-            <FieldLabel className="w-10 shrink-0 text-xs text-muted-foreground">
+            <FieldLabel className="w-10 shrink-0 text-xs text-content-subtle">
               {label}
             </FieldLabel>
             <Input
@@ -202,9 +322,10 @@ function ViewRange({
               inputMode="decimal"
               aria-label={label}
               value={draft[key]}
-              onChange={(event) =>
-                setDraft((d) => ({ ...d, [key]: event.currentTarget.value }))
-              }
+              onChange={(event) => {
+                const value = event.currentTarget.value;
+                setDraft((d) => ({ ...d, [key]: value }));
+              }}
               onBlur={() => commit(key)}
               onKeyDown={(event) => {
                 if (event.key === 'Enter') {
@@ -226,6 +347,15 @@ export function GraphPanel() {
   const shapesRecord = useDocumentStore(
     (s) => s.doc.pages[s.currentPageId]?.shapes,
   );
+  const fieldRefs = useRef(new Map<string, MathfieldElement>());
+
+  // Focus a row's math field once it has mounted (e.g. after add/delete).
+  const focusField = (id: string, tries = 5) => {
+    const el = fieldRefs.current.get(id);
+    if (el) el.focus();
+    else if (tries > 0) requestAnimationFrame(() => focusField(id, tries - 1));
+  };
+
   const selectedId = selectedIds.length === 1 ? selectedIds[0] : null;
   const shape = selectedId ? shapesRecord?.[selectedId] : undefined;
 
@@ -257,10 +387,19 @@ export function GraphPanel() {
   };
 
   const addExpression = () => {
-    updateExpressions([
-      ...props.expressions,
-      createGraphExpression(props.expressions.length),
-    ]);
+    const created = createGraphExpression(props.expressions.length);
+    updateExpressions([...props.expressions, created]);
+    focusField(created.id);
+  };
+
+  // Enter inside a row inserts a new expression directly below it (Desmos).
+  const insertExpressionAfter = (afterId: string) => {
+    const created = createGraphExpression(props.expressions.length);
+    const next = [...props.expressions];
+    const index = next.findIndex((expression) => expression.id === afterId);
+    next.splice(index + 1, 0, created);
+    updateExpressions(next);
+    focusField(created.id);
   };
 
   const deleteExpression = (expressionId: string) => {
@@ -268,16 +407,27 @@ export function GraphPanel() {
     updateExpressions(next.length ? next : [createGraphExpression(0)]);
   };
 
+  // Backspace in an empty row removes it and focuses the previous one, unless
+  // it is the only row left.
+  const deleteEmptyExpression = (expressionId: string) => {
+    if (props.expressions.length <= 1) return;
+    const index = props.expressions.findIndex((e) => e.id === expressionId);
+    const next = props.expressions.filter((e) => e.id !== expressionId);
+    updateExpressions(next);
+    const target = next[index - 1] ?? next[0];
+    if (target) focusField(target.id);
+  };
+
   const parameterNames = Object.keys(props.parameters).sort((a, b) =>
     a.localeCompare(b),
   );
 
   return (
-    <Surface className="touch-targets absolute top-[calc(4.5rem+env(safe-area-inset-top))] right-[calc(1rem+env(safe-area-inset-right))] z-20 flex max-h-[calc(100dvh-7rem-env(safe-area-inset-top))] w-[min(20rem,calc(100vw-2rem))] flex-col gap-3 overflow-y-auto p-3.5">
+    <Surface className="touch-targets absolute top-[calc(3.75rem+env(safe-area-inset-top))] right-[calc(1rem+env(safe-area-inset-right))] z-20 flex max-h-[calc(100dvh-6.25rem-env(safe-area-inset-top))] w-[min(20rem,calc(100vw-2rem))] flex-col gap-4 overflow-y-auto p-4 shadow-floating">
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <div className="text-sm font-semibold text-foreground">Function</div>
-          <div className="text-xs text-muted-foreground">
+          <div className="text-sm font-semibold text-content-emphasis">Plotter</div>
+          <div className="text-xs text-content-subtle">
             {props.expressions.length} curve{props.expressions.length === 1 ? '' : 's'}
           </div>
         </div>
@@ -287,7 +437,7 @@ export function GraphPanel() {
           onClick={() => updateGraph({ viewport: { ...DEFAULT_GRAPH_VIEWPORT } })}
         >
           <RotateCcw data-icon="inline-start" />
-          Reset
+          Reset view
         </Button>
       </div>
 
@@ -335,16 +485,22 @@ export function GraphPanel() {
                     }
                   />
                 </InputGroupAddon>
-                <InputGroupInput
+                <MathField
                   id={`graph-expression-${expression.id}`}
+                  aria-label={`Expression ${index + 1}`}
                   aria-invalid={error ? true : undefined}
+                  className="flex-1"
                   value={expression.expression}
-                  placeholder="y = sin(x)"
-                  onChange={(event) =>
-                    patchExpression(expression.id, {
-                      expression: event.currentTarget.value,
-                    })
+                  placeholder="y=sin(x) or x^2+y^2=1"
+                  elementRef={(el) => {
+                    if (el) fieldRefs.current.set(expression.id, el);
+                    else fieldRefs.current.delete(expression.id);
+                  }}
+                  onChange={(value) =>
+                    patchExpression(expression.id, { expression: value })
                   }
+                  onEnter={() => insertExpressionAfter(expression.id)}
+                  onBackspaceEmpty={() => deleteEmptyExpression(expression.id)}
                 />
                 <InputGroupAddon className="gap-1">
                   <button
@@ -386,7 +542,7 @@ export function GraphPanel() {
               </ToggleGroup>
 
               {error ? (
-                <div className="text-xs font-medium text-destructive">{error}</div>
+                <div className="text-xs font-medium text-content-error">{error}</div>
               ) : null}
             </Field>
           );

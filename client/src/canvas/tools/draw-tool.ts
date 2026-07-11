@@ -128,7 +128,10 @@ export function createDrawTool(): Tool {
       const minDistance = 1 / Math.max(info.zoom, 0.05);
       if (Math.hypot(last.x - local.x, last.y - local.y) < minDistance) {
         if (last.pressure === local.pressure) return false;
-        last.pressure = local.pressure;
+        // Replace (don't mutate): the previous object was already handed to Yjs
+        // by an earlier flush's `points.slice()`, so mutating it in place would
+        // desync the stored value from the document.
+        points[points.length - 1] = { ...last, pressure: local.pressure };
         return true;
       }
     }
@@ -173,6 +176,7 @@ export function createDrawTool(): Tool {
           points: points.slice(),
           color: useStyleStore.getState().color,
           size: useStyleStore.getState().size,
+          dash: useStyleStore.getState().dash,
           // Pressure has been conditioned at input time, so the renderer must
           // not simulate it again.
           simulatePressure: false,

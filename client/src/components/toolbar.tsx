@@ -1,11 +1,20 @@
 import { useState } from 'react';
-import { ImagePlus, Lock, LockOpen, MonitorPlay, Shapes } from 'lucide-react';
+import {
+  ChevronDown,
+  ChevronUp,
+  ImagePlus,
+  Lock,
+  LockOpen,
+  MonitorPlay,
+  Shapes,
+} from 'lucide-react';
 import type { PolygonKind } from '@whiteboard/shared';
 import { YouTubeDialog } from '@/components/youtube-dialog';
 import { buttonVariants } from '@/components/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
@@ -33,10 +42,14 @@ const POLYGON_KINDS: { kind: PolygonKind; label: string }[] = [
   { kind: 'hexagon', label: 'Hexagon' },
 ];
 
-const GROUP_1 = ['select', 'lasso'];
+const GROUP_1 = ['select', 'hand', 'lasso'];
 const GROUP_2 = ['draw', 'eraser'];
 const GROUP_3 = ['text', 'graph'];
 const GROUP_4 = ['rectangle', 'ellipse', 'arrow'];
+const ACTIVE_TOOL_CLASS =
+  'border-transparent bg-bg-info text-content-info hover:bg-bg-info hover:text-content-info';
+const ACTIVE_UTILITY_CLASS =
+  'bg-bg-muted text-content-emphasis hover:bg-bg-muted hover:text-content-emphasis';
 
 // Less-frequent shape tools folded into the Shapes overflow menu to keep the
 // bar to a single row on narrow (e.g. iPad) screens.
@@ -63,7 +76,7 @@ function ToolMenuItem({ toolId }: { toolId: string }) {
   const Icon = tool.icon;
   return (
     <DropdownMenuItem onClick={() => setTool(tool.id)}>
-      {Icon ? <Icon className="size-4" /> : null}
+      {Icon ? <Icon /> : null}
       {tool.label}
     </DropdownMenuItem>
   );
@@ -74,31 +87,42 @@ function ShapesMenu({ active }: { active: boolean }) {
   const setPolygonKind = useStyleStore((s) => s.setPolygonKind);
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger
-        aria-label="More shapes"
-        className={cn(
-          buttonVariants({ variant: 'ghost', size: 'icon' }),
-          active &&
-            'bg-accent-brand text-accent-brand-foreground hover:bg-accent-brand/90 hover:text-accent-brand-foreground',
-        )}
-      >
-        <Shapes className="size-4" />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent side="top" align="center">
-        <ToolMenuItem toolId="line" />
-        <ToolMenuItem toolId="frame" />
-        {POLYGON_KINDS.map(({ kind, label }) => (
-          <DropdownMenuItem
-            key={kind}
-            onClick={() => {
-              setPolygonKind(kind);
-              setTool('polygon');
-            }}
-          >
-            <MiniShape kind={kind} />
-            {label}
-          </DropdownMenuItem>
-        ))}
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <DropdownMenuTrigger
+              aria-label="More shapes"
+              className={cn(
+                buttonVariants({ variant: 'ghost', size: 'icon-lg' }),
+                'rounded-lg',
+                active && ACTIVE_TOOL_CLASS,
+              )}
+            />
+          }
+        >
+          <Shapes />
+        </TooltipTrigger>
+        <TooltipContent side="top">
+          <span>More shapes</span>
+        </TooltipContent>
+      </Tooltip>
+      <DropdownMenuContent side="top" align="center" sideOffset={8}>
+        <DropdownMenuGroup>
+          <ToolMenuItem toolId="line" />
+          <ToolMenuItem toolId="frame" />
+          {POLYGON_KINDS.map(({ kind, label }) => (
+            <DropdownMenuItem
+              key={kind}
+              onClick={() => {
+                setPolygonKind(kind);
+                setTool('polygon');
+              }}
+            >
+              <MiniShape kind={kind} />
+              {label}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -109,21 +133,35 @@ function MediaMenu() {
   return (
     <>
       <DropdownMenu>
-        <DropdownMenuTrigger
-          aria-label="Add media"
-          className={cn(buttonVariants({ variant: 'ghost', size: 'icon' }))}
-        >
-          <ImagePlus className="size-4" />
-        </DropdownMenuTrigger>
-        <DropdownMenuContent side="top" align="center">
-          <DropdownMenuItem onClick={() => void pickAndPlaceImages()}>
-            <ImagePlus className="size-4" />
-            Add image
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => setOpen(true)}>
-            <MonitorPlay className="size-4" />
-            Add YouTube video
-          </DropdownMenuItem>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <DropdownMenuTrigger
+                aria-label="Add media"
+                className={cn(
+                  buttonVariants({ variant: 'ghost', size: 'icon-lg' }),
+                  'rounded-lg',
+                )}
+              />
+            }
+          >
+            <ImagePlus />
+          </TooltipTrigger>
+          <TooltipContent side="top">
+            <span>Add media</span>
+          </TooltipContent>
+        </Tooltip>
+        <DropdownMenuContent side="top" align="center" sideOffset={8}>
+          <DropdownMenuGroup>
+            <DropdownMenuItem onClick={() => void pickAndPlaceImages()}>
+              <ImagePlus />
+              Add image
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setOpen(true)}>
+              <MonitorPlay />
+              Add YouTube video
+            </DropdownMenuItem>
+          </DropdownMenuGroup>
         </DropdownMenuContent>
       </DropdownMenu>
       <YouTubeDialog open={open} onOpenChange={setOpen} />
@@ -139,21 +177,21 @@ function ToolLockButton() {
     <Tooltip>
       <TooltipTrigger
         onClick={toggle}
-        aria-label="Tool Lock"
+        aria-label="Tool lock"
         aria-pressed={locked}
         className={cn(
-          buttonVariants({ variant: 'ghost', size: 'icon' }),
-          locked &&
-            'bg-accent-brand text-accent-brand-foreground hover:bg-accent-brand/90 hover:text-accent-brand-foreground',
+          buttonVariants({ variant: 'ghost', size: 'icon-lg' }),
+          'rounded-lg',
+          locked && ACTIVE_UTILITY_CLASS,
         )}
       >
-        <Icon className="size-4" />
+        <Icon />
       </TooltipTrigger>
       <TooltipContent side="top">
-        <span>Tool Lock</span>
+        <span>Tool lock</span>
         <kbd
           data-slot="kbd"
-          className="bg-background/15 px-1 font-mono text-[10px] uppercase"
+          className="bg-content-inverted/15 px-1 font-mono text-[10px] uppercase text-content-inverted"
         >
           q
         </kbd>
@@ -168,6 +206,7 @@ function ToolLockButton() {
 export function Toolbar() {
   const activeToolId = useToolStore((s) => s.activeToolId);
   const setTool = useToolStore((s) => s.setTool);
+  const [hidden, setHidden] = useState(false);
 
   const renderToolButton = (toolId: string) => {
     const tool = toolRegistry.get(toolId);
@@ -181,19 +220,19 @@ export function Toolbar() {
           aria-label={tool.label}
           aria-pressed={active}
           className={cn(
-            buttonVariants({ variant: 'ghost', size: 'icon' }),
-            active &&
-              'bg-accent-brand text-accent-brand-foreground hover:bg-accent-brand/90 hover:text-accent-brand-foreground',
+            buttonVariants({ variant: 'ghost', size: 'icon-lg' }),
+            'rounded-lg',
+            active && ACTIVE_TOOL_CLASS,
           )}
         >
-          {Icon ? <Icon className="size-4" /> : null}
+          {Icon ? <Icon /> : null}
         </TooltipTrigger>
         <TooltipContent side="top">
           <span>{tool.label}</span>
           {tool.hotkey ? (
             <kbd
               data-slot="kbd"
-              className="bg-background/15 px-1 font-mono text-[10px] uppercase"
+              className="bg-content-inverted/15 px-1 font-mono text-[10px] uppercase text-content-inverted"
             >
               {tool.hotkey}
             </kbd>
@@ -205,48 +244,91 @@ export function Toolbar() {
 
   return (
     <TooltipProvider delay={300}>
-      <Surface className="touch-targets absolute bottom-[calc(1.5rem+env(safe-area-inset-bottom))] left-1/2 z-20 flex w-max max-w-[calc(100vw-1rem)] -translate-x-1/2 flex-wrap justify-center items-center gap-1 p-1.5 shadow-[0_14px_42px_rgba(0,0,0,0.14),0_4px_12px_rgba(0,0,0,0.08)] dark:shadow-[0_18px_48px_rgba(0,0,0,0.55),0_4px_14px_rgba(0,0,0,0.35)]">
-        {/* Group 1: Navigation & Selection */}
-        <div className="flex items-center gap-1">
-          {GROUP_1.map(renderToolButton)}
-        </div>
+      {/* Centering anchor. The toolbar and the collapsed "show" button both live
+          here and cross-fade/slide so hiding and reopening is animated rather
+          than an instant DOM swap. */}
+      <div className="absolute bottom-[calc(1rem+env(safe-area-inset-bottom))] left-1/2 z-20 -translate-x-1/2">
+        <Surface
+          role="toolbar"
+          aria-label="Canvas tools"
+          aria-hidden={hidden}
+          inert={hidden}
+          className={cn(
+            'touch-targets flex h-12 w-max max-w-[calc(100vw-1rem)] origin-bottom flex-nowrap items-center gap-2 overflow-x-auto overflow-y-hidden p-1.5 shadow-hover transition-all duration-150 ease-out motion-reduce:transition-none',
+            hidden &&
+              'pointer-events-none translate-y-[calc(100%+1rem)] opacity-0',
+          )}
+        >
+          {/* Group 1: Navigation & Selection */}
+          <div className="flex shrink-0 items-center gap-1">
+            {GROUP_1.map(renderToolButton)}
+          </div>
 
-        <div className="w-px h-5 bg-border mx-0.5" />
+          {/* Group 2: Drawing & Annotation */}
+          <div className="flex shrink-0 items-center gap-1">
+            {GROUP_2.map(renderToolButton)}
+          </div>
 
-        {/* Group 2: Drawing & Annotation */}
-        <div className="flex items-center gap-1">
-          {GROUP_2.map(renderToolButton)}
-        </div>
+          {/* Group 3: Text & Math */}
+          <div className="flex shrink-0 items-center gap-1">
+            {GROUP_3.map(renderToolButton)}
+          </div>
 
-        <div className="w-px h-5 bg-border mx-0.5" />
+          {/* Group 4: Basic Shapes */}
+          <div className="flex shrink-0 items-center gap-1">
+            {GROUP_4.map(renderToolButton)}
+            <ShapesMenu active={SHAPES_MENU_TOOLS.includes(activeToolId)} />
+          </div>
 
-        {/* Group 3: Text & Math */}
-        <div className="flex items-center gap-1">
-          {GROUP_3.map(renderToolButton)}
-        </div>
+          {/* Group 5: Media */}
+          <div className="flex shrink-0 items-center gap-1">
+            <MediaMenu />
+          </div>
 
-        <div className="w-px h-5 bg-border mx-0.5" />
+          {/* Group 6: Utilities (tool lock + hide) */}
+          <div className="flex shrink-0 items-center gap-1">
+            <ToolLockButton />
+            <Tooltip>
+              <TooltipTrigger
+                onClick={() => setHidden(true)}
+                aria-label="Hide toolbar"
+                className={cn(
+                  buttonVariants({ variant: 'ghost', size: 'icon-lg' }),
+                  'rounded-lg',
+                )}
+              >
+                <ChevronDown />
+              </TooltipTrigger>
+              <TooltipContent side="top">
+                <span>Hide toolbar</span>
+              </TooltipContent>
+            </Tooltip>
+          </div>
+        </Surface>
 
-        {/* Group 4: Basic Shapes */}
-        <div className="flex items-center gap-1">
-          {GROUP_4.map(renderToolButton)}
-          <ShapesMenu active={SHAPES_MENU_TOOLS.includes(activeToolId)} />
-        </div>
-
-        <div className="w-px h-5 bg-border mx-0.5" />
-
-        {/* Group 5: Media */}
-        <div className="flex items-center gap-1">
-          <MediaMenu />
-        </div>
-
-        <div className="w-px h-5 bg-border mx-0.5" />
-
-        {/* Group 6: Tool Lock */}
-        <div className="flex items-center gap-1">
-          <ToolLockButton />
-        </div>
-      </Surface>
+        {/* Collapsed state: sits at the same bottom-center spot and fades/slides
+            in as the toolbar slides away. */}
+        <Tooltip>
+          <TooltipTrigger
+            onClick={() => setHidden(false)}
+            aria-label="Show toolbar"
+            aria-hidden={!hidden}
+            tabIndex={hidden ? 0 : -1}
+            className={cn(
+              buttonVariants({ variant: 'ghost', size: 'icon-lg' }),
+              'touch-targets absolute bottom-0 left-1/2 -translate-x-1/2 rounded-xl border border-border-subtle bg-bg-default text-content-emphasis shadow-hover transition-all duration-150 ease-out motion-reduce:transition-none',
+              hidden
+                ? 'translate-y-0 opacity-100'
+                : 'pointer-events-none translate-y-2 opacity-0',
+            )}
+          >
+            <ChevronUp />
+          </TooltipTrigger>
+          <TooltipContent side="top">
+            <span>Show toolbar</span>
+          </TooltipContent>
+        </Tooltip>
+      </div>
     </TooltipProvider>
   );
 }

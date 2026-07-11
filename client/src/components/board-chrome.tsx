@@ -1,53 +1,57 @@
 import { useState } from 'react';
 import {
   ArrowLeft,
+  Cog,
   Download,
   Moon,
+  MoreHorizontal,
   NotebookPen,
-  Settings2,
   Sun,
 } from 'lucide-react';
 import { exportBoardToPng } from '@/canvas/export-png';
+import { DoodleAvatar } from '@/collab/avatar';
 import type { Identity } from '@/collab/identity';
+import { jumpToPeerViewport } from '@/collab/presence';
 import { usePresenceStore } from '@/collab/use-presence-store';
 import { BoardNotesDialog } from '@/components/board-notes-dialog';
-import { ConnectionIndicator } from '@/components/connection-indicator';
 import { FollowControls } from '@/components/follow-controls';
 import { MusicPlayer } from '@/music/music-player';
 import { PageMenu } from '@/components/page-menu';
 import { SettingsDialog } from '@/components/settings-dialog';
 import { ShareButton } from '@/components/share-button';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Surface } from '@/components/ui/surface';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import { useThemeStore } from '@/use-theme-store';
-import { cn, isLightColor } from '@/lib/utils';
 
 const MAX_VISIBLE_AVATARS = 4;
 
-function initial(name: string): string {
-  return name.trim().charAt(0).toUpperCase() || '?';
-}
-
-function Avatar({ name, color }: { name: string; color: string }) {
-  const isLight = isLightColor(color);
+function Avatar({ avatar }: { avatar: string }) {
   return (
-    <div
-      className={cn(
-        "flex size-7 items-center justify-center rounded-full border-2 border-card text-[11px] font-bold transition-all",
-        isLight ? "text-zinc-950" : "text-white"
-      )}
-      style={{ background: color }}
-      title={name}
-    >
-      {initial(name)}
-    </div>
+    <DoodleAvatar
+      seed={avatar}
+      className="size-7 shrink-0 overflow-hidden rounded-full border-2 border-bg-default"
+    />
   );
 }
 
 function OverflowAvatar({ count }: { count: number }) {
   return (
     <div
-      className="flex size-7 items-center justify-center rounded-full border-2 border-card bg-muted text-[10px] font-semibold text-muted-foreground"
+      className="flex size-7 items-center justify-center rounded-full border-2 border-bg-default bg-bg-subtle text-[10px] font-semibold text-content-subtle"
       title={`${count} more present`}
     >
       +{count}
@@ -63,26 +67,37 @@ export function BoardChrome({
   title,
   onBack,
   onRenameTitle,
+  onEditIdentity,
   identity,
 }: {
   boardId: string;
   title: string;
   onBack: () => void;
   onRenameTitle?: () => void;
+  onEditIdentity?: () => void;
   identity: Identity | null;
 }) {
   const theme = useThemeStore((s) => s.theme);
   const toggle = useThemeStore((s) => s.toggle);
   const peers = usePresenceStore((s) => s.peers);
-  const present = peers.length + (identity ? 1 : 0);
   const participants = [
     ...peers.map((peer) => ({
       id: `peer-${peer.clientId}`,
       name: peer.name,
-      color: peer.color,
+      avatar: peer.avatar,
+      isLocal: false,
+      peer,
     })),
     ...(identity
-      ? [{ id: 'local-user', name: identity.name, color: identity.color }]
+      ? [
+          {
+            id: 'local-user',
+            name: identity.name,
+            avatar: identity.avatar,
+            isLocal: true,
+            peer: null,
+          },
+        ]
       : []),
   ];
   const visibleParticipants = participants.slice(0, MAX_VISIBLE_AVATARS);
@@ -106,114 +121,176 @@ export function BoardChrome({
 
   return (
     <>
-      {/* Left Floating Panel (Back & Title) */}
-      <Surface className="touch-targets absolute top-[calc(1rem+env(safe-area-inset-top))] left-[calc(1rem+env(safe-area-inset-left))] z-20 flex h-11 items-center gap-1.5 px-1.5">
+      {/* Top-left panel: board navigation and the current page. */}
+      <Surface className="touch-targets absolute top-[calc(1rem+env(safe-area-inset-top))] left-[calc(1rem+env(safe-area-inset-left))] z-20 flex h-10 items-center gap-0.5 p-1 shadow-hover">
         {/* Back navigates to the boards list, which is tutor-only. Students join
             via a shared link and aren't authenticated, so following it would
             bounce them to the login page — hide it for them. */}
         {identity?.isTutor && (
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label="Back to boards"
-            onClick={onBack}
-            className="size-8 rounded-lg"
-          >
-            <ArrowLeft className="size-4" />
-          </Button>
+          <TooltipProvider delay={300}>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label="Back to boards"
+                    onClick={onBack}
+                  />
+                }
+              >
+                <ArrowLeft />
+              </TooltipTrigger>
+              <TooltipContent side="bottom">Back to boards</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         )}
         {renameTitle ? (
-          <button
-            type="button"
-            aria-label="Rename board title"
-            title="Double-click to rename"
-            onDoubleClick={renameTitle}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                renameTitle();
-              }
-            }}
-            className="max-w-[140px] cursor-text truncate rounded-md px-1 text-left text-sm font-semibold text-foreground outline-none focus-visible:ring-2 focus-visible:ring-foreground focus-visible:ring-offset-2"
-          >
-            {title}
-          </button>
+          <TooltipProvider delay={300}>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    aria-label="Rename board title"
+                    onDoubleClick={renameTitle}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        renameTitle();
+                      }
+                    }}
+                    className="max-w-[clamp(5rem,20vw,12.5rem)] cursor-text rounded-lg px-2 font-semibold"
+                  />
+                }
+              >
+                <span className="truncate">{title}</span>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                Double-click to rename
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         ) : (
-          <span className="max-w-[140px] truncate text-sm font-semibold text-foreground">
+          <span className="flex h-8 max-w-[clamp(5rem,20vw,12.5rem)] items-center truncate px-2 text-sm font-semibold text-content-emphasis">
             {title}
           </span>
         )}
-        <div className="h-5 w-px bg-border" />
+        <span aria-hidden="true" className="px-0.5 text-xs text-content-muted">
+          /
+        </span>
         <PageMenu />
       </Surface>
 
-      {/* Center Floating Panel (Collab & Presence) */}
-      <Surface className="absolute top-[calc(1rem+env(safe-area-inset-top))] left-1/2 -translate-x-1/2 z-20 flex h-11 items-center gap-2.5 px-3">
-        <ConnectionIndicator />
-        <div className="h-5 w-px bg-border" />
-        <div className="flex items-center gap-2">
-          <div className="flex -space-x-1.5">
-            {visibleParticipants.map((participant) => (
-              <Avatar
-                key={participant.id}
-                name={participant.name}
-                color={participant.color}
-              />
-            ))}
-            {overflowCount > 0 ? <OverflowAvatar count={overflowCount} /> : null}
-          </div>
-          <span className="min-w-4 text-right text-xs font-semibold tabular-nums text-foreground">
-            {present}
-          </span>
-          <span className="text-xs text-muted-foreground hidden xs:inline">present</span>
+      {/* Top-right panel (presence, session controls, and sharing). */}
+      <Surface className="touch-targets absolute top-[calc(1rem+env(safe-area-inset-top))] right-[calc(1rem+env(safe-area-inset-right))] z-20 flex h-10 items-center gap-0.5 p-1 shadow-hover">
+        <div className="flex items-center px-1">
+          <TooltipProvider delay={300}>
+            <div className="flex -space-x-1.5">
+              {visibleParticipants.map((participant) => {
+                const label = participant.isLocal
+                  ? `${participant.name} (you)`
+                  : participant.name;
+                let trigger;
+                if (participant.isLocal && onEditIdentity) {
+                  trigger = (
+                    <TooltipTrigger
+                      render={
+                        <button
+                          type="button"
+                          onClick={onEditIdentity}
+                          className="rounded-full outline-none transition-opacity hover:opacity-80"
+                          aria-label="Edit your icon"
+                        />
+                      }
+                    >
+                      <Avatar avatar={participant.avatar} />
+                    </TooltipTrigger>
+                  );
+                } else if (participant.peer) {
+                  const peer = participant.peer;
+                  trigger = (
+                    <TooltipTrigger
+                      render={
+                        <button
+                          type="button"
+                          onClick={() => jumpToPeerViewport(peer)}
+                          className="rounded-full outline-none transition-opacity hover:opacity-80"
+                          aria-label={`Jump to ${participant.name}'s view`}
+                        />
+                      }
+                    >
+                      <Avatar avatar={participant.avatar} />
+                    </TooltipTrigger>
+                  );
+                } else {
+                  trigger = (
+                    <TooltipTrigger render={<span />}>
+                      <Avatar avatar={participant.avatar} />
+                    </TooltipTrigger>
+                  );
+                }
+                return (
+                  <Tooltip key={participant.id}>
+                    {trigger}
+                    <TooltipContent side="bottom">{label}</TooltipContent>
+                  </Tooltip>
+                );
+              })}
+              {overflowCount > 0 ? (
+                <OverflowAvatar count={overflowCount} />
+              ) : null}
+            </div>
+          </TooltipProvider>
         </div>
-      </Surface>
-
-      {/* Right Floating Panel (Music, view controls, settings, share) */}
-      <Surface className="touch-targets absolute top-[calc(1rem+env(safe-area-inset-top))] right-[calc(1rem+env(safe-area-inset-right))] z-20 flex h-11 items-center gap-1.5 px-2">
         <MusicPlayer identity={identity} />
-        <div className="h-5 w-px bg-border" />
         <FollowControls identity={identity} />
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="Toggle theme"
-          onClick={toggle}
-          className="size-8 rounded-lg"
-        >
-          {theme === 'dark' ? <Sun className="size-4" /> : <Moon className="size-4" />}
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="Export as PNG"
-          onClick={() => void onExport()}
-          disabled={exporting}
-          className="size-8 rounded-lg"
-        >
-          <Download className="size-4" />
-        </Button>
-        {identity?.isTutor && (
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label="Student notes"
-            onClick={() => setNotesOpen(true)}
-            className="size-8 rounded-lg"
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="More actions"
+              />
+            }
           >
-            <NotebookPen className="size-4" />
-          </Button>
-        )}
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="Settings"
-          onClick={() => setSettingsOpen(true)}
-          className="size-8 rounded-lg"
-        >
-          <Settings2 className="size-4" />
-        </Button>
-        <div className="h-5 w-px bg-border" />
+            <MoreHorizontal />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="end"
+            sideOffset={8}
+            className="w-44"
+          >
+            <DropdownMenuGroup>
+              <DropdownMenuItem onClick={() => setSettingsOpen(true)}>
+                <Cog />
+                Settings
+              </DropdownMenuItem>
+              {identity?.isTutor && (
+                <DropdownMenuItem onClick={() => setNotesOpen(true)}>
+                  <NotebookPen />
+                  Student notes
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuGroup>
+            <DropdownMenuSeparator />
+            <DropdownMenuGroup>
+              <DropdownMenuItem onClick={toggle}>
+                {theme === 'dark' ? <Sun /> : <Moon />}
+                {theme === 'dark' ? 'Light mode' : 'Dark mode'}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => void onExport()}
+                disabled={exporting}
+              >
+                <Download />
+                Export PNG
+              </DropdownMenuItem>
+            </DropdownMenuGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <ShareButton />
       </Surface>
 

@@ -2,8 +2,10 @@ import { Type } from 'lucide-react';
 import { genId, type Shape, type TextProps } from '@whiteboard/shared';
 import { getTopIndex } from '../order';
 import { shapeRegistry } from '../shapes/shape-registry';
-import { LINE_HEIGHT_FACTOR } from '../shapes/text-measure';
+import { textIndexAtWorldPoint } from '../shapes/text';
+import { textLineHeight } from '../shapes/text-measure';
 import { useCameraStore } from '../use-camera-store';
+import { useSelectionStore } from '../use-selection-store';
 import { useStyleStore } from '../use-style-store';
 import { useTextEditingStore } from '../use-text-editing-store';
 import type { Tool, ToolContext, ToolPointerInfo } from './types';
@@ -32,7 +34,11 @@ export function createTextTool(): Tool {
         if (s.type !== 'text') continue;
         const util = shapeRegistry.getFor(s);
         if (util?.hitTest(s, info.point, tol)) {
-          useTextEditingStore.getState().start(s.id);
+          const index = textIndexAtWorldPoint(s, info.point);
+          useSelectionStore.getState().setSelection([s.id]);
+          useTextEditingStore
+            .getState()
+            .start(s.id, { anchor: index, head: index });
           ctx.setTool('select');
           return;
         }
@@ -53,14 +59,15 @@ export function createTextTool(): Tool {
         type: 'text',
         x: info.point.x,
         // Center the first line vertically on the click point.
-        y: info.point.y - (props.fontSize * LINE_HEIGHT_FACTOR) / 2,
+        y: info.point.y - (props.fontSize * textLineHeight(props)) / 2,
         rotation: 0,
         opacity: style.opacity,
         index: getTopIndex(shapes),
         props,
       } as Shape;
       ctx.editor.createShape(shape);
-      useTextEditingStore.getState().start(id);
+      useSelectionStore.getState().setSelection([id]);
+      useTextEditingStore.getState().start(id, { anchor: 0, head: 0 });
       ctx.setTool('select');
     },
   };
