@@ -28,7 +28,13 @@ import { shapeRegistry } from '../shapes/shape-registry';
 import { textIndexAtWorldPoint } from '../shapes/text';
 import { layoutTextProps, MIN_TEXT_WIDTH } from '../shapes/text-measure';
 import type { ShapeUtil } from '../shapes/types';
-import { snapBounds } from '../snapping';
+import { shapeSnapGeometry } from '../snap-geometry';
+import {
+  type PointSnapTarget,
+  snapBounds,
+  snapPoint,
+  snapResizeBounds,
+} from '../snapping';
 import { spatialIndex } from '../use-document-store';
 import { useCameraStore } from '../use-camera-store';
 import { useCanvasUiStore } from '../use-canvas-ui-store';
@@ -46,7 +52,7 @@ const DRAG_SLOP_SCREEN = 3;
 const ROTATE_SNAP = (15 * Math.PI) / 180;
 const MIN_RESIZE = 1;
 /** Snap threshold in screen px (divided by zoom for world distance). */
-const SNAP_SCREEN = 6;
+const SNAP_SCREEN = 8;
 
 interface GroupItem {
   initial: Shape;
@@ -89,12 +95,19 @@ type SelectState =
       selectionBefore: string[];
       axis: Axis | null;
     }
-  | { type: 'resize'; handle: ResizeHandleId; initial: Shape; util: ShapeUtil }
+  | {
+      type: 'resize';
+      handle: ResizeHandleId;
+      initial: Shape;
+      util: ShapeUtil;
+      targets: Bounds[];
+    }
   | {
       type: 'group-resize';
       handle: ResizeHandleId;
       bounds0: Bounds;
       items: GroupItem[];
+      targets: Bounds[];
     }
   | { type: 'rotate'; initial: Shape; center: Point; startAngle: number }
   | {
@@ -103,6 +116,8 @@ type SelectState =
       handleId: string;
       util: ShapeUtil;
       initial: Shape;
+      targets: PointSnapTarget[];
+      canSnap: boolean;
     }
   | {
       type: 'marquee';
@@ -239,8 +254,10 @@ function marqueeBounds(start: Point, point: Point): Bounds {
   };
 }
 
-function marqueeMode(start: Point, point: Point): MarqueeMode {
-  return point.x >= start.x ? 'contain' : 'touch';
+// Any shape the selection rectangle touches is selected, regardless of drag
+// direction — shapes no longer need to be fully enclosed.
+function marqueeMode(): MarqueeMode {
+  return 'touch';
 }
 
 export function createSelectTool(): Tool {
@@ -275,23 +292,38 @@ export function createSelectTool(): Tool {
     return { type: 'move', start, initial, bounds0, selectionBefore, axis: null };
   }
 
-  /** Other visible, non-moving shapes' bounds near the moving box (for snap). */
-  function snapTargets(
+  /** Visible, non-moving shapes in the viewport that permit snapping. */
+  function snapTargetShapes(
     editor: Editor,
     movingIds: Set<string>,
     region: Bounds,
-  ): Bounds[] {
-    const targets: Bounds[] = [];
+  ): Shape[] {
+    if (!useCanvasUiStore.getState().snappingEnabled) return [];
+    const targets: Shape[] = [];
     for (const id of spatialIndex.search(region)) {
       if (movingIds.has(id)) continue;
       const shape = editor.getShape(id);
       if (!shape || !isVisible(shape)) continue;
-      // The spatial index already holds this shape's rotated world bounds (it's
-      // what `search` matched on), so reuse them instead of recomputing.
-      const bounds = spatialIndex.getBounds(id);
-      if (bounds) targets.push(bounds);
+      const util = shapeRegistry.getFor(shape);
+      if (!util || util.canSnap === false || shape.type === 'group') continue;
+      targets.push(shape);
     }
     return targets;
+  }
+
+  function snapRegion(ctx: ToolContext, fallback: Bounds): Bounds {
+    return ctx.getViewportBounds?.() ?? spatialIndex.totalBounds() ?? fallback;
+  }
+
+  function snapTargetBounds(
+    editor: Editor,
+    movingIds: Set<string>,
+    region: Bounds,
+  ): Bounds[] {
+    return snapTargetShapes(editor, movingIds, region).flatMap((shape) => {
+      const bounds = spatialIndex.getBounds(shape.id);
+      return bounds ? [bounds] : [];
+    });
   }
 
   function applyMove(move: Extract<SelectState, { type: 'move' }>, info: ToolPointerInfo, ctx: ToolContext): void {
@@ -302,7 +334,11 @@ export function createSelectTool(): Tool {
 
     let dx = move.axis === 'y' ? 0 : rawDx;
     let dy = move.axis === 'x' ? 0 : rawDy;
-    if (!info.altKey && move.bounds0) {
+    if (
+      useCanvasUiStore.getState().snappingEnabled &&
+      !info.altKey &&
+      move.bounds0
+    ) {
       const camera = useCameraStore.getState().camera;
       const threshold = SNAP_SCREEN / camera.z;
       const moving: Bounds = {
@@ -311,16 +347,19 @@ export function createSelectTool(): Tool {
         maxX: move.bounds0.maxX + dx,
         maxY: move.bounds0.maxY + dy,
       };
-      const region = {
-        minX: moving.minX - threshold,
-        minY: moving.minY - threshold,
-        maxX: moving.maxX + threshold,
-        maxY: moving.maxY + threshold,
-      };
       const background = useCanvasUiStore.getState().background;
       const snap = snapBounds(
         moving,
-        snapTargets(ctx.editor, new Set(move.initial.keys()), region),
+        snapTargetBounds(
+          ctx.editor,
+          new Set(move.initial.keys()),
+          snapRegion(ctx, {
+            minX: moving.minX - threshold,
+            minY: moving.minY - threshold,
+            maxX: moving.maxX + threshold,
+            maxY: moving.maxY + threshold,
+          }),
+        ),
         getSnapGridStep(background, camera),
         threshold,
       );
@@ -436,12 +475,22 @@ export function createSelectTool(): Tool {
           const shape = ctx.editor.getShape(selectionInfo.ids[0]!);
           const util = shape ? shapeRegistry.getFor(shape) : undefined;
           if (shape && util?.onHandleDrag) {
+            const targets = snapTargetShapes(
+              ctx.editor,
+              new Set([shape.id]),
+              snapRegion(ctx, selectionInfo.bounds),
+            ).flatMap((target) => {
+              const geometry = shapeSnapGeometry(target);
+              return geometry ? [geometry] : [];
+            });
             state = {
               type: 'handle',
               shapeId: shape.id,
               handleId: handle.id,
               util,
               initial: shape,
+              targets,
+              canSnap: handle.kind === 'vertex',
             };
             return;
           }
@@ -468,7 +517,20 @@ export function createSelectTool(): Tool {
           } else if (selectionInfo.isSingle) {
             const initial = ctx.editor.getShape(selectionInfo.ids[0]!);
             const util = initial ? shapeRegistry.getFor(initial) : undefined;
-            if (initial && util?.canResize) state = { type: 'resize', handle: handle.id, initial, util };
+            if (initial && util?.canResize) {
+              const movingIds = new Set(moveTargetIds(shapes, selectionInfo.ids));
+              state = {
+                type: 'resize',
+                handle: handle.id,
+                initial,
+                util,
+                targets: snapTargetBounds(
+                  ctx.editor,
+                  movingIds,
+                  snapRegion(ctx, selectionInfo.bounds),
+                ),
+              };
+            }
           } else {
             const items: GroupItem[] = [];
             for (const id of selectionInfo.ids) {
@@ -478,7 +540,18 @@ export function createSelectTool(): Tool {
               if (util?.canResize) items.push({ initial: shape, util, b0: util.getBounds(shape as never) });
             }
             if (items.length) {
-              state = { type: 'group-resize', handle: handle.id, bounds0: selectionInfo.bounds, items };
+              const movingIds = new Set(moveTargetIds(shapes, selectionInfo.ids));
+              state = {
+                type: 'group-resize',
+                handle: handle.id,
+                bounds0: selectionInfo.bounds,
+                items,
+                targets: snapTargetBounds(
+                  ctx.editor,
+                  movingIds,
+                  snapRegion(ctx, selectionInfo.bounds),
+                ),
+              };
             }
           }
           return;
@@ -572,11 +645,11 @@ export function createSelectTool(): Tool {
             start,
             base,
             selectionBefore: state.selectionBefore,
-            mode: marqueeMode(start, info.point),
+            mode: marqueeMode(),
           };
           // Fall through on the same sample so the marquee starts at the first drag frame.
           const bounds = marqueeBounds(state.start, info.point);
-          state.mode = marqueeMode(state.start, info.point);
+          state.mode = marqueeMode();
           useSelectionStore.getState().setMarquee({ bounds, mode: state.mode });
           selectMarquee(bounds, state.mode, state.base, ctx.editor);
           return;
@@ -585,14 +658,35 @@ export function createSelectTool(): Tool {
           applyMove(state, info, ctx);
           return;
         case 'resize': {
-          const bounds = computeResizeBounds(
+          const lockAspect =
+            info.shiftKey ||
+            (state.initial.type === 'text' && state.handle.length === 2);
+          let bounds = computeResizeBounds(
             state.initial,
             state.util,
             state.handle,
             info.point,
-            info.shiftKey ||
-              (state.initial.type === 'text' && state.handle.length === 2),
+            lockAspect,
           );
+          if (useCanvasUiStore.getState().snappingEnabled && !info.altKey) {
+            const camera = useCameraStore.getState().camera;
+            const background = useCanvasUiStore.getState().background;
+            const initialBounds = state.util.getBounds(state.initial as never);
+            const snapped = snapResizeBounds(
+              bounds,
+              state.handle,
+              state.targets,
+              getSnapGridStep(background, camera),
+              SNAP_SCREEN / camera.z,
+              lockAspect,
+              (initialBounds.maxX - initialBounds.minX) /
+                (initialBounds.maxY - initialBounds.minY || 1),
+            );
+            bounds = snapped.bounds;
+            useSelectionStore.getState().setSnapGuides(snapped.guides);
+          } else {
+            useSelectionStore.getState().setSnapGuides([]);
+          }
           if (
             state.initial.type === 'text' &&
             (state.handle === 'e' || state.handle === 'w')
@@ -623,7 +717,30 @@ export function createSelectTool(): Tool {
           return;
         }
         case 'group-resize': {
-          const bounds = axisAlignedResize(state.bounds0, state.handle, info.point, info.shiftKey);
+          let bounds = axisAlignedResize(
+            state.bounds0,
+            state.handle,
+            info.point,
+            info.shiftKey,
+          );
+          if (useCanvasUiStore.getState().snappingEnabled && !info.altKey) {
+            const camera = useCameraStore.getState().camera;
+            const background = useCanvasUiStore.getState().background;
+            const snapped = snapResizeBounds(
+              bounds,
+              state.handle,
+              state.targets,
+              getSnapGridStep(background, camera),
+              SNAP_SCREEN / camera.z,
+              info.shiftKey,
+              (state.bounds0.maxX - state.bounds0.minX) /
+                (state.bounds0.maxY - state.bounds0.minY || 1),
+            );
+            bounds = snapped.bounds;
+            useSelectionStore.getState().setSnapGuides(snapped.guides);
+          } else {
+            useSelectionStore.getState().setSnapGuides([]);
+          }
           const sx = (bounds.maxX - bounds.minX) / (state.bounds0.maxX - state.bounds0.minX || 1);
           const sy = (bounds.maxY - bounds.minY) / (state.bounds0.maxY - state.bounds0.minY || 1);
           const fixedX = state.handle.includes('w') ? state.bounds0.maxX : state.bounds0.minX;
@@ -650,7 +767,20 @@ export function createSelectTool(): Tool {
         case 'handle': {
           const shape = ctx.editor.getShape(state.shapeId);
           if (!shape || !state.util.onHandleDrag) return;
-          const result = state.util.onHandleDrag(shape as never, state.handleId, info.point, {
+          let point = info.point;
+          if (
+            useCanvasUiStore.getState().snappingEnabled &&
+            !info.altKey &&
+            state.canSnap
+          ) {
+            const camera = useCameraStore.getState().camera;
+            const snapped = snapPoint(point, state.targets, SNAP_SCREEN / camera.z);
+            point = snapped.point;
+            useSelectionStore.getState().setSnapGuides(snapped.guides);
+          } else {
+            useSelectionStore.getState().setSnapGuides([]);
+          }
+          const result = state.util.onHandleDrag(shape as never, state.handleId, point, {
             shiftKey: info.shiftKey,
           });
           const patch: { x?: number; y?: number; props?: Record<string, unknown> } = {};
@@ -672,7 +802,7 @@ export function createSelectTool(): Tool {
         }
         case 'marquee': {
           const bounds = marqueeBounds(state.start, info.point);
-          state.mode = marqueeMode(state.start, info.point);
+          state.mode = marqueeMode();
           useSelectionStore.getState().setMarquee({ bounds, mode: state.mode });
           selectMarquee(bounds, state.mode, state.base, ctx.editor);
           return;

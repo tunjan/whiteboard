@@ -30,6 +30,7 @@ import { buttonVariants } from '@/components/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuSub,
@@ -53,7 +54,7 @@ interface SelectionToolbarProps {
 /** Screen-px gap between the selection's edge and the floating bar. */
 const GAP = 12;
 /** Roughly the rendered bar width; only used to keep it on-screen. */
-const APPROX_WIDTH = 320;
+const APPROX_WIDTH = 232;
 
 /**
  * Figma-style contextual bar that floats above the current selection, exposing
@@ -120,191 +121,225 @@ export function SelectionToolbar({ camera }: SelectionToolbarProps) {
     <TooltipProvider delay={300}>
       <div
         data-ui-layer
-        className="absolute z-20 -translate-x-1/2 pointer-events-auto"
+        className="pointer-events-auto absolute z-20 -translate-x-1/2"
         style={{
           left,
           top,
           transform: `translate(-50%, ${below ? '0' : '-100%'})`,
         }}
       >
-        <Surface className="touch-targets flex items-center gap-1 p-2">
-          <IconButton
-            label="Duplicate"
-            onClick={() => setSelection(duplicateShapes(editor, selectedIds))}
-          >
-            <CopyPlus className="size-4" />
-          </IconButton>
-          <IconButton label="Copy" onClick={() => copyShapes(editor, selectedIds)}>
-            <Copy className="size-4" />
-          </IconButton>
-          <IconButton
-            label="Delete"
-            destructive
-            disabled={allLocked}
-            onClick={() => {
-              const unlocked = selectedIds.filter(
-                (id) => !editor.getShape(id)?.locked,
-              );
-              editor.deleteShapes(deleteTargetIds(editor.getShapes(), unlocked));
-              useSelectionStore.getState().clear();
-            }}
-          >
-            <Trash2 className="size-4" />
-          </IconButton>
+        <Surface
+          role="toolbar"
+          aria-label="Selection actions"
+          className="touch-targets flex h-11 items-center gap-1.5 p-1.5 shadow-hover"
+        >
+          <div className="flex items-center gap-0.5">
+            <IconButton
+              label="Duplicate"
+              onClick={() => setSelection(duplicateShapes(editor, selectedIds))}
+            >
+              <CopyPlus />
+            </IconButton>
+          </div>
 
-          <div className="mx-1 h-5 w-px bg-border-subtle" />
+          <div className="flex items-center gap-0.5">
+            <IconButton
+              label="Bring to front"
+              onClick={() => bringToFront(editor, selectedIds)}
+            >
+              <SendToBack className="rotate-180" />
+            </IconButton>
+            <IconButton
+              label="Send to back"
+              onClick={() => sendToBack(editor, selectedIds)}
+            >
+              <SendToBack />
+            </IconButton>
+          </div>
 
-          <IconButton
-            label="Bring to front"
-            onClick={() => bringToFront(editor, selectedIds)}
-          >
-            <SendToBack className="size-4 rotate-180" />
-          </IconButton>
-          <IconButton
-            label="Send to back"
-            onClick={() => sendToBack(editor, selectedIds)}
-          >
-            <SendToBack className="size-4" />
-          </IconButton>
-          <IconButton
-            label={allLocked ? 'Unlock' : 'Lock'}
-            onClick={() => setLocked(!allLocked)}
-          >
-            {allLocked ? (
-              <Lock className="size-4" />
-            ) : (
-              <LockOpen className="size-4" />
-            )}
-          </IconButton>
+          <div className="flex items-center gap-0.5">
+            <IconButton
+              label={allLocked ? 'Unlock' : 'Lock'}
+              active={allLocked}
+              onClick={() => setLocked(!allLocked)}
+            >
+              {allLocked ? <Lock /> : <LockOpen />}
+            </IconButton>
+            <IconButton
+              label="Delete"
+              destructive
+              disabled={allLocked}
+              onClick={() => {
+                const unlocked = selectedIds.filter(
+                  (id) => !editor.getShape(id)?.locked,
+                );
+                editor.deleteShapes(
+                  deleteTargetIds(editor.getShapes(), unlocked),
+                );
+                useSelectionStore.getState().clear();
+              }}
+            >
+              <Trash2 />
+            </IconButton>
 
-          <div className="mx-1 h-5 w-px bg-border-subtle" />
-
-          <DropdownMenu>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <DropdownMenuTrigger
-                    aria-label="More actions"
-                    className={cn(
-                      buttonVariants({ variant: 'ghost', size: 'icon' }),
-                    )}
-                  />
-                }
-              >
-                <MoreHorizontal className="size-4" />
-              </TooltipTrigger>
-              <TooltipContent side="top">
-                <span>More</span>
-              </TooltipContent>
-            </Tooltip>
-            <DropdownMenuContent side="top" align="end" className="w-48">
-              <DropdownMenuItem onClick={() => bringForward(editor, selectedIds)}>
-                Bring forward
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => sendBackward(editor, selectedIds)}>
-                Send backward
-              </DropdownMenuItem>
-
-              <DropdownMenuSeparator />
-
-              <DropdownMenuSub>
-                <DropdownMenuSubTrigger disabled={!canAlign}>
-                  Align
-                </DropdownMenuSubTrigger>
-                <DropdownMenuSubContent className="w-44">
-                  <DropdownMenuItem onClick={() => align('left')}>
-                    Align left
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => align('centerX')}>
-                    Align center
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => align('right')}>
-                    Align right
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={() => align('top')}>
-                    Align top
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => align('centerY')}>
-                    Align middle
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => align('bottom')}>
-                    Align bottom
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    disabled={!canDistribute}
-                    onClick={() =>
-                      distributeShapes(editor, selectedIds, 'horizontal')
-                    }
-                  >
-                    Distribute horizontally
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    disabled={!canDistribute}
-                    onClick={() =>
-                      distributeShapes(editor, selectedIds, 'vertical')
-                    }
-                  >
-                    Distribute vertically
-                  </DropdownMenuItem>
-                </DropdownMenuSubContent>
-              </DropdownMenuSub>
-
-              <DropdownMenuItem
-                disabled={!canGroup}
-                onClick={() => {
-                  const gid = groupShapes(editor, selectedIds);
-                  if (gid) setSelection([gid]);
-                }}
-              >
-                <Group className="size-4" />
-                Group
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                disabled={!hasGroup}
-                onClick={() => {
-                  const freed = ungroupShapes(editor, selectedIds);
-                  if (freed.length) setSelection(freed);
-                }}
-              >
-                <Ungroup className="size-4" />
-                Ungroup
-              </DropdownMenuItem>
-
-              <DropdownMenuSeparator />
-
-              <DropdownMenuItem
-                onClick={() =>
-                  void exportSelectionToPng(selectedIds, 'selection')
-                }
-              >
-                <ImageDown className="size-4" />
-                Export as PNG
-              </DropdownMenuItem>
-              {singleImageId && (
-                <DropdownMenuItem
-                  onClick={() =>
-                    useImageCroppingStore.getState().start(singleImageId)
+            <DropdownMenu>
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <DropdownMenuTrigger
+                      aria-label="More actions"
+                      className={cn(
+                        buttonVariants({ variant: 'ghost', size: 'icon-sm' }),
+                      )}
+                    />
                   }
                 >
-                  <Crop className="size-4" />
-                  Crop
-                </DropdownMenuItem>
-              )}
-              <DropdownMenuItem
-                onClick={() => {
-                  useHiddenStore
-                    .getState()
-                    .hide(deleteTargetIds(editor.getShapes(), selectedIds));
-                  useSelectionStore.getState().clear();
-                }}
+                  <MoreHorizontal />
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                  <span>More actions</span>
+                </TooltipContent>
+              </Tooltip>
+              <DropdownMenuContent
+                side="top"
+                align="end"
+                sideOffset={8}
+                className="w-52"
               >
-                <EyeOff className="size-4" />
-                Hide
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+                <DropdownMenuGroup>
+                  <DropdownMenuItem
+                    onClick={() => copyShapes(editor, selectedIds)}
+                  >
+                    <Copy />
+                    Copy
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => bringForward(editor, selectedIds)}
+                  >
+                    Bring forward
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => sendBackward(editor, selectedIds)}
+                  >
+                    Send backward
+                  </DropdownMenuItem>
+                </DropdownMenuGroup>
+
+                <DropdownMenuSeparator />
+
+                <DropdownMenuGroup>
+                  <DropdownMenuSub>
+                    <DropdownMenuSubTrigger disabled={!canAlign}>
+                      Align
+                    </DropdownMenuSubTrigger>
+                    <DropdownMenuSubContent className="w-52">
+                      <DropdownMenuGroup>
+                        <DropdownMenuItem onClick={() => align('left')}>
+                          Align left
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => align('centerX')}>
+                          Align center
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => align('right')}>
+                          Align right
+                        </DropdownMenuItem>
+                      </DropdownMenuGroup>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuGroup>
+                        <DropdownMenuItem onClick={() => align('top')}>
+                          Align top
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => align('centerY')}>
+                          Align middle
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => align('bottom')}>
+                          Align bottom
+                        </DropdownMenuItem>
+                      </DropdownMenuGroup>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuGroup>
+                        <DropdownMenuItem
+                          disabled={!canDistribute}
+                          onClick={() =>
+                            distributeShapes(
+                              editor,
+                              selectedIds,
+                              'horizontal',
+                            )
+                          }
+                        >
+                          Distribute horizontally
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          disabled={!canDistribute}
+                          onClick={() =>
+                            distributeShapes(editor, selectedIds, 'vertical')
+                          }
+                        >
+                          Distribute vertically
+                        </DropdownMenuItem>
+                      </DropdownMenuGroup>
+                    </DropdownMenuSubContent>
+                  </DropdownMenuSub>
+
+                  <DropdownMenuItem
+                    disabled={!canGroup}
+                    onClick={() => {
+                      const gid = groupShapes(editor, selectedIds);
+                      if (gid) setSelection([gid]);
+                    }}
+                  >
+                    <Group />
+                    Group
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    disabled={!hasGroup}
+                    onClick={() => {
+                      const freed = ungroupShapes(editor, selectedIds);
+                      if (freed.length) setSelection(freed);
+                    }}
+                  >
+                    <Ungroup />
+                    Ungroup
+                  </DropdownMenuItem>
+                </DropdownMenuGroup>
+
+                <DropdownMenuSeparator />
+
+                <DropdownMenuGroup>
+                  <DropdownMenuItem
+                    onClick={() =>
+                      void exportSelectionToPng(selectedIds, 'selection')
+                    }
+                  >
+                    <ImageDown />
+                    Export PNG
+                  </DropdownMenuItem>
+                  {singleImageId && (
+                    <DropdownMenuItem
+                      onClick={() =>
+                        useImageCroppingStore.getState().start(singleImageId)
+                      }
+                    >
+                      <Crop />
+                      Crop
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuItem
+                    onClick={() => {
+                      useHiddenStore
+                        .getState()
+                        .hide(deleteTargetIds(editor.getShapes(), selectedIds));
+                      useSelectionStore.getState().clear();
+                    }}
+                  >
+                    <EyeOff />
+                    Hide
+                  </DropdownMenuItem>
+                </DropdownMenuGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </Surface>
       </div>
     </TooltipProvider>
@@ -316,12 +351,14 @@ function IconButton({
   onClick,
   disabled,
   destructive,
+  active,
   children,
 }: {
   label: string;
   onClick: () => void;
   disabled?: boolean;
   destructive?: boolean;
+  active?: boolean;
   children: ReactNode;
 }) {
   return (
@@ -330,11 +367,14 @@ function IconButton({
         onClick={onClick}
         disabled={disabled}
         aria-label={label}
+        aria-pressed={active || undefined}
         className={cn(
-          buttonVariants({ variant: 'ghost', size: 'icon' }),
+          buttonVariants({ variant: 'ghost', size: 'icon-sm' }),
+          'disabled:border-transparent disabled:bg-transparent disabled:text-content-muted',
+          active &&
+            'bg-bg-muted text-content-emphasis hover:bg-bg-muted hover:text-content-emphasis',
           destructive &&
-            'text-content-error hover:bg-bg-error hover:text-content-error',
-          disabled && 'pointer-events-none opacity-50',
+            'hover:bg-bg-error hover:text-content-error',
         )}
       >
         {children}

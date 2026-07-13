@@ -33,6 +33,7 @@ import '@/canvas/tools/register';
 import { useStyleStore } from '@/canvas/use-style-store';
 import { useToolStore } from '@/canvas/use-tool-store';
 import { useToolLockStore } from '@/canvas/use-tool-lock-store';
+import { useAnimationStore } from '@/animation/use-animation-store';
 
 const POLYGON_KINDS: { kind: PolygonKind; label: string }[] = [
   { kind: 'triangle', label: 'Triangle' },
@@ -43,7 +44,7 @@ const POLYGON_KINDS: { kind: PolygonKind; label: string }[] = [
 ];
 
 const GROUP_1 = ['select', 'hand', 'lasso'];
-const GROUP_2 = ['draw', 'eraser'];
+const GROUP_2 = ['draw', 'eraser', 'laser'];
 const GROUP_3 = ['text', 'graph'];
 const GROUP_4 = ['rectangle', 'ellipse', 'arrow'];
 const ACTIVE_TOOL_CLASS =
@@ -94,7 +95,6 @@ function ShapesMenu({ active }: { active: boolean }) {
               aria-label="More shapes"
               className={cn(
                 buttonVariants({ variant: 'ghost', size: 'icon-lg' }),
-                'rounded-lg',
                 active && ACTIVE_TOOL_CLASS,
               )}
             />
@@ -140,7 +140,6 @@ function MediaMenu() {
                 aria-label="Add media"
                 className={cn(
                   buttonVariants({ variant: 'ghost', size: 'icon-lg' }),
-                  'rounded-lg',
                 )}
               />
             }
@@ -181,7 +180,6 @@ function ToolLockButton() {
         aria-pressed={locked}
         className={cn(
           buttonVariants({ variant: 'ghost', size: 'icon-lg' }),
-          'rounded-lg',
           locked && ACTIVE_UTILITY_CLASS,
         )}
       >
@@ -207,6 +205,7 @@ export function Toolbar() {
   const activeToolId = useToolStore((s) => s.activeToolId);
   const setTool = useToolStore((s) => s.setTool);
   const [hidden, setHidden] = useState(false);
+  const playbackActive = useAnimationStore((s) => s.playbackActive);
 
   const renderToolButton = (toolId: string) => {
     const tool = toolRegistry.get(toolId);
@@ -221,7 +220,6 @@ export function Toolbar() {
           aria-pressed={active}
           className={cn(
             buttonVariants({ variant: 'ghost', size: 'icon-lg' }),
-            'rounded-lg',
             active && ACTIVE_TOOL_CLASS,
           )}
         >
@@ -252,11 +250,13 @@ export function Toolbar() {
           role="toolbar"
           aria-label="Canvas tools"
           aria-hidden={hidden}
-          inert={hidden}
+          inert={hidden || playbackActive}
+          aria-disabled={playbackActive}
           className={cn(
             'touch-targets flex h-12 w-max max-w-[calc(100vw-1rem)] origin-bottom flex-nowrap items-center gap-2 overflow-x-auto overflow-y-hidden p-1.5 shadow-hover transition-all duration-150 ease-out motion-reduce:transition-none',
             hidden &&
               'pointer-events-none translate-y-[calc(100%+1rem)] opacity-0',
+            playbackActive && 'pointer-events-none opacity-40',
           )}
         >
           {/* Group 1: Navigation & Selection */}
@@ -294,7 +294,6 @@ export function Toolbar() {
                 aria-label="Hide toolbar"
                 className={cn(
                   buttonVariants({ variant: 'ghost', size: 'icon-lg' }),
-                  'rounded-lg',
                 )}
               >
                 <ChevronDown />
@@ -313,6 +312,7 @@ export function Toolbar() {
             onClick={() => setHidden(false)}
             aria-label="Show toolbar"
             aria-hidden={!hidden}
+            disabled={playbackActive}
             tabIndex={hidden ? 0 : -1}
             className={cn(
               buttonVariants({ variant: 'ghost', size: 'icon-lg' }),

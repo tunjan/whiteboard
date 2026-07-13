@@ -76,7 +76,7 @@ const ACTION_SHORTCUTS: Shortcut[] = [
   { label: 'Bring forward / backward', keys: `${MOD} ] / [` },
   { label: 'Bring to front / back', keys: `${MOD} ⇧ ] / [` },
   { label: 'Zoom in / out / reset', keys: `${MOD} + / − / 0` },
-  { label: 'Disable snapping', keys: 'Alt-drag' },
+  { label: 'Temporarily disable snapping', keys: 'Alt-drag' },
   { label: 'Pan', keys: 'Space-drag' },
   { label: 'Zoom', keys: `${MOD}-scroll / pinch` },
   { label: 'Back to select', keys: 'Esc' },
@@ -192,6 +192,10 @@ function GeneralSettings() {
   const setTheme = useThemeStore((state) => state.setTheme);
   const background = useCanvasUiStore((state) => state.background);
   const setBackground = useCanvasUiStore((state) => state.setBackground);
+  const snappingEnabled = useCanvasUiStore((state) => state.snappingEnabled);
+  const setSnappingEnabled = useCanvasUiStore(
+    (state) => state.setSnappingEnabled,
+  );
 
   return (
     <div className="flex flex-col gap-4 p-4 sm:p-6">
@@ -220,6 +224,14 @@ function GeneralSettings() {
             </ToggleGroupItem>
           ))}
         </ToggleGroup>
+      </PreferenceRow>
+
+      <PreferenceRow label="Object snapping">
+        <Switch
+          aria-label="Object snapping"
+          checked={snappingEnabled}
+          onCheckedChange={setSnappingEnabled}
+        />
       </PreferenceRow>
     </div>
   );

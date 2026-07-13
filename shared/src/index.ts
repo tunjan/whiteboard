@@ -11,3 +11,5 @@ export * from './document';
 export * from './registry';
 export * from './board-repository';
 export * from './music';
+export * from './animation';
+export * from './recordings';

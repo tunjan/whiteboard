@@ -94,7 +94,6 @@ export function FollowControls({ identity }: FollowControlsProps) {
                 aria-pressed={following}
                 onClick={toggle}
                 className={cn(
-                  'rounded-lg',
                   following &&
                     'border-[var(--follow-color)] bg-[color-mix(in_oklch,var(--follow-color),transparent_84%)] text-content-emphasis hover:bg-[color-mix(in_oklch,var(--follow-color),transparent_78%)]',
                 )}

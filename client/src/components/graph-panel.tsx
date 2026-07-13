@@ -11,8 +11,8 @@ import type {
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
-import { InputGroup, InputGroupAddon } from '@/components/ui/input-group';
 import { MathField } from '@/components/ui/math-field';
+import { PanelLabel } from '@/components/ui/panel-label';
 import {
   Popover,
   PopoverContent,
@@ -22,6 +22,7 @@ import {
 import { Separator } from '@/components/ui/separator';
 import { Slider } from '@/components/ui/slider';
 import { Surface } from '@/components/ui/surface';
+import { Switch } from '@/components/ui/switch';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import {
   DEFAULT_GRAPH_VIEWPORT,
@@ -33,11 +34,23 @@ import {
 import { breakUndoCapture, editor, useDocumentStore } from '@/canvas/use-document-store';
 import { useSelectionStore } from '@/canvas/use-selection-store';
 import { cn } from '@/lib/utils';
+import { useAnimationStore } from '@/animation/use-animation-store';
 
 const DASHES: StrokeDash[] = ['solid', 'dashed', 'dotted'];
 
 function valueFromSlider(value: number | number[]): number {
   return Array.isArray(value) ? value[0]! : value;
+}
+
+/** Trails `value` by `delay` ms — used to keep parse errors quiet while the
+ * user is still typing (Desmos-style). */
+function useDebouncedValue<T>(value: T, delay: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(timer);
+  }, [value, delay]);
+  return debounced;
 }
 
 function DashPreview({ dash }: { dash: StrokeDash }) {
@@ -59,57 +72,165 @@ function DashPreview({ dash }: { dash: StrokeDash }) {
   );
 }
 
-function expressionError(expression: GraphExpression): string | null {
-  if (!expression.expression.trim()) return null;
-  const parsed = parseGraphExpression(expression.expression);
+function expressionError(source: string): string | null {
+  if (!source.trim()) return null;
+  const parsed = parseGraphExpression(source);
   return parsed.ok ? null : parsed.message;
 }
 
-function ColorPicker({
+/** Swatch button opening the curve's color + line style controls. The dot is
+ * filled when the curve is visible and outline-only when hidden. */
+function CurveStylePopover({
   expression,
-  onColorChange,
+  onPatch,
 }: {
   expression: GraphExpression;
-  onColorChange: (color: string) => void;
+  onPatch: (patch: Partial<GraphExpression>) => void;
 }) {
   return (
     <Popover>
       <PopoverTrigger
-        aria-label="Curve color"
+        aria-label="Curve color and line style"
+        title="Color & line style"
         className="flex size-6 items-center justify-center rounded-md transition-colors hover:bg-bg-muted"
       >
         <span
-          className="size-4 rounded-full border border-border-default"
-          style={{ background: expression.color }}
+          className="size-4 rounded-full border-2 transition-colors"
+          style={{
+            borderColor: expression.color,
+            background: expression.visible ? expression.color : 'transparent',
+          }}
         />
       </PopoverTrigger>
       <PopoverContent side="left" align="start" className="w-44">
-        <PopoverTitle>Curve color</PopoverTitle>
-        <div role="group" aria-label="Curve color" className="grid grid-cols-6 gap-1">
-          {GRAPH_COLORS.map((color) => {
-            const active = expression.color === color;
-            return (
-              <button
-                key={color}
-                type="button"
-                aria-label={`Use ${color}`}
-                aria-pressed={active}
-                onClick={() => onColorChange(color)}
-                className={cn(
-                  'flex size-6 items-center justify-center rounded-md transition-colors',
-                  active ? 'bg-bg-muted' : 'hover:bg-bg-muted',
-                )}
-              >
-                <span
-                  className="size-4 rounded-full border border-border-default"
-                  style={{ background: color }}
-                />
-              </button>
-            );
-          })}
+        <PopoverTitle>Curve style</PopoverTitle>
+        <div className="flex flex-col gap-1.5">
+          <PanelLabel>Color</PanelLabel>
+          <div role="group" aria-label="Curve color" className="grid grid-cols-4 gap-1">
+            {GRAPH_COLORS.map((color) => {
+              const active = expression.color === color;
+              return (
+                <button
+                  key={color}
+                  type="button"
+                  aria-label={`Use ${color}`}
+                  aria-pressed={active}
+                  onClick={() => onPatch({ color })}
+                  className={cn(
+                    'flex size-7 items-center justify-center rounded-md transition-colors',
+                    active ? 'bg-bg-muted' : 'hover:bg-bg-muted',
+                  )}
+                >
+                  <span
+                    className="size-4 rounded-full border border-border-default"
+                    style={{ background: color }}
+                  />
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <PanelLabel>Line style</PanelLabel>
+          <ToggleGroup
+            aria-label="Line style"
+            value={[expression.dash]}
+            onValueChange={(value) => {
+              const dash = value[0] as StrokeDash | undefined;
+              if (dash) onPatch({ dash });
+            }}
+          >
+            {DASHES.map((dash) => (
+              <ToggleGroupItem key={dash} value={dash} title={dash}>
+                <DashPreview dash={dash} />
+              </ToggleGroupItem>
+            ))}
+          </ToggleGroup>
         </div>
       </PopoverContent>
     </Popover>
+  );
+}
+
+/** One Desmos-style expression row: numbered gutter with the curve's style
+ * swatch, a math field, and hover-revealed visibility/delete actions. */
+function ExpressionRow({
+  expression,
+  index,
+  onPatch,
+  onDelete,
+  onEnter,
+  onBackspaceEmpty,
+  onMoveOut,
+  registerField,
+}: {
+  expression: GraphExpression;
+  index: number;
+  onPatch: (patch: Partial<GraphExpression>) => void;
+  onDelete: () => void;
+  onEnter: () => void;
+  onBackspaceEmpty: () => void;
+  onMoveOut: (direction: 'upward' | 'downward') => void;
+  registerField: (el: MathfieldElement | null) => void;
+}) {
+  // Errors only surface once typing pauses, so half-finished expressions
+  // ("y=", "sin(") don't flash red on every keystroke.
+  const settled = useDebouncedValue(expression.expression, 500);
+  const error =
+    settled === expression.expression ? expressionError(settled) : null;
+
+  return (
+    <div className="group relative flex items-start gap-1 px-1.5 py-1 transition-colors focus-within:bg-bg-subtle">
+      <div className="flex h-9 w-8 shrink-0 items-center justify-center">
+        <CurveStylePopover expression={expression} onPatch={onPatch} />
+      </div>
+
+      <div className="flex min-w-0 flex-1 flex-col">
+        <MathField
+          id={`graph-expression-${expression.id}`}
+          aria-label={`Expression ${index + 1}`}
+          aria-invalid={error ? true : undefined}
+          className={cn(
+            'w-full transition-opacity',
+            !expression.visible && 'opacity-50',
+          )}
+          value={expression.expression}
+          placeholder="y=sin(x) or x^2+y^2=1"
+          elementRef={registerField}
+          onChange={(value) => onPatch({ expression: value })}
+          onEnter={onEnter}
+          onBackspaceEmpty={onBackspaceEmpty}
+          onMoveOut={onMoveOut}
+        />
+        {error ? (
+          <div className="px-2 pb-1 text-xs font-medium text-content-error">
+            {error}
+          </div>
+        ) : null}
+      </div>
+
+      <div className="touch-reveal flex h-9 shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
+        <button
+          type="button"
+          aria-label={expression.visible ? 'Hide curve' : 'Show curve'}
+          aria-pressed={!expression.visible}
+          title={expression.visible ? 'Hide curve' : 'Show curve'}
+          className={cn(buttonVariants({ variant: 'ghost', size: 'icon-xs' }))}
+          onClick={() => onPatch({ visible: !expression.visible })}
+        >
+          {expression.visible ? <Eye /> : <EyeOff />}
+        </button>
+        <button
+          type="button"
+          aria-label="Delete curve"
+          title="Delete curve"
+          className={cn(buttonVariants({ variant: 'ghost', size: 'icon-xs' }))}
+          onClick={onDelete}
+        >
+          <Trash2 />
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -197,6 +318,7 @@ function SliderRow({
             type="button"
             aria-label={playing ? `Pause ${name}` : `Animate ${name}`}
             aria-pressed={playing}
+            title={playing ? 'Pause' : 'Animate'}
             className={cn(buttonVariants({ variant: 'ghost', size: 'icon-xs' }))}
             onClick={() => setPlaying((p) => !p)}
           >
@@ -205,32 +327,34 @@ function SliderRow({
           <FieldLabel className="font-mono">{name}</FieldLabel>
         </div>
         <span className="font-mono text-xs tabular-nums text-content-subtle">
-          {Number(parameter.value.toPrecision(4))}
+          = {Number(parameter.value.toPrecision(4))}
         </span>
       </div>
-      <Slider
-        aria-label={name}
-        min={parameter.min}
-        max={parameter.max}
-        step={parameter.step}
-        value={parameter.value}
-        onValueChange={(value) =>
-          onChange({ ...parameter, value: valueFromSlider(value) })
-        }
-      />
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex items-center gap-1.5">
         <BoundInput
           label={`${name} minimum`}
           value={minDraft}
           onChange={setMinDraft}
           onCommit={(raw) => commitBound('min', raw)}
+          className="text-center"
+        />
+        <Slider
+          aria-label={name}
+          min={parameter.min}
+          max={parameter.max}
+          step={parameter.step}
+          value={parameter.value}
+          onValueChange={(value) =>
+            onChange({ ...parameter, value: valueFromSlider(value) })
+          }
+          className="min-w-0 flex-1"
         />
         <BoundInput
           label={`${name} maximum`}
           value={maxDraft}
           onChange={setMaxDraft}
           onCommit={(raw) => commitBound('max', raw)}
-          className="text-right"
+          className="text-center"
         />
       </div>
     </Field>
@@ -255,6 +379,7 @@ function BoundInput({
       type="number"
       inputMode="decimal"
       aria-label={label}
+      title={label}
       value={value}
       onChange={(event) => onChange(event.currentTarget.value)}
       onBlur={(event) => onCommit(event.currentTarget.value)}
@@ -265,7 +390,7 @@ function BoundInput({
           event.currentTarget.blur();
         }
       }}
-      className={cn('h-7 w-16 px-2 font-mono text-xs', className)}
+      className={cn('h-7 w-12 shrink-0 px-1 font-mono text-xs', className)}
     />
   );
 }
@@ -280,9 +405,11 @@ const VIEWPORT_FIELDS: { key: keyof GraphViewport; label: string }[] = [
 function ViewRange({
   viewport,
   onChange,
+  onReset,
 }: {
   viewport: GraphViewport;
   onChange: (viewport: GraphViewport) => void;
+  onReset: () => void;
 }) {
   const toDraft = (v: GraphViewport) => ({
     xMin: String(v.xMin),
@@ -308,8 +435,17 @@ function ViewRange({
 
   return (
     <FieldGroup className="gap-2">
-      <div className="text-sm font-medium leading-none text-content-emphasis select-none">
-        View range
+      <div className="flex items-center justify-between">
+        <PanelLabel>View range</PanelLabel>
+        <Button
+          variant="ghost"
+          size="xs"
+          title="Reset to the default view"
+          onClick={onReset}
+        >
+          <RotateCcw data-icon="inline-start" />
+          Reset
+        </Button>
       </div>
       <div className="grid grid-cols-2 gap-2">
         {VIEWPORT_FIELDS.map(({ key, label }) => (
@@ -348,6 +484,7 @@ export function GraphPanel() {
     (s) => s.doc.pages[s.currentPageId]?.shapes,
   );
   const fieldRefs = useRef(new Map<string, MathfieldElement>());
+  const playbackActive = useAnimationStore((s) => s.playbackActive);
 
   // Focus a row's math field once it has mounted (e.g. after add/delete).
   const focusField = (id: string, tries = 5) => {
@@ -359,7 +496,7 @@ export function GraphPanel() {
   const selectedId = selectedIds.length === 1 ? selectedIds[0] : null;
   const shape = selectedId ? shapesRecord?.[selectedId] : undefined;
 
-  if (!shape || shape.type !== 'graph') return null;
+  if (playbackActive || !shape || shape.type !== 'graph') return null;
 
   const props = shape.props;
   const showAxisLabels = props.showAxisLabels !== false;
@@ -418,146 +555,62 @@ export function GraphPanel() {
     if (target) focusField(target.id);
   };
 
+  // Arrow up/down at a row boundary moves focus to the adjacent row (Desmos).
+  const moveFocus = (fromId: string, direction: 'upward' | 'downward') => {
+    const index = props.expressions.findIndex((e) => e.id === fromId);
+    const target =
+      props.expressions[direction === 'upward' ? index - 1 : index + 1];
+    if (target) focusField(target.id);
+  };
+
   const parameterNames = Object.keys(props.parameters).sort((a, b) =>
     a.localeCompare(b),
   );
 
   return (
     <Surface className="touch-targets absolute top-[calc(3.75rem+env(safe-area-inset-top))] right-[calc(1rem+env(safe-area-inset-right))] z-20 flex max-h-[calc(100dvh-6.25rem-env(safe-area-inset-top))] w-[min(20rem,calc(100vw-2rem))] flex-col gap-4 overflow-y-auto p-4 shadow-floating">
-      <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-sm font-semibold text-content-emphasis">Plotter</div>
-          <div className="text-xs text-content-subtle">
-            {props.expressions.length} curve{props.expressions.length === 1 ? '' : 's'}
-          </div>
+      <div className="min-w-0">
+        <div className="text-sm font-semibold text-content-emphasis">Plotter</div>
+        <div className="text-xs text-content-subtle">
+          {props.expressions.length} curve{props.expressions.length === 1 ? '' : 's'}
+          {parameterNames.length > 0
+            ? ` · ${parameterNames.length} slider${parameterNames.length === 1 ? '' : 's'}`
+            : ''}
         </div>
-        <Button
-          variant="outline"
-          size="xs"
-          onClick={() => updateGraph({ viewport: { ...DEFAULT_GRAPH_VIEWPORT } })}
-        >
-          <RotateCcw data-icon="inline-start" />
-          Reset view
-        </Button>
       </div>
 
-      <Separator />
-
-      <Field orientation="horizontal">
-        <FieldLabel>Axis numbers</FieldLabel>
-        <ToggleGroup
-          aria-label="Axis numbers"
-          className="w-28"
-          value={[showAxisLabels ? 'on' : 'off']}
-          onValueChange={(value) => {
-            const next = value[0];
-            if (next) updateGraph({ showAxisLabels: next === 'on' });
-          }}
+      {/* Desmos-style expression list: full-bleed rows with hairline dividers. */}
+      <div className="-mx-4 flex flex-col divide-y divide-border-subtle border-y border-border-subtle">
+        {props.expressions.map((expression, index) => (
+          <ExpressionRow
+            key={expression.id}
+            expression={expression}
+            index={index}
+            onPatch={(patch) => patchExpression(expression.id, patch)}
+            onDelete={() => deleteExpression(expression.id)}
+            onEnter={() => insertExpressionAfter(expression.id)}
+            onBackspaceEmpty={() => deleteEmptyExpression(expression.id)}
+            onMoveOut={(direction) => moveFocus(expression.id, direction)}
+            registerField={(el) => {
+              if (el) fieldRefs.current.set(expression.id, el);
+              else fieldRefs.current.delete(expression.id);
+            }}
+          />
+        ))}
+        <button
+          type="button"
+          onClick={addExpression}
+          className="flex w-full items-center gap-2 px-3.5 py-2 text-left text-sm text-content-subtle transition-colors hover:bg-bg-muted hover:text-content-emphasis"
         >
-          <ToggleGroupItem value="on">On</ToggleGroupItem>
-          <ToggleGroupItem value="off">Off</ToggleGroupItem>
-        </ToggleGroup>
-      </Field>
-
-      <Separator />
-
-      <ViewRange
-        viewport={props.viewport}
-        onChange={(viewport) => updateGraph({ viewport })}
-      />
-
-      <Separator />
-
-      <FieldGroup className="gap-3">
-        {props.expressions.map((expression, index) => {
-          const error = expressionError(expression);
-          return (
-            <Field key={expression.id} data-invalid={error ? true : undefined}>
-              <FieldLabel className="sr-only" htmlFor={`graph-expression-${expression.id}`}>
-                Expression {index + 1}
-              </FieldLabel>
-              <InputGroup aria-invalid={error ? true : undefined}>
-                <InputGroupAddon>
-                  <ColorPicker
-                    expression={expression}
-                    onColorChange={(color) =>
-                      patchExpression(expression.id, { color })
-                    }
-                  />
-                </InputGroupAddon>
-                <MathField
-                  id={`graph-expression-${expression.id}`}
-                  aria-label={`Expression ${index + 1}`}
-                  aria-invalid={error ? true : undefined}
-                  className="flex-1"
-                  value={expression.expression}
-                  placeholder="y=sin(x) or x^2+y^2=1"
-                  elementRef={(el) => {
-                    if (el) fieldRefs.current.set(expression.id, el);
-                    else fieldRefs.current.delete(expression.id);
-                  }}
-                  onChange={(value) =>
-                    patchExpression(expression.id, { expression: value })
-                  }
-                  onEnter={() => insertExpressionAfter(expression.id)}
-                  onBackspaceEmpty={() => deleteEmptyExpression(expression.id)}
-                />
-                <InputGroupAddon className="gap-1">
-                  <button
-                    type="button"
-                    aria-label={expression.visible ? 'Hide curve' : 'Show curve'}
-                    className={cn(buttonVariants({ variant: 'ghost', size: 'icon-xs' }))}
-                    onClick={() =>
-                      patchExpression(expression.id, {
-                        visible: !expression.visible,
-                      })
-                    }
-                  >
-                    {expression.visible ? <Eye /> : <EyeOff />}
-                  </button>
-                  <button
-                    type="button"
-                    aria-label="Delete curve"
-                    className={cn(buttonVariants({ variant: 'ghost', size: 'icon-xs' }))}
-                    onClick={() => deleteExpression(expression.id)}
-                  >
-                    <Trash2 />
-                  </button>
-                </InputGroupAddon>
-              </InputGroup>
-
-              <ToggleGroup
-                aria-label={`Line style for expression ${index + 1}`}
-                value={[expression.dash]}
-                onValueChange={(value) => {
-                  const dash = value[0] as StrokeDash | undefined;
-                  if (dash) patchExpression(expression.id, { dash });
-                }}
-              >
-                {DASHES.map((dash) => (
-                  <ToggleGroupItem key={dash} value={dash} title={dash}>
-                    <DashPreview dash={dash} />
-                  </ToggleGroupItem>
-                ))}
-              </ToggleGroup>
-
-              {error ? (
-                <div className="text-xs font-medium text-content-error">{error}</div>
-              ) : null}
-            </Field>
-          );
-        })}
-      </FieldGroup>
-
-      <Button variant="outline" size="sm" onClick={addExpression}>
-        <Plus data-icon="inline-start" />
-        Add curve
-      </Button>
+          <Plus className="size-4" aria-hidden="true" />
+          Add curve
+        </button>
+      </div>
 
       {parameterNames.length > 0 ? (
         <>
-          <Separator />
           <FieldGroup className="gap-3">
+            <PanelLabel>Sliders</PanelLabel>
             {parameterNames.map((name) => {
               const parameter = props.parameters[name]!;
               return (
@@ -577,8 +630,24 @@ export function GraphPanel() {
               );
             })}
           </FieldGroup>
+          <Separator />
         </>
       ) : null}
+
+      <ViewRange
+        viewport={props.viewport}
+        onChange={(viewport) => updateGraph({ viewport })}
+        onReset={() => updateGraph({ viewport: { ...DEFAULT_GRAPH_VIEWPORT } })}
+      />
+
+      <Field orientation="horizontal">
+        <FieldLabel>Axis numbers</FieldLabel>
+        <Switch
+          aria-label="Axis numbers"
+          checked={showAxisLabels}
+          onCheckedChange={(checked) => updateGraph({ showAxisLabels: checked })}
+        />
+      </Field>
     </Surface>
   );
 }

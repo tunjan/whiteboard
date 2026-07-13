@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Check, Copy, Share2 } from 'lucide-react';
 import { useDocumentStore } from '@/canvas/use-document-store';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Surface } from '@/components/ui/surface';
 
 /** Build the shareable URL for a board, pinned to the page being viewed. */
@@ -12,7 +13,7 @@ export function shareUrl(boardId: string, pageId: string): string {
 }
 
 /**
- * Share control (top-right chrome, tldraw-style). Copies a capability link to
+ * Share control for the top-right chrome. Copies a capability link to
  * the board that opens straight to the page the sharer is currently viewing.
  */
 export function ShareButton() {
@@ -64,12 +65,11 @@ export function ShareButton() {
   return (
     <div ref={rootRef} className="relative" data-ui-layer>
       <Button
-        variant="outline"
+        variant="ghost"
         size="sm"
         aria-label="Share board"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        className="rounded-lg"
       >
         <Share2 data-icon="inline-start" />
         <span className="hidden sm:inline">Share</span>
@@ -85,17 +85,17 @@ export function ShareButton() {
             on now.
           </p>
           <div className="flex items-center gap-2">
-            <input
+            <Input
               readOnly
               value={link}
               onFocus={(e) => e.currentTarget.select()}
-              className="h-8 w-full min-w-0 flex-1 rounded-md border border-border-subtle bg-bg-default px-2 font-mono text-xs text-content-emphasis outline-none focus-visible:border-border-emphasis focus-visible:ring-4 focus-visible:ring-border-subtle"
+              className="h-8 flex-1 px-2 font-mono text-xs"
             />
             <Button
               variant={copied ? 'outline' : 'default'}
               size="sm"
               onClick={copy}
-              className="h-8 shrink-0 rounded-md"
+              className="shrink-0"
             >
               {copied ? (
                 <Check data-icon="inline-start" />

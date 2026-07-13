@@ -4,7 +4,12 @@ import type { Camera } from '@/canvas/camera';
 import { viewportWorldBounds } from '@/canvas/geometry';
 import { setCurrentPage } from '@/canvas/use-document-store';
 import { useCameraStore } from '@/canvas/use-camera-store';
+import {
+  type LaserPresence,
+  useLaserStore,
+} from '@/canvas/use-laser-store';
 import { stopFollowingForManualCameraChange } from '@/collab/use-follow-store';
+import { isAnimationPlaybackActive } from '@/animation/use-animation-store';
 import {
   type PeerPresence,
   type TextSelectionPresence,
@@ -27,12 +32,15 @@ let localUser: LocalUser | null = null;
 let localPage: string | null = null;
 let localFollowing = false;
 let localTextSelection: TextSelectionPresence | null = null;
+let localLaser: LaserPresence | null = null;
 let lastCursorSent = 0;
+let lastLaserSent = 0;
 let lastViewportSent = 0;
 let lastSummonSent = 0;
 let latestViewport: ViewportPresence | null = null;
 
 const CURSOR_THROTTLE_MS = 40;
+const LASER_THROTTLE_MS = 40;
 const VIEWPORT_THROTTLE_MS = 70;
 
 // Previous peer objects keyed by clientId. Awareness fires `change` on any
@@ -59,6 +67,7 @@ function publishPeers(a: Awareness): void {
     const following = (state.following as boolean | undefined) ?? false;
     const textSelection =
       (state.textSelection as TextSelectionPresence | null) ?? null;
+    const laser = (state.laser as LaserPresence | null) ?? null;
     const prev = prevPeers.get(clientId);
     const peer: PeerPresence =
       prev &&
@@ -71,7 +80,8 @@ function publishPeers(a: Awareness): void {
       prev.summon === summon &&
       prev.page === page &&
       prev.following === following &&
-      prev.textSelection === textSelection
+      prev.textSelection === textSelection &&
+      prev.laser === laser
         ? prev
         : {
             clientId,
@@ -85,6 +95,7 @@ function publishPeers(a: Awareness): void {
             page,
             following,
             textSelection,
+            laser,
           };
     next.set(clientId, peer);
     peers.push(peer);
@@ -109,6 +120,7 @@ export function setActiveAwareness(next: Awareness | null): void {
   if (localPage) next.setLocalStateField('page', localPage);
   next.setLocalStateField('following', localFollowing);
   next.setLocalStateField('textSelection', localTextSelection);
+  next.setLocalStateField('laser', localLaser);
   publishPeers(next);
 }
 
@@ -137,6 +149,22 @@ export function setLocalCursor(point: Point | null): void {
     lastCursorSent = now;
   }
   awareness.setLocalStateField('cursor', point);
+}
+
+/** Publish a transient presentation trail without touching the board document. */
+export function setLocalLaser(laser: LaserPresence | null): void {
+  const wasActive = localLaser?.active ?? false;
+  localLaser = laser;
+  useLaserStore.getState().setLaser(laser);
+  if (!awareness) return;
+  if (laser?.active && wasActive) {
+    const now = performance.now();
+    if (now - lastLaserSent < LASER_THROTTLE_MS) return;
+    lastLaserSent = now;
+  } else {
+    lastLaserSent = performance.now();
+  }
+  awareness.setLocalStateField('laser', laser);
 }
 
 export function setLocalTextSelection(
@@ -172,6 +200,7 @@ export function summonAll(): void {
  * the peer has published a viewport and we have a measured local viewport.
  */
 export function jumpToPeerViewport(peer: PeerPresence): void {
+  if (isAnimationPlaybackActive()) return;
   if (!peer.viewport) return;
   const localSize = latestViewport?.size;
   if (!localSize || localSize.width <= 0 || localSize.height <= 0) return;

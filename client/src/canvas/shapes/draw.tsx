@@ -16,6 +16,7 @@ import type { ShapeUtil } from './types';
 export const drawUtil: ShapeUtil<'draw'> = {
   type: 'draw',
   canResize: true,
+  canSnap: false,
 
   getDefaultProps: () => ({
     points: [],

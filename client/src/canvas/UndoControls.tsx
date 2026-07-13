@@ -13,6 +13,7 @@ interface UndoControlsProps {
   canRedo: boolean;
   onUndo: () => void;
   onRedo: () => void;
+  disabled?: boolean;
 }
 
 export function UndoControls({
@@ -20,6 +21,7 @@ export function UndoControls({
   canRedo,
   onUndo,
   onRedo,
+  disabled = false,
 }: UndoControlsProps) {
   return (
     <div
@@ -27,16 +29,17 @@ export function UndoControls({
       className="touch-targets absolute left-[calc(1rem+env(safe-area-inset-left))] bottom-[calc(1rem+env(safe-area-inset-bottom))] [@media(pointer:coarse)]:bottom-[calc(7rem+env(safe-area-inset-bottom))] select-none"
     >
       <TooltipProvider delay={300}>
-        <Surface className="flex items-center gap-1 p-2 shadow-floating">
+        <Surface className="flex h-12 items-center gap-1 p-1.5 shadow-hover">
           <Tooltip>
             <TooltipTrigger
               render={
                 <Button
                   variant="ghost"
-                  size="icon-sm"
+                  size="icon-lg"
                   aria-label="Undo"
-                  disabled={!canUndo}
+                  disabled={disabled || !canUndo}
                   onClick={onUndo}
+                  className="disabled:border-transparent disabled:bg-transparent disabled:text-content-muted"
                 />
               }
             >
@@ -51,10 +54,11 @@ export function UndoControls({
               render={
                 <Button
                   variant="ghost"
-                  size="icon-sm"
+                  size="icon-lg"
                   aria-label="Redo"
-                  disabled={!canRedo}
+                  disabled={disabled || !canRedo}
                   onClick={onRedo}
+                  className="disabled:border-transparent disabled:bg-transparent disabled:text-content-muted"
                 />
               }
             >

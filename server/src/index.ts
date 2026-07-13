@@ -10,6 +10,7 @@ import { blobRoutes } from './blobs/routes';
 import { boardRoutes } from './boards/routes';
 import { hocuspocus } from './collab/hocuspocus';
 import { musicRoutes } from './music/routes';
+import { recordingRoutes } from './recordings/routes';
 
 const app = new Hono();
 
@@ -18,6 +19,7 @@ app.route('/api/auth', authRoutes);
 app.route('/api/boards', boardRoutes);
 app.route('/api/blobs', blobRoutes);
 app.route('/api/music', musicRoutes);
+app.route('/api/recordings', recordingRoutes);
 
 const clientDist = fileURLToPath(new URL('../../client/dist', import.meta.url));
 const clientIndex = fileURLToPath(

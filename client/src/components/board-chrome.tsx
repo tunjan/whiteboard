@@ -3,8 +3,8 @@ import {
   ArrowLeft,
   Cog,
   Download,
+  EllipsisVertical,
   Moon,
-  MoreHorizontal,
   NotebookPen,
   Sun,
 } from 'lucide-react';
@@ -14,6 +14,7 @@ import type { Identity } from '@/collab/identity';
 import { jumpToPeerViewport } from '@/collab/presence';
 import { usePresenceStore } from '@/collab/use-presence-store';
 import { BoardNotesDialog } from '@/components/board-notes-dialog';
+import { AnimationControls } from '@/components/animation-controls';
 import { FollowControls } from '@/components/follow-controls';
 import { MusicPlayer } from '@/music/music-player';
 import { PageMenu } from '@/components/page-menu';
@@ -161,7 +162,7 @@ export function BoardChrome({
                         renameTitle();
                       }
                     }}
-                    className="max-w-[clamp(5rem,20vw,12.5rem)] cursor-text rounded-lg px-2 font-semibold"
+                    className="max-w-[clamp(5rem,20vw,12.5rem)] cursor-text px-2 font-semibold"
                   />
                 }
               >
@@ -181,6 +182,51 @@ export function BoardChrome({
           /
         </span>
         <PageMenu />
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="More actions"
+              />
+            }
+          >
+            <EllipsisVertical />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="start"
+            sideOffset={8}
+            className="w-44"
+          >
+            <DropdownMenuGroup>
+              <DropdownMenuItem onClick={() => setSettingsOpen(true)}>
+                <Cog />
+                Settings
+              </DropdownMenuItem>
+              {identity?.isTutor && (
+                <DropdownMenuItem onClick={() => setNotesOpen(true)}>
+                  <NotebookPen />
+                  Student notes
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuGroup>
+            <DropdownMenuSeparator />
+            <DropdownMenuGroup>
+              <DropdownMenuItem onClick={toggle}>
+                {theme === 'dark' ? <Sun /> : <Moon />}
+                {theme === 'dark' ? 'Light mode' : 'Dark mode'}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => void onExport()}
+                disabled={exporting}
+              >
+                <Download />
+                Export PNG
+              </DropdownMenuItem>
+            </DropdownMenuGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </Surface>
 
       {/* Top-right panel (presence, session controls, and sharing). */}
@@ -246,51 +292,7 @@ export function BoardChrome({
         </div>
         <MusicPlayer identity={identity} />
         <FollowControls identity={identity} />
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label="More actions"
-              />
-            }
-          >
-            <MoreHorizontal />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent
-            align="end"
-            sideOffset={8}
-            className="w-44"
-          >
-            <DropdownMenuGroup>
-              <DropdownMenuItem onClick={() => setSettingsOpen(true)}>
-                <Cog />
-                Settings
-              </DropdownMenuItem>
-              {identity?.isTutor && (
-                <DropdownMenuItem onClick={() => setNotesOpen(true)}>
-                  <NotebookPen />
-                  Student notes
-                </DropdownMenuItem>
-              )}
-            </DropdownMenuGroup>
-            <DropdownMenuSeparator />
-            <DropdownMenuGroup>
-              <DropdownMenuItem onClick={toggle}>
-                {theme === 'dark' ? <Sun /> : <Moon />}
-                {theme === 'dark' ? 'Light mode' : 'Dark mode'}
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => void onExport()}
-                disabled={exporting}
-              >
-                <Download />
-                Export PNG
-              </DropdownMenuItem>
-            </DropdownMenuGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <AnimationControls identity={identity} />
         <ShareButton />
       </Surface>
 

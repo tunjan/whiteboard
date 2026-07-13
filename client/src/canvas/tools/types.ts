@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react';
-import type { Point } from '@whiteboard/shared';
+import type { Bounds, Point } from '@whiteboard/shared';
 import type { Editor } from '../editor';
 
 /** Pointer info passed to tool handlers, normalized to world coordinates. */
@@ -27,6 +27,8 @@ export interface ToolPointerInfo {
 /** Ambient context every tool handler receives. */
 export interface ToolContext {
   editor: Editor;
+  /** Live visible page bounds, used to cull spatial interaction candidates. */
+  getViewportBounds?: () => Bounds;
   /** Switch the active tool (e.g. revert to select after creating a shape). */
   setTool: (toolId: string) => void;
   /** Finish a creation interaction: revert to Select unless Tool Lock is on. */

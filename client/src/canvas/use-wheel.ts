@@ -23,13 +23,17 @@ function clamp(n: number, min: number, max: number): number {
  * Safari delivers trackpad pinch as `gesture*` events instead — see
  * `useSafariGestures`.
  */
-export function useWheel(ref: RefObject<HTMLElement | null>): void {
+export function useWheel(
+  ref: RefObject<HTMLElement | null>,
+  disabled = false,
+): void {
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
 
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
+      if (disabled) return;
       stopFollowingForManualCameraChange();
       const rect = el.getBoundingClientRect();
       const anchor = { x: e.clientX - rect.left, y: e.clientY - rect.top };
@@ -52,5 +56,5 @@ export function useWheel(ref: RefObject<HTMLElement | null>): void {
 
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
-  }, [ref]);
+  }, [ref, disabled]);
 }

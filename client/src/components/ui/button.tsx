@@ -4,7 +4,7 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "@/lib/utils"
 
 const buttonVariants = cva(
-  "group/button inline-flex shrink-0 items-center justify-center rounded-lg border border-transparent bg-clip-padding text-sm font-medium whitespace-nowrap transition-all duration-150 ease-out outline-none select-none focus-visible:ring-4 focus-visible:ring-border-subtle disabled:pointer-events-none disabled:cursor-not-allowed disabled:border-border-subtle disabled:bg-bg-subtle disabled:text-content-muted disabled:opacity-100 disabled:shadow-none aria-invalid:border-content-error aria-invalid:ring-4 aria-invalid:ring-bg-error [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  "group/button inline-flex shrink-0 items-center justify-center rounded-lg border border-transparent bg-clip-padding text-sm font-medium whitespace-nowrap transition-all duration-150 ease-out outline-none select-none in-data-[slot=surface]:rounded-[var(--surface-control-radius)] focus-visible:ring-4 focus-visible:ring-border-subtle disabled:pointer-events-none disabled:cursor-not-allowed disabled:border-border-subtle disabled:bg-bg-subtle disabled:text-content-muted disabled:opacity-100 disabled:shadow-none aria-invalid:border-content-error aria-invalid:ring-4 aria-invalid:ring-bg-error [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
       variant: {

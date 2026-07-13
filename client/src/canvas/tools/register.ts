@@ -13,11 +13,13 @@ import { createTextTool } from './text-tool';
 import { createPolygonTool } from './polygon-tool';
 import { createFrameTool } from './frame-tool';
 import { createGraphTool } from './graph-tool';
+import { createLaserTool } from './laser-tool';
 
 toolRegistry.register(createSelectTool());
 toolRegistry.register(createHandTool());
 toolRegistry.register(createLassoTool());
 toolRegistry.register(createDrawTool());
+toolRegistry.register(createLaserTool());
 toolRegistry.register(createTextTool());
 toolRegistry.register(createGraphTool());
 toolRegistry.register(createPolygonTool());

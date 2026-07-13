@@ -8,6 +8,8 @@ import {
 
 interface CanvasUiStore {
   background: BackgroundType;
+  /** Whether shape alignment, spacing, resize, and handle snapping is active. */
+  snappingEnabled: boolean;
   /** Pencil stabilization strength from 0..1 for newly drawn strokes. */
   pencilStabilization: number;
   /** Pressure-to-width multiplier (-1..1) for newly drawn strokes. */
@@ -26,6 +28,7 @@ interface CanvasUiStore {
   /** Whether the on-canvas performance overlay (FPS/frame time) is shown. */
   debugPerformance: boolean;
   setBackground: (background: BackgroundType) => void;
+  setSnappingEnabled: (snappingEnabled: boolean) => void;
   setPencilStabilization: (pencilStabilization: number) => void;
   setPencilThinning: (pencilThinning: number) => void;
   setPencilSmoothing: (pencilSmoothing: number) => void;
@@ -56,7 +59,7 @@ const PREVIOUS_PENCIL_DEFAULTS = {
   pencilEndTaper: true,
 } as const;
 
-function migratePencilDefaults(persistedState: unknown): CanvasUiStore {
+function migrateCanvasUiStore(persistedState: unknown): CanvasUiStore {
   const state = persistedState as Partial<CanvasUiStore>;
   const isUnchangedBrushPreset =
     state.pencilThinning === PREVIOUS_PENCIL_DEFAULTS.pencilThinning &&
@@ -66,20 +69,24 @@ function migratePencilDefaults(persistedState: unknown): CanvasUiStore {
     state.pencilStartTaper === PREVIOUS_PENCIL_DEFAULTS.pencilStartTaper &&
     state.pencilEndTaper === PREVIOUS_PENCIL_DEFAULTS.pencilEndTaper;
 
-  return (isUnchangedBrushPreset
-    ? { ...state, ...PENCIL_DEFAULTS }
-    : state) as CanvasUiStore;
+  return {
+    snappingEnabled: true,
+    ...(isUnchangedBrushPreset
+      ? { ...state, ...PENCIL_DEFAULTS }
+      : state),
+  } as CanvasUiStore;
 }
 
-// Local, per-user canvas UI preferences. Moves into the Settings dialog in
-// Phase 23; for now a small persisted store.
+// Local, per-user canvas UI preferences shown in the Settings dialog.
 export const useCanvasUiStore = create<CanvasUiStore>()(
   persist(
     (set) => ({
       background: 'graph',
+      snappingEnabled: true,
       debugPerformance: false,
       ...PENCIL_DEFAULTS,
       setBackground: (background) => set({ background }),
+      setSnappingEnabled: (snappingEnabled) => set({ snappingEnabled }),
       setPencilStabilization: (pencilStabilization) =>
         set({ pencilStabilization }),
       setPencilThinning: (pencilThinning) => set({ pencilThinning }),
@@ -93,8 +100,8 @@ export const useCanvasUiStore = create<CanvasUiStore>()(
     }),
     {
       name: 'whiteboard:canvas-ui',
-      version: 1,
-      migrate: migratePencilDefaults,
+      version: 2,
+      migrate: migrateCanvasUiStore,
     },
   ),
 );

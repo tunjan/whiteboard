@@ -167,6 +167,50 @@ export function SelectionLayer({ camera }: SelectionLayerProps) {
       })}
 
       {snapGuides.map((g, i) => {
+        if (g.kind === 'point') {
+          const point = toScreen({ x: g.at, y: g.from });
+          return (
+            <circle
+              // eslint-disable-next-line react/no-array-index-key -- transient guides
+              key={i}
+              cx={point.x}
+              cy={point.y}
+              r={4}
+              fill="var(--color-background)"
+              stroke={SNAP}
+              strokeWidth={1.5}
+            />
+          );
+        }
+        if (g.kind === 'gap') {
+          const a = g.axis === 'x'
+            ? toScreen({ x: g.from, y: g.at })
+            : toScreen({ x: g.at, y: g.from });
+          const b = g.axis === 'x'
+            ? toScreen({ x: g.to, y: g.at })
+            : toScreen({ x: g.at, y: g.to });
+          return (
+            <g
+              // eslint-disable-next-line react/no-array-index-key -- transient guides
+              key={i}
+              stroke={SNAP}
+              strokeWidth={1}
+            >
+              <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} />
+              {g.axis === 'x' ? (
+                <>
+                  <line x1={a.x} y1={a.y - 3} x2={a.x} y2={a.y + 3} />
+                  <line x1={b.x} y1={b.y - 3} x2={b.x} y2={b.y + 3} />
+                </>
+              ) : (
+                <>
+                  <line x1={a.x - 3} y1={a.y} x2={a.x + 3} y2={a.y} />
+                  <line x1={b.x - 3} y1={b.y} x2={b.x + 3} y2={b.y} />
+                </>
+              )}
+            </g>
+          );
+        }
         const a =
           g.axis === 'x'
             ? toScreen({ x: g.at, y: g.from })
@@ -185,6 +229,7 @@ export function SelectionLayer({ camera }: SelectionLayerProps) {
             y2={b.y}
             stroke={SNAP}
             strokeWidth={1}
+            strokeDasharray="4 3"
           />
         );
       })}
@@ -201,7 +246,7 @@ export function SelectionLayer({ camera }: SelectionLayerProps) {
       )}
 
       {marquee && (() => {
-        const { bounds, mode } = marquee;
+        const { bounds } = marquee;
         const tl = toScreen({ x: bounds.minX, y: bounds.minY });
         const br = toScreen({ x: bounds.maxX, y: bounds.maxY });
         return (
@@ -214,7 +259,6 @@ export function SelectionLayer({ camera }: SelectionLayerProps) {
             fillOpacity={0.08}
             stroke={ACCENT}
             strokeWidth={1}
-            strokeDasharray={mode === 'touch' ? '4 3' : undefined}
           />
         );
       })()}

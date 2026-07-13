@@ -32,6 +32,7 @@ interface CanvasControlsProps {
   onZoomOut: () => void;
   onZoomReset: () => void;
   onZoomToFit: () => void;
+  disabled?: boolean;
 }
 
 export function CanvasControls({
@@ -42,6 +43,7 @@ export function CanvasControls({
   onZoomOut,
   onZoomReset,
   onZoomToFit,
+  disabled = false,
 }: CanvasControlsProps) {
   const BackgroundIcon = BACKGROUND_ICONS[background];
 
@@ -56,25 +58,28 @@ export function CanvasControls({
             variant="ghost"
             size="icon-sm"
             aria-label="Zoom out"
+            disabled={disabled}
             onClick={onZoomOut}
-            className="rounded-lg"
           >
             <Minus />
           </Button>
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="sm"
             onClick={onZoomReset}
-            className="h-8 min-w-12 rounded-lg px-1.5 text-center font-mono text-xs text-content-subtle tabular-nums transition-colors hover:bg-bg-muted hover:text-content-emphasis"
+            className="min-w-12 px-1.5 font-mono text-content-subtle tabular-nums"
             aria-label="Reset zoom to 100%"
+            disabled={disabled}
           >
             {Math.round(zoom * 100)}%
-          </button>
+          </Button>
           <Button
             variant="ghost"
             size="icon-sm"
             aria-label="Zoom in"
+            disabled={disabled}
             onClick={onZoomIn}
-            className="rounded-lg"
           >
             <Plus />
           </Button>
@@ -85,8 +90,8 @@ export function CanvasControls({
             variant="ghost"
             size="icon-sm"
             aria-label="Zoom to fit"
+            disabled={disabled}
             onClick={onZoomToFit}
-            className="rounded-lg"
           >
             <Maximize2 />
           </Button>
@@ -97,7 +102,7 @@ export function CanvasControls({
                   variant="ghost"
                   size="icon-sm"
                   aria-label={`Background: ${BACKGROUND_LABELS[background]}`}
-                  className="rounded-lg"
+                  disabled={disabled}
                 />
               }
             >

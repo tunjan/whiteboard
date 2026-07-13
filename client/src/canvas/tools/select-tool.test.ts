@@ -5,6 +5,7 @@ import type { Editor } from '../editor';
 import { shapeRotatedBounds } from '../selection-geometry';
 import { spatialIndex } from '../use-document-store';
 import { useEnteredGroupStore } from '../use-entered-group-store';
+import { useCanvasUiStore } from '../use-canvas-ui-store';
 import { useSelectionStore } from '../use-selection-store';
 import { createSelectTool } from './select-tool';
 import type { ToolContext, ToolPointerInfo } from './types';
@@ -141,6 +142,7 @@ describe('select tool state machine', () => {
     useSelectionStore.getState().setMarquee(null);
     useSelectionStore.getState().setSnapGuides([]);
     useEnteredGroupStore.getState().exit();
+    useCanvasUiStore.getState().setSnappingEnabled(true);
   });
 
   afterEach(() => spatialIndex.clear());
@@ -246,6 +248,22 @@ describe('select tool state machine', () => {
     expect(shapes.get('a')?.x).toBe(40);
     expect(shapes.get('b')?.x).toBe(120);
     expect(shapes.get('c')?.x).toBe(200);
+  });
+
+  it('does not snap or show guides when snapping is disabled', () => {
+    const a = rectangle('a', 0, 0, 'a0');
+    const target = rectangle('target', 80, 0, 'a1');
+    const { ctx, shapes } = context([a, target]);
+    const tool = createSelectTool();
+    useSelectionStore.getState().setSelection(['a']);
+    useCanvasUiStore.getState().setSnappingEnabled(false);
+
+    tool.onPointerDown?.(pointer(10, 10), ctx);
+    tool.onPointerMove?.(pointer(47, 10), ctx);
+    tool.onPointerUp?.(pointer(47, 10), ctx);
+
+    expect(shapes.get('a')?.x).toBe(37);
+    expect(useSelectionStore.getState().snapGuides).toEqual([]);
   });
 
   it('rolls back an interrupted live drag to the gesture snapshot', () => {

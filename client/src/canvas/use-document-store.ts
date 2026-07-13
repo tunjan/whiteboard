@@ -3,8 +3,13 @@ import { IndexeddbPersistence } from 'y-indexeddb';
 import { HocuspocusProvider } from '@hocuspocus/provider';
 import { create } from 'zustand';
 import {
+  DEFAULT_ANIMATION_PLAYBACK,
   DEFAULT_MUSIC_PLAYBACK,
   genId,
+  isAnimationRecording,
+  type AnimationPlaybackState,
+  type AnimationPlaybackStatus,
+  type AnimationRecordingV1,
   type MusicPlaybackState,
   type MusicPlaybackStatus,
   type Page,
@@ -21,6 +26,11 @@ import { useSelectionStore } from './use-selection-store';
 import { useConnectionStore } from '@/collab/use-connection-store';
 import { setActiveAwareness, setLocalPage } from '@/collab/presence';
 import { useMusicPlaybackStore } from '@/music/use-music-playback-store';
+import {
+  isAnimationPageLocked,
+  isAnimationPlaybackActive,
+  useAnimationStore,
+} from '@/animation/use-animation-store';
 
 // page-default's shapes live at the doc root map `shapes` (unchanged from Pass 1),
 // which keeps the Yjs structure idempotent across IndexedDB + server sync. Every
@@ -32,6 +42,7 @@ const DEFAULT_PAGE_NAME = 'Page 1';
 
 /** Origin tag for this client's own mutations — only these are undoable. */
 export const LOCAL_ORIGIN = 'local-user';
+const ANIMATION_ORIGIN = 'animation-system';
 
 /** Room name for a board's Yjs content (IndexedDB + Hocuspocus). */
 export function boardRoom(boardId: string): string {
@@ -215,6 +226,10 @@ interface Session {
   pages: Y.Map<YPageMeta>;
   /** Shared playback state for the board's music player. */
   music: Y.Map<unknown>;
+  /** Legacy per-page recordings; migrated to the server library, then cleared. */
+  animations: Y.Map<AnimationRecordingV1>;
+  /** Shared animation transport state. */
+  animationPlayback: Y.Map<unknown>;
   /** Shapes map for the active page (root `shapes` for page-default). */
   currentShapes: Y.Map<YShape>;
   currentPageId: string;
@@ -225,6 +240,8 @@ interface Session {
   shapesObserver: (events: Y.YEvent<Y.AbstractType<unknown>>[]) => void;
   pagesObserver: () => void;
   musicObserver: () => void;
+  animationsObserver: () => void;
+  animationPlaybackObserver: () => void;
   persistence: IndexeddbPersistence | null;
   provider: HocuspocusProvider | null;
   cleanup: () => void;
@@ -371,6 +388,62 @@ function publishMusicPlayback(): void {
   useMusicPlaybackStore.getState().setPlayback(readMusicPlayback());
 }
 
+function readAnimationPlayback(): AnimationPlaybackState {
+  if (!session) return DEFAULT_ANIMATION_PLAYBACK;
+  const status = session.animationPlayback.get('status');
+  return {
+    recordingId: asStringOrNull(session.animationPlayback.get('recordingId')),
+    status:
+      status === 'playing' || status === 'paused' || status === 'stopped'
+        ? status
+        : DEFAULT_ANIMATION_PLAYBACK.status,
+    positionMs: asNonNegativeNumber(
+      session.animationPlayback.get('positionMs'),
+      0,
+    ),
+    updatedAt: asNonNegativeNumber(
+      session.animationPlayback.get('updatedAt'),
+      0,
+    ),
+    version: asNonNegativeNumber(session.animationPlayback.get('version'), 0),
+  };
+}
+
+// Legacy in-doc recordings: the animation layer registers a listener so the
+// tutor client can migrate them to the server library once they sync in.
+let legacyAnimationsListener: (() => void) | null = null;
+
+export function setLegacyAnimationsListener(
+  listener: (() => void) | null,
+): void {
+  legacyAnimationsListener = listener;
+  if (listener && session && session.animations.size > 0) listener();
+}
+
+function notifyLegacyAnimations(): void {
+  if (session && session.animations.size > 0) legacyAnimationsListener?.();
+}
+
+export function readLegacyAnimationRecordings(): AnimationRecordingV1[] {
+  if (!session) return [];
+  const recordings: AnimationRecordingV1[] = [];
+  for (const [, value] of session.animations) {
+    if (isAnimationRecording(value)) recordings.push(value);
+  }
+  return recordings;
+}
+
+export function clearLegacyAnimationRecordings(): void {
+  if (!session) return;
+  session.doc.transact(() => {
+    session?.animations.clear();
+  }, ANIMATION_ORIGIN);
+}
+
+function publishAnimationPlayback(): void {
+  useAnimationStore.getState().setPlayback(readAnimationPlayback());
+}
+
 function asStringOrNull(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
 }
@@ -493,10 +566,13 @@ export function loadBoard(
     currentPageId: DEFAULT_PAGE_ID,
   });
   useMusicPlaybackStore.getState().reset();
+  useAnimationStore.getState().reset();
 
   const doc = new Y.Doc();
   const pages = doc.getMap('pages') as Y.Map<YPageMeta>;
   const music = doc.getMap('music');
+  const animations = doc.getMap<AnimationRecordingV1>('animations');
+  const animationPlayback = doc.getMap('animation-playback');
   const currentShapes = getShapesMap(doc, DEFAULT_PAGE_ID);
   const undo = new Y.UndoManager(currentShapes, {
     trackedOrigins: new Set([LOCAL_ORIGIN]),
@@ -522,6 +598,10 @@ export function loadBoard(
 
   const musicObserver = () => publishMusicPlayback();
   music.observe(musicObserver);
+  const animationsObserver = () => notifyLegacyAnimations();
+  animations.observe(animationsObserver);
+  const animationPlaybackObserver = () => publishAnimationPlayback();
+  animationPlayback.observe(animationPlaybackObserver);
 
   const persistence = opts.persist
     ? new IndexeddbPersistence(boardRoom(boardId), doc)
@@ -547,6 +627,8 @@ export function loadBoard(
     doc,
     pages,
     music,
+    animations,
+    animationPlayback,
     currentShapes,
     currentPageId: DEFAULT_PAGE_ID,
     undo,
@@ -554,6 +636,8 @@ export function loadBoard(
     shapesObserver,
     pagesObserver,
     musicObserver,
+    animationsObserver,
+    animationPlaybackObserver,
     persistence,
     provider,
     cleanup: () => {
@@ -561,12 +645,15 @@ export function loadBoard(
       session?.currentShapes.unobserveDeep(session.shapesObserver);
       pages.unobserveDeep(pagesObserver);
       music.unobserve(musicObserver);
+      animations.unobserve(animationsObserver);
+      animationPlayback.unobserve(animationPlaybackObserver);
       session?.unbindUndoState();
       session?.undo.destroy();
       provider?.destroy();
       persistence?.destroy();
       doc.destroy();
       useMusicPlaybackStore.getState().reset();
+      useAnimationStore.getState().reset();
     },
   };
 
@@ -582,6 +669,8 @@ export function loadBoard(
 
   fullResync();
   publishMusicPlayback();
+  notifyLegacyAnimations();
+  publishAnimationPlayback();
 
   let disposed = false;
   return () => {
@@ -593,6 +682,7 @@ export function loadBoard(
 }
 
 export function undo(): void {
+  if (isAnimationPlaybackActive()) return;
   session?.undo.undo();
 }
 /** Force the next mutation to start a new undo entry (gesture boundary). */
@@ -600,6 +690,7 @@ export function breakUndoCapture(): void {
   session?.undo.stopCapturing();
 }
 export function redo(): void {
+  if (isAnimationPlaybackActive()) return;
   session?.undo.redo();
 }
 
@@ -629,12 +720,22 @@ function switchToPageInternal(pageId: string): void {
 }
 
 export function setCurrentPage(pageId: string): void {
+  if (isAnimationPageLocked()) return;
   if (!session || session.currentPageId === pageId) return;
+  switchToPageInternal(pageId);
+}
+
+/** Playback-only page switch that bypasses the local interaction lock. */
+export function setCurrentPageForAnimation(pageId: string): void {
+  if (!session || session.currentPageId === pageId || !session.pages.has(pageId)) {
+    return;
+  }
   switchToPageInternal(pageId);
 }
 
 /** Create a new page after the current one and switch to it. Returns its id. */
 export function createPage(name?: string): string {
+  if (isAnimationPageLocked()) return '';
   if (!session) return '';
   const id = genId();
   const metas = readPages(session.pages);
@@ -656,6 +757,7 @@ export function createPage(name?: string): string {
 }
 
 export function renamePage(id: string, name: string): void {
+  if (isAnimationPageLocked()) return;
   if (!session) return;
   const trimmed = name.trim();
   if (!trimmed) return;
@@ -666,6 +768,7 @@ export function renamePage(id: string, name: string): void {
 }
 
 export function deletePage(id: string): void {
+  if (isAnimationPageLocked()) return;
   if (!session) return;
   const metas = readPages(session.pages);
   if (metas.length <= 1) return; // never delete the last page
@@ -677,31 +780,35 @@ export function deletePage(id: string): void {
   session.doc.transact(() => {
     session!.pages.delete(id);
     getShapesMap(session!.doc, id).clear();
-  });
+  }, ANIMATION_ORIGIN);
 }
 
-/** Move a page one slot up or down in the order (conflict-free fractional key). */
-export function movePage(id: string, direction: 'up' | 'down'): void {
+/** Move a page to a resolved list position with one fractional-index write. */
+export function movePageToIndex(id: string, targetIndex: number): void {
+  if (isAnimationPageLocked()) return;
   if (!session) return;
   const metas = readPages(session.pages);
-  const i = metas.findIndex((m) => m.id === id);
-  if (i < 0) return;
-  const j = direction === 'up' ? i - 1 : i + 1;
-  const neighbor = metas[j];
-  if (!neighbor) return;
-  let before: string | null;
-  let after: string | null;
-  if (direction === 'up') {
-    before = metas[j - 1]?.index ?? null;
-    after = neighbor.index;
-  } else {
-    before = neighbor.index;
-    after = metas[j + 1]?.index ?? null;
-  }
+  const currentIndex = metas.findIndex((meta) => meta.id === id);
+  if (currentIndex < 0) return;
+  const clampedTarget = Math.max(0, Math.min(metas.length - 1, targetIndex));
+  if (clampedTarget === currentIndex) return;
+
+  const remaining = metas.filter((meta) => meta.id !== id);
+  const before = remaining[clampedTarget - 1]?.index ?? null;
+  const after = remaining[clampedTarget]?.index ?? null;
   const index = generateKeyBetween(before, after);
   session.doc.transact(() => {
     session!.pages.get(id)?.set('index', index);
   });
+}
+
+/** Move a page one slot with the same index-based operation used by dragging. */
+export function movePage(id: string, direction: 'up' | 'down'): void {
+  if (!session) return;
+  const metas = readPages(session.pages);
+  const currentIndex = metas.findIndex((meta) => meta.id === id);
+  if (currentIndex < 0) return;
+  movePageToIndex(id, direction === 'up' ? currentIndex - 1 : currentIndex + 1);
 }
 
 // --- Music playback API ---
@@ -737,6 +844,28 @@ export function setMusicPlayback(
       session?.music.delete('requestedBy');
     }
   });
+}
+
+// --- Whiteboard animation API ---
+
+export function setAnimationPlayback(update: {
+  recordingId?: string | null;
+  status?: AnimationPlaybackStatus;
+  positionMs?: number;
+}): void {
+  if (!session) return;
+  const current = readAnimationPlayback();
+  const recordingId =
+    update.recordingId !== undefined ? update.recordingId : current.recordingId;
+  const status = update.status ?? current.status;
+  const positionMs = Math.max(0, update.positionMs ?? current.positionMs);
+  session.doc.transact(() => {
+    session?.animationPlayback.set('recordingId', recordingId);
+    session?.animationPlayback.set('status', status);
+    session?.animationPlayback.set('positionMs', positionMs);
+    session?.animationPlayback.set('updatedAt', Date.now());
+    session?.animationPlayback.set('version', current.version + 1);
+  }, ANIMATION_ORIGIN);
 }
 
 // --- Editor (stable; mutates the current page's Yjs map) ---
@@ -775,18 +904,26 @@ export const editor: Editor = {
     return currentSortedShapes();
   },
   createShape: (shape) =>
-    transactLocal(() => session?.currentShapes.set(shape.id, shapeToY(shape))),
+    !isAnimationPlaybackActive()
+      ? transactLocal(() => session?.currentShapes.set(shape.id, shapeToY(shape)))
+      : undefined,
   updateShape: (id, patch) =>
-    transactLocal(() => {
-      const m = session?.currentShapes.get(id);
-      if (m) applyPatchToY(m, patch);
-    }),
+    !isAnimationPlaybackActive()
+      ? transactLocal(() => {
+          const m = session?.currentShapes.get(id);
+          if (m) applyPatchToY(m, patch);
+        })
+      : undefined,
   deleteShapes: (ids) =>
-    transactLocal(() => {
-      for (const id of ids) session?.currentShapes.delete(id);
-    }),
+    !isAnimationPlaybackActive()
+      ? transactLocal(() => {
+          for (const id of ids) session?.currentShapes.delete(id);
+        })
+      : undefined,
   // Yjs transactions are reentrant: the inner `transactLocal` calls made by
   // `updateShape` join this one, so the deep observer fires (and the snapshot
   // rebuilds) exactly once for the whole batch.
-  transact: (fn) => transactLocal(fn),
+  transact: (fn) => {
+    if (!isAnimationPlaybackActive()) transactLocal(fn);
+  },
 };

@@ -16,7 +16,10 @@ interface SafariGestureEvent extends Event {
  * pinch zooms the canvas instead of the page. No-op in browsers that don't
  * fire these events.
  */
-export function useSafariGestures(ref: RefObject<HTMLElement | null>): void {
+export function useSafariGestures(
+  ref: RefObject<HTMLElement | null>,
+  disabled = false,
+): void {
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -36,6 +39,7 @@ export function useSafariGestures(ref: RefObject<HTMLElement | null>): void {
     const onStart = (ev: Event) => {
       const e = ev as SafariGestureEvent;
       e.preventDefault();
+      if (disabled) return;
       stopFollowingForManualCameraChange();
       startZoom = useCameraStore.getState().camera.z;
       lastAnchor = anchorFrom(e);
@@ -43,6 +47,7 @@ export function useSafariGestures(ref: RefObject<HTMLElement | null>): void {
     const onChange = (ev: Event) => {
       const e = ev as SafariGestureEvent;
       e.preventDefault();
+      if (disabled) return;
       const anchor = anchorFrom(e);
       useCameraStore.getState().zoomAtScreenWithPan(
         anchor,
@@ -62,5 +67,5 @@ export function useSafariGestures(ref: RefObject<HTMLElement | null>): void {
       el.removeEventListener('gesturechange', onChange);
       el.removeEventListener('gestureend', onEnd);
     };
-  }, [ref]);
+  }, [ref, disabled]);
 }

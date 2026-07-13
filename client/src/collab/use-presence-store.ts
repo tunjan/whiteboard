@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { Point } from '@whiteboard/shared';
 import type { Camera } from '@/canvas/camera';
+import type { LaserPresence } from '@/canvas/use-laser-store';
 
 export interface ViewportPresence {
   camera: Camera;
@@ -35,6 +36,8 @@ export interface PeerPresence {
   following: boolean;
   /** Ephemeral caret/selection inside an actively edited text shape. */
   textSelection: TextSelectionPresence | null;
+  /** Ephemeral laser trail while this peer is presenting. */
+  laser: LaserPresence | null;
 }
 
 interface PresenceStore {

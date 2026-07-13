@@ -8,6 +8,7 @@ import type { ShapeUtil } from './types';
 export const groupUtil: ShapeUtil<'group'> = {
   type: 'group',
   canResize: false,
+  canSnap: false,
 
   getDefaultProps: () => ({}),
 

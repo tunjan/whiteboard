@@ -19,6 +19,8 @@ import {
 import { quantizedCullRegion, viewportWorldBounds } from './geometry';
 import { PerformanceOverlay } from '@/components/performance-overlay';
 import { CursorsLayer } from '@/collab/CursorsLayer';
+import { LaserLayer } from './LaserLayer';
+import { DrawingCursor } from './DrawingCursor';
 import {
   setLocalCursor,
   setLocalFollowing,
@@ -82,6 +84,10 @@ import { useImageCroppingStore } from './use-image-cropping-store';
 import { useToolStore } from './use-tool-store';
 import { useToolLockStore } from './use-tool-lock-store';
 import {
+  isAnimationPlaybackActive,
+  useAnimationStore,
+} from '@/animation/use-animation-store';
+import {
   TOUCH_PAN_SPEED,
   pinchGesture,
   pruneStaleTouches,
@@ -119,6 +125,8 @@ const STALE_TOUCH_MS = 2000;
 
 export function Canvas() {
   const [containerRef, size] = useElementSize<HTMLDivElement>();
+  const sizeRef = useRef(size);
+  sizeRef.current = size;
   const camera = useCameraStore((s) => s.camera);
   const following = useFollowStore((s) => s.following);
   const lastSummonApplied = useFollowStore((s) => s.lastSummonApplied);
@@ -127,9 +135,12 @@ export function Canvas() {
   const debugPerformance = useCanvasUiStore((s) => s.debugPerformance);
   const activeToolId = useToolStore((s) => s.activeToolId);
   const cameraMoving = useCameraInteraction((s) => s.isMoving);
-  const pan = useSpacePan();
-  useWheel(containerRef);
-  useSafariGestures(containerRef);
+  const playbackActive = useAnimationStore((s) => s.playbackActive);
+  const playbackShapes = useAnimationStore((s) => s.playbackShapes);
+  const setAnimationViewportSize = useAnimationStore((s) => s.setViewportSize);
+  const pan = useSpacePan(playbackActive);
+  useWheel(containerRef, playbackActive);
+  useSafariGestures(containerRef, playbackActive);
 
   // Which gesture owns the current pointer interaction.
   const gesture = useRef<'pan' | 'tool' | null>(null);
@@ -168,6 +179,14 @@ export function Canvas() {
   const ctx = useMemo<ToolContext>(
     () => ({
       editor,
+      getViewportBounds: () => {
+        const currentSize = sizeRef.current;
+        return viewportWorldBounds(
+          useCameraStore.getState().camera,
+          currentSize.width,
+          currentSize.height,
+        );
+      },
       setTool: useToolStore.getState().setTool,
       complete: () => {
         if (!useToolLockStore.getState().locked) {
@@ -184,11 +203,16 @@ export function Canvas() {
   const hidden = useHiddenStore((s) => s.hidden);
   const erasing = useEraserStore((s) => s.marked);
   const currentPageId = useDocumentStore((s) => s.currentPageId);
-  const shapesRecord = useDocumentStore(
+  const liveShapesRecord = useDocumentStore(
     (s) => s.doc.pages[s.currentPageId]?.shapes,
   );
   // Shared, pre-sorted array from the store (stable across camera-only renders).
-  const shapes = useDocumentStore((s) => s.shapes);
+  const liveShapes = useDocumentStore((s) => s.shapes);
+  const shapes = playbackActive ? playbackShapes : liveShapes;
+  const shapesRecord = useMemo<Record<string, Shape>>(() => {
+    if (!playbackActive) return liveShapesRecord ?? {};
+    return Object.fromEntries(playbackShapes.map((shape) => [shape.id, shape]));
+  }, [liveShapesRecord, playbackActive, playbackShapes]);
   const canUndo = useUndoStore((s) => s.canUndo);
   const canRedo = useUndoStore((s) => s.canRedo);
 
@@ -254,7 +278,7 @@ export function Canvas() {
 
   const visibleShapes = useMemo(() => {
     let base = shapes;
-    if (cullRegion) {
+    if (cullRegion && !playbackActive) {
       const ids = new Set(spatialIndex.search(cullRegion));
       base = shapes.filter((s) => ids.has(s.id));
     }
@@ -267,7 +291,7 @@ export function Canvas() {
     );
     // `cullKey` stands in for `cullRegion` (stable across sub-cell pans).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cullKey, shapes, editingId, playingId, croppingId, hidden]);
+  }, [cullKey, shapes, editingId, playingId, croppingId, hidden, playbackActive]);
 
   const topLevelShapes = useMemo(
     () => visibleShapes.filter((s) => !frameAncestorIds.has(s.id)),
@@ -542,6 +566,7 @@ export function Canvas() {
 
   const onPointerDown = useCallback(
     (e: ReactPointerEvent) => {
+      if (playbackActive) return;
       publishCursorPosition(e.clientX, e.clientY);
 
       // Touch: drive the active tool with one finger; two fingers = pinch/pan.
@@ -603,11 +628,13 @@ export function Canvas() {
       screenPointOf,
       beginPinch,
       publishCursorPosition,
+      playbackActive,
     ],
   );
 
   const onPointerMove = useCallback(
     (e: ReactPointerEvent) => {
+      if (playbackActive) return;
       if (isTouchPointer(e) && penActive.current) return;
       const rect = containerRef.current?.getBoundingClientRect();
       if (rect) {
@@ -697,7 +724,15 @@ export function Canvas() {
         }
       }
     },
-    [pan, toInfo, ctx, containerRef, clearLongPress, publishCursorPosition],
+    [
+      pan,
+      toInfo,
+      ctx,
+      containerRef,
+      clearLongPress,
+      publishCursorPosition,
+      playbackActive,
+    ],
   );
 
   const releaseTouch = useCallback(
@@ -722,6 +757,7 @@ export function Canvas() {
 
   const onPointerUp = useCallback(
     (e: ReactPointerEvent) => {
+      if (playbackActive) return;
       releaseTouch(e);
       if (e.pointerId !== toolPointerId.current) return;
       if (gesture.current === 'pan') {
@@ -736,7 +772,7 @@ export function Canvas() {
       gesture.current = null;
       toolPointerId.current = null;
     },
-    [pan, toInfo, ctx, releaseTouch],
+    [pan, toInfo, ctx, releaseTouch, playbackActive],
   );
 
   // The browser fires pointercancel when it steals a touch (e.g. a pinch is
@@ -791,16 +827,20 @@ export function Canvas() {
 
   const onDoubleClick = useCallback(
     (e: ReactMouseEvent) => {
-      if (pan.isSpaceDown || !isSurfaceEvent(e.target)) return;
+      if (playbackActive || pan.isSpaceDown || !isSurfaceEvent(e.target)) return;
       activeTool()?.onDoubleClick?.(toInfo(e), ctx);
     },
-    [pan, toInfo, ctx, isSurfaceEvent],
+    [pan, toInfo, ctx, isSurfaceEvent, playbackActive],
   );
 
   // Right-click selects the shape under the cursor (so the context menu acts on
   // it). Does not preventDefault — the context menu opens normally.
   const onContextMenu = useCallback(
     (e: ReactMouseEvent) => {
+      if (playbackActive) {
+        e.preventDefault();
+        return;
+      }
       if (!isSurfaceEvent(e.target)) return;
       const info = toInfo(e);
       const tol = 4 / useCameraStore.getState().camera.z;
@@ -835,7 +875,7 @@ export function Canvas() {
       }
       sel.clear();
     },
-    [toInfo, isSurfaceEvent],
+    [toInfo, isSurfaceEvent, playbackActive],
   );
 
   // Clear selection whenever we leave the select tool.
@@ -850,7 +890,7 @@ export function Canvas() {
   }, [following]);
 
   useEffect(() => {
-    if (!following) return;
+    if (playbackActive || !following) return;
     if (tutorClientId === null) {
       useFollowStore.getState().setFollowing(false);
       return;
@@ -872,9 +912,11 @@ export function Canvas() {
     currentPageId,
     size.width,
     size.height,
+    playbackActive,
   ]);
 
   useEffect(() => {
+    if (playbackActive) return;
     if (tutorClientId === null) {
       summonBaselineReady.current = false;
       return;
@@ -913,6 +955,7 @@ export function Canvas() {
     lastSummonApplied,
     size.width,
     size.height,
+    playbackActive,
   ]);
 
   useEffect(() => {
@@ -936,6 +979,7 @@ export function Canvas() {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (isTypingTarget(e.target)) return;
+      if (isAnimationPlaybackActive()) return;
       const mod = e.metaKey || e.ctrlKey;
       const ids = useSelectionStore.getState().selectedIds;
 
@@ -1115,6 +1159,7 @@ export function Canvas() {
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
       if (isTypingTarget(e.target)) return;
+      if (isAnimationPlaybackActive()) return;
       const dt = e.clipboardData;
       const ours =
         hasClipboard() && wbClipToken(dt?.getData('text/html') ?? '') === clipboardToken();
@@ -1172,6 +1217,7 @@ export function Canvas() {
   }, []);
   const onDrop = useCallback(
     (e: ReactDragEvent) => {
+      if (playbackActive) return;
       const files = Array.from(e.dataTransfer.files).filter((f) =>
         f.type.startsWith('image/'),
       );
@@ -1189,8 +1235,12 @@ export function Canvas() {
         }
       });
     },
-    [containerRef],
+    [containerRef, playbackActive],
   );
+
+  useEffect(() => {
+    setAnimationViewportSize({ width: size.width, height: size.height });
+  }, [setAnimationViewportSize, size.width, size.height]);
 
   // Zoom controls.
   const center = useCallback(
@@ -1200,31 +1250,34 @@ export function Canvas() {
   const onZoomIn = useCallback(() => {
     stopFollowingForManualCameraChange();
     const s = useCameraStore.getState();
-    s.zoomAtScreen(center(), nextDiscreteZoom(s.camera.z, 'in'));
+    s.animateZoomAtScreen(center(), nextDiscreteZoom(s.camera.z, 'in'));
   }, [center]);
   const onZoomOut = useCallback(() => {
     stopFollowingForManualCameraChange();
     const s = useCameraStore.getState();
-    s.zoomAtScreen(center(), nextDiscreteZoom(s.camera.z, 'out'));
+    s.animateZoomAtScreen(center(), nextDiscreteZoom(s.camera.z, 'out'));
   }, [center]);
   const onZoomReset = useCallback(() => {
     stopFollowingForManualCameraChange();
-    useCameraStore.getState().zoomAtScreen(center(), 1);
+    useCameraStore.getState().animateZoomAtScreen(center(), 1);
   }, [center]);
   const onZoomToFit = useCallback(() => {
     stopFollowingForManualCameraChange();
     const s = useCameraStore.getState();
     const bounds = spatialIndex.totalBounds();
     if (!bounds) s.reset();
-    else s.zoomToBounds(bounds, size.width, size.height);
+    else s.animateToBounds(bounds, size.width, size.height);
   }, [size.width, size.height]);
 
   const toolCursor = toolRegistry.get(activeToolId)?.cursor ?? 'default';
+  const showDrawingCursor = activeToolId === 'draw' && !pan.isSpaceDown;
   const cursor = pan.isPanning
     ? 'grabbing'
     : pan.isSpaceDown
       ? 'grab'
-      : toolCursor;
+      : showDrawingCursor
+        ? 'none'
+        : toolCursor;
 
   return (
     <div
@@ -1275,19 +1328,23 @@ export function Canvas() {
           wheel events still bubble to the container's handlers below it. */}
       {cameraMoving && <div className="absolute inset-0" />}
 
-      {!editingShape && <SelectionLayer camera={camera} />}
-      {!editingShape && <SelectionToolbar camera={camera} />}
+      {!playbackActive && !editingShape && <SelectionLayer camera={camera} />}
+      {!playbackActive && !editingShape && <SelectionToolbar camera={camera} />}
+      <LaserLayer camera={camera} />
       <CursorsLayer camera={camera} />
+      {!playbackActive && showDrawingCursor && (
+        <DrawingCursor camera={camera} containerRef={containerRef} />
+      )}
 
-      {editingShape?.type === 'text' && (
+      {!playbackActive && editingShape?.type === 'text' && (
         <TextEditorOverlay shape={editingShape} camera={camera} />
       )}
 
-      {playingShape?.type === 'video' && (
+      {!playbackActive && playingShape?.type === 'video' && (
         <VideoPlayerOverlay shape={playingShape} camera={camera} />
       )}
 
-      {croppingShape?.type === 'image' && (
+      {!playbackActive && croppingShape?.type === 'image' && (
         <ImageCropOverlay shape={croppingShape} camera={camera} />
       )}
 
@@ -1296,6 +1353,7 @@ export function Canvas() {
         canRedo={canRedo}
         onUndo={undo}
         onRedo={redo}
+        disabled={playbackActive}
       />
 
       <CanvasControls
@@ -1306,6 +1364,7 @@ export function Canvas() {
         onZoomOut={onZoomOut}
         onZoomReset={onZoomReset}
         onZoomToFit={onZoomToFit}
+        disabled={playbackActive}
       />
 
       {debugPerformance && <PerformanceOverlay />}

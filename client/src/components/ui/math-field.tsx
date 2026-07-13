@@ -33,6 +33,9 @@ export interface MathFieldProps {
   onEnter?: () => void;
   /** Backspace while the field is empty — used to delete the row. */
   onBackspaceEmpty?: () => void;
+  /** Arrow key pressed with nowhere to go inside the field — used to move
+   * focus to the previous/next expression row (Desmos-style). */
+  onMoveOut?: (direction: 'upward' | 'downward') => void;
   placeholder?: string;
   className?: string;
   id?: string;
@@ -47,6 +50,7 @@ export function MathField({
   onChange,
   onEnter,
   onBackspaceEmpty,
+  onMoveOut,
   placeholder,
   className,
   elementRef,
@@ -55,8 +59,8 @@ export function MathField({
   const ref = React.useRef<MathfieldElement | null>(null);
 
   // Keep the latest callbacks reachable from listeners bound once on mount.
-  const handlers = React.useRef({ onChange, onEnter, onBackspaceEmpty });
-  handlers.current = { onChange, onEnter, onBackspaceEmpty };
+  const handlers = React.useRef({ onChange, onEnter, onBackspaceEmpty, onMoveOut });
+  handlers.current = { onChange, onEnter, onBackspaceEmpty, onMoveOut };
 
   const setRef = React.useCallback(
     (el: MathfieldElement | null) => {
@@ -70,7 +74,9 @@ export function MathField({
     const mf = ref.current;
     if (!mf) return;
 
-    mf.mathVirtualKeyboardPolicy = 'manual';
+    // Desmos-style math keyboard on touch devices; desktop keeps the physical
+    // keyboard only.
+    mf.mathVirtualKeyboardPolicy = 'auto';
     mf.smartFence = true;
     mf.smartSuperscript = true;
     // No right-click math menu or inline keyboard toggle in this compact panel.
@@ -97,12 +103,26 @@ export function MathField({
       }
     };
 
+    // Arrow up/down at the field boundary moves focus to the adjacent row.
+    const onMoveOutEvent = (event: HTMLElementEventMap['move-out']) => {
+      const { direction } = event.detail;
+      if (
+        (direction === 'upward' || direction === 'downward') &&
+        handlers.current.onMoveOut
+      ) {
+        event.preventDefault();
+        handlers.current.onMoveOut(direction);
+      }
+    };
+
     mf.addEventListener('input', onInput);
     // Capture phase so we preempt the mathfield's own key handling.
     mf.addEventListener('keydown', onKeyDown, { capture: true });
+    mf.addEventListener('move-out', onMoveOutEvent);
     return () => {
       mf.removeEventListener('input', onInput);
       mf.removeEventListener('keydown', onKeyDown, { capture: true });
+      mf.removeEventListener('move-out', onMoveOutEvent);
     };
     // Bind once; value/placeholder syncing is handled by the effect below.
     // eslint-disable-next-line react-hooks/exhaustive-deps

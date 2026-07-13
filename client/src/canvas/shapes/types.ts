@@ -42,6 +42,9 @@ export interface ShapeUtil<T extends ShapeType = ShapeType>
   extends ShapeDefinition<T> {
   Component: (props: ShapeComponentProps<T>) => ReactElement | null;
 
+  /** Whether this geometry may be used as a snap target. Defaults to true. */
+  readonly canSnap?: boolean;
+
   /**
    * Custom drag handles (in world space). When present, the selection tool
    * shows these and suppresses the generic resize/rotate box.

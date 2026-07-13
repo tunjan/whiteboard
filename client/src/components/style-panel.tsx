@@ -36,6 +36,7 @@ import { Slider } from '@/components/ui/slider';
 import { Surface } from '@/components/ui/surface';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { ChevronsUpDown } from 'lucide-react';
+import { useAnimationStore } from '@/animation/use-animation-store';
 
 
 const FILLS: FillStyle[] = ['none', 'solid', 'hatch', 'crosshatch'];
@@ -124,6 +125,7 @@ export function StylePanel() {
   const shapesRecord = useDocumentStore(
     (s) => s.doc.pages[s.currentPageId]?.shapes,
   );
+  const playbackActive = useAnimationStore((s) => s.playbackActive);
 
 
 
@@ -138,7 +140,7 @@ export function StylePanel() {
     return true;
   })();
 
-  if (!isStylePanelVisible) {
+  if (playbackActive || !isStylePanelVisible) {
     return null;
   }
 
