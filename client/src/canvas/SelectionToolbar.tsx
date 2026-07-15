@@ -68,11 +68,10 @@ const APPROX_WIDTH = 232;
 export function SelectionToolbar({ camera }: SelectionToolbarProps) {
   const selectedIds = useSelectionStore((s) => s.selectedIds);
   const marquee = useSelectionStore((s) => s.marquee);
-  const lasso = useSelectionStore((s) => s.lasso);
   const shapes = useDocumentStore((s) => s.shapes);
 
   // Hide while a drag-select is in progress to avoid flicker.
-  if (marquee || lasso) return null;
+  if (marquee) return null;
 
   const info = getSelectionInfo(shapes, selectedIds, camera.z);
   if (!info) return null;

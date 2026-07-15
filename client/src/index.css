@@ -301,6 +301,16 @@
   }
 }
 
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  .pencil-draw-icon {
+    transform-origin: 30% 70%;
+    transition: transform 240ms cubic-bezier(0.45, 0, 0.55, 1);
+  }
+
+  .pencil-draw-trigger:hover .pencil-draw-icon {
+    transform: translate3d(-1px, 1px, 0) rotate(-7deg);
+  }
+}
 
 /* Accessibility Focus Rings Override */
 @layer base {

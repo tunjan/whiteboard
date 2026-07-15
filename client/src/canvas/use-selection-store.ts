@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Bounds, Point } from '@whiteboard/shared';
+import type { Bounds } from '@whiteboard/shared';
 import type { MarqueeMode } from './selection-geometry';
 import type { SnapGuide } from './snapping';
 
@@ -14,8 +14,6 @@ interface SelectionStore {
   selectedIds: string[];
   /** Live directional marquee while drag-selecting, else null. */
   marquee: MarqueeSelection | null;
-  /** Live lasso polygon (world points) while lasso-selecting, else null. */
-  lasso: Point[] | null;
   /** Live alignment guides during a snapping drag. */
   snapGuides: SnapGuide[];
   setSelection: (ids: string[]) => void;
@@ -24,7 +22,6 @@ interface SelectionStore {
   clear: () => void;
   has: (id: string) => boolean;
   setMarquee: (marquee: MarqueeSelection | null) => void;
-  setLasso: (points: Point[] | null) => void;
   setSnapGuides: (guides: SnapGuide[]) => void;
 }
 
@@ -32,7 +29,6 @@ interface SelectionStore {
 export const useSelectionStore = create<SelectionStore>((set, get) => ({
   selectedIds: [],
   marquee: null,
-  lasso: null,
   snapGuides: [],
   setSelection: (selectedIds) => set({ selectedIds }),
   add: (ids) =>
@@ -46,6 +42,5 @@ export const useSelectionStore = create<SelectionStore>((set, get) => ({
   clear: () => set({ selectedIds: [] }),
   has: (id) => get().selectedIds.includes(id),
   setMarquee: (marquee) => set({ marquee }),
-  setLasso: (lasso) => set({ lasso }),
   setSnapGuides: (snapGuides) => set({ snapGuides }),
 }));

@@ -43,9 +43,9 @@ const POLYGON_KINDS: { kind: PolygonKind; label: string }[] = [
   { kind: 'hexagon', label: 'Hexagon' },
 ];
 
-const GROUP_1 = ['select', 'hand', 'lasso'];
+const GROUP_1 = ['select', 'hand'];
 const GROUP_2 = ['draw', 'eraser', 'laser'];
-const GROUP_3 = ['text', 'graph'];
+const GROUP_3 = ['text', 'graph', 'comment'];
 const GROUP_4 = ['rectangle', 'ellipse', 'arrow'];
 const ACTIVE_TOOL_CLASS =
   'border-transparent bg-bg-info text-content-info hover:bg-bg-info hover:text-content-info';
@@ -220,10 +220,15 @@ export function Toolbar() {
           aria-pressed={active}
           className={cn(
             buttonVariants({ variant: 'ghost', size: 'icon-lg' }),
+            tool.id === 'draw' && 'pencil-draw-trigger',
             active && ACTIVE_TOOL_CLASS,
           )}
         >
-          {Icon ? <Icon /> : null}
+          {Icon ? (
+            <Icon
+              className={tool.id === 'draw' ? 'pencil-draw-icon' : undefined}
+            />
+          ) : null}
         </TooltipTrigger>
         <TooltipContent side="top">
           <span>{tool.label}</span>

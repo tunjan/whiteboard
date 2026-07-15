@@ -1,3 +1,4 @@
+import type { ConnectionStatus } from '@/collab/use-connection-store';
 import { useConnectionStore } from '@/collab/use-connection-store';
 import {
   Tooltip,
@@ -5,50 +6,138 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-import { Cloud, CloudOff, Loader2 } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
-const STATUS = {
-  connected: {
-    label: 'Connected',
-    Icon: Cloud,
-    colorClass: 'text-[var(--content-success)]',
-  },
-  connecting: {
-    label: 'Connecting',
-    Icon: Loader2,
-    colorClass: 'text-[var(--content-attention)] animate-spin',
-  },
-  disconnected: {
-    label: 'Disconnected',
-    Icon: CloudOff,
-    colorClass: 'text-[var(--content-error)]',
-  },
-} as const;
+const BARS = [
+  { x: 1, y: 11, height: 4 },
+  { x: 5, y: 8, height: 7 },
+  { x: 9, y: 5, height: 10 },
+  { x: 13, y: 2, height: 13 },
+] as const;
 
-/** Connection status pill for the top bar. */
+function connectionQuality(
+  status: ConnectionStatus,
+  latencyMs: number | null,
+) {
+  if (status === 'disconnected') {
+    return {
+      activeBars: 0,
+      label: 'Disconnected',
+      colorClass: 'text-content-error',
+      pending: false,
+    };
+  }
+  if (status === 'connecting' || latencyMs === null) {
+    return {
+      activeBars: 0,
+      label: status === 'connecting' ? 'Connecting' : 'Measuring connection',
+      colorClass: 'text-content-attention',
+      pending: true,
+    };
+  }
+  if (latencyMs <= 100) {
+    return {
+      activeBars: 4,
+      label: 'Excellent connection',
+      colorClass: 'text-content-success',
+      pending: false,
+    };
+  }
+  if (latencyMs <= 200) {
+    return {
+      activeBars: 3,
+      label: 'Good connection',
+      colorClass: 'text-content-success',
+      pending: false,
+    };
+  }
+  if (latencyMs <= 400) {
+    return {
+      activeBars: 2,
+      label: 'Fair connection',
+      colorClass: 'text-content-attention',
+      pending: false,
+    };
+  }
+  return {
+    activeBars: 1,
+    label: 'Poor connection',
+    colorClass: 'text-content-error',
+    pending: false,
+  };
+}
+
+function SignalBars({
+  activeBars,
+  className,
+  pending,
+}: {
+  activeBars: number;
+  className?: string;
+  pending: boolean;
+}) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={cn('size-4', pending && 'animate-pulse', className)}
+      viewBox="0 0 17 16"
+    >
+      {BARS.map((bar, index) => (
+        <rect
+          key={bar.x}
+          className={cn(
+            'transition-opacity duration-200 motion-reduce:transition-none',
+            index < activeBars ? 'opacity-100' : 'opacity-20',
+          )}
+          fill="currentColor"
+          height={bar.height}
+          rx="1"
+          width="3"
+          x={bar.x}
+          y={bar.y}
+        />
+      ))}
+    </svg>
+  );
+}
+
+/** Live collaboration quality shown as latency-sensitive signal bars. */
 export function ConnectionIndicator() {
-  const status = useConnectionStore((s) => s.status);
-  const info = STATUS[status];
-  const Icon = info.Icon;
+  const status = useConnectionStore((state) => state.status);
+  const latencyMs = useConnectionStore((state) => state.latencyMs);
+  const quality = connectionQuality(status, latencyMs);
+  const tooltipLabel =
+    latencyMs !== null
+      ? `${latencyMs} ms`
+      : status === 'connected'
+        ? 'Measuring latency…'
+        : quality.label;
+  const accessibleLabel =
+    latencyMs === null
+      ? quality.label
+      : `${quality.label}, ${latencyMs} ms latency`;
+
   return (
     <TooltipProvider delay={300}>
       <Tooltip>
         <TooltipTrigger
           render={
             <div
-              aria-label={info.label}
-              aria-live="polite"
-              className="flex size-5 items-center justify-center text-xs select-none focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-border-subtle"
+              aria-label={accessibleLabel}
+              className="flex size-8 items-center justify-center rounded-[var(--surface-control-radius)] select-none hover:bg-bg-subtle focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-border-subtle"
               role="status"
               tabIndex={0}
-              title={info.label}
             />
           }
         >
-          <Icon className={`size-4 ${info.colorClass}`} />
+          <SignalBars
+            activeBars={quality.activeBars}
+            className={quality.colorClass}
+            pending={quality.pending}
+          />
         </TooltipTrigger>
-        <TooltipContent side="bottom">
-          <span>{info.label}</span>
+        <TooltipContent side="bottom" className="tabular-nums">
+          {tooltipLabel}
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>

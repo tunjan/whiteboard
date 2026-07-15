@@ -1,4 +1,5 @@
 import { Fragment } from 'react';
+import { MousePointer2 } from 'lucide-react';
 import { rotatePoint, type TextShape } from '@whiteboard/shared';
 import type { Camera } from '@/canvas/camera';
 import { worldToScreen } from '@/canvas/camera';
@@ -10,25 +11,27 @@ import {
 } from '@/canvas/shapes/text-measure';
 import { useDocumentStore } from '@/canvas/use-document-store';
 import { usePresenceStore } from '@/collab/use-presence-store';
+import { cn } from '@/lib/utils';
 
 function CursorIcon({ color }: { color: string }) {
   return (
-    <svg
+    <span
       aria-hidden="true"
-      width="17"
-      height="19"
-      viewBox="0 0 20 22"
-      className="block"
+      className="relative block size-5 -translate-x-1 -translate-y-1"
     >
-      <path
-        d="M3.25 2.5 17 10.05l-5.45 1.7-2.7 5.25L3.25 2.5Z"
-        fill={color}
+      <MousePointer2
+        className="absolute inset-0 size-5"
+        fill="var(--bg-default)"
         stroke="var(--bg-default)"
-        strokeWidth="2.25"
-        strokeLinejoin="round"
-        style={{ paintOrder: 'stroke fill' }}
+        strokeWidth={4.5}
       />
-    </svg>
+      <MousePointer2
+        className="absolute inset-0 size-5"
+        fill={color}
+        stroke={color}
+        strokeWidth={1.25}
+      />
+    </span>
   );
 }
 
@@ -53,14 +56,20 @@ function textLocalToScreen(
 }
 
 /** Live peer cursors, positioned from world-coordinate awareness state. */
-export function CursorsLayer({ camera }: { camera: Camera }) {
+export function CursorsLayer({
+  camera,
+  viewportSize,
+}: {
+  camera: Camera;
+  viewportSize: { width: number; height: number };
+}) {
   const peers = usePresenceStore((s) => s.peers);
   const currentPageId = useDocumentStore((s) => s.currentPageId);
   const shapes = useDocumentStore(
     (s) => s.doc.pages[s.currentPageId]?.shapes,
   );
   return (
-    <div className="pointer-events-none absolute inset-0 z-10 overflow-hidden">
+    <div className="pointer-events-none absolute inset-0 overflow-hidden">
       {peers.map((p) => {
         // Only show cursors of peers viewing the same page.
         if (p.page && p.page !== currentPageId) return null;
@@ -122,23 +131,32 @@ export function CursorsLayer({ camera }: { camera: Camera }) {
           })() : null;
 
         const s = p.cursor ? worldToScreen(p.cursor, camera) : null;
+        const placeLabelLeft =
+          s !== null && s.x > viewportSize.width - 176;
+        const placeLabelAbove =
+          s !== null && s.y > viewportSize.height - 44;
         return (
           <Fragment key={p.clientId}>
             {textOverlay}
             {s && (
               <div
                 aria-hidden="true"
-                className="absolute top-0 left-0 will-change-transform"
+                className="absolute top-0 left-0 transition-transform duration-75 ease-linear will-change-transform motion-reduce:transition-none"
                 style={{
                   transform: `translate3d(${Math.round(s.x)}px, ${Math.round(s.y)}px, 0)`,
                 }}
               >
                 <CursorIcon color={p.color} />
                 <span
-                  className="absolute top-3 left-3 flex max-w-36 items-center rounded-md border px-2 py-1 text-[11px] font-medium leading-none text-content-emphasis"
+                  className={cn(
+                    'absolute flex h-6 max-w-40 items-center rounded-md bg-bg-default/95 px-2 text-[11px] font-medium leading-none text-content-default shadow-hover',
+                    placeLabelLeft
+                      ? 'right-1 border-r-2'
+                      : 'left-3 border-l-2',
+                    placeLabelAbove ? 'bottom-3' : 'top-3',
+                  )}
                   style={{
-                    background: `color-mix(in srgb, ${p.color} 8%, var(--bg-default))`,
-                    borderColor: `color-mix(in srgb, ${p.color} 22%, var(--border-subtle))`,
+                    borderColor: p.color,
                   }}
                 >
                   <span className="truncate">{p.name}</span>

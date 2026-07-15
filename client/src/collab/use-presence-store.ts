@@ -34,6 +34,8 @@ export interface PeerPresence {
   page: string | null;
   /** Whether this peer is currently following the tutor's view. */
   following: boolean;
+  /** This peer's measured collaboration round-trip latency, in milliseconds. */
+  latencyMs: number | null;
   /** Ephemeral caret/selection inside an actively edited text shape. */
   textSelection: TextSelectionPresence | null;
   /** Ephemeral laser trail while this peer is presenting. */

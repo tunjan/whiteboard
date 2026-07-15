@@ -23,7 +23,6 @@ interface SelectionLayerProps {
 export function SelectionLayer({ camera }: SelectionLayerProps) {
   const selectedIds = useSelectionStore((s) => s.selectedIds);
   const marquee = useSelectionStore((s) => s.marquee);
-  const lasso = useSelectionStore((s) => s.lasso);
   const snapGuides = useSelectionStore((s) => s.snapGuides);
   const shapesRecord = useDocumentStore(
     (s) => s.doc.pages[s.currentPageId]?.shapes,
@@ -233,17 +232,6 @@ export function SelectionLayer({ camera }: SelectionLayerProps) {
           />
         );
       })}
-
-      {lasso && lasso.length > 1 && (
-        <polygon
-          points={lasso.map((p) => { const s = toScreen(p); return `${s.x},${s.y}`; }).join(' ')}
-          fill={ACCENT}
-          fillOpacity={0.08}
-          stroke={ACCENT}
-          strokeWidth={1}
-          strokeDasharray="4 3"
-        />
-      )}
 
       {marquee && (() => {
         const { bounds } = marquee;

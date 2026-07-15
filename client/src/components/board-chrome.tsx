@@ -12,9 +12,13 @@ import { exportBoardToPng } from '@/canvas/export-png';
 import { DoodleAvatar } from '@/collab/avatar';
 import type { Identity } from '@/collab/identity';
 import { jumpToPeerViewport } from '@/collab/presence';
-import { usePresenceStore } from '@/collab/use-presence-store';
+import {
+  type PeerPresence,
+  usePresenceStore,
+} from '@/collab/use-presence-store';
 import { BoardNotesDialog } from '@/components/board-notes-dialog';
 import { AnimationControls } from '@/components/animation-controls';
+import { ConnectionIndicator } from '@/components/connection-indicator';
 import { FollowControls } from '@/components/follow-controls';
 import { MusicPlayer } from '@/music/music-player';
 import { PageMenu } from '@/components/page-menu';
@@ -40,6 +44,18 @@ import { useThemeStore } from '@/use-theme-store';
 
 const MAX_VISIBLE_AVATARS = 4;
 
+interface Participant {
+  id: string;
+  name: string;
+  avatar: string;
+  isLocal: boolean;
+  peer: PeerPresence | null;
+}
+
+function peerLatencyLabel(peer: PeerPresence): string {
+  return peer.latencyMs === null ? 'Measuring…' : `${peer.latencyMs} ms`;
+}
+
 function Avatar({ avatar }: { avatar: string }) {
   return (
     <DoodleAvatar
@@ -49,14 +65,57 @@ function Avatar({ avatar }: { avatar: string }) {
   );
 }
 
-function OverflowAvatar({ count }: { count: number }) {
-  return (
+function OverflowAvatar({
+  participants,
+  showPeerLatency,
+}: {
+  participants: Participant[];
+  showPeerLatency: boolean;
+}) {
+  const label = `${participants.length} more present`;
+  const avatar = (
     <div
       className="flex size-7 items-center justify-center rounded-full border-2 border-bg-default bg-bg-subtle text-[10px] font-semibold text-content-subtle"
-      title={`${count} more present`}
+      title={showPeerLatency ? undefined : label}
     >
-      +{count}
+      +{participants.length}
     </div>
+  );
+
+  if (!showPeerLatency) return avatar;
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <div
+            aria-label={label}
+            className="rounded-full"
+            role="status"
+            tabIndex={0}
+          />
+        }
+      >
+        {avatar}
+      </TooltipTrigger>
+      <TooltipContent side="bottom" className="flex-col items-stretch gap-1.5">
+        {participants.map((participant) => (
+          <div
+            key={participant.id}
+            className="flex items-center justify-between gap-3"
+          >
+            <span>
+              {participant.name}
+              {participant.isLocal ? ' (you)' : ''}
+            </span>
+            {participant.peer ? (
+              <span className="min-w-14 text-right font-mono tabular-nums">
+                {peerLatencyLabel(participant.peer)}
+              </span>
+            ) : null}
+          </div>
+        ))}
+      </TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -81,7 +140,7 @@ export function BoardChrome({
   const theme = useThemeStore((s) => s.theme);
   const toggle = useThemeStore((s) => s.toggle);
   const peers = usePresenceStore((s) => s.peers);
-  const participants = [
+  const participants: Participant[] = [
     ...peers.map((peer) => ({
       id: `peer-${peer.clientId}`,
       name: peer.name,
@@ -102,10 +161,7 @@ export function BoardChrome({
       : []),
   ];
   const visibleParticipants = participants.slice(0, MAX_VISIBLE_AVATARS);
-  const overflowCount = Math.max(
-    0,
-    participants.length - visibleParticipants.length,
-  );
+  const overflowParticipants = participants.slice(MAX_VISIBLE_AVATARS);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [notesOpen, setNotesOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -231,6 +287,7 @@ export function BoardChrome({
 
       {/* Top-right panel (presence, session controls, and sharing). */}
       <Surface className="touch-targets absolute top-[calc(1rem+env(safe-area-inset-top))] right-[calc(1rem+env(safe-area-inset-right))] z-20 flex h-10 items-center gap-0.5 p-1 shadow-hover">
+        <ConnectionIndicator />
         <div className="flex items-center px-1">
           <TooltipProvider delay={300}>
             <div className="flex -space-x-1.5">
@@ -238,6 +295,10 @@ export function BoardChrome({
                 const label = participant.isLocal
                   ? `${participant.name} (you)`
                   : participant.name;
+                const latencyLabel =
+                  identity?.isTutor && participant.peer
+                    ? peerLatencyLabel(participant.peer)
+                    : null;
                 let trigger;
                 if (participant.isLocal && onEditIdentity) {
                   trigger = (
@@ -280,12 +341,22 @@ export function BoardChrome({
                 return (
                   <Tooltip key={participant.id}>
                     {trigger}
-                    <TooltipContent side="bottom">{label}</TooltipContent>
+                    <TooltipContent side="bottom">
+                      <span>{label}</span>
+                      {latencyLabel ? (
+                        <span className="font-mono tabular-nums">
+                          · {latencyLabel}
+                        </span>
+                      ) : null}
+                    </TooltipContent>
                   </Tooltip>
                 );
               })}
-              {overflowCount > 0 ? (
-                <OverflowAvatar count={overflowCount} />
+              {overflowParticipants.length > 0 ? (
+                <OverflowAvatar
+                  participants={overflowParticipants}
+                  showPeerLatency={identity?.isTutor === true}
+                />
               ) : null}
             </div>
           </TooltipProvider>

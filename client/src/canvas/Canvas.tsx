@@ -19,6 +19,7 @@ import {
 import { quantizedCullRegion, viewportWorldBounds } from './geometry';
 import { PerformanceOverlay } from '@/components/performance-overlay';
 import { CursorsLayer } from '@/collab/CursorsLayer';
+import { CommentsLayer } from './CommentsLayer';
 import { LaserLayer } from './LaserLayer';
 import { DrawingCursor } from './DrawingCursor';
 import {
@@ -135,6 +136,7 @@ export function Canvas() {
   const debugPerformance = useCanvasUiStore((s) => s.debugPerformance);
   const activeToolId = useToolStore((s) => s.activeToolId);
   const cameraMoving = useCameraInteraction((s) => s.isMoving);
+  const handDragging = useCameraInteraction((s) => s.isHandDragging);
   const playbackActive = useAnimationStore((s) => s.playbackActive);
   const playbackShapes = useAnimationStore((s) => s.playbackShapes);
   const setAnimationViewportSize = useAnimationStore((s) => s.setViewportSize);
@@ -937,14 +939,16 @@ export function Canvas() {
     ) {
       return;
     }
-    // A summon yanks you to the tutor's page as well as their viewport.
+    // A summon moves you to the tutor's page, then eases into their viewport.
     if (tutorPage && tutorPage !== currentPageId) setCurrentPage(tutorPage);
     const bounds = viewportWorldBounds(
       tutorViewport.camera,
       tutorViewport.size.width,
       tutorViewport.size.height,
     );
-    useCameraStore.getState().zoomToBounds(bounds, size.width, size.height, 1);
+    useCameraStore
+      .getState()
+      .animateToBounds(bounds, size.width, size.height, 1);
     useFollowStore.getState().setLastSummonApplied(tutorSummon);
   }, [
     tutorClientId,
@@ -1271,7 +1275,7 @@ export function Canvas() {
 
   const toolCursor = toolRegistry.get(activeToolId)?.cursor ?? 'default';
   const showDrawingCursor = activeToolId === 'draw' && !pan.isSpaceDown;
-  const cursor = pan.isPanning
+  const cursor = pan.isPanning || handDragging
     ? 'grabbing'
     : pan.isSpaceDown
       ? 'grab'
@@ -1331,7 +1335,8 @@ export function Canvas() {
       {!playbackActive && !editingShape && <SelectionLayer camera={camera} />}
       {!playbackActive && !editingShape && <SelectionToolbar camera={camera} />}
       <LaserLayer camera={camera} />
-      <CursorsLayer camera={camera} />
+      <CursorsLayer camera={camera} viewportSize={size} />
+      {!playbackActive && <CommentsLayer camera={camera} />}
       {!playbackActive && showDrawingCursor && (
         <DrawingCursor camera={camera} containerRef={containerRef} />
       )}

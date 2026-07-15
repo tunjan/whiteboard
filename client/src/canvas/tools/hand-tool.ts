@@ -1,6 +1,7 @@
-import { Hand } from 'lucide-react';
 import { stopFollowingForManualCameraChange } from '@/collab/use-follow-store';
 import { useCameraStore } from '../use-camera-store';
+import { setHandDragging } from '../use-camera-interaction';
+import { HandToolIcon } from './hand-tool-icon';
 import type { Tool, ToolPointerInfo } from './types';
 
 /**
@@ -10,16 +11,25 @@ import type { Tool, ToolPointerInfo } from './types';
  */
 export function createHandTool(): Tool {
   let last: { x: number; y: number } | null = null;
+  const finishDrag = () => {
+    last = null;
+    setHandDragging(false);
+  };
 
   return {
     id: 'hand',
-    label: 'Hand',
+    label: 'Pan',
     hotkey: 'h',
     cursor: 'grab',
-    icon: Hand,
+    icon: HandToolIcon,
 
     onPointerDown(info: ToolPointerInfo) {
+      if (info.button !== 0) {
+        finishDrag();
+        return;
+      }
       last = info.screenPoint;
+      setHandDragging(true);
       stopFollowingForManualCameraChange();
     },
 
@@ -28,16 +38,21 @@ export function createHandTool(): Tool {
       const dx = info.screenPoint.x - last.x;
       const dy = info.screenPoint.y - last.y;
       last = info.screenPoint;
+      if (dx === 0 && dy === 0) return;
       // Drag right -> camera moves left so content follows the cursor.
       useCameraStore.getState().panByScreen(-dx, -dy);
     },
 
     onPointerUp() {
-      last = null;
+      finishDrag();
     },
 
     onCancel() {
-      last = null;
+      finishDrag();
+    },
+
+    onExit() {
+      finishDrag();
     },
   };
 }

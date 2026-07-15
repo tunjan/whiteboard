@@ -13,3 +13,4 @@ export * from './board-repository';
 export * from './music';
 export * from './animation';
 export * from './recordings';
+export * from './latency';

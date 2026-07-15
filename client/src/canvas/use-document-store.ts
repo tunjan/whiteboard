@@ -23,8 +23,14 @@ import { shapeRotatedBounds } from './shape-bounds';
 import { SpatialIndex } from './spatial-index';
 import { useCameraStore } from './use-camera-store';
 import { useSelectionStore } from './use-selection-store';
+import { type CommentMessage, useCommentsStore } from './use-comments-store';
 import { useConnectionStore } from '@/collab/use-connection-store';
-import { setActiveAwareness, setLocalPage } from '@/collab/presence';
+import { startLatencyMonitor } from '@/collab/latency';
+import {
+  setActiveAwareness,
+  setLocalLatency,
+  setLocalPage,
+} from '@/collab/presence';
 import { useMusicPlaybackStore } from '@/music/use-music-playback-store';
 import {
   isAnimationPageLocked,
@@ -43,6 +49,9 @@ const DEFAULT_PAGE_NAME = 'Page 1';
 /** Origin tag for this client's own mutations — only these are undoable. */
 export const LOCAL_ORIGIN = 'local-user';
 const ANIMATION_ORIGIN = 'animation-system';
+// Comments are never part of undo history (not shapes, not selectable), so
+// their origin is deliberately excluded from the UndoManager's trackedOrigins.
+const COMMENT_ORIGIN = 'comments';
 
 /** Room name for a board's Yjs content (IndexedDB + Hocuspocus). */
 export function boardRoom(boardId: string): string {
@@ -230,6 +239,8 @@ interface Session {
   animations: Y.Map<AnimationRecordingV1>;
   /** Shared animation transport state. */
   animationPlayback: Y.Map<unknown>;
+  /** Comment thread messages, flat map keyed by message id (all pages). */
+  comments: Y.Map<CommentMessage>;
   /** Shapes map for the active page (root `shapes` for page-default). */
   currentShapes: Y.Map<YShape>;
   currentPageId: string;
@@ -242,6 +253,7 @@ interface Session {
   musicObserver: () => void;
   animationsObserver: () => void;
   animationPlaybackObserver: () => void;
+  commentsObserver: () => void;
   persistence: IndexeddbPersistence | null;
   provider: HocuspocusProvider | null;
   cleanup: () => void;
@@ -444,6 +456,19 @@ function publishAnimationPlayback(): void {
   useAnimationStore.getState().setPlayback(readAnimationPlayback());
 }
 
+// --- Comments (flat map: message id -> plain CommentMessage object) ---
+
+function readComments(): Record<string, CommentMessage> {
+  if (!session) return {};
+  const out: Record<string, CommentMessage> = {};
+  for (const [id, message] of session.comments) out[id] = message;
+  return out;
+}
+
+function publishComments(): void {
+  useCommentsStore.getState().setMessages(readComments());
+}
+
 function asStringOrNull(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
 }
@@ -567,12 +592,14 @@ export function loadBoard(
   });
   useMusicPlaybackStore.getState().reset();
   useAnimationStore.getState().reset();
+  useCommentsStore.getState().reset();
 
   const doc = new Y.Doc();
   const pages = doc.getMap('pages') as Y.Map<YPageMeta>;
   const music = doc.getMap('music');
   const animations = doc.getMap<AnimationRecordingV1>('animations');
   const animationPlayback = doc.getMap('animation-playback');
+  const comments = doc.getMap<CommentMessage>('comments');
   const currentShapes = getShapesMap(doc, DEFAULT_PAGE_ID);
   const undo = new Y.UndoManager(currentShapes, {
     trackedOrigins: new Set([LOCAL_ORIGIN]),
@@ -602,12 +629,15 @@ export function loadBoard(
   animations.observe(animationsObserver);
   const animationPlaybackObserver = () => publishAnimationPlayback();
   animationPlayback.observe(animationPlaybackObserver);
+  const commentsObserver = () => publishComments();
+  comments.observe(commentsObserver);
 
   const persistence = opts.persist
     ? new IndexeddbPersistence(boardRoom(boardId), doc)
     : null;
 
   let provider: HocuspocusProvider | null = null;
+  let stopLatencyMonitor = () => {};
   if (opts.collab) {
     provider = new HocuspocusProvider({
       url: collabUrl(),
@@ -617,6 +647,7 @@ export function loadBoard(
     provider.on('status', (event: { status: string }) => {
       useConnectionStore.getState().setStatus(event.status);
     });
+    stopLatencyMonitor = startLatencyMonitor(provider, setLocalLatency);
     setActiveAwareness(provider.awareness ?? null);
   } else {
     useConnectionStore.getState().setStatus('disconnected');
@@ -629,6 +660,7 @@ export function loadBoard(
     music,
     animations,
     animationPlayback,
+    comments,
     currentShapes,
     currentPageId: DEFAULT_PAGE_ID,
     undo,
@@ -638,6 +670,7 @@ export function loadBoard(
     musicObserver,
     animationsObserver,
     animationPlaybackObserver,
+    commentsObserver,
     persistence,
     provider,
     cleanup: () => {
@@ -647,13 +680,16 @@ export function loadBoard(
       music.unobserve(musicObserver);
       animations.unobserve(animationsObserver);
       animationPlayback.unobserve(animationPlaybackObserver);
+      comments.unobserve(commentsObserver);
       session?.unbindUndoState();
       session?.undo.destroy();
+      stopLatencyMonitor();
       provider?.destroy();
       persistence?.destroy();
       doc.destroy();
       useMusicPlaybackStore.getState().reset();
       useAnimationStore.getState().reset();
+      useCommentsStore.getState().reset();
     },
   };
 
@@ -671,6 +707,7 @@ export function loadBoard(
   publishMusicPlayback();
   notifyLegacyAnimations();
   publishAnimationPlayback();
+  publishComments();
 
   let disposed = false;
   return () => {
@@ -866,6 +903,84 @@ export function setAnimationPlayback(update: {
     session?.animationPlayback.set('updatedAt', Date.now());
     session?.animationPlayback.set('version', current.version + 1);
   }, ANIMATION_ORIGIN);
+}
+
+// --- Comments API ---
+// A flat map keyed by message id: the thread root (id === threadId) carries
+// the pin position and resolved flag; replies just point back via threadId.
+// Concurrent replies from two clients never conflict since each is its own key.
+
+/** Start a new comment thread pinned at a world position. Returns its id. */
+export function addComment(input: {
+  pageId: string;
+  x: number;
+  y: number;
+  text: string;
+  author: { name: string; color: string };
+}): string {
+  const id = genId();
+  if (!session) return id;
+  const message: CommentMessage = {
+    id,
+    pageId: input.pageId,
+    threadId: id,
+    x: input.x,
+    y: input.y,
+    text: input.text,
+    authorName: input.author.name,
+    authorColor: input.author.color,
+    createdAt: Date.now(),
+    resolved: false,
+  };
+  session.doc.transact(() => {
+    session?.comments.set(id, message);
+  }, COMMENT_ORIGIN);
+  return id;
+}
+
+/** Append a reply to an existing thread. Returns the reply's id. */
+export function addCommentReply(
+  threadId: string,
+  text: string,
+  author: { name: string; color: string },
+): string {
+  const id = genId();
+  if (!session) return id;
+  const root = session.comments.get(threadId);
+  if (!root) return id;
+  const message: CommentMessage = {
+    id,
+    pageId: root.pageId,
+    threadId,
+    text,
+    authorName: author.name,
+    authorColor: author.color,
+    createdAt: Date.now(),
+  };
+  session.doc.transact(() => {
+    session?.comments.set(id, message);
+  }, COMMENT_ORIGIN);
+  return id;
+}
+
+/** Mark a thread resolved/unresolved. Resolved threads are hidden on canvas. */
+export function setThreadResolved(threadId: string, resolved: boolean): void {
+  if (!session) return;
+  const root = session.comments.get(threadId);
+  if (!root) return;
+  session.doc.transact(() => {
+    session?.comments.set(threadId, { ...root, resolved });
+  }, COMMENT_ORIGIN);
+}
+
+/** Delete a thread's root message and all of its replies. */
+export function deleteCommentThread(threadId: string): void {
+  if (!session) return;
+  session.doc.transact(() => {
+    for (const [id, message] of session!.comments) {
+      if (message.threadId === threadId) session!.comments.delete(id);
+    }
+  }, COMMENT_ORIGIN);
 }
 
 // --- Editor (stable; mutates the current page's Yjs map) ---

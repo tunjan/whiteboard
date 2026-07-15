@@ -31,6 +31,7 @@ let onChange: (() => void) | null = null;
 let localUser: LocalUser | null = null;
 let localPage: string | null = null;
 let localFollowing = false;
+let localLatencyMs: number | null = null;
 let localTextSelection: TextSelectionPresence | null = null;
 let localLaser: LaserPresence | null = null;
 let lastCursorSent = 0;
@@ -65,6 +66,12 @@ function publishPeers(a: Awareness): void {
     const summon = (state.summon as number | null) ?? null;
     const page = (state.page as string | null) ?? null;
     const following = (state.following as boolean | undefined) ?? false;
+    const latencyMs =
+      typeof state.latencyMs === 'number' &&
+      Number.isFinite(state.latencyMs) &&
+      state.latencyMs >= 0
+        ? Math.round(state.latencyMs)
+        : null;
     const textSelection =
       (state.textSelection as TextSelectionPresence | null) ?? null;
     const laser = (state.laser as LaserPresence | null) ?? null;
@@ -80,6 +87,7 @@ function publishPeers(a: Awareness): void {
       prev.summon === summon &&
       prev.page === page &&
       prev.following === following &&
+      prev.latencyMs === latencyMs &&
       prev.textSelection === textSelection &&
       prev.laser === laser
         ? prev
@@ -94,6 +102,7 @@ function publishPeers(a: Awareness): void {
             summon,
             page,
             following,
+            latencyMs,
             textSelection,
             laser,
           };
@@ -119,6 +128,7 @@ export function setActiveAwareness(next: Awareness | null): void {
   if (localUser) next.setLocalStateField('user', localUser);
   if (localPage) next.setLocalStateField('page', localPage);
   next.setLocalStateField('following', localFollowing);
+  next.setLocalStateField('latencyMs', localLatencyMs);
   next.setLocalStateField('textSelection', localTextSelection);
   next.setLocalStateField('laser', localLaser);
   publishPeers(next);
@@ -127,6 +137,11 @@ export function setActiveAwareness(next: Awareness | null): void {
 export function setLocalUser(user: LocalUser): void {
   localUser = user;
   awareness?.setLocalStateField('user', user);
+}
+
+/** The local user's identity, or null before it's been set. */
+export function getLocalUser(): LocalUser | null {
+  return localUser;
 }
 
 /** Publish which page this client is viewing so peers can follow across pages. */
@@ -139,6 +154,12 @@ export function setLocalPage(pageId: string): void {
 export function setLocalFollowing(following: boolean): void {
   localFollowing = following;
   awareness?.setLocalStateField('following', following);
+}
+
+/** Publish this client's own server round-trip time for tutor diagnostics. */
+export function setLocalLatency(latencyMs: number | null): void {
+  localLatencyMs = latencyMs;
+  awareness?.setLocalStateField('latencyMs', latencyMs);
 }
 
 export function setLocalCursor(point: Point | null): void {

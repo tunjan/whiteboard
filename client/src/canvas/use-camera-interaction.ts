@@ -9,6 +9,8 @@ const IDLE_MS = 140;
 interface CameraInteractionStore {
   /** True while the camera is actively panning/zooming (debounced). */
   isMoving: boolean;
+  /** True only while the selected Hand tool owns a pointer drag. */
+  isHandDragging: boolean;
 }
 
 // Transient, derived signal — never persisted. Drives the pointer-event blocker
@@ -16,7 +18,14 @@ interface CameraInteractionStore {
 // stops hit-testing the SVG shape tree on every frame.
 export const useCameraInteraction = create<CameraInteractionStore>(() => ({
   isMoving: false,
+  isHandDragging: false,
 }));
+
+/** Publish the Hand tool's press state for the canvas cursor and toolbar icon. */
+export function setHandDragging(isHandDragging: boolean): void {
+  if (useCameraInteraction.getState().isHandDragging === isHandDragging) return;
+  useCameraInteraction.setState({ isHandDragging });
+}
 
 // A single subscription to the camera store covers every movement source (wheel,
 // trackpad pinch, Safari gestures, space-pan, keyboard zoom, follow/summon): they

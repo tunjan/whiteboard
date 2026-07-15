@@ -1,9 +1,11 @@
+import { useEffect } from 'react';
 import {
   AlignCenter,
   AlignLeft,
   AlignRight,
   ArrowLeft,
   ArrowRight,
+  ChevronsUpDown,
 } from 'lucide-react';
 import type {
   FillStyle,
@@ -13,6 +15,7 @@ import type {
 } from '@whiteboard/shared';
 import { fontStack } from '@/canvas/shapes/text-measure';
 import { editor, useDocumentStore } from '@/canvas/use-document-store';
+import { usePenPresetsStore } from '@/canvas/use-pen-presets-store';
 import { useSelectionStore } from '@/canvas/use-selection-store';
 import {
   PALETTES,
@@ -35,15 +38,24 @@ import { Separator } from '@/components/ui/separator';
 import { Slider } from '@/components/ui/slider';
 import { Surface } from '@/components/ui/surface';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
-import { ChevronsUpDown } from 'lucide-react';
 import { useAnimationStore } from '@/animation/use-animation-store';
-
 
 const FILLS: FillStyle[] = ['none', 'solid', 'hatch', 'crosshatch'];
 const DASHES: StrokeDash[] = ['solid', 'dashed', 'dotted'];
 const FILLABLE = new Set(['rectangle', 'ellipse', 'polygon']);
 const DASHABLE = new Set(['rectangle', 'ellipse', 'polygon', 'line', 'arrow', 'draw']);
 
+const FILL_LABELS: Record<FillStyle, string> = {
+  none: 'No fill',
+  solid: 'Solid fill',
+  hatch: 'Hatched fill',
+  crosshatch: 'Crosshatched fill',
+};
+const DASH_LABELS: Record<StrokeDash, string> = {
+  solid: 'Solid stroke',
+  dashed: 'Dashed stroke',
+  dotted: 'Dotted stroke',
+};
 const FONTS: { family: FontFamily; label: string }[] = [
   { family: 'sans', label: 'Aa' },
   { family: 'serif', label: 'Aa' },
@@ -98,9 +110,7 @@ function DashPreview({ dash }: { dash: StrokeDash }) {
   );
 }
 
-
-
-/** Color, stroke width, fill, dash, and text styling — applied to the
+/** Color, stroke width, fill, dash, and text styling - applied to the
  * selection and to new shapes. */
 export function StylePanel() {
   const { color, size, fill, dash, opacity, arrowStart, arrowEnd, fontFamily, align, paletteId } =
@@ -126,6 +136,20 @@ export function StylePanel() {
     (s) => s.doc.pages[s.currentPageId]?.shapes,
   );
   const playbackActive = useAnimationStore((s) => s.playbackActive);
+  const { presets, activeIndex } = usePenPresetsStore();
+
+  // The pen tool has 3 dedicated presets; re-applying the active one whenever
+  // the draw tool becomes active keeps the drawing style in sync even if the
+  // user changed color/size on another tool in the meantime.
+  useEffect(() => {
+    if (activeToolId !== 'draw') return;
+    const { presets, activeIndex } = usePenPresetsStore.getState();
+    const preset = presets[activeIndex];
+    if (preset) {
+      setColor(preset.color);
+      setSize(preset.size);
+    }
+  }, [activeToolId]);
 
 
 
@@ -134,7 +158,7 @@ export function StylePanel() {
     if (activeToolId === 'eraser' || activeToolId === 'hand' || activeToolId === 'laser') {
       return false;
     }
-    if (activeToolId === 'select' || activeToolId === 'lasso') {
+    if (activeToolId === 'select') {
       return selectedIds.length > 0;
     }
     return true;
@@ -148,7 +172,7 @@ export function StylePanel() {
 
   // Dynamic filter based on tool/selection type
   const targetType = (() => {
-    if (activeToolId !== 'select' && activeToolId !== 'lasso') {
+    if (activeToolId !== 'select') {
       return activeToolId;
     }
     if (selectedIds.length > 0 && shapesRecord) {
@@ -209,17 +233,29 @@ export function StylePanel() {
 
   const applyColor = (c: string) => {
     setColor(c);
+    if (activeToolId === 'draw') usePenPresetsStore.getState().updateActive({ color: c });
     for (const id of selectedIds) editor.updateShape(id, { props: { color: c } });
   };
 
   const applySize = (n: number) => {
     setSize(n);
+    if (activeToolId === 'draw') usePenPresetsStore.getState().updateActive({ size: n });
     for (const id of selectedIds) {
       const shape = editor.getShape(id);
       if (shape && shape.type !== 'text') {
         editor.updateShape(id, { props: { size: n } });
       }
     }
+  };
+
+  // Selects a pen preset: makes it active and applies its color/size so new
+  // strokes use it (Miro-style pen slots).
+  const applyPreset = (i: number) => {
+    const preset = presets[i];
+    if (!preset) return;
+    usePenPresetsStore.getState().setActive(i);
+    setColor(preset.color);
+    setSize(preset.size);
   };
 
   const applyFill = (f: FillStyle) => {
@@ -286,53 +322,96 @@ export function StylePanel() {
   };
 
   return (
-    <Surface className="absolute top-[calc(3.75rem+env(safe-area-inset-top))] right-[calc(1rem+env(safe-area-inset-right))] z-20 w-[min(14rem,calc(100vw-2rem))] p-4 shadow-floating">
+    <Surface
+      role="region"
+      aria-label="Style controls"
+      className="touch-targets absolute top-[calc(3.75rem+env(safe-area-inset-top))] right-[calc(1rem+env(safe-area-inset-right))] z-20 max-h-[calc(100dvh-6.25rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] w-[min(14rem,calc(100vw-2rem))] overflow-y-auto overscroll-contain p-4 shadow-floating"
+    >
       <div className="flex flex-col">
-        {/* Color + opacity — the always-present group. Label-less by design:
-            the swatches and slider read on their own, keeping the panel calm. */}
-        <div className="flex flex-col gap-3">
+        {activeToolId === 'draw' ? (
+          <>
+            <ToggleGroup
+              aria-label="Pen presets"
+              value={[String(activeIndex)]}
+              onValueChange={(values) =>
+                values[0] && applyPreset(Number(values[0]))
+              }
+            >
+              {presets.map((preset, index) => {
+                const dotSize = Math.min(18, 8 + preset.size * 0.65);
+                return (
+                  <ToggleGroupItem
+                    key={index}
+                    value={String(index)}
+                    aria-label={`Pen preset ${index + 1}`}
+                    title={`Pen preset ${index + 1}`}
+                    className="h-9"
+                  >
+                    <span
+                      className="rounded-full border border-border-default"
+                      style={{
+                        backgroundColor: preset.color,
+                        width: dotSize,
+                        height: dotSize,
+                      }}
+                    />
+                  </ToggleGroupItem>
+                );
+              })}
+            </ToggleGroup>
+            <Separator className="my-3" />
+          </>
+        ) : null}
+
+        <div className="flex flex-col gap-2.5">
           <DropdownMenu>
             <DropdownMenuTrigger
               render={
                 <Button
-                  variant="ghost"
+                  variant="outline"
                   size="sm"
-                  className="h-8 w-full justify-between gap-2 px-2 text-content-subtle"
+                  className="w-full justify-between"
                 />
               }
             >
-              <span className="flex items-center gap-1.5">
-                {colors.slice(0, 4).map((c) => (
-                  <span
-                    key={c.name}
-                    className="size-3 rounded-full border border-border-default"
-                    style={{ background: c.value }}
-                  />
-                ))}
-                <span className="text-[13px] font-medium text-content-emphasis">
-                  {activePalette.name}
+              <span className="flex min-w-0 items-center gap-2">
+                <span className="flex shrink-0 items-center gap-1">
+                  {colors.slice(0, 4).map((paletteColor) => (
+                    <span
+                      key={paletteColor.name}
+                      className="size-2.5 rounded-full border border-border-default"
+                      style={{ backgroundColor: paletteColor.value }}
+                    />
+                  ))}
                 </span>
+                <span className="truncate">{activePalette.name}</span>
               </span>
-              <ChevronsUpDown className="size-3.5 text-content-subtle" aria-hidden="true" />
+              <ChevronsUpDown data-icon="inline-end" aria-hidden="true" />
             </DropdownMenuTrigger>
             <DropdownMenuContent className="w-(--anchor-width)">
               <DropdownMenuRadioGroup
                 value={paletteId}
                 onValueChange={setPaletteId}
               >
-                {PALETTES.map((p) => (
-                  <DropdownMenuRadioItem key={p.id} value={p.id} closeOnClick>
-                    <span className="flex items-center gap-1.5">
-                      {(theme === 'dark' ? p.dark : p.light)
-                        .slice(0, 4)
-                        .map((c) => (
-                          <span
-                            key={c.name}
-                            className="size-3 rounded-full border border-border-default"
-                            style={{ background: c.value }}
-                          />
-                        ))}
-                      {p.name}
+                {PALETTES.map((palette) => (
+                  <DropdownMenuRadioItem
+                    key={palette.id}
+                    value={palette.id}
+                    closeOnClick
+                  >
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span className="flex shrink-0 items-center gap-1">
+                        {(theme === 'dark' ? palette.dark : palette.light)
+                          .slice(0, 4)
+                          .map((paletteColor) => (
+                            <span
+                              key={paletteColor.name}
+                              className="size-2.5 rounded-full border border-border-default"
+                              style={{ backgroundColor: paletteColor.value }}
+                            />
+                          ))}
+                      </span>
+                      <span className="truncate">{palette.name}</span>
                     </span>
                   </DropdownMenuRadioItem>
                 ))}
@@ -340,25 +419,30 @@ export function StylePanel() {
             </DropdownMenuContent>
           </DropdownMenu>
 
-          <div role="group" aria-label="Color" className="grid grid-cols-4 gap-2">
-            {colors.map((c) => {
-              const active = color === c.value;
+          <div
+            role="group"
+            aria-label="Color"
+            className="grid grid-cols-4 gap-1.5"
+          >
+            {colors.map((paletteColor) => {
+              const active = color === paletteColor.value;
               return (
                 <button
-                  key={c.name}
+                  key={paletteColor.name}
                   type="button"
-                  title={c.name}
-                  aria-label={c.name}
+                  title={paletteColor.name}
+                  aria-label={paletteColor.name}
                   aria-pressed={active}
-                  onClick={() => applyColor(c.value)}
-                  className={cn(
-                    'flex cursor-pointer items-center justify-center rounded-lg p-1 transition-colors',
-                    active ? 'bg-bg-muted' : 'hover:bg-bg-muted',
-                  )}
+                  onClick={() => applyColor(paletteColor.value)}
+                  className="flex h-9 w-full items-center justify-center rounded-lg transition-colors duration-150 ease-out hover:bg-bg-muted active:scale-[0.98] motion-reduce:transition-none"
                 >
                   <span
-                    className="size-8 rounded-full border border-border-default transition-transform active:scale-95"
-                    style={{ background: c.value }}
+                    className={cn(
+                      'size-6 rounded-full border border-border-default',
+                      active &&
+                        'ring-2 ring-accent-brand ring-offset-2 ring-offset-bg-default',
+                    )}
+                    style={{ backgroundColor: paletteColor.value }}
                   />
                 </button>
               );
@@ -379,121 +463,147 @@ export function StylePanel() {
           </div>
         </div>
 
-        {/* Segmented property controls for the current tool/selection. */}
-        {hasShapeControls && (
-          <>
-            <Separator className="my-4" />
-            <div className="flex flex-col gap-3">
-              {showFill && (
-                <ToggleGroup
-                  aria-label="Fill style"
-                  value={[fill]}
-                  onValueChange={(val) => val[0] && applyFill(val[0] as FillStyle)}
-                >
-                  {FILLS.map((f) => (
-                    <ToggleGroupItem key={f} value={f} title={f}>
-                      <FillPreview style={f} />
-                    </ToggleGroupItem>
-                  ))}
-                </ToggleGroup>
-              )}
+        {hasShapeControls || showArrows ? <Separator className="my-3" /> : null}
 
-              {showDash && (
-                <ToggleGroup
-                  aria-label="Stroke dash"
-                  value={[dash]}
-                  onValueChange={(val) => val[0] && applyDash(val[0] as StrokeDash)}
+        <div className="flex flex-col gap-2.5">
+          {showFill ? (
+            <ToggleGroup
+              aria-label="Fill style"
+              value={[fill]}
+              onValueChange={(values) =>
+                values[0] && applyFill(values[0] as FillStyle)
+              }
+            >
+              {FILLS.map((fillStyle) => (
+                <ToggleGroupItem
+                  key={fillStyle}
+                  value={fillStyle}
+                  aria-label={FILL_LABELS[fillStyle]}
+                  title={FILL_LABELS[fillStyle]}
                 >
-                  {DASHES.map((d) => (
-                    <ToggleGroupItem key={d} value={d} title={d}>
-                      <DashPreview dash={d} />
-                    </ToggleGroupItem>
-                  ))}
-                </ToggleGroup>
-              )}
+                  <FillPreview style={fillStyle} />
+                </ToggleGroupItem>
+              ))}
+            </ToggleGroup>
+          ) : null}
 
-              {showSize && (
-                <ToggleGroup
-                  aria-label="Stroke size"
-                  value={[String(size)]}
-                  onValueChange={(val) => val[0] && applySize(Number(val[0]))}
+          {showDash ? (
+            <ToggleGroup
+              aria-label="Stroke style"
+              value={[dash]}
+              onValueChange={(values) =>
+                values[0] && applyDash(values[0] as StrokeDash)
+              }
+            >
+              {DASHES.map((strokeDash) => (
+                <ToggleGroupItem
+                  key={strokeDash}
+                  value={strokeDash}
+                  aria-label={DASH_LABELS[strokeDash]}
+                  title={DASH_LABELS[strokeDash]}
                 >
-                  {SIZE_OPTIONS.map((o) => (
-                    <ToggleGroupItem key={o.name} value={String(o.value)}>
-                      {o.name}
-                    </ToggleGroupItem>
-                  ))}
-                </ToggleGroup>
-              )}
+                  <DashPreview dash={strokeDash} />
+                </ToggleGroupItem>
+              ))}
+            </ToggleGroup>
+          ) : null}
 
-              {showFont && (
-                <ToggleGroup
-                  aria-label="Font"
-                  value={[fontFamily]}
-                  onValueChange={(val) => val[0] && applyFontFamily(val[0] as FontFamily)}
+          {showSize ? (
+            <ToggleGroup
+              aria-label="Stroke weight"
+              value={[String(size)]}
+              onValueChange={(values) =>
+                values[0] && applySize(Number(values[0]))
+              }
+            >
+              {SIZE_OPTIONS.map((option) => (
+                <ToggleGroupItem
+                  key={option.name}
+                  value={String(option.value)}
+                  aria-label={`${option.name}, ${option.value} pixels`}
+                  title={`${option.value}px`}
                 >
-                  {FONTS.map(({ family, label }) => (
-                    <ToggleGroupItem
-                      key={family}
-                      value={family}
-                      style={{ fontFamily: fontStack(family) }}
-                    >
-                      {label}
-                    </ToggleGroupItem>
-                  ))}
-                </ToggleGroup>
-              )}
+                  {option.name}
+                </ToggleGroupItem>
+              ))}
+            </ToggleGroup>
+          ) : null}
 
-              {showAlign && (
-                <ToggleGroup
-                  aria-label="Alignment"
-                  value={[align]}
-                  onValueChange={(val) => val[0] && applyAlign(val[0] as TextAlign)}
+          {showFont ? (
+            <ToggleGroup
+              aria-label="Typeface"
+              value={[fontFamily]}
+              onValueChange={(values) =>
+                values[0] && applyFontFamily(values[0] as FontFamily)
+              }
+            >
+              {FONTS.map(({ family, label }) => (
+                <ToggleGroupItem
+                  key={family}
+                  value={family}
+                  aria-label={`${family} typeface`}
+                  title={family}
+                  style={{ fontFamily: fontStack(family) }}
                 >
-                  {ALIGNS.map(({ align: a, Icon }) => (
-                    <ToggleGroupItem key={a} value={a}>
-                      <Icon className="size-4" />
-                    </ToggleGroupItem>
-                  ))}
-                </ToggleGroup>
-              )}
-            </div>
-          </>
-        )}
+                  {label}
+                </ToggleGroupItem>
+              ))}
+            </ToggleGroup>
+          ) : null}
 
-        {/* Contextual row: arrowhead ends (arrows only). */}
-        {showArrows && (
-          <>
-            <Separator className="my-4" />
-            <div className="flex items-center justify-between">
-              <span className="text-[13px] font-medium text-content-emphasis select-none">
-                Arrows
-              </span>
-              <div className="flex items-center gap-1">
-                <Button
-                  variant={arrowStart ? 'secondary' : 'ghost'}
-                  size="icon-xs"
-                  aria-pressed={arrowStart}
-                  aria-label="Arrowhead at start"
-                  title="Arrowhead at start"
-                  onClick={() => applyArrowStart(!arrowStart)}
+          {showAlign ? (
+            <ToggleGroup
+              aria-label="Text alignment"
+              value={[align]}
+              onValueChange={(values) =>
+                values[0] && applyAlign(values[0] as TextAlign)
+              }
+            >
+              {ALIGNS.map(({ align: textAlign, Icon }) => (
+                <ToggleGroupItem
+                  key={textAlign}
+                  value={textAlign}
+                  aria-label={`${textAlign} alignment`}
+                  title={`${textAlign} alignment`}
                 >
-                  <ArrowLeft />
-                </Button>
-                <Button
-                  variant={arrowEnd ? 'secondary' : 'ghost'}
-                  size="icon-xs"
-                  aria-pressed={arrowEnd}
-                  aria-label="Arrowhead at end"
-                  title="Arrowhead at end"
-                  onClick={() => applyArrowEnd(!arrowEnd)}
-                >
-                  <ArrowRight />
-                </Button>
-              </div>
-            </div>
-          </>
-        )}
+                  <Icon aria-hidden="true" />
+                </ToggleGroupItem>
+              ))}
+            </ToggleGroup>
+          ) : null}
+
+          {showArrows ? (
+            <ToggleGroup
+              multiple
+              aria-label="Arrowheads"
+              value={[
+                ...(arrowStart ? ['start'] : []),
+                ...(arrowEnd ? ['end'] : []),
+              ]}
+              onValueChange={(values) => {
+                const nextStart = values.includes('start');
+                const nextEnd = values.includes('end');
+                if (nextStart !== arrowStart) applyArrowStart(nextStart);
+                if (nextEnd !== arrowEnd) applyArrowEnd(nextEnd);
+              }}
+            >
+              <ToggleGroupItem
+                value="start"
+                aria-label="Arrowhead at start"
+                title="Arrowhead at start"
+              >
+                <ArrowLeft aria-hidden="true" />
+              </ToggleGroupItem>
+              <ToggleGroupItem
+                value="end"
+                aria-label="Arrowhead at end"
+                title="Arrowhead at end"
+              >
+                <ArrowRight aria-hidden="true" />
+              </ToggleGroupItem>
+            </ToggleGroup>
+          ) : null}
+        </div>
       </div>
     </Surface>
   );

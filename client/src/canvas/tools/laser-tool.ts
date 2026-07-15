@@ -1,4 +1,4 @@
-import { CircleDot } from 'lucide-react';
+import { Wand2 } from 'lucide-react';
 import type { Point } from '@whiteboard/shared';
 import { setLocalLaser } from '@/collab/presence';
 import type { Tool, ToolPointerInfo } from './types';
@@ -69,7 +69,7 @@ export function createLaserTool(): Tool {
     label: 'Laser pointer',
     hotkey: 'k',
     cursor: 'crosshair',
-    icon: CircleDot,
+    icon: Wand2,
 
     onPointerDown(info: ToolPointerInfo) {
       if (info.button !== 0) return;

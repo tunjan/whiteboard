@@ -1,5 +1,6 @@
 import { Hocuspocus } from '@hocuspocus/server';
 import { Database } from '@hocuspocus/extension-database';
+import { LATENCY_MESSAGE_PREFIX } from '@whiteboard/shared';
 import { eq } from 'drizzle-orm';
 import { db } from '../db/client';
 import { boardDocuments } from '../db/schema';
@@ -13,6 +14,11 @@ import { boardDocuments } from '../db/schema';
  * Configured now; clients connect starting Phase 19.
  */
 export const hocuspocus = new Hocuspocus({
+  onStateless: async ({ connection, payload }) => {
+    if (payload.startsWith(LATENCY_MESSAGE_PREFIX)) {
+      connection.sendStateless(payload);
+    }
+  },
   extensions: [
     new Database({
       fetch: async ({ documentName }) => {
