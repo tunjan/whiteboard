@@ -68,7 +68,7 @@ export function PerformanceOverlay() {
   return (
     <div
       data-ui-layer
-      className="pointer-events-none absolute left-3 top-3 z-50 flex min-w-40 flex-col gap-1 rounded-lg border border-border-subtle bg-bg-default/90 px-3 py-2 font-mono text-xs shadow-md backdrop-blur"
+      className="pointer-events-none absolute left-3 top-3 z-50 flex min-w-40 flex-col gap-1 rounded-xl border border-border-subtle bg-bg-default/90 px-3 py-2 font-mono text-xs shadow-md backdrop-blur"
     >
       <StatRow label="FPS" value={String(fps)} />
       <StatRow label="Frame" value={`${frameMs.toFixed(1)} ms`} />

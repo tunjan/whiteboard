@@ -34,11 +34,11 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Separator } from '@/components/ui/separator';
 import { Slider } from '@/components/ui/slider';
 import { Surface } from '@/components/ui/surface';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { useAnimationStore } from '@/animation/use-animation-store';
+import { ToolPanelPresence } from '@/components/tool-panel-presence';
 
 const FILLS: FillStyle[] = ['none', 'solid', 'hatch', 'crosshatch'];
 const DASHES: StrokeDash[] = ['solid', 'dashed', 'dotted'];
@@ -164,12 +164,6 @@ export function StylePanel() {
     return true;
   })();
 
-  if (playbackActive || !isStylePanelVisible) {
-    return null;
-  }
-
-
-
   // Dynamic filter based on tool/selection type
   const targetType = (() => {
     if (activeToolId !== 'select') {
@@ -193,9 +187,8 @@ export function StylePanel() {
     return null;
   })();
 
-  if (targetType === 'graph') {
-    return null;
-  }
+  const panelVisible =
+    !playbackActive && isStylePanelVisible && targetType !== 'graph';
 
   const showSize =
     targetType === 'draw' ||
@@ -227,9 +220,10 @@ export function StylePanel() {
   const showFont = targetType === 'text' || targetType === 'mixed';
   const showAlign = targetType === 'text' || targetType === 'mixed';
   const showArrows = targetType === 'arrow';
-
-  // Whether the middle group (segmented controls) has any visible row.
-  const hasShapeControls = showSize || showFill || showDash || showFont || showAlign;
+  const panelContentKey =
+    activeToolId === 'select'
+      ? `selection-${targetType ?? 'default'}`
+      : `tool-${targetType ?? 'default'}`;
 
   const applyColor = (c: string) => {
     setColor(c);
@@ -322,45 +316,47 @@ export function StylePanel() {
   };
 
   return (
-    <Surface
-      role="region"
-      aria-label="Style controls"
-      className="touch-targets absolute top-[calc(3.75rem+env(safe-area-inset-top))] right-[calc(1rem+env(safe-area-inset-right))] z-20 max-h-[calc(100dvh-6.25rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] w-[min(14rem,calc(100vw-2rem))] overflow-y-auto overscroll-contain p-4 shadow-floating"
-    >
-      <div className="flex flex-col">
+    <ToolPanelPresence visible={panelVisible}>
+      {panelVisible ? (
+        <Surface
+          role="region"
+          aria-label="Style controls"
+          className="touch-targets max-h-[calc(100dvh-6.25rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] w-[min(14rem,calc(100vw-2rem))] overflow-y-auto overscroll-contain p-4 shadow-floating"
+        >
+          <div
+            key={panelContentKey}
+            className="tool-panel-content flex flex-col gap-3"
+          >
         {activeToolId === 'draw' ? (
-          <>
-            <ToggleGroup
-              aria-label="Pen presets"
-              value={[String(activeIndex)]}
-              onValueChange={(values) =>
-                values[0] && applyPreset(Number(values[0]))
-              }
-            >
-              {presets.map((preset, index) => {
-                const dotSize = Math.min(18, 8 + preset.size * 0.65);
-                return (
-                  <ToggleGroupItem
-                    key={index}
-                    value={String(index)}
-                    aria-label={`Pen preset ${index + 1}`}
-                    title={`Pen preset ${index + 1}`}
-                    className="h-9"
-                  >
-                    <span
-                      className="rounded-full border border-border-default"
-                      style={{
-                        backgroundColor: preset.color,
-                        width: dotSize,
-                        height: dotSize,
-                      }}
-                    />
-                  </ToggleGroupItem>
-                );
-              })}
-            </ToggleGroup>
-            <Separator className="my-3" />
-          </>
+          <ToggleGroup
+            aria-label="Pen presets"
+            value={[String(activeIndex)]}
+            onValueChange={(values) =>
+              values[0] && applyPreset(Number(values[0]))
+            }
+          >
+            {presets.map((preset, index) => {
+              const dotSize = Math.min(18, 8 + preset.size * 0.65);
+              return (
+                <ToggleGroupItem
+                  key={index}
+                  value={String(index)}
+                  aria-label={`Pen preset ${index + 1}`}
+                  title={`Pen preset ${index + 1}`}
+                  className="h-9"
+                >
+                  <span
+                    className="rounded-full border border-border-default"
+                    style={{
+                      backgroundColor: preset.color,
+                      width: dotSize,
+                      height: dotSize,
+                    }}
+                  />
+                </ToggleGroupItem>
+              );
+            })}
+          </ToggleGroup>
         ) : null}
 
         <div className="flex flex-col gap-2.5">
@@ -434,7 +430,7 @@ export function StylePanel() {
                   aria-label={paletteColor.name}
                   aria-pressed={active}
                   onClick={() => applyColor(paletteColor.value)}
-                  className="flex h-9 w-full items-center justify-center rounded-lg transition-colors duration-150 ease-out hover:bg-bg-muted active:scale-[0.98] motion-reduce:transition-none"
+                  className="flex h-9 w-full items-center justify-center rounded-[var(--surface-control-radius)] transition-colors duration-150 ease-out hover:bg-bg-muted active:scale-[0.98] motion-reduce:transition-none"
                 >
                   <span
                     className={cn(
@@ -462,8 +458,6 @@ export function StylePanel() {
             />
           </div>
         </div>
-
-        {hasShapeControls || showArrows ? <Separator className="my-3" /> : null}
 
         <div className="flex flex-col gap-2.5">
           {showFill ? (
@@ -604,7 +598,9 @@ export function StylePanel() {
             </ToggleGroup>
           ) : null}
         </div>
-      </div>
-    </Surface>
+          </div>
+        </Surface>
+      ) : null}
+    </ToolPanelPresence>
   );
 }

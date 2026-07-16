@@ -38,7 +38,7 @@ export function FollowControls({ identity }: FollowControlsProps) {
           <Tooltip>
             <TooltipTrigger
               render={
-                <span className="flex items-center gap-2 rounded-lg px-2 text-xs font-medium text-content-emphasis" />
+                <span className="flex items-center gap-2 rounded-[var(--surface-control-radius,var(--radius-lg))] px-2 text-xs font-medium text-content-emphasis" />
               }
             >
               <span

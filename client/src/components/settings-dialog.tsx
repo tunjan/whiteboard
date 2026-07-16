@@ -1,4 +1,3 @@
-import { type BackgroundType, BACKGROUND_LABELS, BACKGROUND_TYPES } from '@/canvas/grid';
 import { toolRegistry } from '@/canvas/tools/tool-registry';
 import { useCanvasUiStore } from '@/canvas/use-canvas-ui-store';
 import { ConnectionIndicator } from '@/components/connection-indicator';
@@ -10,7 +9,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Field, FieldLabel } from '@/components/ui/field';
+import {
+  Field,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+} from '@/components/ui/field';
 import { PanelLabel } from '@/components/ui/panel-label';
 import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
@@ -62,7 +66,7 @@ const SETTINGS_NAV: SettingsNavItem[] = [
 ];
 
 const ACTIVE_SECTION_CLASS =
-  'bg-bg-info text-content-info hover:bg-bg-info hover:text-content-info';
+  'bg-bg-subtle text-content-emphasis hover:bg-bg-subtle hover:text-content-emphasis';
 
 const ACTION_SHORTCUTS: Shortcut[] = [
   { label: 'Undo', keys: `${MOD} Z` },
@@ -84,10 +88,12 @@ const ACTION_SHORTCUTS: Shortcut[] = [
 
 function PreferenceRow({
   label,
+  description,
   children,
   className,
 }: {
   label: string;
+  description?: string;
   children: React.ReactNode;
   className?: string;
 }) {
@@ -95,11 +101,16 @@ function PreferenceRow({
     <Field
       orientation="horizontal"
       className={cn(
-        'min-h-20 rounded-xl border border-border-subtle bg-bg-default p-4 sm:p-5 max-sm:flex-col max-sm:items-stretch',
+        'min-h-16 border-b border-border-muted py-3 max-sm:flex-col max-sm:items-stretch',
         className,
       )}
     >
-      <FieldLabel className="text-sm font-medium">{label}</FieldLabel>
+      <div className="flex min-w-0 flex-col gap-1">
+        <FieldLabel>{label}</FieldLabel>
+        {description ? (
+          <FieldDescription>{description}</FieldDescription>
+        ) : null}
+      </div>
       {children}
     </Field>
   );
@@ -123,12 +134,10 @@ function SliderField({
   onChange: (value: number) => void;
 }) {
   return (
-    <PreferenceRow label={label} className="min-h-[5.5rem]">
-      <div className="flex w-full max-w-[19rem] flex-col gap-2.5">
-        <span className="text-right font-mono text-xs tabular-nums text-muted-foreground">
-          {display}
-        </span>
+    <PreferenceRow label={label}>
+      <div className="flex w-full max-w-80 items-center gap-3">
         <Slider
+          className="flex-1"
           aria-label={label}
           min={min}
           max={max}
@@ -138,6 +147,9 @@ function SliderField({
             onChange(Array.isArray(nextValue) ? nextValue[0]! : nextValue)
           }
         />
+        <span className="w-10 shrink-0 text-right font-mono text-xs tabular-nums text-muted-foreground">
+          {display}
+        </span>
       </div>
     </PreferenceRow>
   );
@@ -174,7 +186,7 @@ function SettingsNavigation({
             aria-current={isActive ? 'page' : undefined}
             onClick={() => onPageChange(id)}
             className={cn(
-              'h-11 w-full justify-start gap-3 px-3.5 text-left',
+              'h-11 w-full justify-start gap-2.5 px-3 text-left max-sm:w-auto',
               isActive && ACTIVE_SECTION_CLASS,
             )}
           >
@@ -190,39 +202,25 @@ function SettingsNavigation({
 function GeneralSettings() {
   const theme = useThemeStore((state) => state.theme);
   const setTheme = useThemeStore((state) => state.setTheme);
-  const background = useCanvasUiStore((state) => state.background);
-  const setBackground = useCanvasUiStore((state) => state.setBackground);
   const snappingEnabled = useCanvasUiStore((state) => state.snappingEnabled);
   const setSnappingEnabled = useCanvasUiStore(
     (state) => state.setSnappingEnabled,
   );
 
   return (
-    <div className="flex flex-col gap-4 p-4 sm:p-6">
+    <FieldGroup className="gap-0 px-4 py-2 sm:px-8 sm:py-3">
       <PreferenceRow label="Theme">
         <ToggleGroup
           className="w-full max-w-56"
           value={[theme]}
           onValueChange={(value) => value[0] && setTheme(value[0] as Theme)}
         >
-          <ToggleGroupItem value="light">Light</ToggleGroupItem>
-          <ToggleGroupItem value="dark">Dark</ToggleGroupItem>
-        </ToggleGroup>
-      </PreferenceRow>
-
-      <PreferenceRow label="Canvas background">
-        <ToggleGroup
-          className="w-full max-w-80"
-          value={[background]}
-          onValueChange={(value) =>
-            value[0] && setBackground(value[0] as BackgroundType)
-          }
-        >
-          {BACKGROUND_TYPES.map((type) => (
-            <ToggleGroupItem key={type} value={type}>
-              {BACKGROUND_LABELS[type]}
-            </ToggleGroupItem>
-          ))}
+          <ToggleGroupItem value="light" className="max-sm:h-11">
+            Light
+          </ToggleGroupItem>
+          <ToggleGroupItem value="dark" className="max-sm:h-11">
+            Dark
+          </ToggleGroupItem>
         </ToggleGroup>
       </PreferenceRow>
 
@@ -233,7 +231,7 @@ function GeneralSettings() {
           onCheckedChange={setSnappingEnabled}
         />
       </PreferenceRow>
-    </div>
+    </FieldGroup>
   );
 }
 
@@ -276,7 +274,7 @@ function PencilSettings() {
   )}%`;
 
   return (
-    <div className="flex flex-col gap-4 p-4 sm:p-6">
+    <FieldGroup className="gap-0 px-4 py-2 sm:px-8 sm:py-3">
       <SliderField
         label="Stroke stabilisation"
         value={pencilStabilization}
@@ -315,32 +313,39 @@ function PencilSettings() {
       />
       <PreferenceRow label="Taper end to a point">
         <Switch
+          aria-label="Taper end to a point"
           checked={pencilEndTaper}
           onCheckedChange={setPencilEndTaper}
         />
       </PreferenceRow>
       <PreferenceRow label="Simulate pressure">
         <Switch
+          aria-label="Simulate pressure"
           checked={pencilSimulatePressure}
           onCheckedChange={setPencilSimulatePressure}
         />
       </PreferenceRow>
-      <div className="rounded-xl border border-border-subtle bg-bg-default p-4 sm:p-5">
-        <Button variant="outline" size="sm" onClick={resetPencil}>
+      <PreferenceRow label="Pencil settings">
+        <Button
+          variant="outline"
+          size="sm"
+          className="max-sm:h-11"
+          onClick={resetPencil}
+        >
           Restore defaults
         </Button>
-      </div>
-    </div>
+      </PreferenceRow>
+    </FieldGroup>
   );
 }
 
 function ShortcutList({ shortcuts }: { shortcuts: Shortcut[] }) {
   return (
-    <div className="flex flex-col divide-y divide-border-muted rounded-xl border border-border-subtle bg-bg-default">
+    <div className="flex flex-col divide-y divide-border-muted border-y border-border-subtle">
       {shortcuts.map((shortcut) => (
         <div
           key={shortcut.label}
-          className="flex min-h-10 items-center justify-between gap-3 px-3.5 py-2"
+          className="flex min-h-10 items-center justify-between gap-3 py-2"
         >
           <span className="min-w-0 leading-5 text-content-default">
             {shortcut.label}
@@ -359,14 +364,14 @@ function ShortcutsSettings() {
     .map((tool) => ({ label: tool.label, keys: tool.hotkey!.toUpperCase() }));
 
   return (
-    <div className="grid gap-6 p-4 sm:p-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-      <section className="flex min-w-0 flex-col gap-3">
+    <div className="grid gap-5 p-4 sm:p-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+      <section className="flex min-w-0 flex-col gap-2">
         <PanelLabel as="h3" className="text-content-muted">
           Tools
         </PanelLabel>
         <ShortcutList shortcuts={toolShortcuts} />
       </section>
-      <section className="flex min-w-0 flex-col gap-3">
+      <section className="flex min-w-0 flex-col gap-2">
         <PanelLabel as="h3" className="text-content-muted">
           Actions
         </PanelLabel>
@@ -378,13 +383,13 @@ function ShortcutsSettings() {
 
 function ConnectionSettings() {
   return (
-    <div className="flex flex-col gap-4 p-4 sm:p-6">
+    <FieldGroup className="gap-0 px-4 py-2 sm:px-8 sm:py-3">
       <PreferenceRow label="Board connection">
-        <div className="flex size-8 items-center justify-center rounded-full bg-bg-subtle">
+        <div className="flex size-8 items-center justify-center rounded-full bg-bg-subtle [--surface-control-radius:9999px]">
           <ConnectionIndicator />
         </div>
       </PreferenceRow>
-    </div>
+    </FieldGroup>
   );
 }
 
@@ -395,18 +400,18 @@ function DebugSettings() {
   );
 
   return (
-    <div className="flex flex-col gap-4 p-4 sm:p-6">
-      <PreferenceRow label="Performance overlay">
+    <FieldGroup className="gap-0 px-4 py-2 sm:px-8 sm:py-3">
+      <PreferenceRow
+        label="Performance overlay"
+        description="Shows frame rate, worst frame time, shape count, and heap usage in the top-left corner of the canvas."
+      >
         <Switch
+          aria-label="Performance overlay"
           checked={debugPerformance}
           onCheckedChange={setDebugPerformance}
         />
       </PreferenceRow>
-      <p className="px-1 text-sm text-content-subtle">
-        Shows a live readout of frame rate, worst frame time, shape count, and
-        heap usage in the top-left corner of the canvas.
-      </p>
-    </div>
+    </FieldGroup>
   );
 }
 
@@ -424,9 +429,9 @@ export function SettingsDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         showCloseButton={false}
-        className="!flex h-[min(44rem,calc(100dvh-2rem))] w-[calc(100%_-_2rem)] max-w-none gap-0 overflow-hidden rounded-2xl border-border-subtle bg-bg-default p-0 sm:w-[min(68rem,calc(100%_-_4rem))] sm:max-w-none"
+        className="!flex h-[min(52rem,calc(100dvh-2rem))] w-[calc(100%_-_2rem)] max-w-none gap-0 overflow-hidden rounded-2xl border-border-subtle bg-bg-default p-0 sm:w-[min(64rem,calc(100%_-_4rem))] sm:max-w-none"
       >
-        <aside className="hidden w-56 shrink-0 flex-col border-r border-border-subtle bg-bg-muted p-3 sm:flex">
+        <aside className="hidden w-52 shrink-0 flex-col border-r border-border-subtle bg-bg-default p-3 sm:flex">
           <SettingsNavigation
             activePage={activePage}
             onPageChange={setActivePage}
@@ -435,7 +440,7 @@ export function SettingsDialog({
         </aside>
 
         <div className="flex min-w-0 flex-1 flex-col">
-          <div className="border-b border-border-subtle bg-bg-muted px-2 py-2 sm:hidden">
+          <div className="border-b border-border-subtle bg-bg-default px-2 py-2 sm:hidden">
             <SettingsNavigation
               activePage={activePage}
               onPageChange={setActivePage}
@@ -443,17 +448,15 @@ export function SettingsDialog({
             />
           </div>
 
-          <DialogHeader className="flex-row items-center justify-between gap-4 border-b border-border-subtle bg-bg-default px-6 py-5 sm:px-8 sm:py-6">
-            <DialogTitle className="text-2xl font-semibold tracking-[-0.02em]">
-              {activeItem.label}
-            </DialogTitle>
+          <DialogHeader className="flex-row items-center justify-between gap-4 border-b border-border-subtle bg-bg-default px-4 py-3 sm:px-8 sm:py-4">
+            <DialogTitle>{activeItem.label}</DialogTitle>
             <DialogClose
               render={
                 <Button
-                  variant="ghost"
+                  variant="outline"
                   size="icon"
                   aria-label="Close settings"
-                  className="rounded-full"
+                  className="size-11 rounded-full"
                 />
               }
             >
@@ -461,7 +464,7 @@ export function SettingsDialog({
             </DialogClose>
           </DialogHeader>
 
-          <div className="min-h-0 flex-1 overflow-y-auto bg-bg-muted">
+          <div className="min-h-0 flex-1 overflow-y-auto bg-bg-default">
             {activePage === 'general' ? <GeneralSettings /> : null}
             {activePage === 'pencil' ? <PencilSettings /> : null}
             {activePage === 'shortcuts' ? <ShortcutsSettings /> : null}

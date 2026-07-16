@@ -5,6 +5,7 @@ import type {
   GraphExpression,
   GraphParameter,
   GraphProps,
+  GraphShape,
   GraphViewport,
   StrokeDash,
 } from '@whiteboard/shared';
@@ -35,6 +36,7 @@ import { breakUndoCapture, editor, useDocumentStore } from '@/canvas/use-documen
 import { useSelectionStore } from '@/canvas/use-selection-store';
 import { cn } from '@/lib/utils';
 import { useAnimationStore } from '@/animation/use-animation-store';
+import { ToolPanelPresence } from '@/components/tool-panel-presence';
 
 const DASHES: StrokeDash[] = ['solid', 'dashed', 'dotted'];
 
@@ -478,13 +480,8 @@ function ViewRange({
   );
 }
 
-export function GraphPanel() {
-  const selectedIds = useSelectionStore((s) => s.selectedIds);
-  const shapesRecord = useDocumentStore(
-    (s) => s.doc.pages[s.currentPageId]?.shapes,
-  );
+function GraphPanelContent({ shape }: { shape: GraphShape }) {
   const fieldRefs = useRef(new Map<string, MathfieldElement>());
-  const playbackActive = useAnimationStore((s) => s.playbackActive);
 
   // Focus a row's math field once it has mounted (e.g. after add/delete).
   const focusField = (id: string, tries = 5) => {
@@ -492,11 +489,6 @@ export function GraphPanel() {
     if (el) el.focus();
     else if (tries > 0) requestAnimationFrame(() => focusField(id, tries - 1));
   };
-
-  const selectedId = selectedIds.length === 1 ? selectedIds[0] : null;
-  const shape = selectedId ? shapesRecord?.[selectedId] : undefined;
-
-  if (playbackActive || !shape || shape.type !== 'graph') return null;
 
   const props = shape.props;
   const showAxisLabels = props.showAxisLabels !== false;
@@ -568,7 +560,11 @@ export function GraphPanel() {
   );
 
   return (
-    <Surface className="touch-targets absolute top-[calc(3.75rem+env(safe-area-inset-top))] right-[calc(1rem+env(safe-area-inset-right))] z-20 flex max-h-[calc(100dvh-6.25rem-env(safe-area-inset-top))] w-[min(20rem,calc(100vw-2rem))] flex-col gap-4 overflow-y-auto p-4 shadow-floating">
+    <Surface
+      role="region"
+      aria-label="Graph controls"
+      className="touch-targets flex max-h-[calc(100dvh-6.25rem-env(safe-area-inset-top))] w-[min(20rem,calc(100vw-2rem))] flex-col gap-4 overflow-y-auto p-4 shadow-floating"
+    >
       <div className="min-w-0">
         <div className="text-sm font-semibold text-content-emphasis">Plotter</div>
         <div className="text-xs text-content-subtle">
@@ -649,5 +645,26 @@ export function GraphPanel() {
         />
       </Field>
     </Surface>
+  );
+}
+
+export function GraphPanel() {
+  const selectedIds = useSelectionStore((s) => s.selectedIds);
+  const shapesRecord = useDocumentStore(
+    (s) => s.doc.pages[s.currentPageId]?.shapes,
+  );
+  const playbackActive = useAnimationStore((s) => s.playbackActive);
+  const selectedId = selectedIds.length === 1 ? selectedIds[0] : null;
+  const selectedShape = selectedId ? shapesRecord?.[selectedId] : undefined;
+  const graphShape =
+    selectedShape?.type === 'graph' ? selectedShape : undefined;
+  const panelVisible = !playbackActive && Boolean(graphShape);
+
+  return (
+    <ToolPanelPresence visible={panelVisible}>
+      {panelVisible && graphShape ? (
+        <GraphPanelContent shape={graphShape} />
+      ) : null}
+    </ToolPanelPresence>
   );
 }

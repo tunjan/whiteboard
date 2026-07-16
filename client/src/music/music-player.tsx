@@ -249,7 +249,7 @@ export function MusicPlayer({ identity }: MusicPlayerProps) {
 
           <div className="flex flex-col gap-2 rounded-lg bg-bg-muted p-3">
             <div className="flex min-w-0 items-center gap-2">
-              <div className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border-subtle bg-bg-default text-content-subtle">
+              <div className="flex size-9 shrink-0 items-center justify-center rounded-md border border-border-subtle bg-bg-default text-content-subtle">
                 {isPlaying ? <Volume2 className="size-4" /> : <Music2 className="size-4" />}
               </div>
               <div className="min-w-0 flex-1">
@@ -352,7 +352,7 @@ export function MusicPlayer({ identity }: MusicPlayerProps) {
                       size="sm"
                       aria-pressed={active}
                       onClick={() => setActivePlaylist(playlist.name)}
-                      className="max-w-32 rounded-lg"
+                      className="max-w-32"
                     >
                       <ListMusic data-icon="inline-start" />
                       <span className="truncate">{playlist.name}</span>
