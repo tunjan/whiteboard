@@ -3,6 +3,8 @@ import { genId, type DrawPoint, type DrawProps, type Shape } from '@whiteboard/s
 import { getTopIndex } from '../order';
 import { pencilStabilizationToStreamline } from '../shapes/ink';
 import { shapeRegistry } from '../shapes/shape-registry';
+import { simplifyRDP } from '../shapes/simplify';
+import { DEFAULT_INK_SIZE } from '../shapes/style';
 import { useCanvasUiStore } from '../use-canvas-ui-store';
 import { useStyleStore } from '../use-style-store';
 import type { Tool, ToolContext, ToolPointerInfo } from './types';
@@ -18,6 +20,9 @@ export function createDrawTool(): Tool {
   let origin = { x: 0, y: 0 };
   let points: DrawPoint[] = [];
   let simulatePressure = false;
+  // Brush width of the stroke in progress, captured at pointer-down so the
+  // commit-time simplification tolerance scales with it.
+  let strokeSize = DEFAULT_INK_SIZE;
   let previousSample: { x: number; y: number; timestamp: number } | null = null;
   // Pending rAF for the live stroke write. Pointer Events can deliver many
   // coalesced samples per frame; without this each sample fired its own Yjs
@@ -48,11 +53,23 @@ export function createDrawTool(): Tool {
     const sid = id;
     id = null;
     if (!sid) return;
-    // Final synchronous write so the committed shape has every point.
-    ctx.editor.updateShape(sid, { props: { points: points.slice() } });
+    // Final synchronous write. Raw pointer input carries far more samples than
+    // the curve needs, and every one of them is paid for again on each later
+    // render (`getInkPathData` runs perfect-freehand over the whole array), on
+    // each hit test, and in the Yjs payload for every client — forever. Collapse
+    // them once, here on commit only: the live path above still writes every
+    // sample, so mid-stroke feel and what peers see while drawing are untouched.
+    ctx.editor.updateShape(sid, {
+      props: { points: simplifyRDP(points, strokeSize * SIMPLIFY_EPSILON) },
+    });
     points = [];
     previousSample = null;
   };
+
+  // Commit-time simplification tolerance, as a fraction of the brush width.
+  // Deliberately far below the width so removed points are well inside the ink
+  // and the committed curve is visually identical to what was drawn.
+  const SIMPLIFY_EPSILON = 0.06;
 
   // Calibrated in screen pixels/ms so a stroke has the same pressure response
   // at every camera zoom level (0.08 = slow, 1.25 = fast).
@@ -163,6 +180,7 @@ export function createDrawTool(): Tool {
       );
       const sid = genId();
       id = sid;
+      strokeSize = useStyleStore.getState().size;
       const shape = {
         id: sid,
         type: 'draw',

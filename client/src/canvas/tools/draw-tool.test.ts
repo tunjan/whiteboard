@@ -61,7 +61,7 @@ function drawPoints(shape: Shape | undefined): DrawProps['points'] | undefined {
 }
 
 describe('draw tool stroke lifecycle', () => {
-  it('onCommit keeps the stroke with every accumulated point', () => {
+  it('onCommit keeps the stroke, collapsing points the curve does not need', () => {
     const { ctx, shapes } = context();
     const tool = createDrawTool();
 
@@ -72,8 +72,27 @@ describe('draw tool stroke lifecycle', () => {
 
     expect(shapes.size).toBe(1);
     const points = drawPoints([...shapes.values()][0]);
-    // Down + two moves past the decimation threshold.
+    // Commit simplifies (see `SIMPLIFY_EPSILON`). These three samples are
+    // collinear, so the midpoint sits exactly on the chord and contributes
+    // nothing — the endpoints alone describe the same stroke.
+    expect(points?.length).toBe(2);
+    expect(points?.[0]).toMatchObject({ x: 0, y: 0 });
+    expect(points?.[1]).toMatchObject({ x: 20, y: 0 });
+  });
+
+  it('onCommit preserves points that carry the curve', () => {
+    const { ctx, shapes } = context();
+    const tool = createDrawTool();
+
+    // The midpoint is far off the chord, so simplification must keep it.
+    tool.onPointerDown?.(pointer(0, 0), ctx);
+    tool.onPointerMove?.(pointer(10, 5), ctx);
+    tool.onPointerMove?.(pointer(20, 0), ctx);
+    tool.onCommit?.(ctx);
+
+    const points = drawPoints([...shapes.values()][0]);
     expect(points?.length).toBe(3);
+    expect(points?.[1]).toMatchObject({ x: 10, y: 5 });
   });
 
   it('onCancel discards the in-progress stroke', () => {
