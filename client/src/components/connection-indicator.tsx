@@ -124,7 +124,7 @@ export function ConnectionIndicator() {
           render={
             <div
               aria-label={accessibleLabel}
-              className="flex size-8 items-center justify-center rounded-[var(--surface-control-radius,var(--radius-lg))] select-none hover:bg-bg-subtle focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-border-subtle"
+              className="flex size-8 items-center justify-center rounded-[var(--surface-control-radius,var(--radius-lg))] select-none hover:bg-bg-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-emphasis"
               role="status"
               tabIndex={0}
             />

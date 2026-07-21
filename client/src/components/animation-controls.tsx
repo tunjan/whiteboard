@@ -194,7 +194,7 @@ export function AnimationControls({ identity }: { identity: Identity | null }) {
           className="relative flex size-40 items-center justify-center motion-safe:animate-in motion-safe:zoom-in-50 motion-safe:fade-in motion-safe:duration-300"
         >
           <span className="absolute inset-0 rounded-full border-2 border-content-error/30 motion-safe:animate-ping" />
-          <span className="absolute inset-0 rounded-full bg-bg-default/80 shadow-floating backdrop-blur-sm" />
+          <span className="absolute inset-0 rounded-full bg-bg-default shadow-floating" />
           <span className="relative font-mono text-7xl font-bold text-content-error tabular-nums">
             {recordingCountdown}
           </span>
@@ -207,7 +207,7 @@ export function AnimationControls({ identity }: { identity: Identity | null }) {
             type="button"
             variant="outline"
             size="sm"
-            className="rounded-full shadow-floating"
+            className="shadow-floating"
             onClick={() => cancelRecordingCountdown()}
           >
             Cancel
@@ -218,7 +218,6 @@ export function AnimationControls({ identity }: { identity: Identity | null }) {
 
   const recordingPanel = recordingPageId ? (
     <Surface
-      shape="pill"
       data-ui-layer
       role="status"
       aria-label="Recording whiteboard animation"
@@ -248,7 +247,6 @@ export function AnimationControls({ identity }: { identity: Identity | null }) {
 
   const playbackPanel = playbackActive && activeRecording ? (
     <Surface
-      shape="pill"
       data-ui-layer
       role="region"
       aria-label="Whiteboard animation playback"
@@ -363,7 +361,7 @@ export function AnimationControls({ identity }: { identity: Identity | null }) {
                       aria-hidden="true"
                       className="size-2.5 shrink-0 rounded-full bg-content-error"
                     />
-                    Record this page
+                    Record This Page
                   </button>
                 </div>
               ) : null}
@@ -381,7 +379,7 @@ export function AnimationControls({ identity }: { identity: Identity | null }) {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Save recording</DialogTitle>
+            <DialogTitle>Save Recording</DialogTitle>
             <DialogDescription>
               {pendingSave
                 ? `${formatTime(pendingSave.recording.durationMs)} recording — give it a name so it's easy to find later.`
@@ -411,7 +409,7 @@ export function AnimationControls({ identity }: { identity: Identity | null }) {
               Discard
             </Button>
             <Button disabled={saving} onClick={() => void saveRecording()}>
-              {saveError ? 'Retry' : saving ? 'Saving…' : 'Save'}
+              {saveError ? 'Retry Save' : saving ? 'Saving…' : 'Save Recording'}
             </Button>
           </DialogFooter>
         </DialogContent>

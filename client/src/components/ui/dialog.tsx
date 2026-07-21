@@ -31,7 +31,11 @@ function DialogOverlay({
     <DialogPrimitive.Backdrop
       data-slot="dialog-overlay"
       className={cn(
-        "fixed inset-0 isolate z-50 bg-black/25 duration-200 supports-backdrop-filter:backdrop-blur-xs data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0 motion-reduce:backdrop-blur-none motion-reduce:transition-none",
+        // `fill-mode-forwards` is required: tw-animate-css leaves
+        // animation-fill-mode at `none`, so without it the backdrop snaps back
+        // to full opacity when the fade-out ends and flashes over the canvas
+        // for the frames before Base UI unmounts it.
+        "ui-overlay fixed inset-0 isolate z-50 duration-150 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0 data-closed:fill-mode-forwards motion-reduce:transition-none",
         className
       )}
       {...props}
@@ -53,7 +57,7 @@ function DialogContent({
       <DialogPrimitive.Popup
         data-slot="dialog-content"
         className={cn(
-          "fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-5 rounded-2xl border border-border-subtle bg-bg-default p-6 text-sm text-content-default shadow-floating duration-200 ease-[var(--ease-out-expo)] outline-none sm:max-w-lg data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 motion-reduce:transition-none motion-reduce:data-open:zoom-in-100 motion-reduce:data-closed:zoom-out-100",
+          "ui-dialog-surface fixed top-1/2 left-1/2 z-50 grid max-h-[calc(100dvh-2rem)] w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-5 overflow-y-auto duration-200 ease-[var(--ease-out-expo)] sm:max-w-[35rem] data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 data-closed:fill-mode-forwards motion-reduce:transition-none motion-reduce:data-open:zoom-in-100 motion-reduce:data-closed:zoom-out-100",
           className
         )}
         {...props}
@@ -102,7 +106,7 @@ function DialogFooter({
     <div
       data-slot="dialog-footer"
       className={cn(
-        "-mx-6 -mb-6 flex flex-col-reverse gap-2 rounded-b-2xl border-t border-border-subtle bg-bg-muted p-4 sm:flex-row sm:justify-end",
+        "ui-dialog-footer -mx-6 -mb-6 flex flex-col-reverse gap-2 p-4 sm:flex-row sm:justify-end",
         className
       )}
       {...props}
@@ -121,10 +125,7 @@ function DialogTitle({ className, ...props }: DialogPrimitive.Title.Props) {
   return (
     <DialogPrimitive.Title
       data-slot="dialog-title"
-      className={cn(
-        "font-heading text-xl leading-[1.3] font-semibold text-content-emphasis tracking-[-0.02em]",
-        className
-      )}
+      className={cn("ui-dialog-title", className)}
       {...props}
     />
   )
@@ -138,7 +139,7 @@ function DialogDescription({
     <DialogPrimitive.Description
       data-slot="dialog-description"
       className={cn(
-        "max-w-[70ch] text-sm text-content-subtle *:[a]:underline *:[a]:underline-offset-3 *:[a]:hover:text-content-emphasis",
+        "ui-dialog-description *:[a]:text-link *:[a]:underline-offset-3 *:[a]:hover:underline",
         className
       )}
       {...props}

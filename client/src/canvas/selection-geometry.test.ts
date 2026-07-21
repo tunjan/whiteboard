@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Shape } from '@whiteboard/shared';
 import './shapes/register';
-import { matchesMarquee } from './selection-geometry';
+import { getSelectionInfo, matchesMarquee } from './selection-geometry';
 
 function rectangle(overrides: Partial<Extract<Shape, { type: 'rectangle' }>> = {}) {
   return {
@@ -85,5 +85,20 @@ describe('directional marquee geometry', () => {
     expect(
       matchesMarquee(shape, { minX: 40, minY: -3, maxX: 60, maxY: 3 }, 'contain'),
     ).toBe(false);
+  });
+});
+
+describe('selection controls', () => {
+  it('places four rotation targets beyond the corners at a fixed screen offset', () => {
+    const shape = rectangle();
+    const info = getSelectionInfo([shape], [shape.id], 2);
+
+    expect(info?.handles.map((handle) => handle.id)).not.toContain('rotate');
+    expect(info?.rotationHandles).toEqual([
+      { id: 'rotate-nw', point: { x: -9, y: -9 } },
+      { id: 'rotate-ne', point: { x: 109, y: -9 } },
+      { id: 'rotate-se', point: { x: 109, y: 69 } },
+      { id: 'rotate-sw', point: { x: -9, y: 69 } },
+    ]);
   });
 });

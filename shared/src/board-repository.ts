@@ -4,6 +4,7 @@ export interface BoardMeta {
   name: string;
   createdAt: number;
   updatedAt: number;
+  lastOpenedAt: number;
 }
 
 /**
@@ -17,4 +18,5 @@ export interface BoardRepository {
   create(name: string): Promise<BoardMeta>;
   rename(id: string, name: string): Promise<void>;
   delete(id: string): Promise<void>;
+  markOpened(id: string): Promise<void>;
 }

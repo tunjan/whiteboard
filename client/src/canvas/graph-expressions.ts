@@ -2,6 +2,7 @@ import { parse, type MathNode } from 'mathjs';
 import type {
   GraphExpression,
   GraphParameter,
+  GraphPoint,
   GraphProps,
   GraphViewport,
 } from '@whiteboard/shared';
@@ -138,6 +139,8 @@ export const DEFAULT_GRAPH_PROPS: GraphProps = {
   ],
   parameters: {},
   showAxisLabels: true,
+  points: [],
+  showIntersections: false,
 };
 
 type TokenType =
@@ -196,6 +199,7 @@ export function createDefaultGraphProps(): GraphProps {
       ...expression,
     })),
     parameters: {},
+    points: [],
   };
 }
 
@@ -209,6 +213,19 @@ export function createGraphExpression(index: number): GraphExpression {
     color: GRAPH_COLORS[index % GRAPH_COLORS.length]!,
     visible: true,
     dash: 'solid',
+  };
+}
+
+export function createGraphPoint(index: number): GraphPoint {
+  return {
+    id:
+      typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? `pt-${crypto.randomUUID()}`
+        : `pt-${Date.now()}-${index}`,
+    x: 0,
+    y: 0,
+    color: GRAPH_COLORS[index % GRAPH_COLORS.length]!,
+    visible: true,
   };
 }
 
@@ -476,15 +493,15 @@ export function parseGraphExpression(source: string): GraphExpressionParseResult
   }
 }
 
-type GraphPoint = { x: number; y: number };
-type ContourLine = { a: GraphPoint; b: GraphPoint };
+type ContourPoint = { x: number; y: number };
+type ContourLine = { a: ContourPoint; b: ContourPoint };
 
 function interpolateZero(
-  a: GraphPoint,
-  b: GraphPoint,
+  a: ContourPoint,
+  b: ContourPoint,
   valueA: number,
   valueB: number,
-): GraphPoint {
+): ContourPoint {
   const denominator = valueA - valueB;
   const t =
     denominator === 0 ? 0.5 : Math.min(1, Math.max(0, valueA / denominator));
@@ -498,10 +515,10 @@ function stitchContourLines(
   lines: ContourLine[],
   xStep: number,
   yStep: number,
-): GraphPoint[][] {
+): ContourPoint[][] {
   const xTolerance = Math.max(Math.abs(xStep) * 1e-5, Number.EPSILON);
   const yTolerance = Math.max(Math.abs(yStep) * 1e-5, Number.EPSILON);
-  const key = (point: GraphPoint) =>
+  const key = (point: ContourPoint) =>
     `${Math.round(point.x / xTolerance)}:${Math.round(point.y / yTolerance)}`;
   const endpoints = lines.map((line) => ({ a: key(line.a), b: key(line.b) }));
   const adjacency = new Map<string, number[]>();
@@ -512,7 +529,7 @@ function stitchContourLines(
   });
 
   const used = new Set<number>();
-  const paths: GraphPoint[][] = [];
+  const paths: ContourPoint[][] = [];
   for (let seed = 0; seed < lines.length; seed += 1) {
     if (used.has(seed)) continue;
     const seedLine = lines[seed]!;
@@ -575,7 +592,7 @@ function sampleImplicitGraphExpression(
     for (let column = 0; column < columns; column += 1) {
       const x0 = viewport.xMin + column * xStep;
       const x1 = x0 + xStep;
-      const cellPoints: GraphPoint[] = [
+      const cellPoints: ContourPoint[] = [
         { x: x0, y: y0 },
         { x: x1, y: y0 },
         { x: x1, y: y1 },
@@ -595,7 +612,7 @@ function sampleImplicitGraphExpression(
       );
       if (cellCase === 0 || cellCase === 15) continue;
 
-      const edgePoint = (edge: number): GraphPoint => {
+      const edgePoint = (edge: number): ContourPoint => {
         const edgeCorners = [
           [0, 1],
           [1, 2],

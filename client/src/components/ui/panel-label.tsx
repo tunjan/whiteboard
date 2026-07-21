@@ -3,7 +3,7 @@ import * as React from "react"
 import { cn } from "@/lib/utils"
 
 /**
- * Small uppercase section label used inside chrome panels and dialogs
+ * Compact section label used inside chrome panels and dialogs
  * ("Color", "Stroke size", "Appearance"…).
  *
  * Encodes the one metadata-label treatment so section headings don't drift in
@@ -19,10 +19,7 @@ function PanelLabel({
   return (
     <Comp
       data-slot="panel-label"
-      className={cn(
-        "block text-[11px] leading-4 font-semibold tracking-wide text-content-muted uppercase select-none",
-        className
-      )}
+      className={cn("ui-panel-label", className)}
       {...props}
     />
   )

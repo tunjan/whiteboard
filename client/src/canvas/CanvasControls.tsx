@@ -50,9 +50,9 @@ export function CanvasControls({
   return (
     <div
       data-ui-layer
-      className="touch-targets absolute right-[calc(1rem+env(safe-area-inset-right))] bottom-[calc(1rem+env(safe-area-inset-bottom))] [@media(pointer:coarse)]:bottom-[calc(7rem+env(safe-area-inset-bottom))] select-none"
+      className="touch-targets absolute right-[env(safe-area-inset-right)] bottom-[env(safe-area-inset-bottom)] [@media(pointer:coarse)]:bottom-[calc(7rem+env(safe-area-inset-bottom))] select-none"
     >
-      <Surface className="flex h-10 items-center gap-1 p-1 shadow-hover">
+      <Surface className="flex h-10 items-center gap-1 rounded-none rounded-tl-md border-b-0 border-r-0 p-1">
         <div className="flex items-center gap-0.5">
           <Button
             variant="ghost"

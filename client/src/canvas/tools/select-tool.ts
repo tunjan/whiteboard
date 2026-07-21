@@ -12,6 +12,7 @@ import {
 import {
   getSelectionInfo,
   matchesMarquee,
+  ROTATION_HANDLE_HIT_SCREEN,
   shapeRotatedBounds,
   type MarqueeMode,
   type ResizeHandleId,
@@ -254,10 +255,8 @@ function marqueeBounds(start: Point, point: Point): Bounds {
   };
 }
 
-// Any shape the selection rectangle touches is selected, regardless of drag
-// direction — shapes no longer need to be fully enclosed.
-function marqueeMode(): MarqueeMode {
-  return 'touch';
+function marqueeMode(start: Point, current: Point): MarqueeMode {
+  return current.x >= start.x ? 'contain' : 'touch';
 }
 
 export function createSelectTool(): Tool {
@@ -466,7 +465,12 @@ export function createSelectTool(): Tool {
       const zoom = useCameraStore.getState().camera.z;
       const selection = useSelectionStore.getState();
       const shapes = ctx.editor.getShapes();
-      const selectionInfo = getSelectionInfo(shapes, selection.selectedIds, zoom);
+      const selectionInfo = getSelectionInfo(
+        shapes,
+        selection.selectedIds,
+        zoom,
+        ctx.editor.getShape,
+      );
 
       // 1a. Custom shape handles (connector endpoints/bend) take priority.
       if (selectionInfo?.isSingle && selectionInfo.customHandles) {
@@ -497,24 +501,11 @@ export function createSelectTool(): Tool {
         }
       }
 
-      // 1b. Generic resize/rotate box handles (single or group bounding box).
+      // 1b. Generic resize handles (single or group bounding box).
       if (selectionInfo) {
         for (const handle of selectionInfo.handles) {
           if (distance(info.point, handle.point) > HANDLE_HIT_SCREEN / zoom) continue;
-          if (handle.id === 'rotate') {
-            const initial = ctx.editor.getShape(selectionInfo.ids[0]!);
-            if (initial) {
-              state = {
-                type: 'rotate',
-                initial,
-                center: selectionInfo.center,
-                startAngle: Math.atan2(
-                  info.point.y - selectionInfo.center.y,
-                  info.point.x - selectionInfo.center.x,
-                ),
-              };
-            }
-          } else if (selectionInfo.isSingle) {
+          if (selectionInfo.isSingle) {
             const initial = ctx.editor.getShape(selectionInfo.ids[0]!);
             const util = initial ? shapeRegistry.getFor(initial) : undefined;
             if (initial && util?.canResize) {
@@ -553,6 +544,30 @@ export function createSelectTool(): Tool {
                 ),
               };
             }
+          }
+          return;
+        }
+
+        // Rotation lives in four invisible zones just outside the corners,
+        // leaving the top-center lane free for the contextual toolbar.
+        for (const handle of selectionInfo.rotationHandles) {
+          if (
+            distance(info.point, handle.point) >
+            ROTATION_HANDLE_HIT_SCREEN / zoom
+          ) {
+            continue;
+          }
+          const initial = ctx.editor.getShape(selectionInfo.ids[0]!);
+          if (initial) {
+            state = {
+              type: 'rotate',
+              initial,
+              center: selectionInfo.center,
+              startAngle: Math.atan2(
+                info.point.y - selectionInfo.center.y,
+                info.point.x - selectionInfo.center.x,
+              ),
+            };
           }
           return;
         }
@@ -645,11 +660,11 @@ export function createSelectTool(): Tool {
             start,
             base,
             selectionBefore: state.selectionBefore,
-            mode: marqueeMode(),
+            mode: marqueeMode(start, info.point),
           };
           // Fall through on the same sample so the marquee starts at the first drag frame.
           const bounds = marqueeBounds(state.start, info.point);
-          state.mode = marqueeMode();
+          state.mode = marqueeMode(start, info.point);
           useSelectionStore.getState().setMarquee({ bounds, mode: state.mode });
           selectMarquee(bounds, state.mode, state.base, ctx.editor);
           return;
@@ -660,7 +675,9 @@ export function createSelectTool(): Tool {
         case 'resize': {
           const lockAspect =
             info.shiftKey ||
-            (state.initial.type === 'text' && state.handle.length === 2);
+            ((state.initial.type === 'text' ||
+              state.initial.type === 'equation') &&
+              state.handle.length === 2);
           let bounds = computeResizeBounds(
             state.initial,
             state.util,
@@ -802,7 +819,7 @@ export function createSelectTool(): Tool {
         }
         case 'marquee': {
           const bounds = marqueeBounds(state.start, info.point);
-          state.mode = marqueeMode();
+          state.mode = marqueeMode(state.start, info.point);
           useSelectionStore.getState().setMarquee({ bounds, mode: state.mode });
           selectMarquee(bounds, state.mode, state.base, ctx.editor);
           return;
@@ -867,7 +884,12 @@ export function createSelectTool(): Tool {
       const zoom = useCameraStore.getState().camera.z;
       const shapes = ctx.editor.getShapes();
       const selection = useSelectionStore.getState();
-      const selectionInfo = getSelectionInfo(shapes, selection.selectedIds, zoom);
+      const selectionInfo = getSelectionInfo(
+        shapes,
+        selection.selectedIds,
+        zoom,
+        ctx.editor.getShape,
+      );
 
       // A double click on either text width handle releases the constraint and
       // returns to content-driven auto sizing. Keep the opposite side's center

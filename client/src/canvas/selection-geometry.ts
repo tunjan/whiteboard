@@ -28,7 +28,11 @@ export type ResizeHandleId =
   | 's'
   | 'sw'
   | 'w';
-export type HandleId = ResizeHandleId | 'rotate';
+export type CornerHandleId = Extract<
+  ResizeHandleId,
+  'nw' | 'ne' | 'se' | 'sw'
+>;
+export type RotationHandleId = `rotate-${CornerHandleId}`;
 export type MarqueeMode = 'contain' | 'touch';
 
 type Segment = readonly [Point, Point];
@@ -57,8 +61,10 @@ export const RESIZE_HANDLES: ResizeHandleId[] = [
   'w',
 ];
 
-/** Screen-px offset of the rotate handle above the top edge. */
-const ROTATE_OFFSET = 24;
+/** Screen-px inset beyond each edge for the invisible corner rotation zones. */
+const ROTATE_CORNER_OFFSET = 18;
+/** Screen-px radius of each corner rotation hit zone. */
+export const ROTATION_HANDLE_HIT_SCREEN = 14;
 
 export interface SelectionInfo {
   ids: string[];
@@ -69,22 +75,39 @@ export interface SelectionInfo {
   center: Point;
   /** Oriented corners (rotated for single), world. */
   corners: { nw: Point; ne: Point; se: Point; sw: Point };
-  /** Generic resize/rotate box handles (single only); empty for multi or when
-   * the shape exposes its own custom handles. */
-  handles: { id: HandleId; point: Point }[];
+  /** Generic resize handles; empty when the shape exposes custom handles. */
+  handles: { id: ResizeHandleId; point: Point }[];
+  /** Invisible FigJam-style rotation targets just beyond each corner. */
+  rotationHandles: { id: RotationHandleId; point: Point }[];
   /** Shape-specific handles (e.g. connector endpoints/bend); null otherwise. */
   customHandles: ShapeHandle[] | null;
   isSingle: boolean;
 }
 
 export function getSelectionInfo(
+  /** All page shapes. Only read for a single group selection, whose box derives
+   *  from its descendants — every other path uses `ids` alone. */
   shapes: Shape[],
   ids: string[],
   zoom: number,
+  /** O(1) id lookup. Callers that already index their shapes (tools via
+   *  `editor.getShape`, layers via their selection record) should pass one:
+   *  without it this scans the whole document on every call, which lands on the
+   *  per-frame path during drags and pans. Selection order never matters here —
+   *  the single-shape path takes `ids[0]` and the multi path unions bounds. */
+  getShape?: (id: string) => Shape | undefined,
 ): SelectionInfo | null {
   if (ids.length === 0) return null;
-  const idSet = new Set(ids);
-  const selected = shapes.filter((s) => idSet.has(s.id));
+  const selected: Shape[] = [];
+  if (getShape) {
+    for (const id of ids) {
+      const shape = getShape(id);
+      if (shape) selected.push(shape);
+    }
+  } else {
+    const idSet = new Set(ids);
+    for (const shape of shapes) if (idSet.has(shape.id)) selected.push(shape);
+  }
   if (selected.length === 0) return null;
 
   const isSingle = selected.length === 1;
@@ -130,7 +153,8 @@ export function getSelectionInfo(
     const noHandles = shape.locked || isGroup;
     const customHandles = noHandles ? null : util.getHandles?.(shape) ?? null;
 
-    let handles: { id: HandleId; point: Point }[] = [];
+    let handles: { id: ResizeHandleId; point: Point }[] = [];
+    let rotationHandles: SelectionInfo['rotationHandles'] = [];
     if (!noHandles && !customHandles) {
       // Text has two intentional resize gestures: corners scale typography;
       // horizontal side handles set a fixed wrap width. Vertical-only handles
@@ -142,10 +166,13 @@ export function getSelectionInfo(
           : RESIZE_HANDLES;
       handles = resizeHandles.map((id) => ({ id, point: handlePts[id] }));
       if (shape.type !== 'frame') {
-        handles.push({
-          id: 'rotate',
-          point: rot(midX, minY - ROTATE_OFFSET / zoom),
-        });
+        const d = ROTATE_CORNER_OFFSET / zoom;
+        rotationHandles = [
+          { id: 'rotate-nw', point: rot(minX - d, minY - d) },
+          { id: 'rotate-ne', point: rot(maxX + d, minY - d) },
+          { id: 'rotate-se', point: rot(maxX + d, maxY + d) },
+          { id: 'rotate-sw', point: rot(minX - d, maxY + d) },
+        ];
       }
     }
 
@@ -156,6 +183,7 @@ export function getSelectionInfo(
       center,
       corners,
       handles,
+      rotationHandles,
       customHandles,
       isSingle: true,
     };
@@ -196,6 +224,7 @@ export function getSelectionInfo(
     handles: anyUnlocked
       ? RESIZE_HANDLES.map((id) => ({ id, point: groupPts[id] }))
       : [],
+    rotationHandles: [],
     customHandles: null,
     isSingle: false,
   };
@@ -293,6 +322,7 @@ function marqueeGeometry(shape: Shape): MarqueeGeometry | null {
     case 'image':
     case 'video':
     case 'graph':
+    case 'equation':
     case 'frame':
       return { kind: 'region', outline: rotatedBoxOutline(shape) };
   }

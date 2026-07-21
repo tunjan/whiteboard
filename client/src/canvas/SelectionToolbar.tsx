@@ -1,4 +1,6 @@
 import type { ReactNode } from 'react';
+import { useShallow } from 'zustand/react/shallow';
+import type { Shape } from '@whiteboard/shared';
 import {
   Copy,
   CopyPlus,
@@ -21,6 +23,10 @@ import { duplicateShapes, groupShapes, ungroupShapes } from './commands';
 import { exportSelectionToPng } from './export-png';
 import { deleteTargetIds } from './hierarchy';
 import { getSelectionInfo } from './selection-geometry';
+
+/** Stable empty array for the non-group selection path (see `hasGroup`). */
+const NO_SHAPES: Shape[] = [];
+
 import { editor, useDocumentStore } from './use-document-store';
 import { useHiddenStore } from './use-hidden-store';
 import { useImageCroppingStore } from './use-image-cropping-store';
@@ -68,12 +74,39 @@ const APPROX_WIDTH = 232;
 export function SelectionToolbar({ camera }: SelectionToolbarProps) {
   const selectedIds = useSelectionStore((s) => s.selectedIds);
   const marquee = useSelectionStore((s) => s.marquee);
-  const shapes = useDocumentStore((s) => s.shapes);
+  // Only the selected shapes — the toolbar just needs to follow their bounds.
+  // Subscribing to the whole `shapes` array re-rendered it (and re-ran the
+  // full-document scan in `getSelectionInfo`) once per frame of every stroke.
+  const shapesRecord = useDocumentStore(
+    useShallow((s) => {
+      const record = s.doc.pages[s.currentPageId]?.shapes;
+      const out: Record<string, Shape> = {};
+      if (!record) return out;
+      for (const id of selectedIds) {
+        const shape = record[id];
+        if (shape) out[id] = shape;
+      }
+      return out;
+    }),
+  );
+  // A group's box comes from its descendants, so only then depend on the whole
+  // document (see the same note in SelectionLayer).
+  const selectionHasGroup = Object.values(shapesRecord).some(
+    (s) => s.type === 'group',
+  );
+  const shapes = useDocumentStore((s) =>
+    selectionHasGroup ? s.shapes : NO_SHAPES,
+  );
 
   // Hide while a drag-select is in progress to avoid flicker.
   if (marquee) return null;
 
-  const info = getSelectionInfo(shapes, selectedIds, camera.z);
+  const info = getSelectionInfo(
+    shapes,
+    selectedIds,
+    camera.z,
+    (id) => shapesRecord[id],
+  );
   if (!info) return null;
 
   // Derived availability — mirrors canvas-context-menu.tsx.
@@ -120,17 +153,25 @@ export function SelectionToolbar({ camera }: SelectionToolbarProps) {
     <TooltipProvider delay={300}>
       <div
         data-ui-layer
-        className="pointer-events-auto absolute z-20 -translate-x-1/2"
+        className="pointer-events-auto absolute z-20"
         style={{
           left,
           top,
+          // Keep both axes in one transform. Tailwind's translate utility uses
+          // the individual `translate` property and would shift X a second time.
           transform: `translate(-50%, ${below ? '0' : '-100%'})`,
         }}
       >
         <Surface
           role="toolbar"
           aria-label="Selection actions"
-          className="touch-targets flex h-11 items-center gap-1.5 p-1.5 shadow-hover"
+          className={cn(
+            'touch-targets flex h-11 items-center gap-1.5 p-1.5 shadow-hover',
+            'motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95 motion-safe:duration-200 motion-safe:ease-[var(--ease-out-expo)]',
+            below
+              ? 'origin-top motion-safe:slide-in-from-top-1'
+              : 'origin-bottom motion-safe:slide-in-from-bottom-1',
+          )}
         >
           <div className="flex items-center gap-0.5">
             <IconButton

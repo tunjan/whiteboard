@@ -16,19 +16,24 @@ declare module 'react' {
       'math-field': React.DetailedHTMLProps<
         React.HTMLAttributes<MathfieldElement>,
         MathfieldElement
-      >;
+      > & {
+        disabled?: boolean;
+      };
     }
   }
 }
 
-// The mathfield reads and writes expressions as ASCII math (`sin(x)`, `x^2`,
-// `(a)/(b)`), which is the syntax the graph parser already understands.
-const FORMAT = 'ascii-math';
+export type MathFieldFormat = 'ascii-math' | 'latex';
+export type MathFieldVirtualKeyboardPolicy = 'auto' | 'manual';
 
 export interface MathFieldProps {
-  /** Current expression as ASCII math. */
+  /** Current expression in the selected output format. */
   value: string;
   onChange: (value: string) => void;
+  /** Graphs use ASCII math; equation shapes use source LaTeX. */
+  format?: MathFieldFormat;
+  /** Whether MathLive opens its keyboard automatically or via an external control. */
+  virtualKeyboardPolicy?: MathFieldVirtualKeyboardPolicy;
   /** Enter inside the field — used to add and focus a new expression row. */
   onEnter?: () => void;
   /** Backspace while the field is empty — used to delete the row. */
@@ -41,6 +46,7 @@ export interface MathFieldProps {
   id?: string;
   'aria-label'?: string;
   'aria-invalid'?: boolean;
+  disabled?: boolean;
   /** Receives the underlying element so callers can focus a specific row. */
   elementRef?: (el: MathfieldElement | null) => void;
 }
@@ -54,9 +60,13 @@ export function MathField({
   placeholder,
   className,
   elementRef,
+  format = 'ascii-math',
+  virtualKeyboardPolicy = 'auto',
   ...attrs
 }: MathFieldProps) {
   const ref = React.useRef<MathfieldElement | null>(null);
+  const formatRef = React.useRef<MathFieldFormat>(format);
+  formatRef.current = format;
 
   // Keep the latest callbacks reachable from listeners bound once on mount.
   const handlers = React.useRef({ onChange, onEnter, onBackspaceEmpty, onMoveOut });
@@ -76,17 +86,21 @@ export function MathField({
 
     // Desmos-style math keyboard on touch devices; desktop keeps the physical
     // keyboard only.
-    mf.mathVirtualKeyboardPolicy = 'auto';
+    mf.mathVirtualKeyboardPolicy = virtualKeyboardPolicy;
     mf.smartFence = true;
     mf.smartSuperscript = true;
     // No right-click math menu or inline keyboard toggle in this compact panel.
     mf.menuItems = [];
     if (placeholder) mf.setAttribute('placeholder', placeholder);
-    if (mf.getValue(FORMAT) !== value) {
-      mf.setValue(value, { format: FORMAT, silenceNotifications: true });
+    if (mf.getValue(formatRef.current) !== value) {
+      mf.setValue(value, {
+        format: formatRef.current,
+        silenceNotifications: true,
+      });
     }
 
-    const onInput = () => handlers.current.onChange(mf.getValue(FORMAT));
+    const onInput = () =>
+      handlers.current.onChange(mf.getValue(formatRef.current));
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Enter' && handlers.current.onEnter) {
         event.preventDefault();
@@ -95,7 +109,7 @@ export function MathField({
       } else if (
         event.key === 'Backspace' &&
         handlers.current.onBackspaceEmpty &&
-        mf.getValue(FORMAT).trim() === ''
+        mf.getValue(formatRef.current).trim() === ''
       ) {
         event.preventDefault();
         event.stopPropagation();
@@ -132,10 +146,23 @@ export function MathField({
   // without clobbering the value the user is actively typing.
   React.useEffect(() => {
     const mf = ref.current;
-    if (mf && mf.getValue(FORMAT) !== value) {
-      mf.setValue(value, { format: FORMAT, silenceNotifications: true });
+    if (mf && mf.getValue(format) !== value) {
+      mf.setValue(value, { format, silenceNotifications: true });
     }
-  }, [value]);
+  }, [format, value]);
+
+  React.useEffect(() => {
+    if (ref.current) {
+      ref.current.mathVirtualKeyboardPolicy = virtualKeyboardPolicy;
+    }
+  }, [virtualKeyboardPolicy]);
+
+  React.useEffect(() => {
+    const mf = ref.current;
+    if (!mf) return;
+    if (placeholder) mf.setAttribute('placeholder', placeholder);
+    else mf.removeAttribute('placeholder');
+  }, [placeholder]);
 
   return (
     <math-field

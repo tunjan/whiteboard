@@ -1,11 +1,30 @@
 import { useEffect, useState } from 'react';
-import { Pencil, Plus, Trash2 } from 'lucide-react';
+import { Grid2X2, Pencil, Plus, Trash2 } from 'lucide-react';
 import type { BoardMeta } from '@whiteboard/shared';
 import { type AuthState, getAuth, logout } from '@/board/auth';
 import { boardRepository } from '@/board/server-board-repository';
 import { BrandMark } from '@/components/brand-mark';
 import { BoardTitleDialog } from '@/components/board-title-dialog';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from '@/components/ui/empty';
+import { Skeleton } from '@/components/ui/skeleton';
+import {
+  AlertDialog,
+  AlertDialogClose,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { navigate } from '@/router';
 import { Login } from './login';
 
@@ -23,21 +42,26 @@ function BoardRow({
   onDelete: () => void;
 }) {
   return (
-    <article className="group flex min-h-16 items-center gap-2 border-b border-border-subtle">
+    <article className="group flex min-h-16 items-center gap-2 border-b border-border-subtle transition-colors duration-150 hover:bg-bg-muted focus-within:bg-bg-muted">
       <button
         type="button"
         onClick={() => navigate(`/board/${board.id}`)}
-        className="grid min-w-0 flex-1 gap-1 py-4 text-left outline-none transition-opacity hover:opacity-70 sm:grid-cols-[minmax(0,1fr)_10rem] sm:items-center sm:gap-6"
+        className="flex min-w-0 flex-1 items-center gap-3 rounded-md py-3 text-left outline-none sm:gap-4"
       >
-        <h2 className="truncate text-sm font-medium text-content-emphasis">
-          {board.name}
-        </h2>
-        <time
-          dateTime={new Date(board.updatedAt).toISOString()}
-          className="text-xs text-content-subtle sm:text-sm"
-        >
-          Updated {new Date(board.updatedAt).toLocaleDateString()}
-        </time>
+        <span className="grid size-10 shrink-0 place-items-center rounded-md border border-border-subtle bg-bg-default text-content-subtle" aria-hidden="true">
+          <Grid2X2 className="size-4" />
+        </span>
+        <span className="grid min-w-0 flex-1 gap-0.5 sm:grid-cols-[minmax(0,1fr)_10rem] sm:items-center sm:gap-6">
+          <span className="truncate text-sm font-medium text-content-emphasis">
+            {board.name}
+          </span>
+          <time
+            dateTime={new Date(board.lastOpenedAt).toISOString()}
+            className="text-xs tabular-nums text-content-subtle sm:text-sm"
+          >
+            Opened {new Date(board.lastOpenedAt).toLocaleDateString()}
+          </time>
+        </span>
       </button>
 
       <div className="touch-reveal touch-targets flex shrink-0 gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
@@ -62,6 +86,7 @@ export function Home() {
   const [auth, setAuth] = useState<AuthState | null>(null);
   const [boards, setBoards] = useState<BoardMeta[]>([]);
   const [titleDialog, setTitleDialog] = useState<TitleDialogState | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<BoardMeta | null>(null);
 
   const refresh = () => {
     void boardRepository.list().then(setBoards);
@@ -76,8 +101,19 @@ export function Home() {
 
   if (auth === null) {
     return (
-      <div className="grid min-h-screen place-items-center bg-bg-muted text-sm text-content-subtle">
-        Loading…
+      <div className="min-h-dvh bg-bg-default text-content-emphasis">
+        <div className="mx-auto w-full max-w-[70rem] px-4 py-20 sm:px-8">
+          <span className="sr-only" role="status">Loading Boards</span>
+          <Skeleton className="h-8 w-32" />
+          <div className="mt-8 border-t border-border-subtle" aria-hidden="true">
+            {[0, 1, 2].map((row) => (
+              <div key={row} className="flex h-16 items-center gap-4 border-b border-border-subtle">
+                <Skeleton className="size-10" />
+                <Skeleton className="h-4 w-48 max-w-[50vw]" />
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
     );
   }
@@ -86,10 +122,9 @@ export function Home() {
   }
 
   const remove = async (b: BoardMeta) => {
-    if (window.confirm(`Delete "${b.name}"? This cannot be undone.`)) {
-      await boardRepository.delete(b.id);
-      refresh();
-    }
+    await boardRepository.delete(b.id);
+    setDeleteTarget(null);
+    refresh();
   };
 
   const commitTitle = async (title: string) => {
@@ -107,11 +142,11 @@ export function Home() {
 
   return (
     <div className="min-h-dvh bg-bg-default text-content-emphasis">
-      <header className="border-b border-border-subtle">
-        <div className="mx-auto flex h-14 max-w-[1040px] items-center justify-between px-5 sm:px-8">
+      <header className="border-b border-border-subtle bg-bg-default">
+        <div className="mx-auto flex h-14 max-w-[70rem] items-center justify-between px-4 sm:px-8">
           <div className="flex items-center gap-2.5">
             <BrandMark className="size-7" />
-            <span className="text-sm font-semibold tracking-[-0.02em]">
+            <span className="text-sm font-semibold tracking-[-0.01em]">
               Best Whiteboard
             </span>
           </div>
@@ -123,43 +158,43 @@ export function Home() {
               setAuth({ authenticated: false });
             }}
           >
-            Log out
+            Log Out
           </Button>
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-[1040px] px-5 py-8 sm:px-8 sm:py-12">
+      <main className="mx-auto w-full max-w-[70rem] px-4 py-8 sm:px-8 sm:py-12">
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-baseline gap-3">
-            <h1 className="text-2xl font-semibold tracking-[-0.03em]">Boards</h1>
-            <span className="text-sm tabular-nums text-content-subtle">
+            <h1 className="text-balance text-3xl leading-10 font-semibold tracking-[-0.025em]">Boards</h1>
+            <Badge variant="secondary" className="tabular-nums" aria-label={`${boards.length} boards`}>
               {boards.length}
-            </span>
+            </Badge>
           </div>
           {boards.length > 0 ? (
             <Button onClick={() => setTitleDialog({ mode: 'create' })}>
               <Plus data-icon="inline-start" />
-              New board
+              New Board
             </Button>
           ) : null}
         </div>
 
         {boards.length === 0 ? (
-          <div className="flex min-h-[50vh] flex-col items-center justify-center text-center">
-            <h2 className="text-lg font-semibold tracking-[-0.02em]">
-              Create your first board
-            </h2>
-            <p className="mt-2 text-sm text-content-subtle">
-              Start with a blank whiteboard.
-            </p>
-            <Button
-              className="mt-5"
-              onClick={() => setTitleDialog({ mode: 'create' })}
-            >
-              <Plus data-icon="inline-start" />
-              New board
-            </Button>
-          </div>
+          <Empty className="min-h-[50vh]">
+            <EmptyHeader>
+              <EmptyMedia variant="icon"><Grid2X2 /></EmptyMedia>
+              <EmptyTitle>No Boards Yet</EmptyTitle>
+              <EmptyDescription>
+                Create a shared canvas for sketches, equations, notes, and live collaboration.
+              </EmptyDescription>
+            </EmptyHeader>
+            <EmptyContent>
+              <Button onClick={() => setTitleDialog({ mode: 'create' })}>
+                <Plus data-icon="inline-start" />
+                Create Board
+              </Button>
+            </EmptyContent>
+          </Empty>
         ) : (
           <div className="mt-7 border-t border-border-subtle">
             {boards.map((b) => (
@@ -169,7 +204,7 @@ export function Home() {
                 onRename={() => {
                   setTitleDialog({ mode: 'rename', board: b });
                 }}
-                onDelete={() => remove(b)}
+                onDelete={() => setDeleteTarget(b)}
               />
             ))}
           </div>
@@ -179,7 +214,7 @@ export function Home() {
       <BoardTitleDialog
         open={titleDialog !== null}
         heading={
-          titleDialog?.mode === 'create' ? 'Name whiteboard' : 'Rename board'
+          titleDialog?.mode === 'create' ? 'Name Whiteboard' : 'Rename Board'
         }
         description={
           titleDialog?.mode === 'create'
@@ -190,13 +225,39 @@ export function Home() {
           titleDialog?.mode === 'rename' ? titleDialog.board.name : ''
         }
         submitLabel={
-          titleDialog?.mode === 'create' ? 'Create board' : 'Save changes'
+          titleDialog?.mode === 'create' ? 'Create Board' : 'Save Changes'
         }
         onOpenChange={(open) => {
           if (!open) setTitleDialog(null);
         }}
         onSubmit={commitTitle}
       />
+      <AlertDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Whiteboard?</AlertDialogTitle>
+            <AlertDialogDescription>
+              “{deleteTarget?.name}” and all of its pages will be permanently deleted. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                if (deleteTarget) void remove(deleteTarget);
+              }}
+            >
+              Delete Whiteboard
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

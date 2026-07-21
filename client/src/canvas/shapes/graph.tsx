@@ -6,6 +6,7 @@ import {
   createDefaultGraphProps,
   sampleGraphExpression,
 } from '../graph-expressions';
+import { findGraphIntersections } from '../graph-intersections';
 import { useLodDetail } from '../lod';
 import { useCameraStore } from '../use-camera-store';
 import { breakUndoCapture, editor } from '../use-document-store';
@@ -174,6 +175,11 @@ export const graphUtil: ShapeUtil<'graph'> = {
     const samples = Math.max(180, Math.round(area.w * 1.4));
     const verticalSamples = Math.max(120, Math.round(area.h * 1.4));
     const showAxisLabels = props.showAxisLabels !== false;
+    const points = props.points ?? [];
+    const intersections =
+      props.showIntersections === true
+        ? findGraphIntersections(props.expressions, viewport, props.parameters)
+        : [];
     const xLabelsBelow = clippedXAxis <= area.y + area.h - 18;
     const xLabelY = xLabelsBelow ? clippedXAxis + 13 : clippedXAxis - 7;
     const yLabelsRight = clippedYAxis <= area.x + area.w - 34;
@@ -184,6 +190,14 @@ export const graphUtil: ShapeUtil<'graph'> = {
       fill: 'var(--color-muted-foreground)',
       stroke: 'var(--color-background)',
       strokeWidth: 3,
+      paintOrder: 'stroke' as const,
+    };
+    const intersectionLabelStyle = {
+      fontSize: 13,
+      fontWeight: 600,
+      fill: 'var(--color-foreground)',
+      stroke: 'var(--color-background)',
+      strokeWidth: 3.5,
       paintOrder: 'stroke' as const,
     };
 
@@ -313,6 +327,46 @@ export const graphUtil: ShapeUtil<'graph'> = {
                 vectorEffect="non-scaling-stroke"
               />
             ));
+          })}
+          {points.map((point) => {
+            if (!point.visible) return null;
+            const screen = graphToScreen(point, viewport, area);
+            return (
+              <circle
+                key={point.id}
+                cx={screen.x}
+                cy={screen.y}
+                r={5}
+                fill={point.color}
+                stroke="var(--color-background)"
+                strokeWidth={1.75}
+              />
+            );
+          })}
+          {intersections.map((point, index) => {
+            const screen = graphToScreen(point, viewport, area);
+            const nearRight = screen.x > area.x + area.w - 64;
+            const nearTop = screen.y < area.y + 16;
+            return (
+              <g key={`ix-${index}`}>
+                <circle
+                  cx={screen.x}
+                  cy={screen.y}
+                  r={5}
+                  fill="var(--color-foreground)"
+                  stroke="var(--color-background)"
+                  strokeWidth={1.75}
+                />
+                <text
+                  x={nearRight ? screen.x - 8 : screen.x + 8}
+                  y={nearTop ? screen.y + 18 : screen.y - 8}
+                  textAnchor={nearRight ? 'end' : 'start'}
+                  {...intersectionLabelStyle}
+                >
+                  {`(${formatAxisLabel(point.x)}, ${formatAxisLabel(point.y)})`}
+                </text>
+              </g>
+            );
           })}
           {showAxisLabels
             ? xTicks.map((x) => {

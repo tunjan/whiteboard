@@ -11,6 +11,7 @@ import { textUtil } from './text';
 import { imageUtil } from './image';
 import { videoUtil } from './video';
 import { graphUtil } from './graph';
+import { equationUtil } from './equation';
 import { groupUtil } from './group';
 import { frameUtil } from './frame';
 
@@ -24,5 +25,6 @@ shapeRegistry.register(textUtil);
 shapeRegistry.register(imageUtil);
 shapeRegistry.register(videoUtil);
 shapeRegistry.register(graphUtil);
+shapeRegistry.register(equationUtil);
 shapeRegistry.register(groupUtil);
 shapeRegistry.register(frameUtil);

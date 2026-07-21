@@ -3,7 +3,14 @@ import { Check, Copy, Share2 } from 'lucide-react';
 import { useDocumentStore } from '@/canvas/use-document-store';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Surface } from '@/components/ui/surface';
+import {
+  Popover,
+  PopoverContent,
+  PopoverDescription,
+  PopoverHeader,
+  PopoverTitle,
+  PopoverTrigger,
+} from '@/components/ui/popover';
 
 /** Build the shareable URL for a board, pinned to the page being viewed. */
 export function shareUrl(boardId: string, pageId: string): string {
@@ -21,26 +28,10 @@ export function ShareButton() {
   const currentPageId = useDocumentStore((s) => s.currentPageId);
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const link = boardId ? shareUrl(boardId, currentPageId) : '';
-
-  useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (e: PointerEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
-    };
-    window.addEventListener('pointerdown', onPointerDown, true);
-    window.addEventListener('keydown', onKey);
-    return () => {
-      window.removeEventListener('pointerdown', onPointerDown, true);
-      window.removeEventListener('keydown', onKey);
-    };
-  }, [open]);
 
   useEffect(
     () => () => {
@@ -54,7 +45,7 @@ export function ShareButton() {
       await navigator.clipboard.writeText(link);
     } catch {
       // Clipboard API unavailable (e.g. insecure context) — fall back to select.
-      rootRef.current?.querySelector('input')?.select();
+      inputRef.current?.select();
       return;
     }
     setCopied(true);
@@ -63,50 +54,50 @@ export function ShareButton() {
   };
 
   return (
-    <div ref={rootRef} className="relative" data-ui-layer>
-      <Button
-        variant="ghost"
-        size="sm"
-        aria-label="Share board"
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger
+        render={
+          <Button variant="ghost" size="sm" aria-label="Share Board" />
+        }
       >
         <Share2 data-icon="inline-start" />
         <span className="hidden sm:inline">Share</span>
-      </Button>
-
-      {open ? (
-        <Surface className="absolute top-10 right-0 z-30 flex w-80 flex-col gap-3 p-3 shadow-floating">
-          <div className="text-sm font-semibold text-content-emphasis">
-            Share this board
-          </div>
-          <p className="text-xs leading-5 text-content-subtle">
+      </PopoverTrigger>
+      <PopoverContent side="bottom" align="end" sideOffset={8} className="w-80">
+        <PopoverHeader>
+          <PopoverTitle>Share This Board</PopoverTitle>
+          <PopoverDescription className="text-pretty text-xs leading-5">
             Anyone with the link can view and edit. It opens to the page you're
             on now.
-          </p>
-          <div className="flex items-center gap-2">
-            <Input
-              readOnly
-              value={link}
-              onFocus={(e) => e.currentTarget.select()}
-              className="h-8 flex-1 px-2 font-mono text-xs"
-            />
-            <Button
-              variant={copied ? 'outline' : 'default'}
-              size="sm"
-              onClick={copy}
-              className="shrink-0"
-            >
-              {copied ? (
-                <Check data-icon="inline-start" />
-              ) : (
-                <Copy data-icon="inline-start" />
-              )}
-              {copied ? 'Copied' : 'Copy'}
-            </Button>
-          </div>
-        </Surface>
-      ) : null}
-    </div>
+          </PopoverDescription>
+        </PopoverHeader>
+        <div className="grid gap-2">
+          <Input
+            ref={inputRef}
+            readOnly
+            value={link}
+            title={link}
+            aria-label="Share link"
+            onFocus={(e) => e.currentTarget.select()}
+            className="w-full font-mono text-sm text-content-emphasis"
+          />
+          <Button
+            variant={copied ? 'outline' : 'default'}
+            onClick={copy}
+            className="w-full"
+          >
+            {copied ? (
+              <Check data-icon="inline-start" />
+            ) : (
+              <Copy data-icon="inline-start" />
+            )}
+            {copied ? 'Copied' : 'Copy Link'}
+          </Button>
+        </div>
+        <span className="sr-only" aria-live="polite">
+          {copied ? 'Link copied' : ''}
+        </span>
+      </PopoverContent>
+    </Popover>
   );
 }

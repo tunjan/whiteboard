@@ -166,6 +166,14 @@ export interface GraphParameter {
   step: number;
 }
 
+export interface GraphPoint {
+  id: string;
+  x: number;
+  y: number;
+  color: string;
+  visible: boolean;
+}
+
 export interface GraphProps {
   /** Rendered plot size in world units. */
   w: number;
@@ -175,6 +183,22 @@ export interface GraphProps {
   parameters: Record<string, GraphParameter>;
   /** Whether tick numbers are shown along the visible axes. */
   showAxisLabels: boolean;
+  /** Discrete plotted points. Absent on boards saved before this feature. */
+  points?: GraphPoint[];
+  /** Render intersection markers for explicit curves. Defaults to false. */
+  showIntersections?: boolean;
+}
+
+export interface EquationProps {
+  /** LaTeX source rendered in display mode. */
+  latex: string;
+  /** Applied as currentColor to the MathJax SVG paths. */
+  color: string;
+  /** Typographic scale in world units. */
+  fontSize: number;
+  /** Cached rendered size in world units. */
+  w: number;
+  h: number;
 }
 
 /** A group is a pure container: no geometry of its own, bounds = children. */
@@ -198,6 +222,7 @@ export type TextShape = BaseShape<'text', TextProps>;
 export type ImageShape = BaseShape<'image', ImageProps>;
 export type VideoShape = BaseShape<'video', VideoProps>;
 export type GraphShape = BaseShape<'graph', GraphProps>;
+export type EquationShape = BaseShape<'equation', EquationProps>;
 export type GroupShape = BaseShape<'group', GroupProps>;
 export type FrameShape = BaseShape<'frame', FrameProps>;
 
@@ -217,6 +242,7 @@ export type Shape =
   | ImageShape
   | VideoShape
   | GraphShape
+  | EquationShape
   | GroupShape
   | FrameShape;
 
@@ -234,6 +260,7 @@ export interface ShapeMap {
   image: ImageShape;
   video: VideoShape;
   graph: GraphShape;
+  equation: EquationShape;
   group: GroupShape;
   frame: FrameShape;
 }

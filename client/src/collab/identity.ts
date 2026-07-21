@@ -1,12 +1,9 @@
 import { getAuth } from '@/board/auth';
-import { randomAvatarSeed } from './avatar';
 
 export interface Identity {
   name: string;
   color: string;
   isTutor: boolean;
-  /** Seed for this user's hand-drawn doodle avatar. */
-  avatar: string;
 }
 
 /** The tutor's cursor color is reserved so students can always spot them. */
@@ -25,7 +22,6 @@ const STUDENT_COLORS = [
 
 const NAME_KEY = 'whiteboard:display-name';
 const COLOR_KEY = 'whiteboard:cursor-color';
-const AVATAR_KEY = 'whiteboard:avatar-seed';
 
 export function setStoredName(name: string): void {
   localStorage.setItem(NAME_KEY, name);
@@ -33,20 +29,6 @@ export function setStoredName(name: string): void {
 
 function getStoredName(): string | null {
   return localStorage.getItem(NAME_KEY);
-}
-
-export function setStoredAvatar(seed: string): void {
-  localStorage.setItem(AVATAR_KEY, seed);
-}
-
-/** A stable per-browser avatar seed, generated on first use. */
-export function getOrAssignAvatar(): string {
-  let seed = localStorage.getItem(AVATAR_KEY);
-  if (!seed) {
-    seed = randomAvatarSeed();
-    localStorage.setItem(AVATAR_KEY, seed);
-  }
-  return seed;
 }
 
 /** A stable per-browser student color from the palette (never the tutor color). */
@@ -65,7 +47,6 @@ export interface ResolvedIdentity {
   identity: Identity | null;
   needsName: boolean;
   color: string;
-  avatar: string;
 }
 
 /**
@@ -74,29 +55,25 @@ export interface ResolvedIdentity {
  */
 export async function resolveIdentity(): Promise<ResolvedIdentity> {
   const auth = await getAuth();
-  const avatar = getOrAssignAvatar();
   if (auth.authenticated) {
     return {
       identity: {
         name: auth.name ?? 'Tutor',
         color: TUTOR_COLOR,
         isTutor: true,
-        avatar,
       },
       needsName: false,
       color: TUTOR_COLOR,
-      avatar,
     };
   }
   const color = getOrAssignStudentColor();
   const name = getStoredName();
   if (name) {
     return {
-      identity: { name, color, isTutor: false, avatar },
+      identity: { name, color, isTutor: false },
       needsName: false,
       color,
-      avatar,
     };
   }
-  return { identity: null, needsName: true, color, avatar };
+  return { identity: null, needsName: true, color };
 }

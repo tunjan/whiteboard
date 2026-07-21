@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { screenToWorld } from '@/canvas/camera';
 import { createYoutubeShape, parseYoutubeId } from '@/canvas/place-video';
 import { useCameraStore } from '@/canvas/use-camera-store';
@@ -24,6 +24,7 @@ export function YouTubeDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const inputId = useId();
   const [url, setUrl] = useState('');
   const [error, setError] = useState(false);
 
@@ -53,15 +54,16 @@ export function YouTubeDialog({
     <Dialog open={open} onOpenChange={(o) => (o ? onOpenChange(true) : close())}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Add YouTube video</DialogTitle>
+          <DialogTitle>Add YouTube Video</DialogTitle>
           <DialogDescription>
             Paste a YouTube link to embed and play it on the board.
           </DialogDescription>
         </DialogHeader>
         <FieldGroup>
           <Field data-invalid={error ? true : undefined}>
-            <FieldLabel className="sr-only">YouTube link</FieldLabel>
+            <FieldLabel htmlFor={inputId}>YouTube Link</FieldLabel>
             <Input
+              id={inputId}
               autoFocus
               value={url}
               placeholder="https://www.youtube.com/watch?v=…"
@@ -87,7 +89,7 @@ export function YouTubeDialog({
             Cancel
           </Button>
           <Button onClick={submit} disabled={!url.trim()}>
-            Add
+            Add Video
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -19,19 +19,20 @@ import {
   useDocumentStore,
 } from '@/canvas/use-document-store';
 import {
+  LIST_VERTICAL_PADDING,
   SortableList,
   type SortableHandleProps,
 } from '@/components/sortable-list';
 import { Button } from '@/components/ui/button';
 import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+  AlertDialog,
+  AlertDialogClose,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -50,26 +51,65 @@ import { Input } from '@/components/ui/input';
 import {
   Popover,
   PopoverContent,
+  PopoverTitle,
   PopoverTrigger,
 } from '@/components/ui/popover';
-import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
 
 const PAGE_ROW_HEIGHT = 40;
-const PAGE_LIST_HEIGHT_KEY = 'whiteboard:page-menu-height:v1';
+/** Coarse pointers grow controls to 40px, so rows need extra room to not touch. */
+const PAGE_ROW_HEIGHT_COARSE = 48;
+const PAGE_LIST_HEIGHT_KEY = 'whiteboard:page-menu-height:v2';
 const PAGE_LIST_MAX_HEIGHT = 800;
+const HEADER_HEIGHT = 34;
+/** Reserved for the footer at its resting size. Held constant so opening the
+ *  create form grows the popover instead of resizing the list under the cursor. */
+const FOOTER_HEIGHT = 48;
+const RESIZE_HINT =
+  'Drag to resize. Press Enter or double-click to fit the list to its pages.';
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
-function storedPageListHeight(): number | null {
+/** Scoped per board so a tall list on a 20-page board does not follow the user
+ *  to a 2-page one. */
+function pageListHeightKey(boardId: string): string {
+  return `${PAGE_LIST_HEIGHT_KEY}:${boardId}`;
+}
+
+function storedPageListHeight(boardId: string): number | null {
+  if (!boardId) return null;
   try {
-    const value = Number(window.localStorage.getItem(PAGE_LIST_HEIGHT_KEY));
+    const value = Number(
+      window.localStorage.getItem(pageListHeightKey(boardId)),
+    );
     return Number.isFinite(value) && value >= PAGE_ROW_HEIGHT ? value : null;
   } catch {
     return null;
   }
+}
+
+/** First unused `Page N`, so deleting a middle page cannot make the next
+ *  default name collide with one that already exists. */
+function nextPageName(names: string[]): string {
+  const used = new Set(names);
+  let n = names.length + 1;
+  while (used.has(`Page ${n}`)) n += 1;
+  return `Page ${n}`;
+}
+
+function useCoarsePointer(): boolean {
+  const [coarse, setCoarse] = useState(
+    () => window.matchMedia('(pointer: coarse)').matches,
+  );
+  useEffect(() => {
+    const query = window.matchMedia('(pointer: coarse)');
+    const onChange = () => setCoarse(query.matches);
+    query.addEventListener('change', onChange);
+    return () => query.removeEventListener('change', onChange);
+  }, []);
+  return coarse;
 }
 
 /**
@@ -77,17 +117,21 @@ function storedPageListHeight(): number | null {
  * the shared Yjs document, so changes appear immediately for every collaborator.
  */
 export function PageMenu() {
+  const boardId = useDocumentStore((state) => state.boardId);
   const pages = useDocumentStore((state) => state.doc.pages);
   const pageOrder = useDocumentStore((state) => state.doc.pageOrder);
   const currentPageId = useDocumentStore((state) => state.currentPageId);
   const pageLocked = useAnimationStore(
     (state) => state.playbackActive || state.recordingPageId !== null,
   );
+  const coarsePointer = useCoarsePointer();
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
-  const [userListHeight, setUserListHeight] = useState(storedPageListHeight);
+  const [reopenAfterDelete, setReopenAfterDelete] = useState(false);
+  const [userListHeight, setUserListHeight] = useState<number | null>(null);
   const [viewportHeight, setViewportHeight] = useState(() => window.innerHeight);
 
   const ordered = pageOrder
@@ -95,14 +139,17 @@ export function PageMenu() {
     .filter((page): page is NonNullable<typeof page> => Boolean(page));
   const current = pages[currentPageId];
   const pageToDelete = deleteId ? pages[deleteId] : undefined;
-  const pageBeingEdited = editingId ? pages[editingId] : undefined;
-  const formOpen = creating || Boolean(pageBeingEdited);
-  const footerHeight = formOpen ? 140 : 48;
+  const rowHeight = coarsePointer ? PAGE_ROW_HEIGHT_COARSE : PAGE_ROW_HEIGHT;
+  const formOpen = creating || Boolean(editingId && pages[editingId]);
   const listMaxHeight = Math.max(
-    PAGE_ROW_HEIGHT,
-    Math.min(PAGE_LIST_MAX_HEIGHT, viewportHeight * 0.62) - footerHeight - 12,
+    rowHeight + LIST_VERTICAL_PADDING,
+    Math.min(PAGE_LIST_MAX_HEIGHT, viewportHeight * 0.62) -
+      HEADER_HEIGHT -
+      FOOTER_HEIGHT -
+      12,
   );
-  const autoListHeight = Math.max(PAGE_ROW_HEIGHT, ordered.length * PAGE_ROW_HEIGHT);
+  const autoListHeight =
+    Math.max(rowHeight, ordered.length * rowHeight) + LIST_VERTICAL_PADDING;
   const listHeight = Math.round(
     Math.min(userListHeight ?? autoListHeight, listMaxHeight),
   );
@@ -110,6 +157,7 @@ export function PageMenu() {
   const resetDraft = () => {
     setEditingId(null);
     setCreating(false);
+    setCreateError(null);
   };
 
   const changeOpen = (nextOpen: boolean) => {
@@ -117,11 +165,20 @@ export function PageMenu() {
     if (!nextOpen) resetDraft();
   };
 
+  // The confirm dialog is modal, so the popover has to yield to it. Restoring
+  // it afterwards keeps the user's place in the list on both paths.
+  const closeDeleteDialog = () => {
+    setDeleteId(null);
+    if (reopenAfterDelete) {
+      setReopenAfterDelete(false);
+      setOpen(true);
+    }
+  };
+
   useEffect(() => {
     if (!pageLocked) return;
     setOpen(false);
-    setEditingId(null);
-    setCreating(false);
+    resetDraft();
   }, [pageLocked]);
 
   useEffect(() => {
@@ -131,13 +188,20 @@ export function PageMenu() {
   }, []);
 
   useEffect(() => {
-    if (userListHeight === null) return;
+    setUserListHeight(storedPageListHeight(boardId));
+  }, [boardId]);
+
+  useEffect(() => {
+    if (userListHeight === null || !boardId) return;
     try {
-      window.localStorage.setItem(PAGE_LIST_HEIGHT_KEY, String(userListHeight));
+      window.localStorage.setItem(
+        pageListHeightKey(boardId),
+        String(userListHeight),
+      );
     } catch {
       // Resizing remains available when browser storage is blocked.
     }
-  }, [userListHeight]);
+  }, [boardId, userListHeight]);
 
   return (
     <>
@@ -159,66 +223,99 @@ export function PageMenu() {
         <PopoverContent
           align="start"
           sideOffset={10}
-          className="touch-targets w-[min(15rem,calc(100vw-2rem))] gap-0 p-0"
+          className="touch-targets w-[min(16rem,calc(100vw-2rem))] gap-0 p-0"
         >
-
+          <div className="flex items-center justify-between gap-2 px-3 pt-2.5 pb-1.5">
+            <PopoverTitle className="text-xs font-medium tracking-wide text-content-muted uppercase">
+              Pages
+            </PopoverTitle>
+            <span className="text-xs text-content-muted tabular-nums">
+              {ordered.length}
+            </span>
+          </div>
 
           <SortableList
             items={ordered}
             height={listHeight}
-            rowHeight={PAGE_ROW_HEIGHT}
+            rowHeight={rowHeight}
             label="Board pages"
+            revealId={currentPageId}
             getItemLabel={(page) => page.name}
             disabled={pageLocked || formOpen}
             onReorder={movePageToIndex}
           >
             {(page, index, dragHandleProps, dragging) => {
               const active = page.id === currentPageId;
+              const renaming = editingId === page.id;
 
               return (
                 <div
                   className={cn(
-                    'flex w-full items-center gap-1 rounded-md',
+                    'flex w-full items-center gap-1 rounded-md pr-0.5',
                     dragging && 'bg-bg-default shadow-hover',
                   )}
                 >
-                  <PageDragHandle
-                    dragHandleProps={dragHandleProps}
-                    disabled={formOpen}
+                  {/* Selection gets its own channel so it never reads as focus. */}
+                  <span
+                    aria-hidden="true"
+                    className={cn(
+                      'h-5 w-[3px] shrink-0 rounded-full transition-colors',
+                      active ? 'bg-accent-brand' : 'bg-transparent',
+                    )}
                   />
-                  <Button
-                    variant={active ? 'secondary' : 'ghost'}
-                    size="sm"
-                    aria-current={active ? 'page' : undefined}
-                    onClick={() => {
-                      setCurrentPage(page.id);
-                    }}
-                    onDoubleClick={(event) => {
-                      event.preventDefault();
-                      setCreating(false);
-                      setEditingId(page.id);
-                    }}
-                    title="Double-click to rename"
-                    className="min-w-0 flex-1 justify-start"
-                  >
-                    <span className="truncate">{page.name}</span>
-                  </Button>
-                  <PageActions
-                    pageName={page.name}
-                    canMoveUp={index > 0}
-                    canMoveDown={index < ordered.length - 1}
-                    canDelete={ordered.length > 1}
-                    onRename={() => {
-                      setCreating(false);
-                      setEditingId(page.id);
-                    }}
-                    onMoveUp={() => movePage(page.id, 'up')}
-                    onMoveDown={() => movePage(page.id, 'down')}
-                    onDelete={() => {
-                      changeOpen(false);
-                      setDeleteId(page.id);
-                    }}
-                  />
+                  {renaming ? (
+                    <PageInlineRename
+                      initialValue={page.name}
+                      onSubmit={(name) => {
+                        renamePage(page.id, name);
+                        setEditingId(null);
+                      }}
+                      onCancel={() => setEditingId(null)}
+                    />
+                  ) : (
+                    <>
+                      <PageDragHandle
+                        dragHandleProps={dragHandleProps}
+                        disabled={formOpen}
+                      />
+                      <Button
+                        variant={active ? 'secondary' : 'ghost'}
+                        size="sm"
+                        aria-current={active ? 'page' : undefined}
+                        onClick={() => setCurrentPage(page.id)}
+                        className={cn(
+                          'min-w-0 flex-1 justify-start',
+                          active && 'font-medium text-content-emphasis',
+                        )}
+                      >
+                        <span className="truncate">{page.name}</span>
+                      </Button>
+                      <PageActions
+                        pageName={page.name}
+                        canMoveUp={index > 0}
+                        canMoveDown={index < ordered.length - 1}
+                        canDelete={ordered.length > 1}
+                        onRename={() => {
+                          setCreating(false);
+                          // Let the menu finish closing first. It restores
+                          // focus on the way out, which would otherwise blur
+                          // the editor the moment the row swaps it in.
+                          console.log('RENAME CLICK', page.id);
+                          window.setTimeout(() => {
+                            console.log('RENAME APPLY', page.id);
+                            setEditingId(page.id);
+                          }, 0);
+                        }}
+                        onMoveUp={() => movePage(page.id, 'up')}
+                        onMoveDown={() => movePage(page.id, 'down')}
+                        onDelete={() => {
+                          setOpen(false);
+                          setReopenAfterDelete(true);
+                          setDeleteId(page.id);
+                        }}
+                      />
+                    </>
+                  )}
                 </div>
               );
             }}
@@ -233,29 +330,24 @@ export function PageMenu() {
           />
 
           <div className="px-1 pb-1">
-            {pageBeingEdited ? (
-              <PageNameForm
-                key={`rename-${pageBeingEdited.id}`}
-                initialValue={pageBeingEdited.name}
-                submitLabel="Save"
-                label="Rename page"
-                onSubmit={(name) => {
-                  renamePage(pageBeingEdited.id, name);
-                  setEditingId(null);
-                }}
-                onCancel={() => setEditingId(null)}
-              />
-            ) : creating ? (
+            {creating ? (
               <PageNameForm
                 key={`create-${ordered.length}`}
-                initialValue={`Page ${ordered.length + 1}`}
-                submitLabel="Create"
-                label="New page"
+                initialValue={nextPageName(ordered.map((page) => page.name))}
+                label="New Page"
+                error={createError}
                 onSubmit={(name) => {
-                  const id = createPage(name);
-                  if (id) changeOpen(false);
+                  setCreateError(null);
+                  if (!createPage(name)) {
+                    setCreateError('Could not create the page. Try again.');
+                    return;
+                  }
+                  setCreating(false);
                 }}
-                onCancel={() => setCreating(false)}
+                onCancel={() => {
+                  setCreating(false);
+                  setCreateError(null);
+                }}
               />
             ) : (
               <Button
@@ -268,42 +360,42 @@ export function PageMenu() {
                 className="w-full justify-start"
               >
                 <Plus data-icon="inline-start" />
-                New page
+                New Page
               </Button>
             )}
           </div>
         </PopoverContent>
       </Popover>
 
-      <Dialog
+      <AlertDialog
         open={Boolean(pageToDelete)}
         onOpenChange={(nextOpen) => {
-          if (!nextOpen) setDeleteId(null);
+          if (!nextOpen) closeDeleteDialog();
         }}
       >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Delete page?</DialogTitle>
-            <DialogDescription>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Page?</AlertDialogTitle>
+            <AlertDialogDescription>
               {pageToDelete
                 ? `“${pageToDelete.name}” and everything on it will be permanently deleted.`
                 : ''}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <DialogClose render={<Button variant="outline" />}>Cancel</DialogClose>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
             <Button
               variant="destructive"
               onClick={() => {
                 if (deleteId) deletePage(deleteId);
-                setDeleteId(null);
+                closeDeleteDialog();
               }}
             >
-              Delete page
+              Delete Page
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }
@@ -369,11 +461,11 @@ function PageActions({
           </DropdownMenuItem>
           <DropdownMenuItem disabled={!canMoveUp} onClick={onMoveUp}>
             <ArrowUp />
-            Move up
+            Move Up
           </DropdownMenuItem>
           <DropdownMenuItem disabled={!canMoveDown} onClick={onMoveDown}>
             <ArrowDown />
-            Move down
+            Move Down
           </DropdownMenuItem>
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
@@ -411,20 +503,22 @@ function PageListResizeHandle({
     startY: number;
   } | null>(null);
 
+  const hintId = useId();
   const resize = (nextHeight: number) => onChange(clamp(nextHeight, min, max));
 
   return (
     <div
       role="separator"
-      aria-label="Resize page list. Press Enter to fit content."
+      aria-label="Resize page list"
+      aria-describedby={hintId}
       aria-orientation="horizontal"
       aria-valuemin={min}
       aria-valuemax={max}
       aria-valuenow={height}
       aria-valuetext={`${height} pixels`}
       tabIndex={0}
-      title="Drag to resize. Double-click to fit content."
-      className="flex h-3 touch-none cursor-row-resize items-center px-3 outline-none focus-visible:ring-4 focus-visible:ring-border-subtle"
+      title={RESIZE_HINT}
+      className="group/resize flex h-3.5 touch-none cursor-row-resize items-center justify-center rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-border-emphasis"
       onDoubleClick={onReset}
       onKeyDown={(event) => {
         if (event.key === 'ArrowUp') {
@@ -474,21 +568,94 @@ function PageListResizeHandle({
         }
       }}
     >
-      <Separator />
+      <span
+        aria-hidden="true"
+        className="h-1 w-8 rounded-full bg-border-default transition-colors group-hover/resize:bg-border-emphasis group-focus-visible/resize:bg-border-emphasis motion-reduce:transition-none"
+      />
+      <span id={hintId} className="sr-only">
+        {RESIZE_HINT}
+      </span>
     </div>
+  );
+}
+
+/**
+ * Rename in place, in the row being renamed. Enter or blur commits, Escape
+ * reverts; an empty name reverts rather than raising an error the row cannot fit.
+ */
+function PageInlineRename({
+  initialValue,
+  onSubmit,
+  onCancel,
+}: {
+  initialValue: string;
+  onSubmit: (name: string) => void;
+  onCancel: () => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [value, setValue] = useState(initialValue);
+  const settledRef = useRef(false);
+  const armedRef = useRef(false);
+
+  const settle = (commit: boolean) => {
+    if (settledRef.current) return;
+    settledRef.current = true;
+    const trimmed = value.trim();
+    if (commit && trimmed && trimmed !== initialValue) onSubmit(trimmed);
+    else onCancel();
+  };
+
+  useEffect(() => {
+    inputRef.current?.focus();
+    inputRef.current?.select();
+    // Blur only counts as "user left the field" once focus has actually
+    // settled here for a frame; anything sooner is another popup's focus
+    // restore landing after mount.
+    const frame = requestAnimationFrame(() => {
+      armedRef.current = true;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, []);
+
+  return (
+    <Input
+      ref={inputRef}
+      value={value}
+      aria-label="Page name"
+      autoComplete="off"
+      className="h-8 min-w-0 flex-1"
+      onChange={(event) => setValue(event.target.value)}
+      onBlur={(event) => {
+        if (!armedRef.current) {
+          event.currentTarget.focus();
+          return;
+        }
+        settle(true);
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          settle(true);
+        } else if (event.key === 'Escape') {
+          event.preventDefault();
+          event.stopPropagation();
+          settle(false);
+        }
+      }}
+    />
   );
 }
 
 function PageNameForm({
   initialValue,
-  submitLabel,
   label,
+  error,
   onSubmit,
   onCancel,
 }: {
   initialValue: string;
-  submitLabel: 'Create' | 'Save';
   label: string;
+  error: string | null;
   onSubmit: (name: string) => void;
   onCancel: () => void;
 }) {
@@ -498,7 +665,7 @@ function PageNameForm({
   const [value, setValue] = useState(initialValue);
   const [touched, setTouched] = useState(false);
   const trimmed = value.trim();
-  const invalid = touched && !trimmed;
+  const invalid = (touched && !trimmed) || Boolean(error);
 
   const submit = () => {
     setTouched(true);
@@ -516,7 +683,7 @@ function PageNameForm({
 
   return (
     <form
-      className="flex flex-col gap-2 rounded-lg bg-bg-muted p-2"
+      className="flex flex-col gap-2 rounded-md bg-bg-muted p-2"
       onSubmit={(event) => {
         event.preventDefault();
         submit();
@@ -543,13 +710,13 @@ function PageNameForm({
             aria-describedby={invalid ? errorId : undefined}
             onChange={(event) => setValue(event.target.value)}
             onBlur={() => setTouched(true)}
-            placeholder="Page name"
+            placeholder="Page Name"
             autoComplete="off"
             className="h-9"
           />
           {invalid ? (
             <FieldError id={errorId} match>
-              Enter a page name.
+              {error ?? 'Enter a page name.'}
             </FieldError>
           ) : null}
         </Field>
@@ -563,7 +730,7 @@ function PageNameForm({
           size="xs"
           onPointerDown={(event) => event.preventDefault()}
         >
-          {submitLabel}
+          Create Page
         </Button>
       </div>
     </form>

@@ -23,20 +23,25 @@ export function Login({ onSuccess }: { onSuccess: () => void }) {
   };
 
   return (
-    <div className="grid min-h-screen place-items-center bg-bg-muted px-6 py-10 text-content-emphasis">
+    <div className="grid min-h-dvh place-items-center bg-bg-default px-4 py-10 text-content-emphasis sm:px-6">
       <form
         onSubmit={submit}
-        className="flex w-full max-w-sm flex-col gap-6 rounded-xl border border-border-subtle bg-bg-default p-6 sm:p-8"
+        className="flex w-full max-w-sm flex-col gap-6 rounded-md border border-border-subtle bg-bg-default p-6 shadow-hover sm:p-8"
       >
-        <div className="flex items-center gap-3">
-          <BrandMark />
-          <div>
-            <p className="text-sm font-semibold tracking-[-0.02em]">
+        <div className="flex flex-col items-start gap-6">
+          <div className="flex items-center gap-2.5">
+            <BrandMark className="size-7" />
+            <p className="text-sm font-semibold tracking-[-0.01em]">
               Best Whiteboard
             </p>
-            <h1 className="text-2xl font-semibold tracking-[-0.02em]">
-              Tutor sign in
+          </div>
+          <div className="grid gap-2">
+            <h1 className="text-balance text-2xl leading-8 font-semibold tracking-[-0.02em]">
+              Tutor Sign In
             </h1>
+            <p className="text-pretty text-sm leading-5 text-content-subtle">
+              Enter the tutor password to create and manage whiteboards.
+            </p>
           </div>
         </div>
 
@@ -58,7 +63,7 @@ export function Login({ onSuccess }: { onSuccess: () => void }) {
         </FieldGroup>
 
         <Button type="submit" className="w-full" disabled={busy}>
-          {busy ? 'Signing in…' : 'Sign in'}
+          {busy ? 'Signing in…' : 'Sign In'}
         </Button>
       </form>
     </div>

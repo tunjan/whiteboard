@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Shape } from '@whiteboard/shared';
 import '../shapes/register';
 import type { Editor } from '../editor';
-import { shapeRotatedBounds } from '../selection-geometry';
+import { getSelectionInfo, shapeRotatedBounds } from '../selection-geometry';
 import { spatialIndex } from '../use-document-store';
 import { useEnteredGroupStore } from '../use-entered-group-store';
 import { useCanvasUiStore } from '../use-canvas-ui-store';
@@ -277,5 +277,28 @@ describe('select tool state machine', () => {
 
     expect(shapes.get('a')).toMatchObject({ x: 0, y: 0 });
     expect(useSelectionStore.getState().selectedIds).toEqual([]);
+  });
+
+  it('rotates from an exterior corner target', () => {
+    const shape = rectangle('a', 0, 0, 'a0');
+    const { ctx, shapes } = context([shape]);
+    const tool = createSelectTool();
+    useSelectionStore.getState().setSelection([shape.id]);
+    const info = getSelectionInfo([shape], [shape.id], 1)!;
+    const handle = info.rotationHandles[0]!.point;
+    const dx = handle.x - info.center.x;
+    const dy = handle.y - info.center.y;
+
+    tool.onPointerDown?.(pointer(handle.x, handle.y), ctx);
+    tool.onPointerMove?.(
+      pointer(info.center.x - dy, info.center.y + dx),
+      ctx,
+    );
+    tool.onPointerUp?.(
+      pointer(info.center.x - dy, info.center.y + dx),
+      ctx,
+    );
+
+    expect(shapes.get(shape.id)?.rotation).toBeCloseTo(Math.PI / 2);
   });
 });

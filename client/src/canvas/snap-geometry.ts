@@ -119,6 +119,7 @@ export function shapeSnapGeometry(shape: Shape): PointSnapTarget | null {
     case 'image':
     case 'video':
     case 'graph':
+    case 'equation':
     case 'frame':
       return boxTarget(shape);
   }

@@ -57,7 +57,7 @@ function FieldLabel({
     <Field.Label
       data-slot="field-label"
       className={cn(
-        "shrink-0 text-sm font-medium leading-none text-content-emphasis select-none group-data-[disabled]/field:text-content-muted group-data-[invalid]/field:text-content-error",
+        "ui-field-label",
         className
       )}
       {...props}
@@ -73,7 +73,7 @@ function FieldDescription({
     <Field.Description
       data-slot="field-description"
       className={cn(
-        "text-xs text-content-subtle group-data-[disabled]/field:text-content-muted",
+        "ui-field-description",
         className
       )}
       {...props}
@@ -89,7 +89,7 @@ function FieldError({
     <Field.Error
       data-slot="field-error"
       className={cn(
-        "text-xs font-medium text-content-error",
+        "ui-field-error",
         className
       )}
       {...props}

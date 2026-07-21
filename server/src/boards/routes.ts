@@ -13,6 +13,7 @@ function toMeta(row: BoardRow): BoardMeta {
     name: row.name,
     createdAt: row.createdAt.getTime(),
     updatedAt: row.updatedAt.getTime(),
+    lastOpenedAt: row.lastOpenedAt.getTime(),
   };
 }
 
@@ -21,7 +22,10 @@ export const boardRoutes = new Hono();
 boardRoutes.use('*', requireTutor);
 
 boardRoutes.get('/', async (c) => {
-  const rows = await db.select().from(boards).orderBy(desc(boards.updatedAt));
+  const rows = await db
+    .select()
+    .from(boards)
+    .orderBy(desc(boards.lastOpenedAt));
   return c.json(rows.map(toMeta));
 });
 
@@ -52,6 +56,17 @@ boardRoutes.patch('/:id', async (c) => {
   const [row] = await db
     .update(boards)
     .set({ name, updatedAt: new Date() })
+    .where(eq(boards.id, id))
+    .returning();
+  if (!row) return c.json({ error: 'not found' }, 404);
+  return c.json(toMeta(row));
+});
+
+boardRoutes.post('/:id/opened', async (c) => {
+  const id = c.req.param('id');
+  const [row] = await db
+    .update(boards)
+    .set({ lastOpenedAt: new Date() })
     .where(eq(boards.id, id))
     .returning();
   if (!row) return c.json({ error: 'not found' }, 404);

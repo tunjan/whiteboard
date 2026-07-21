@@ -1,13 +1,10 @@
 import type { Awareness } from 'y-protocols/awareness';
 import type { Point } from '@whiteboard/shared';
 import type { Camera } from '@/canvas/camera';
+import type { LaserStroke } from '@/canvas/use-laser-store';
 import { viewportWorldBounds } from '@/canvas/geometry';
 import { setCurrentPage } from '@/canvas/use-document-store';
 import { useCameraStore } from '@/canvas/use-camera-store';
-import {
-  type LaserPresence,
-  useLaserStore,
-} from '@/canvas/use-laser-store';
 import { stopFollowingForManualCameraChange } from '@/collab/use-follow-store';
 import { isAnimationPlaybackActive } from '@/animation/use-animation-store';
 import {
@@ -21,7 +18,6 @@ export interface LocalUser {
   name: string;
   color: string;
   isTutor: boolean;
-  avatar: string;
 }
 
 // Awareness payload shape: { user, cursor, viewport, summon }. Camera/viewport
@@ -33,16 +29,17 @@ let localPage: string | null = null;
 let localFollowing = false;
 let localLatencyMs: number | null = null;
 let localTextSelection: TextSelectionPresence | null = null;
-let localLaser: LaserPresence | null = null;
 let lastCursorSent = 0;
-let lastLaserSent = 0;
 let lastViewportSent = 0;
 let lastSummonSent = 0;
 let latestViewport: ViewportPresence | null = null;
+let lastLaserSent = 0;
+let laserTrailingTimer: ReturnType<typeof setTimeout> | null = null;
+let latestLaser: LaserStroke[] = [];
 
 const CURSOR_THROTTLE_MS = 40;
-const LASER_THROTTLE_MS = 40;
 const VIEWPORT_THROTTLE_MS = 70;
+const LASER_THROTTLE_MS = 40;
 
 // Previous peer objects keyed by clientId. Awareness fires `change` on any
 // peer's update (cursors publish at 25 Hz), but most peers are unchanged each
@@ -58,7 +55,6 @@ function publishPeers(a: Awareness): void {
     if (clientId === a.clientID) return;
     const user = state.user as LocalUser | undefined;
     if (!user?.name) return;
-    const avatar = user.avatar || user.name;
     // Awareness returns the same object reference for a field until that field
     // is re-set, so `===` on cursor/viewport correctly detects "unchanged".
     const cursor = (state.cursor as Point | null) ?? null;
@@ -74,14 +70,13 @@ function publishPeers(a: Awareness): void {
         : null;
     const textSelection =
       (state.textSelection as TextSelectionPresence | null) ?? null;
-    const laser = (state.laser as LaserPresence | null) ?? null;
+    const laser = (state.laser as LaserStroke[] | null) ?? null;
     const prev = prevPeers.get(clientId);
     const peer: PeerPresence =
       prev &&
       prev.name === user.name &&
       prev.color === user.color &&
       prev.isTutor === user.isTutor &&
-      prev.avatar === avatar &&
       prev.cursor === cursor &&
       prev.viewport === viewport &&
       prev.summon === summon &&
@@ -96,7 +91,6 @@ function publishPeers(a: Awareness): void {
             name: user.name,
             color: user.color,
             isTutor: user.isTutor,
-            avatar,
             cursor,
             viewport,
             summon,
@@ -130,7 +124,6 @@ export function setActiveAwareness(next: Awareness | null): void {
   next.setLocalStateField('following', localFollowing);
   next.setLocalStateField('latencyMs', localLatencyMs);
   next.setLocalStateField('textSelection', localTextSelection);
-  next.setLocalStateField('laser', localLaser);
   publishPeers(next);
 }
 
@@ -172,20 +165,33 @@ export function setLocalCursor(point: Point | null): void {
   awareness.setLocalStateField('cursor', point);
 }
 
-/** Publish a transient presentation trail without touching the board document. */
-export function setLocalLaser(laser: LaserPresence | null): void {
-  const wasActive = localLaser?.active ?? false;
-  localLaser = laser;
-  useLaserStore.getState().setLaser(laser);
+function sendLaser(): void {
   if (!awareness) return;
-  if (laser?.active && wasActive) {
-    const now = performance.now();
-    if (now - lastLaserSent < LASER_THROTTLE_MS) return;
-    lastLaserSent = now;
-  } else {
-    lastLaserSent = performance.now();
+  lastLaserSent = performance.now();
+  awareness.setLocalStateField(
+    'laser',
+    latestLaser.length > 0 ? latestLaser : null,
+  );
+}
+
+/**
+ * Publish the local laser strokes. Point appends arrive per pointer move, so
+ * sends are throttled like the cursor — but with a trailing send so the final
+ * state of a burst (stroke finished / removed) always reaches peers.
+ */
+export function setLocalLaser(strokes: LaserStroke[]): void {
+  latestLaser = strokes;
+  if (!awareness) return;
+  if (laserTrailingTimer !== null) return;
+  const elapsed = performance.now() - lastLaserSent;
+  if (elapsed >= LASER_THROTTLE_MS) {
+    sendLaser();
+    return;
   }
-  awareness.setLocalStateField('laser', laser);
+  laserTrailingTimer = setTimeout(() => {
+    laserTrailingTimer = null;
+    sendLaser();
+  }, LASER_THROTTLE_MS - elapsed);
 }
 
 export function setLocalTextSelection(

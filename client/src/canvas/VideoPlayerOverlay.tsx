@@ -40,7 +40,7 @@ export function VideoPlayerOverlay({
 
   return (
     <div
-      className="absolute overflow-hidden rounded-xl bg-black shadow-lg"
+      className="absolute overflow-hidden rounded-md bg-black shadow-floating"
       style={{
         left: screen.x,
         top: screen.y,

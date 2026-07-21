@@ -1,15 +1,24 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Shape } from '@whiteboard/shared';
 import type { Editor } from '../editor';
-import { useLaserStore } from '../use-laser-store';
-import { createLaserTool, LASER_FADE_MS } from './laser-tool';
+import { LASER_FADE_MS, useLaserStore } from '../use-laser-store';
+import { createLaserTool } from './laser-tool';
 import type { ToolContext, ToolPointerInfo } from './types';
 
-function pointer(
-  x: number,
-  y: number,
-  overrides: Partial<ToolPointerInfo> = {},
-): ToolPointerInfo {
+// The laser never touches the document, so the editor can be inert.
+const ctx: ToolContext = {
+  editor: {
+    getShape: () => undefined,
+    getShapes: () => [],
+    createShape: () => undefined,
+    updateShape: () => undefined,
+    deleteShapes: () => undefined,
+    transact: (fn) => fn(),
+  } satisfies Editor,
+  setTool: () => undefined,
+  complete: () => undefined,
+};
+
+function pointer(x: number, y: number): ToolPointerInfo {
   return {
     point: { x, y },
     screenPoint: { x, y },
@@ -22,61 +31,71 @@ function pointer(
     ctrlKey: false,
     metaKey: false,
     button: 0,
-    ...overrides,
   };
 }
 
-function context(): { ctx: ToolContext; shapes: Map<string, Shape> } {
-  const shapes = new Map<string, Shape>();
-  const editor: Editor = {
-    getShape: (id) => shapes.get(id),
-    getShapes: () => [...shapes.values()],
-    createShape: (shape) => shapes.set(shape.id, shape),
-    updateShape: () => undefined,
-    deleteShapes: (ids) => ids.forEach((id) => shapes.delete(id)),
-    transact: (fn) => fn(),
-  };
-  return { ctx: { editor, setTool: () => undefined, complete: () => undefined }, shapes };
-}
-
-describe('laser tool', () => {
+describe('laser tool stroke lifecycle', () => {
   beforeEach(() => {
     vi.useFakeTimers();
-    vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
-    useLaserStore.getState().setLaser(null);
+    useLaserStore.setState({ strokes: [] });
   });
 
   afterEach(() => {
-    vi.runOnlyPendingTimers();
+    vi.runAllTimers();
     vi.useRealTimers();
+    useLaserStore.setState({ strokes: [] });
   });
 
-  it('publishes a fading trail without creating board shapes', () => {
-    const { ctx, shapes } = context();
+  it('builds an ephemeral stroke that fades away after pointer up', () => {
     const tool = createLaserTool();
 
     tool.onPointerDown?.(pointer(0, 0), ctx);
-    tool.onPointerMove?.(pointer(12, 8), ctx);
+    tool.onPointerMove?.(pointer(10, 0), ctx);
+    tool.onPointerMove?.(pointer(20, 5), ctx);
 
-    expect(useLaserStore.getState().laser).toMatchObject({
-      active: true,
-      points: [{ x: 0, y: 0 }, { x: 12, y: 8 }],
-    });
-    expect(shapes.size).toBe(0);
+    const [stroke] = useLaserStore.getState().strokes;
+    expect(stroke?.points).toEqual([
+      { x: 0, y: 0 },
+      { x: 10, y: 0 },
+      { x: 20, y: 5 },
+    ]);
+    expect(stroke?.done).toBe(false);
 
-    tool.onPointerUp?.(pointer(20, 8), ctx);
-    expect(useLaserStore.getState().laser).toMatchObject({ active: false });
+    tool.onPointerUp?.(pointer(20, 5), ctx);
+    expect(useLaserStore.getState().strokes[0]?.done).toBe(true);
 
+    // The stroke never touches the document; it evaporates after the fade.
     vi.advanceTimersByTime(LASER_FADE_MS);
-    expect(useLaserStore.getState().laser).toBeNull();
+    expect(useLaserStore.getState().strokes).toEqual([]);
   });
 
-  it('ignores non-primary clicks', () => {
-    const { ctx } = context();
+  it('skips move samples closer than one screen pixel', () => {
     const tool = createLaserTool();
 
-    tool.onPointerDown?.(pointer(0, 0, { button: 2 }), ctx);
+    tool.onPointerDown?.(pointer(0, 0), ctx);
+    tool.onPointerMove?.(pointer(0.4, 0.4), ctx);
 
-    expect(useLaserStore.getState().laser).toBeNull();
+    expect(useLaserStore.getState().strokes[0]?.points).toHaveLength(1);
+  });
+
+  it('discards the partial stroke when the gesture is cancelled', () => {
+    const tool = createLaserTool();
+
+    tool.onPointerDown?.(pointer(0, 0), ctx);
+    tool.onPointerMove?.(pointer(30, 30), ctx);
+    tool.onCancel?.(ctx);
+
+    expect(useLaserStore.getState().strokes).toEqual([]);
+  });
+
+  it('keeps the stroke and fades it when capture is lost mid-stroke', () => {
+    const tool = createLaserTool();
+
+    tool.onPointerDown?.(pointer(0, 0), ctx);
+    tool.onCommit?.(ctx);
+
+    expect(useLaserStore.getState().strokes[0]?.done).toBe(true);
+    vi.advanceTimersByTime(LASER_FADE_MS);
+    expect(useLaserStore.getState().strokes).toEqual([]);
   });
 });

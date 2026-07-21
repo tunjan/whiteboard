@@ -1,10 +1,10 @@
 import { useLodDetail } from '../lod';
 import { boxBounds, boxHitTest, rotationTransform } from './box-geometry';
+import { MEDIA_CORNER_RADIUS } from './style';
 import type { ShapeUtil } from './types';
 
-const VIDEO_CORNER_RADIUS = 12;
-const VIDEO_SHADOW_BLUR = 4;
-const VIDEO_SHADOW_DY = 3;
+const VIDEO_SHADOW_BLUR = 1;
+const VIDEO_SHADOW_DY = 1;
 const VIDEO_SHADOW_MARGIN = 16;
 
 /** YouTube thumbnail URL for a video id. */
@@ -48,7 +48,7 @@ export const videoUtil: ShapeUtil<'video'> = {
     if (!videoId) return null;
     const clipId = `video-clip-${shape.id}`;
     const shadowId = `video-shadow-${shape.id}`;
-    const radius = Math.min(VIDEO_CORNER_RADIUS, w / 4, h / 4);
+    const radius = Math.min(MEDIA_CORNER_RADIUS, w / 4, h / 4);
     const shadow = detail === 'high';
     // Centered play badge sized relative to the box.
     const cx = shape.x + w / 2;
@@ -81,8 +81,8 @@ export const videoUtil: ShapeUtil<'video'> = {
                 dx={0}
                 dy={VIDEO_SHADOW_DY}
                 stdDeviation={VIDEO_SHADOW_BLUR}
-                floodColor="#0f172a"
-                floodOpacity={0.18}
+                floodColor="#000000"
+                floodOpacity={0.08}
               />
             </filter>
           )}

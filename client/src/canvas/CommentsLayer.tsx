@@ -41,7 +41,7 @@ const iconButtonClass = cn(
   buttonVariants({ variant: 'ghost', size: 'icon-xs' }),
 );
 const textareaClass =
-  'w-full resize-none rounded-md border border-border-subtle bg-bg-default px-2 py-1.5 text-sm text-content-emphasis outline-none placeholder:text-content-muted focus-visible:border-border-emphasis focus-visible:ring-4 focus-visible:ring-border-subtle';
+  'w-full resize-none rounded-md border border-border-subtle bg-bg-muted px-2 py-1.5 text-sm text-content-emphasis outline-none placeholder:text-faint-foreground focus-visible:border-border-emphasis focus-visible:ring-2 focus-visible:ring-border-emphasis';
 
 function CommentPin({
   message,
@@ -188,7 +188,7 @@ function ThreadPopup({
   return (
     <div
       data-ui-layer
-      className="pointer-events-auto absolute z-20 flex origin-top-left flex-col overflow-hidden rounded-xl border border-border-subtle bg-bg-default shadow-hover ease-[var(--ease-out-expo)] motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95 motion-safe:duration-200"
+      className="pointer-events-auto absolute z-20 flex origin-top-left flex-col overflow-hidden rounded-md border border-border-subtle bg-bg-default shadow-hover ease-[var(--ease-out-expo)] motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95 motion-safe:duration-200"
       style={{ left, top, width: POPUP_WIDTH }}
       onPointerDown={(e) => e.stopPropagation()}
       onKeyDown={(e) => {

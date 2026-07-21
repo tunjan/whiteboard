@@ -27,6 +27,10 @@ export const boards = pgTable('boards', {
   updatedAt: timestamp('updated_at', { withTimezone: true })
     .notNull()
     .defaultNow(),
+  // Bumped whenever a tutor opens the board — powers the dashboard's ordering.
+  lastOpenedAt: timestamp('last_opened_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
 });
 
 /** One row per board: the opaque binary Yjs document state. */

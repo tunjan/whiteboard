@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { type Bounds, type Shape, unionBounds } from '@whiteboard/shared';
 import { descendantsOf } from './hierarchy';
+import { typesetEquation } from './equation-render';
 import { shapeRotatedBounds } from './shape-bounds';
 import { compareIndex, editor, spatialIndex } from './use-document-store';
 import { shapeRegistry } from './shapes/shape-registry';
@@ -23,6 +24,7 @@ const MAX_DIM = 8192;
 export async function exportBoardToPng(title: string): Promise<void> {
   const bounds = spatialIndex.totalBounds();
   if (!bounds) return; // empty board: nothing to export
+  await prewarmEquationRenders(editor.getShapes());
   await renderToPng(renderTree(), bounds, title);
 }
 
@@ -50,7 +52,31 @@ export async function exportSelectionToPng(
     bounds = bounds ? unionBounds(bounds, b) : b;
   }
   if (!bounds) return;
+  await prewarmEquationRenders(shapes, renderSet);
   await renderToPng(renderTree(renderSet), bounds, title);
+}
+
+/** Fill the synchronous equation cache before server-rendering the SVG tree. */
+async function prewarmEquationRenders(
+  shapes: Shape[],
+  renderSet?: Set<string>,
+): Promise<void> {
+  const latexes = new Set<string>();
+  for (const shape of shapes) {
+    if (
+      shape.type !== 'equation' ||
+      (renderSet && !renderSet.has(shape.id))
+    ) {
+      continue;
+    }
+    const latex = shape.props.latex.trim();
+    if (latex) latexes.add(latex);
+  }
+  await Promise.all(
+    [...latexes].map((latex) =>
+      typesetEquation(latex).catch(() => undefined),
+    ),
+  );
 }
 
 /** Rasterize a rendered shape tree, sized to `bounds`, and trigger a download. */

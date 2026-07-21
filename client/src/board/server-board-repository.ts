@@ -14,7 +14,8 @@ const OUTBOX_KEY = 'whiteboard:boards-outbox';
 
 type OutboxOp =
   | { kind: 'upsert'; board: BoardMeta }
-  | { kind: 'delete'; id: string };
+  | { kind: 'delete'; id: string }
+  | { kind: 'opened'; id: string };
 
 function loadCache(): Record<string, BoardMeta> {
   try {
@@ -59,7 +60,9 @@ export class ServerBoardRepository implements BoardRepository {
     } catch {
       // Offline — fall back to the cache.
     }
-    return Object.values(loadCache()).sort((a, b) => b.updatedAt - a.updatedAt);
+    return Object.values(loadCache()).sort(
+      (a, b) => b.lastOpenedAt - a.lastOpenedAt,
+    );
   }
 
   async get(id: string): Promise<BoardMeta | undefined> {
@@ -73,6 +76,7 @@ export class ServerBoardRepository implements BoardRepository {
       name: name.trim() || 'Untitled board',
       createdAt: now,
       updatedAt: now,
+      lastOpenedAt: now,
     };
     const cache = loadCache();
     cache[board.id] = board;
@@ -102,6 +106,16 @@ export class ServerBoardRepository implements BoardRepository {
     await this.flush();
   }
 
+  async markOpened(id: string): Promise<void> {
+    const cache = loadCache();
+    const board = cache[id];
+    if (!board) return;
+    board.lastOpenedAt = Date.now();
+    saveCache(cache);
+    this.enqueue({ kind: 'opened', id });
+    await this.flush();
+  }
+
   private enqueue(op: OutboxOp): void {
     const ops = loadOutbox();
     ops.push(op);
@@ -120,7 +134,11 @@ export class ServerBoardRepository implements BoardRepository {
                 method: 'POST',
                 body: JSON.stringify({ id: op.board.id, name: op.board.name }),
               })
-            : await api(`/${encodeURIComponent(op.id)}`, { method: 'DELETE' });
+            : op.kind === 'delete'
+              ? await api(`/${encodeURIComponent(op.id)}`, { method: 'DELETE' })
+              : await api(`/${encodeURIComponent(op.id)}/opened`, {
+                  method: 'POST',
+                });
         if (res.status === 401) return; // not signed in yet — retry after login
         // Drop the op on success or any other 4xx (avoid a stuck queue).
         ops = ops.slice(1);

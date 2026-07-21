@@ -45,10 +45,10 @@ const POLYGON_KINDS: { kind: PolygonKind; label: string }[] = [
 
 const GROUP_1 = ['select', 'hand'];
 const GROUP_2 = ['draw', 'eraser', 'laser'];
-const GROUP_3 = ['text', 'graph', 'comment'];
+const GROUP_3 = ['text', 'graph', 'equation', 'comment'];
 const GROUP_4 = ['rectangle', 'ellipse', 'arrow'];
 const ACTIVE_TOOL_CLASS =
-  'border-transparent bg-bg-info text-content-info hover:bg-bg-info hover:text-content-info';
+  'border-transparent bg-bg-inverted text-content-inverted hover:bg-bg-inverted hover:text-content-inverted';
 const ACTIVE_UTILITY_CLASS =
   'bg-bg-muted text-content-emphasis hover:bg-bg-muted hover:text-content-emphasis';
 
@@ -103,7 +103,7 @@ function ShapesMenu({ active }: { active: boolean }) {
           <Shapes />
         </TooltipTrigger>
         <TooltipContent side="top">
-          <span>More shapes</span>
+          <span>More Shapes</span>
         </TooltipContent>
       </Tooltip>
       <DropdownMenuContent side="top" align="center" sideOffset={8}>
@@ -147,7 +147,7 @@ function MediaMenu() {
             <ImagePlus />
           </TooltipTrigger>
           <TooltipContent side="top">
-            <span>Add media</span>
+            <span>Add Media</span>
           </TooltipContent>
         </Tooltip>
         <DropdownMenuContent side="top" align="center" sideOffset={8}>
@@ -186,7 +186,7 @@ function ToolLockButton() {
         <Icon />
       </TooltipTrigger>
       <TooltipContent side="top">
-        <span>Tool lock</span>
+        <span>Tool Lock</span>
         <kbd
           data-slot="kbd"
           className="bg-content-inverted/15 px-1 font-mono text-[10px] uppercase text-content-inverted"
@@ -258,7 +258,7 @@ export function Toolbar() {
           inert={hidden || playbackActive}
           aria-disabled={playbackActive}
           className={cn(
-            'touch-targets flex h-12 w-max max-w-[calc(100vw-1rem)] origin-bottom flex-nowrap items-center gap-2 overflow-x-auto overflow-y-hidden p-1.5 shadow-hover transition-all duration-150 ease-out motion-reduce:transition-none',
+            'touch-targets scrollbar-none flex h-12 w-max max-w-[calc(100vw-1rem)] origin-bottom flex-nowrap items-center gap-2 overflow-x-auto overflow-y-hidden p-1 shadow-hover transition-[opacity,transform] duration-150 ease-out motion-reduce:transition-none',
             hidden &&
               'pointer-events-none translate-y-[calc(100%+1rem)] opacity-0',
             playbackActive && 'pointer-events-none opacity-40',
@@ -304,7 +304,7 @@ export function Toolbar() {
                 <ChevronDown />
               </TooltipTrigger>
               <TooltipContent side="top">
-                <span>Hide toolbar</span>
+                <span>Hide Toolbar</span>
               </TooltipContent>
             </Tooltip>
           </div>
@@ -321,7 +321,7 @@ export function Toolbar() {
             tabIndex={hidden ? 0 : -1}
             className={cn(
               buttonVariants({ variant: 'ghost', size: 'icon-lg' }),
-              'touch-targets absolute bottom-0 left-1/2 -translate-x-1/2 rounded-xl border border-border-subtle bg-bg-default text-content-emphasis shadow-hover transition-all duration-150 ease-out motion-reduce:transition-none',
+              'touch-targets absolute bottom-0 left-1/2 -translate-x-1/2 rounded-md border border-border-subtle bg-bg-muted text-content-emphasis shadow-hover transition-[opacity,transform] duration-150 ease-out motion-reduce:transition-none',
               hidden
                 ? 'translate-y-0 opacity-100'
                 : 'pointer-events-none translate-y-2 opacity-0',
@@ -330,7 +330,7 @@ export function Toolbar() {
             <ChevronUp />
           </TooltipTrigger>
           <TooltipContent side="top">
-            <span>Show toolbar</span>
+            <span>Show Toolbar</span>
           </TooltipContent>
         </Tooltip>
       </div>

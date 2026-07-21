@@ -10,7 +10,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
-import { cn } from '@/lib/utils';
+import { Textarea } from '@/components/ui/textarea';
 
 export function BoardNotesDialog({
   boardId,
@@ -63,17 +63,17 @@ export function BoardNotesDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Student notes</DialogTitle>
+          <DialogTitle>Student Notes</DialogTitle>
           <DialogDescription>
             Private to you — students never see these notes.
           </DialogDescription>
         </DialogHeader>
         <FieldGroup>
           <Field>
-            <FieldLabel htmlFor={inputId} className="sr-only">
-              Notes about the student
+            <FieldLabel htmlFor={inputId}>
+              Student Notes
             </FieldLabel>
-            <textarea
+            <Textarea
               id={inputId}
               value={value}
               onChange={(e) => setValue(e.target.value)}
@@ -81,9 +81,7 @@ export function BoardNotesDialog({
               placeholder={
                 loading ? 'Loading…' : 'Notes about this student…'
               }
-              className={cn(
-                'min-h-[12rem] w-full resize-y rounded-md border border-border-subtle bg-bg-default px-3 py-2 text-base text-content-emphasis transition-colors outline-none placeholder:text-content-muted focus-visible:border-border-emphasis focus-visible:ring-4 focus-visible:ring-border-subtle disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-bg-subtle disabled:text-content-muted disabled:opacity-100 md:text-sm',
-              )}
+              className="min-h-[12rem]"
               autoFocus
             />
           </Field>
@@ -97,7 +95,7 @@ export function BoardNotesDialog({
             Cancel
           </Button>
           <Button onClick={save} disabled={loading || saving}>
-            Save
+            Save Notes
           </Button>
         </DialogFooter>
       </DialogContent>

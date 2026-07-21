@@ -1,104 +1,115 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Point } from '@whiteboard/shared';
-import type { Camera } from './camera';
-import { worldToScreen } from './camera';
-import { LASER_FADE_MS } from './tools/laser-tool';
-import { useDocumentStore } from './use-document-store';
-import { type LaserPresence, useLaserStore } from './use-laser-store';
 import { usePresenceStore } from '@/collab/use-presence-store';
+import { cameraToTransform, type Camera } from './camera';
+import { useDocumentStore } from './use-document-store';
+import {
+  LASER_FADE_MS,
+  useLaserStore,
+  type LaserStroke,
+} from './use-laser-store';
 
-/** Convert pointer samples into a Catmull-Rom-style cubic path. */
-function smoothPath(points: Point[]): string {
+const LASER_COLOR = '#ff2d55';
+
+function pathFor(points: Point[]): string {
   const first = points[0];
   if (!first) return '';
-  if (points.length === 1) return `M ${first.x} ${first.y}`;
-
-  let path = `M ${first.x} ${first.y}`;
-  for (let index = 0; index < points.length - 1; index += 1) {
-    const previous = points[index - 1] ?? points[index]!;
-    const current = points[index]!;
-    const next = points[index + 1]!;
-    const following = points[index + 2] ?? next;
-    const control1 = {
-      x: current.x + (next.x - previous.x) / 6,
-      y: current.y + (next.y - previous.y) / 6,
-    };
-    const control2 = {
-      x: next.x - (following.x - current.x) / 6,
-      y: next.y - (following.y - current.y) / 6,
-    };
-    path += ` C ${control1.x} ${control1.y}, ${control2.x} ${control2.y}, ${next.x} ${next.y}`;
+  if (points.length === 1) {
+    // A zero-length segment with round linecaps renders as a dot.
+    return `M ${first.x} ${first.y} L ${first.x} ${first.y}`;
   }
-  return path;
+  // Midpoint-quadratic smoothing: each sample becomes a control point and the
+  // curve passes through segment midpoints, rounding off raw pointer jitter.
+  let d = `M ${first.x} ${first.y}`;
+  for (let i = 1; i < points.length - 1; i++) {
+    const p = points[i]!;
+    const next = points[i + 1]!;
+    d += ` Q ${p.x} ${p.y} ${(p.x + next.x) / 2} ${(p.y + next.y) / 2}`;
+  }
+  const last = points[points.length - 1]!;
+  d += ` L ${last.x} ${last.y}`;
+  return d;
 }
 
-function LaserTrail({ laser, camera }: { laser: LaserPresence; camera: Camera }) {
-  const [now, setNow] = useState(Date.now());
-
-  useEffect(() => {
-    if (laser.active || laser.expiresAt === null) return;
-    let frame = 0;
-    const tick = () => {
-      const nextNow = Date.now();
-      setNow(nextNow);
-      if (nextNow < laser.expiresAt!) frame = requestAnimationFrame(tick);
-    };
-    frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
-  }, [laser.active, laser.expiresAt]);
-
-  const fade = laser.active
-    ? 1
-    : laser.expiresAt === null
-      ? 0
-      : Math.max(0, Math.min(1, (laser.expiresAt - now) / LASER_FADE_MS));
-  if (fade <= 0 || laser.points.length === 0) return null;
-
-  const points = laser.points.map((point) => worldToScreen(point, camera));
-  const tip = points[points.length - 1]!;
-  const trace = smoothPath(points);
-
-  return (
-    <g aria-hidden="true">
-      <path
-        d={trace}
-        fill="none"
-        stroke="var(--laser)"
-        strokeWidth={10}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        opacity={0.14 * fade}
-      />
-      <path
-        d={trace}
-        fill="none"
-        stroke="var(--laser)"
-        strokeWidth={3}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        opacity={0.88 * fade}
-      />
-      <circle cx={tip.x} cy={tip.y} r={9} fill="var(--laser)" opacity={0.16 * fade} />
-      <circle cx={tip.x} cy={tip.y} r={4} fill="var(--laser)" opacity={fade} />
-      <circle cx={tip.x} cy={tip.y} r={1.5} fill="white" opacity={0.9 * fade} />
-    </g>
-  );
-}
-
-/** Local and collaborative laser trails, rendered above board content. */
+/**
+ * Ephemeral laser-pointer strokes: the local user's from the laser store plus
+ * peers' from awareness. Each side times the fade from when it first sees a
+ * stroke marked done, so sender and peers animate it without a shared clock.
+ */
 export function LaserLayer({ camera }: { camera: Camera }) {
-  const localLaser = useLaserStore((s) => s.laser);
+  const localStrokes = useLaserStore((s) => s.strokes);
   const peers = usePresenceStore((s) => s.peers);
   const currentPageId = useDocumentStore((s) => s.currentPageId);
 
+  const strokes: LaserStroke[] = [
+    ...localStrokes,
+    ...peers.flatMap((p) =>
+      p.laser && (!p.page || p.page === currentPageId) ? p.laser : [],
+    ),
+  ];
+
+  // Re-render each frame while any stroke is fading so opacity animates.
+  const hasFading = strokes.some((s) => s.done);
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!hasFading) return;
+    let raf = requestAnimationFrame(function loop() {
+      setTick((t) => t + 1);
+      raf = requestAnimationFrame(loop);
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [hasFading]);
+
+  // First-seen "done" timestamps, pruned once strokes disappear.
+  const fadeStart = useRef(new Map<string, number>());
+  const liveIds = new Set(strokes.map((s) => s.id));
+  for (const strokeId of fadeStart.current.keys()) {
+    if (!liveIds.has(strokeId)) fadeStart.current.delete(strokeId);
+  }
+
+  if (strokes.length === 0) return null;
+
+  const now = performance.now();
   return (
-    <svg className="pointer-events-none absolute inset-0 z-10 size-full overflow-hidden">
-      {localLaser && <LaserTrail laser={localLaser} camera={camera} />}
-      {peers.map((peer) =>
-        peer.laser && (!peer.page || peer.page === currentPageId) ? (
-          <LaserTrail key={peer.clientId} laser={peer.laser} camera={camera} />
-        ) : null,
-      )}
+    <svg className="pointer-events-none absolute inset-0 h-full w-full">
+      <g transform={cameraToTransform(camera)}>
+        {strokes.map((stroke) => {
+          let opacity = 1;
+          if (stroke.done) {
+            let start = fadeStart.current.get(stroke.id);
+            if (start === undefined) {
+              start = now;
+              fadeStart.current.set(stroke.id, start);
+            }
+            opacity = 1 - (now - start) / LASER_FADE_MS;
+            if (opacity <= 0) return null;
+          }
+          const d = pathFor(stroke.points);
+          return (
+            <g key={stroke.id} opacity={opacity}>
+              <path
+                d={d}
+                fill="none"
+                stroke={LASER_COLOR}
+                strokeWidth={9}
+                strokeOpacity={0.35}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                vectorEffect="non-scaling-stroke"
+              />
+              <path
+                d={d}
+                fill="none"
+                stroke={LASER_COLOR}
+                strokeWidth={3.5}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                vectorEffect="non-scaling-stroke"
+              />
+            </g>
+          );
+        })}
+      </g>
     </svg>
   );
 }

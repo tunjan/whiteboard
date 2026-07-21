@@ -22,6 +22,13 @@ export default defineConfig({
     proxy: {
       // Proxy auth/API to the collab server (avoids CORS; keeps cookies first-party).
       '/api': { target: 'http://localhost:3001', changeOrigin: true },
+      // Proxy WebSocket to the collab server.
+      '/collab': {
+        target: 'ws://localhost:3001',
+        ws: true,
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/collab/, ''),
+      },
     },
   },
 });

@@ -30,7 +30,7 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useId, useState } from 'react';
 
 import '@/canvas/tools/register';
 
@@ -75,15 +75,15 @@ const ACTION_SHORTCUTS: Shortcut[] = [
   { label: 'Duplicate', keys: `${MOD} D` },
   { label: 'Group / Ungroup', keys: `${MOD} G / ${MOD} ⇧ G` },
   { label: 'Delete', keys: 'Delete' },
-  { label: 'Select all', keys: `${MOD} A` },
+  { label: 'Select All', keys: `${MOD} A` },
   { label: 'Nudge (fine / coarse)', keys: 'Arrows / ⇧ Arrows' },
-  { label: 'Bring forward / backward', keys: `${MOD} ] / [` },
-  { label: 'Bring to front / back', keys: `${MOD} ⇧ ] / [` },
-  { label: 'Zoom in / out / reset', keys: `${MOD} + / − / 0` },
-  { label: 'Temporarily disable snapping', keys: 'Alt-drag' },
+  { label: 'Bring Forward / Backward', keys: `${MOD} ] / [` },
+  { label: 'Bring to Front / Back', keys: `${MOD} ⇧ ] / [` },
+  { label: 'Zoom In / Out / Reset', keys: `${MOD} + / − / 0` },
+  { label: 'Temporarily Disable Snapping', keys: 'Alt-drag' },
   { label: 'Pan', keys: 'Space-drag' },
   { label: 'Zoom', keys: `${MOD}-scroll / pinch` },
-  { label: 'Back to select', keys: 'Esc' },
+  { label: 'Back to Select', keys: 'Esc' },
 ];
 
 function PreferenceRow({
@@ -91,11 +91,15 @@ function PreferenceRow({
   description,
   children,
   className,
+  id,
+  htmlFor,
 }: {
   label: string;
   description?: string;
   children: React.ReactNode;
   className?: string;
+  id?: string;
+  htmlFor?: string;
 }) {
   return (
     <Field
@@ -106,7 +110,7 @@ function PreferenceRow({
       )}
     >
       <div className="flex min-w-0 flex-col gap-1">
-        <FieldLabel>{label}</FieldLabel>
+        <FieldLabel id={id} htmlFor={htmlFor}>{label}</FieldLabel>
         {description ? (
           <FieldDescription>{description}</FieldDescription>
         ) : null}
@@ -157,7 +161,7 @@ function SliderField({
 
 function Kbd({ children }: { children: React.ReactNode }) {
   return (
-    <kbd className="shrink-0 rounded-sm border border-border-subtle bg-bg-muted px-2 py-1 font-mono text-[10px] text-content-subtle">
+    <kbd className="shrink-0 rounded-sm border border-border-subtle bg-bg-muted px-2 py-1 font-mono text-xs text-content-subtle">
       {children}
     </kbd>
   );
@@ -186,7 +190,7 @@ function SettingsNavigation({
             aria-current={isActive ? 'page' : undefined}
             onClick={() => onPageChange(id)}
             className={cn(
-              'h-11 w-full justify-start gap-2.5 px-3 text-left max-sm:w-auto',
+              'w-full justify-start gap-2.5 text-left max-sm:w-auto',
               isActive && ACTIVE_SECTION_CLASS,
             )}
           >
@@ -200,6 +204,8 @@ function SettingsNavigation({
 }
 
 function GeneralSettings() {
+  const themeLabelId = useId();
+  const snappingId = useId();
   const theme = useThemeStore((state) => state.theme);
   const setTheme = useThemeStore((state) => state.setTheme);
   const snappingEnabled = useCanvasUiStore((state) => state.snappingEnabled);
@@ -209,8 +215,9 @@ function GeneralSettings() {
 
   return (
     <FieldGroup className="gap-0 px-4 py-2 sm:px-8 sm:py-3">
-      <PreferenceRow label="Theme">
+      <PreferenceRow label="Theme" id={themeLabelId}>
         <ToggleGroup
+          aria-labelledby={themeLabelId}
           className="w-full max-w-56"
           value={[theme]}
           onValueChange={(value) => value[0] && setTheme(value[0] as Theme)}
@@ -224,8 +231,9 @@ function GeneralSettings() {
         </ToggleGroup>
       </PreferenceRow>
 
-      <PreferenceRow label="Object snapping">
+      <PreferenceRow label="Object Snapping" htmlFor={snappingId}>
         <Switch
+          id={snappingId}
           aria-label="Object snapping"
           checked={snappingEnabled}
           onCheckedChange={setSnappingEnabled}
@@ -236,6 +244,9 @@ function GeneralSettings() {
 }
 
 function PencilSettings() {
+  const endTaperId = useId();
+  const simulatePressureId = useId();
+  const restoreDefaultsId = useId();
   const pencilStabilization = useCanvasUiStore(
     (state) => state.pencilStabilization,
   );
@@ -276,7 +287,7 @@ function PencilSettings() {
   return (
     <FieldGroup className="gap-0 px-4 py-2 sm:px-8 sm:py-3">
       <SliderField
-        label="Stroke stabilisation"
+        label="Stroke Stabilisation"
         value={pencilStabilization}
         display={`${Math.round(pencilStabilization * 100)}%`}
         min={0}
@@ -285,7 +296,7 @@ function PencilSettings() {
         onChange={setPencilStabilization}
       />
       <SliderField
-        label="Pressure response"
+        label="Pressure Response"
         value={pencilThinning}
         display={signedPercent}
         min={-1}
@@ -300,10 +311,10 @@ function PencilSettings() {
         min={0}
         max={1}
         step={0.01}
-        onChange={setPencilSmoothing}
+        onChange={pencilSmoothing ? setPencilSmoothing : () => {}}
       />
       <SliderField
-        label="Start taper"
+        label="Start Taper"
         value={pencilStartTaper}
         display={`${Math.round(pencilStartTaper)}px`}
         min={0}
@@ -311,28 +322,31 @@ function PencilSettings() {
         step={1}
         onChange={setPencilStartTaper}
       />
-      <PreferenceRow label="Taper end to a point">
+      <PreferenceRow label="Taper End to a Point" htmlFor={endTaperId}>
         <Switch
+          id={endTaperId}
           aria-label="Taper end to a point"
           checked={pencilEndTaper}
           onCheckedChange={setPencilEndTaper}
         />
       </PreferenceRow>
-      <PreferenceRow label="Simulate pressure">
+      <PreferenceRow label="Simulate Pressure" htmlFor={simulatePressureId}>
         <Switch
+          id={simulatePressureId}
           aria-label="Simulate pressure"
           checked={pencilSimulatePressure}
           onCheckedChange={setPencilSimulatePressure}
         />
       </PreferenceRow>
-      <PreferenceRow label="Pencil settings">
+      <PreferenceRow label="Pencil Settings" htmlFor={restoreDefaultsId}>
         <Button
+          id={restoreDefaultsId}
           variant="outline"
           size="sm"
           className="max-sm:h-11"
           onClick={resetPencil}
         >
-          Restore defaults
+          Restore Defaults
         </Button>
       </PreferenceRow>
     </FieldGroup>
@@ -384,7 +398,7 @@ function ShortcutsSettings() {
 function ConnectionSettings() {
   return (
     <FieldGroup className="gap-0 px-4 py-2 sm:px-8 sm:py-3">
-      <PreferenceRow label="Board connection">
+      <PreferenceRow label="Board Connection">
         <div className="flex size-8 items-center justify-center rounded-full bg-bg-subtle [--surface-control-radius:9999px]">
           <ConnectionIndicator />
         </div>
@@ -394,6 +408,7 @@ function ConnectionSettings() {
 }
 
 function DebugSettings() {
+  const performanceOverlayId = useId();
   const debugPerformance = useCanvasUiStore((state) => state.debugPerformance);
   const setDebugPerformance = useCanvasUiStore(
     (state) => state.setDebugPerformance,
@@ -402,10 +417,12 @@ function DebugSettings() {
   return (
     <FieldGroup className="gap-0 px-4 py-2 sm:px-8 sm:py-3">
       <PreferenceRow
-        label="Performance overlay"
+        label="Performance Overlay"
         description="Shows frame rate, worst frame time, shape count, and heap usage in the top-left corner of the canvas."
+        htmlFor={performanceOverlayId}
       >
         <Switch
+          id={performanceOverlayId}
           aria-label="Performance overlay"
           checked={debugPerformance}
           onCheckedChange={setDebugPerformance}
@@ -429,7 +446,7 @@ export function SettingsDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         showCloseButton={false}
-        className="!flex h-[min(52rem,calc(100dvh-2rem))] w-[calc(100%_-_2rem)] max-w-none gap-0 overflow-hidden rounded-2xl border-border-subtle bg-bg-default p-0 sm:w-[min(64rem,calc(100%_-_4rem))] sm:max-w-none"
+        className="!flex h-[min(52rem,calc(100dvh-2rem))] w-[calc(100%_-_2rem)] max-w-none gap-0 overflow-hidden border-border-subtle bg-bg-default p-0 sm:w-[min(64rem,calc(100%_-_4rem))] sm:max-w-none"
       >
         <aside className="hidden w-52 shrink-0 flex-col border-r border-border-subtle bg-bg-default p-3 sm:flex">
           <SettingsNavigation
@@ -444,7 +461,7 @@ export function SettingsDialog({
             <SettingsNavigation
               activePage={activePage}
               onPageChange={setActivePage}
-              className="flex gap-1 overflow-x-auto"
+              className="scrollbar-none flex gap-1 overflow-x-auto"
             />
           </div>
 
@@ -456,7 +473,6 @@ export function SettingsDialog({
                   variant="outline"
                   size="icon"
                   aria-label="Close settings"
-                  className="size-11 rounded-full"
                 />
               }
             >

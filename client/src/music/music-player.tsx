@@ -341,7 +341,7 @@ export function MusicPlayer({ identity }: MusicPlayerProps) {
             </div>
           ) : (
             <>
-              <div className="flex gap-1 overflow-x-auto pb-1">
+              <div className="scrollbar-none flex gap-1 overflow-x-auto pb-1">
                 {playlists.map((playlist) => {
                   const active = playlist.name === activePlaylist;
                   return (
@@ -370,7 +370,7 @@ export function MusicPlayer({ identity }: MusicPlayerProps) {
                       aria-pressed={active}
                       onClick={() => playTrack(track)}
                       className={cn(
-                        'flex min-h-11 w-full items-center gap-2 rounded-lg px-2 text-left transition-colors outline-none focus-visible:ring-4 focus-visible:ring-border',
+                        'flex min-h-10 w-full items-center gap-2 rounded-md px-2 text-left transition-colors outline-none focus-visible:ring-2 focus-visible:ring-border-emphasis',
                         active
                           ? 'bg-bg-info text-content-info'
                           : 'hover:bg-bg-muted',

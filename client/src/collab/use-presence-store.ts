@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { Point } from '@whiteboard/shared';
 import type { Camera } from '@/canvas/camera';
-import type { LaserPresence } from '@/canvas/use-laser-store';
+import type { LaserStroke } from '@/canvas/use-laser-store';
 
 export interface ViewportPresence {
   camera: Camera;
@@ -22,8 +22,6 @@ export interface PeerPresence {
   name: string;
   color: string;
   isTutor: boolean;
-  /** Seed for this peer's hand-drawn doodle avatar. */
-  avatar: string;
   /** Cursor position in world coordinates, or null when off-canvas. */
   cursor: Point | null;
   /** Viewport camera and pixel size, or null until the peer publishes it. */
@@ -38,8 +36,8 @@ export interface PeerPresence {
   latencyMs: number | null;
   /** Ephemeral caret/selection inside an actively edited text shape. */
   textSelection: TextSelectionPresence | null;
-  /** Ephemeral laser trail while this peer is presenting. */
-  laser: LaserPresence | null;
+  /** In-progress laser-pointer strokes, or null when the peer has none. */
+  laser: LaserStroke[] | null;
 }
 
 interface PresenceStore {

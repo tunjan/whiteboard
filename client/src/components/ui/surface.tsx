@@ -4,13 +4,12 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "@/lib/utils"
 
 const surfaceVariants = cva(
-  "border border-border-subtle bg-bg-default text-content-emphasis select-none",
+  "ui-surface",
   {
     variants: {
       shape: {
-        panel:
-          "rounded-xl [--surface-control-radius:var(--radius-lg)]",
-        pill: "rounded-full [--surface-control-radius:9999px]",
+        panel: "",
+        pill: "ui-surface-pill",
       },
     },
     defaultVariants: {

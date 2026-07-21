@@ -59,11 +59,13 @@ export function boardRoom(boardId: string): string {
 }
 
 function collabUrl(): string {
-  // Dev: the collab server runs on :3001. Use the page's own hostname (not a
-  // literal "localhost") so a phone/iPad hitting the dev box over the LAN
-  // connects to the right machine instead of to itself.
-  if (import.meta.env.DEV) return `ws://${location.hostname}:3001`;
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  // Dev: the collab server is proxied via Vite dev server on /collab. Use the
+  // page's own protocol and host (not literal localhost or hardcoded ws: protocol)
+  // so that HTTPS/WSS and single-port Cloudflare Tunnel setups work seamlessly.
+  if (import.meta.env.DEV) {
+    return `${proto}//${location.host}/collab`;
+  }
   return `${proto}//${location.host}`;
 }
 

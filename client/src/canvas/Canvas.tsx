@@ -20,8 +20,8 @@ import { quantizedCullRegion, viewportWorldBounds } from './geometry';
 import { PerformanceOverlay } from '@/components/performance-overlay';
 import { CursorsLayer } from '@/collab/CursorsLayer';
 import { CommentsLayer } from './CommentsLayer';
-import { LaserLayer } from './LaserLayer';
 import { DrawingCursor } from './DrawingCursor';
+import { LaserLayer } from './LaserLayer';
 import {
   setLocalCursor,
   setLocalFollowing,
@@ -870,6 +870,7 @@ export function Canvas() {
         shapes,
         sel.selectedIds,
         useCameraStore.getState().camera.z,
+        editor.getShape,
       );
       if (selInfo) {
         const { nw, ne, se, sw } = selInfo.corners;
@@ -1286,7 +1287,7 @@ export function Canvas() {
   return (
     <div
       ref={containerRef}
-      className="absolute inset-0 overflow-hidden bg-background"
+      className="absolute inset-0 overflow-hidden bg-bg-default"
       style={{ touchAction: 'none', cursor }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
@@ -1334,8 +1335,8 @@ export function Canvas() {
 
       {!playbackActive && !editingShape && <SelectionLayer camera={camera} />}
       {!playbackActive && !editingShape && <SelectionToolbar camera={camera} />}
-      <LaserLayer camera={camera} />
       <CursorsLayer camera={camera} viewportSize={size} />
+      <LaserLayer camera={camera} />
       {!playbackActive && <CommentsLayer camera={camera} />}
       {!playbackActive && showDrawingCursor && (
         <DrawingCursor camera={camera} containerRef={containerRef} />

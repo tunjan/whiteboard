@@ -23,7 +23,15 @@ export function useElementSize<T extends HTMLElement>(): [
       const entry = entries[0];
       if (!entry) return;
       const { width, height } = entry.contentRect;
-      setSize({ width, height });
+      // Bail on no-op notifications. A modal dialog's scroll lock toggles
+      // `body { overflow: hidden }`, which fires the observer with unchanged
+      // dimensions; returning a fresh object there would re-render the whole
+      // canvas for nothing.
+      setSize((prev) =>
+        prev.width === width && prev.height === height
+          ? prev
+          : { width, height },
+      );
     });
     ro.observe(el);
     return () => ro.disconnect();

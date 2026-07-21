@@ -34,7 +34,6 @@ describe('collaborator latency presence', () => {
       name: 'Student',
       color: '#2f6df6',
       isTutor: false,
-      avatar: 'student-avatar',
     });
     remote.setLocalStateField('latencyMs', 87);
 

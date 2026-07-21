@@ -11,6 +11,9 @@ import {
 import { useDocumentStore } from './use-document-store';
 import { useSelectionStore } from './use-selection-store';
 
+/** Stable empty array for the non-group selection path (see `hasGroup`). */
+const NO_SHAPES: Shape[] = [];
+
 const ACCENT = 'var(--color-accent-brand)';
 const SNAP = '#e5484d';
 const HANDLE = 7;
@@ -72,9 +75,18 @@ export function SelectionLayer({ camera }: SelectionLayerProps) {
       return out;
     }),
   );
-  // Shared, pre-sorted array from the store — no per-render document re-sort.
-  const shapes = useDocumentStore((s) => s.shapes);
-  const info = getSelectionInfo(shapes, selectedIds, camera.z);
+  // A group's box is derived from its descendants, so a group selection has to
+  // re-render when any of them moves — which means depending on the whole
+  // document array. Every other selection depends only on `shapesRecord`, so
+  // return a constant then and keep this layer off the per-mutation path.
+  const hasGroup = Object.values(shapesRecord).some((s) => s.type === 'group');
+  const shapes = useDocumentStore((s) => (hasGroup ? s.shapes : NO_SHAPES));
+  const info = getSelectionInfo(
+    shapes,
+    selectedIds,
+    camera.z,
+    (id) => shapesRecord[id],
+  );
   const single = info?.isSingle ? shapesRecord?.[info.ids[0]!] : undefined;
   const locked = !!single?.locked;
 

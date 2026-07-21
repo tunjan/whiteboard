@@ -1,11 +1,11 @@
 import { blobUrl } from '../../board/blobs';
 import { useLodDetail } from '../lod';
 import { boxBounds, boxHitTest, rotationTransform } from './box-geometry';
+import { MEDIA_CORNER_RADIUS } from './style';
 import type { ShapeUtil } from './types';
 
-const IMAGE_CORNER_RADIUS = 12;
-const IMAGE_SHADOW_BLUR = 4;
-const IMAGE_SHADOW_DY = 3;
+const IMAGE_SHADOW_BLUR = 1;
+const IMAGE_SHADOW_DY = 1;
 const IMAGE_SHADOW_MARGIN = 16;
 
 export const imageUtil: ShapeUtil<'image'> = {
@@ -47,7 +47,7 @@ export const imageUtil: ShapeUtil<'image'> = {
     const imgY = crop ? shape.y - crop.y * fullH : shape.y;
     const clipId = `image-clip-${shape.id}`;
     const shadowId = `image-shadow-${shape.id}`;
-    const radius = Math.min(IMAGE_CORNER_RADIUS, w / 4, h / 4);
+    const radius = Math.min(MEDIA_CORNER_RADIUS, w / 4, h / 4);
     // Zoomed far out the drop shadow is sub-pixel; skip it (and its filter).
     const shadow = detail === 'high';
     return (
@@ -76,8 +76,8 @@ export const imageUtil: ShapeUtil<'image'> = {
                 dx={0}
                 dy={IMAGE_SHADOW_DY}
                 stdDeviation={IMAGE_SHADOW_BLUR}
-                floodColor="#0f172a"
-                floodOpacity={0.18}
+                floodColor="#000000"
+                floodOpacity={0.08}
               />
             </filter>
           )}

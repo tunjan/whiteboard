@@ -9,7 +9,6 @@ import {
   Sun,
 } from 'lucide-react';
 import { exportBoardToPng } from '@/canvas/export-png';
-import { DoodleAvatar } from '@/collab/avatar';
 import type { Identity } from '@/collab/identity';
 import { jumpToPeerViewport } from '@/collab/presence';
 import {
@@ -42,12 +41,12 @@ import {
 } from '@/components/ui/tooltip';
 import { useThemeStore } from '@/use-theme-store';
 
-const MAX_VISIBLE_AVATARS = 4;
+const MAX_VISIBLE_PARTICIPANTS = 4;
 
 interface Participant {
   id: string;
   name: string;
-  avatar: string;
+  color: string;
   isLocal: boolean;
   peer: PeerPresence | null;
 }
@@ -56,16 +55,24 @@ function peerLatencyLabel(peer: PeerPresence): string {
   return peer.latencyMs === null ? 'Measuring…' : `${peer.latencyMs} ms`;
 }
 
-function Avatar({ avatar }: { avatar: string }) {
+function ParticipantBadge({
+  color,
+  name,
+}: {
+  color: string;
+  name: string;
+}) {
   return (
-    <DoodleAvatar
-      seed={avatar}
-      className="size-7 shrink-0 overflow-hidden rounded-full border-2 border-bg-default"
-    />
+    <span
+      className="flex size-7 shrink-0 items-center justify-center rounded-full border-2 bg-bg-default text-[10px] font-semibold text-content-emphasis"
+      style={{ borderColor: color }}
+    >
+      {name.trim().charAt(0).toUpperCase() || '?'}
+    </span>
   );
 }
 
-function OverflowAvatar({
+function OverflowParticipants({
   participants,
   showPeerLatency,
 }: {
@@ -73,7 +80,7 @@ function OverflowAvatar({
   showPeerLatency: boolean;
 }) {
   const label = `${participants.length} more present`;
-  const avatar = (
+  const badge = (
     <div
       className="flex size-7 items-center justify-center rounded-full border-2 border-bg-default bg-bg-subtle text-[10px] font-semibold text-content-subtle"
       title={showPeerLatency ? undefined : label}
@@ -82,7 +89,7 @@ function OverflowAvatar({
     </div>
   );
 
-  if (!showPeerLatency) return avatar;
+  if (!showPeerLatency) return badge;
   return (
     <Tooltip>
       <TooltipTrigger
@@ -95,7 +102,7 @@ function OverflowAvatar({
           />
         }
       >
-        {avatar}
+        {badge}
       </TooltipTrigger>
       <TooltipContent side="bottom" className="flex-col items-stretch gap-1.5">
         {participants.map((participant) => (
@@ -144,7 +151,7 @@ export function BoardChrome({
     ...peers.map((peer) => ({
       id: `peer-${peer.clientId}`,
       name: peer.name,
-      avatar: peer.avatar,
+      color: peer.color,
       isLocal: false,
       peer,
     })),
@@ -153,15 +160,15 @@ export function BoardChrome({
           {
             id: 'local-user',
             name: identity.name,
-            avatar: identity.avatar,
+            color: identity.color,
             isLocal: true,
             peer: null,
           },
         ]
       : []),
   ];
-  const visibleParticipants = participants.slice(0, MAX_VISIBLE_AVATARS);
-  const overflowParticipants = participants.slice(MAX_VISIBLE_AVATARS);
+  const visibleParticipants = participants.slice(0, MAX_VISIBLE_PARTICIPANTS);
+  const overflowParticipants = participants.slice(MAX_VISIBLE_PARTICIPANTS);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [notesOpen, setNotesOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -179,7 +186,7 @@ export function BoardChrome({
   return (
     <>
       {/* Top-left panel: board navigation and the current page. */}
-      <Surface className="touch-targets absolute top-[calc(1rem+env(safe-area-inset-top))] left-[calc(1rem+env(safe-area-inset-left))] z-20 flex h-10 items-center gap-0.5 p-1 shadow-hover">
+      <Surface role="navigation" aria-label="Board navigation" className="touch-targets absolute top-[env(safe-area-inset-top)] left-[env(safe-area-inset-left)] z-20 flex h-10 max-w-[calc(100vw-1rem)] items-center gap-0.5 rounded-none rounded-br-md border-t-0 border-l-0 p-1 sm:max-w-[calc(50vw-1.5rem)]">
         {/* Back navigates to the boards list, which is tutor-only. Students join
             via a shared link and aren't authenticated, so following it would
             bounce them to the login page — hide it for them. */}
@@ -211,7 +218,7 @@ export function BoardChrome({
                     variant="ghost"
                     size="sm"
                     aria-label="Rename board title"
-                    onDoubleClick={renameTitle}
+                    onClick={renameTitle}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' || e.key === ' ') {
                         e.preventDefault();
@@ -225,7 +232,7 @@ export function BoardChrome({
                 <span className="truncate">{title}</span>
               </TooltipTrigger>
               <TooltipContent side="bottom">
-                Double-click to rename
+                Rename Board
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
@@ -263,7 +270,7 @@ export function BoardChrome({
               {identity?.isTutor && (
                 <DropdownMenuItem onClick={() => setNotesOpen(true)}>
                   <NotebookPen />
-                  Student notes
+                  Student Notes
                 </DropdownMenuItem>
               )}
             </DropdownMenuGroup>
@@ -271,7 +278,7 @@ export function BoardChrome({
             <DropdownMenuGroup>
               <DropdownMenuItem onClick={toggle}>
                 {theme === 'dark' ? <Sun /> : <Moon />}
-                {theme === 'dark' ? 'Light mode' : 'Dark mode'}
+                {theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
               </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={() => void onExport()}
@@ -286,7 +293,7 @@ export function BoardChrome({
       </Surface>
 
       {/* Top-right panel (presence, session controls, and sharing). */}
-      <Surface className="touch-targets absolute top-[calc(1rem+env(safe-area-inset-top))] right-[calc(1rem+env(safe-area-inset-right))] z-20 flex h-10 items-center gap-0.5 p-1 shadow-hover">
+      <Surface role="toolbar" aria-label="Session controls" className="touch-targets scrollbar-none absolute top-[calc(2.75rem+env(safe-area-inset-top))] right-[env(safe-area-inset-right)] z-20 flex h-10 max-w-[calc(100vw-1rem)] items-center gap-0.5 overflow-x-auto rounded-none rounded-bl-md border-t-0 border-r-0 p-1 sm:top-[env(safe-area-inset-top)] sm:max-w-[calc(50vw-1.5rem)]">
         <ConnectionIndicator />
         <div className="flex items-center px-1">
           <TooltipProvider delay={300}>
@@ -308,11 +315,14 @@ export function BoardChrome({
                           type="button"
                           onClick={onEditIdentity}
                           className="rounded-full outline-none transition-opacity hover:opacity-80"
-                          aria-label="Edit your icon"
+                          aria-label="Edit your name"
                         />
                       }
                     >
-                      <Avatar avatar={participant.avatar} />
+                      <ParticipantBadge
+                        color={participant.color}
+                        name={participant.name}
+                      />
                     </TooltipTrigger>
                   );
                 } else if (participant.peer) {
@@ -328,13 +338,19 @@ export function BoardChrome({
                         />
                       }
                     >
-                      <Avatar avatar={participant.avatar} />
+                      <ParticipantBadge
+                        color={participant.color}
+                        name={participant.name}
+                      />
                     </TooltipTrigger>
                   );
                 } else {
                   trigger = (
                     <TooltipTrigger render={<span />}>
-                      <Avatar avatar={participant.avatar} />
+                      <ParticipantBadge
+                        color={participant.color}
+                        name={participant.name}
+                      />
                     </TooltipTrigger>
                   );
                 }
@@ -353,7 +369,7 @@ export function BoardChrome({
                 );
               })}
               {overflowParticipants.length > 0 ? (
-                <OverflowAvatar
+                <OverflowParticipants
                   participants={overflowParticipants}
                   showPeerLatency={identity?.isTutor === true}
                 />

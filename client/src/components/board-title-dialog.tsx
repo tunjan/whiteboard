@@ -63,8 +63,8 @@ export function BoardTitleDialog({
         </DialogHeader>
         <FieldGroup>
           <Field>
-            <FieldLabel htmlFor={inputId} className="sr-only">
-              Whiteboard title
+            <FieldLabel htmlFor={inputId}>
+              Whiteboard Title
             </FieldLabel>
             <Input
               id={inputId}
@@ -76,7 +76,7 @@ export function BoardTitleDialog({
                   void submit();
                 }
               }}
-              placeholder="Whiteboard title"
+              placeholder="Untitled Whiteboard"
               autoFocus
             />
           </Field>

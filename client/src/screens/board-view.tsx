@@ -9,13 +9,13 @@ import {
 import {
   type Identity,
   resolveIdentity,
-  setStoredAvatar,
   setStoredName,
 } from '@/collab/identity';
 import { setLocalUser } from '@/collab/presence';
 import { BoardChrome } from '@/components/board-chrome';
 import { BoardTitleDialog } from '@/components/board-title-dialog';
 import { CanvasContextMenu } from '@/components/canvas-context-menu';
+import { EquationPanel } from '@/components/equation-panel';
 import { GraphPanel } from '@/components/graph-panel';
 import { NameDialog } from '@/components/name-dialog';
 import { StylePanel } from '@/components/style-panel';
@@ -28,7 +28,6 @@ export function BoardView({ boardId }: { boardId: string }) {
   const [identity, setIdentity] = useState<Identity | null>(null);
   const [needsName, setNeedsName] = useState(false);
   const [assignedColor, setAssignedColor] = useState('#2f6df6');
-  const [assignedAvatar, setAssignedAvatar] = useState('');
   const [editingIdentity, setEditingIdentity] = useState(false);
   const [renamingBoard, setRenamingBoard] = useState(false);
 
@@ -72,9 +71,9 @@ export function BoardView({ boardId }: { boardId: string }) {
     void resolveIdentity().then((r) => {
       if (cancelled) return;
       setAssignedColor(r.color);
-      setAssignedAvatar(r.avatar);
       if (r.identity) setIdentity(r.identity);
       else setNeedsName(true);
+      if (r.identity?.isTutor) void boardRepository.markOpened(boardId);
     });
     return () => {
       cancelled = true;
@@ -87,7 +86,7 @@ export function BoardView({ boardId }: { boardId: string }) {
   }, [identity]);
 
   return (
-    <div className="relative h-[100dvh] w-screen overflow-hidden overscroll-none bg-bg-muted text-content-emphasis">
+    <div className="relative h-dvh w-screen overflow-hidden overscroll-none bg-bg-muted text-content-emphasis">
       <CanvasContextMenu>
         <Canvas />
       </CanvasContextMenu>
@@ -103,21 +102,19 @@ export function BoardView({ boardId }: { boardId: string }) {
       />
       <Toolbar />
       <GraphPanel />
+      <EquationPanel />
       <StylePanel />
 
       <NameDialog
         open={needsName || editingIdentity}
         editing={editingIdentity}
         initialName={identity?.name ?? ''}
-        initialAvatar={identity?.avatar ?? assignedAvatar}
-        onSubmit={(n, avatar) => {
+        onSubmit={(n) => {
           setStoredName(n);
-          setStoredAvatar(avatar);
           setIdentity({
             name: n,
             color: identity?.color ?? assignedColor,
             isTutor: identity?.isTutor ?? false,
-            avatar,
           });
           setNeedsName(false);
           setEditingIdentity(false);
@@ -125,9 +122,9 @@ export function BoardView({ boardId }: { boardId: string }) {
       />
       <BoardTitleDialog
         open={renamingBoard}
-        heading="Rename board"
+        heading="Rename Board"
         initialValue={name}
-        submitLabel="Save changes"
+        submitLabel="Save Changes"
         onOpenChange={setRenamingBoard}
         onSubmit={async (title) => {
           await boardRepository.rename(boardId, title);
