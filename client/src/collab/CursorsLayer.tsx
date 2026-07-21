@@ -1,6 +1,7 @@
 import { Fragment } from 'react';
-import { MousePointer2 } from 'lucide-react';
-import { rotatePoint, type TextShape } from '@whiteboard/shared';
+import { useShallow } from 'zustand/react/shallow';
+import { MousePointer2, Navigation2 } from 'lucide-react';
+import { rotatePoint, type Shape, type TextShape } from '@whiteboard/shared';
 import type { Camera } from '@/canvas/camera';
 import { worldToScreen } from '@/canvas/camera';
 import {
@@ -10,8 +11,11 @@ import {
   type TextLayout,
 } from '@/canvas/shapes/text-measure';
 import { useDocumentStore } from '@/canvas/use-document-store';
+import { cursorEdgeIndicator } from '@/collab/cursor-edge';
 import { usePresenceStore } from '@/collab/use-presence-store';
 import { cn } from '@/lib/utils';
+
+const EDGE_INDICATOR_INSET = 28;
 
 function CursorIcon({ color }: { color: string }) {
   return (
@@ -32,6 +36,48 @@ function CursorIcon({ color }: { color: string }) {
         strokeWidth={1.25}
       />
     </span>
+  );
+}
+
+function OffscreenCursorIndicator({
+  color,
+  name,
+  rotation,
+}: {
+  color: string;
+  name: string;
+  rotation: number;
+}) {
+  return (
+    <div
+      aria-hidden="true"
+      className="relative size-8 -translate-x-1/2 -translate-y-1/2"
+      title={name}
+    >
+      <span
+        className="absolute inset-0"
+        style={{ transform: `rotate(${rotation}deg)` }}
+      >
+        <Navigation2
+          className="absolute -top-3 left-1/2 size-4 -translate-x-1/2"
+          fill="var(--bg-default)"
+          stroke="var(--bg-default)"
+          strokeWidth={5}
+        />
+        <Navigation2
+          className="absolute -top-3 left-1/2 size-4 -translate-x-1/2"
+          fill={color}
+          stroke={color}
+          strokeWidth={1.5}
+        />
+      </span>
+      <span
+        className="absolute inset-0 flex items-center justify-center rounded-full border-2 bg-bg-default text-xs font-semibold text-content-emphasis shadow-hover"
+        style={{ borderColor: color }}
+      >
+        {name.trim().charAt(0).toUpperCase() || '?'}
+      </span>
+    </div>
   );
 }
 
@@ -65,8 +111,21 @@ export function CursorsLayer({
 }) {
   const peers = usePresenceStore((s) => s.peers);
   const currentPageId = useDocumentStore((s) => s.currentPageId);
+  // Only the shapes peers have a text selection in — usually none. Subscribing
+  // to the whole page record instead re-rendered every peer cursor once per
+  // frame of every stroke, since that record is rebuilt on each mutation.
   const shapes = useDocumentStore(
-    (s) => s.doc.pages[s.currentPageId]?.shapes,
+    useShallow((s) => {
+      const record = s.doc.pages[s.currentPageId]?.shapes;
+      const out: Record<string, Shape> = {};
+      if (!record) return out;
+      for (const p of peers) {
+        const id = p.textSelection?.shapeId;
+        const shape = id ? record[id] : undefined;
+        if (id && shape) out[id] = shape;
+      }
+      return out;
+    }),
   );
   return (
     <div className="pointer-events-none absolute inset-0 overflow-hidden">
@@ -131,6 +190,9 @@ export function CursorsLayer({
           })() : null;
 
         const s = p.cursor ? worldToScreen(p.cursor, camera) : null;
+        const edgeIndicator = s
+          ? cursorEdgeIndicator(s, viewportSize, EDGE_INDICATOR_INSET)
+          : null;
         const placeLabelLeft =
           s !== null && s.x > viewportSize.width - 176;
         const placeLabelAbove =
@@ -138,7 +200,20 @@ export function CursorsLayer({
         return (
           <Fragment key={p.clientId}>
             {textOverlay}
-            {s && (
+            {s && edgeIndicator ? (
+              <div
+                className="absolute top-0 left-0 z-10 transition-transform duration-75 ease-linear will-change-transform motion-reduce:transition-none"
+                style={{
+                  transform: `translate3d(${Math.round(edgeIndicator.position.x)}px, ${Math.round(edgeIndicator.position.y)}px, 0)`,
+                }}
+              >
+                <OffscreenCursorIndicator
+                  color={p.color}
+                  name={p.name}
+                  rotation={edgeIndicator.rotation}
+                />
+              </div>
+            ) : s ? (
               <div
                 aria-hidden="true"
                 className="absolute top-0 left-0 transition-transform duration-75 ease-linear will-change-transform motion-reduce:transition-none"
@@ -162,7 +237,7 @@ export function CursorsLayer({
                   <span className="truncate">{p.name}</span>
                 </span>
               </div>
-            )}
+            ) : null}
           </Fragment>
         );
       })}

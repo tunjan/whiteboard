@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import {
   AlignCenter,
   AlignLeft,
@@ -34,9 +34,16 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { PanelLabel } from '@/components/ui/panel-label';
 import { Slider } from '@/components/ui/slider';
 import { Surface } from '@/components/ui/surface';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import { useAnimationStore } from '@/animation/use-animation-store';
 import { ToolPanelPresence } from '@/components/tool-panel-presence';
 
@@ -44,6 +51,10 @@ const FILLS: FillStyle[] = ['none', 'solid', 'hatch', 'crosshatch'];
 const DASHES: StrokeDash[] = ['solid', 'dashed', 'dotted'];
 const FILLABLE = new Set(['rectangle', 'ellipse', 'polygon']);
 const DASHABLE = new Set(['rectangle', 'ellipse', 'polygon', 'line', 'arrow', 'draw']);
+
+/** Pen-preset dot diameters, indexed to match SIZE_OPTIONS. Spread wide enough
+ * that adjacent sizes stay distinguishable at a glance. */
+const PRESET_DOT_SIZES = [8, 12, 16, 20];
 
 const FILL_LABELS: Record<FillStyle, string> = {
   none: 'No fill',
@@ -132,9 +143,21 @@ export function StylePanel() {
   } = useStyleStore.getState();
   const selectedIds = useSelectionStore((s) => s.selectedIds);
   const activeToolId = useToolStore((s) => s.activeToolId);
-  const shapesRecord = useDocumentStore(
-    (s) => s.doc.pages[s.currentPageId]?.shapes,
-  );
+  // The panel only needs the *type* the selection resolves to, so derive it
+  // inside the selector and subscribe to that string. Subscribing to the page
+  // shapes record instead would re-render this panel once per frame of every
+  // stroke, because the record is a fresh object on every mutation.
+  const selectedType = useDocumentStore((s) => {
+    const record = s.doc.pages[s.currentPageId]?.shapes;
+    if (!record || selectedIds.length === 0) return null;
+    const firstId = selectedIds[0];
+    const firstShape = firstId ? record[firstId] : undefined;
+    if (!firstShape) return null;
+    const allSameType = selectedIds.every(
+      (id) => id && record[id]?.type === firstShape.type,
+    );
+    return allSameType ? firstShape.type : 'mixed';
+  });
   const playbackActive = useAnimationStore((s) => s.playbackActive);
   const { presets, activeIndex } = usePenPresetsStore();
 
@@ -151,11 +174,9 @@ export function StylePanel() {
     }
   }, [activeToolId]);
 
-
-
   // Contextual visibility checks
   const isStylePanelVisible = (() => {
-    if (activeToolId === 'eraser' || activeToolId === 'hand' || activeToolId === 'laser') {
+    if (activeToolId === 'eraser' || activeToolId === 'hand') {
       return false;
     }
     if (activeToolId === 'select') {
@@ -165,30 +186,18 @@ export function StylePanel() {
   })();
 
   // Dynamic filter based on tool/selection type
-  const targetType = (() => {
-    if (activeToolId !== 'select') {
-      return activeToolId;
-    }
-    if (selectedIds.length > 0 && shapesRecord) {
-      const firstId = selectedIds[0];
-      if (firstId) {
-        const firstShape = shapesRecord[firstId];
-        if (firstShape) {
-          const allSameType = selectedIds.every(
-            (id) => id && shapesRecord[id]?.type === firstShape.type,
-          );
-          if (allSameType) {
-            return firstShape.type;
-          }
-          return 'mixed';
-        }
-      }
-    }
-    return null;
-  })();
+  const targetType =
+    activeToolId !== 'select' ? activeToolId : selectedType;
 
   const panelVisible =
-    !playbackActive && isStylePanelVisible && targetType !== 'graph';
+    !playbackActive &&
+    isStylePanelVisible &&
+    targetType !== 'graph' &&
+    targetType !== 'equation';
+
+  // Frames are fixed chrome: they carry no color/size/fill/dash props, so those
+  // controls would be inert. Opacity is a shape-level field and still applies.
+  const showColor = targetType !== 'frame';
 
   const showSize =
     targetType === 'draw' ||
@@ -197,14 +206,12 @@ export function StylePanel() {
     targetType === 'rectangle' ||
     targetType === 'ellipse' ||
     targetType === 'polygon' ||
-    targetType === 'frame' ||
     targetType === 'mixed';
 
   const showFill =
     targetType === 'rectangle' ||
     targetType === 'ellipse' ||
     targetType === 'polygon' ||
-    targetType === 'frame' ||
     targetType === 'mixed';
 
   const showDash =
@@ -214,7 +221,6 @@ export function StylePanel() {
     targetType === 'rectangle' ||
     targetType === 'ellipse' ||
     targetType === 'polygon' ||
-    targetType === 'frame' ||
     targetType === 'mixed';
 
   const showFont = targetType === 'text' || targetType === 'mixed';
@@ -225,10 +231,48 @@ export function StylePanel() {
       ? `selection-${targetType ?? 'default'}`
       : `tool-${targetType ?? 'default'}`;
 
+  // Swatches always include the active color: a pen preset or a persisted
+  // choice can hold a value the current palette does not contain, and a color
+  // grid with nothing selected reads as "no color set".
+  const offPalette = !colors.some((c) => c.value === color);
+  const swatches = offPalette
+    ? [...colors, { name: 'Current color', value: color }]
+    : colors;
+  const swatchRefs = useRef<(HTMLButtonElement | null)[]>([]);
+
+  // Switching palette or theme keeps the same slot rather than stranding the
+  // pen on a color that is no longer shown.
+  const previousTheme = useRef(theme);
+  useEffect(() => {
+    if (previousTheme.current === theme) return;
+    const from = paletteColors(paletteId, previousTheme.current);
+    const to = paletteColors(paletteId, theme);
+    previousTheme.current = theme;
+    const slot = from.findIndex((c) => c.value === useStyleStore.getState().color);
+    const next = slot >= 0 ? to[slot] : undefined;
+    if (next) setColor(next.value);
+  }, [theme, paletteId]);
+
   const applyColor = (c: string) => {
     setColor(c);
     if (activeToolId === 'draw') usePenPresetsStore.getState().updateActive({ color: c });
     for (const id of selectedIds) editor.updateShape(id, { props: { color: c } });
+  };
+
+  const changePalette = (id: string) => {
+    const slot = colors.findIndex((c) => c.value === color);
+    setPaletteId(id);
+    const next = slot >= 0 ? paletteColors(id, theme)[slot] : undefined;
+    if (next) applyColor(next.value);
+  };
+
+  // Arrow keys move between swatches, matching radiogroup conventions.
+  const moveSwatchFocus = (from: number, delta: number) => {
+    const next = (from + delta + swatches.length) % swatches.length;
+    const swatch = swatches[next];
+    if (!swatch) return;
+    applyColor(swatch.value);
+    swatchRefs.current[next]?.focus();
   };
 
   const applySize = (n: number) => {
@@ -321,284 +365,384 @@ export function StylePanel() {
         <Surface
           role="region"
           aria-label="Style controls"
-          className="touch-targets max-h-[calc(100dvh-6.25rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] w-[min(14rem,calc(100vw-2rem))] overflow-y-auto overscroll-contain p-4 shadow-floating"
+          className="touch-targets max-h-[calc(100dvh-9rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] w-[min(12.5rem,calc(100vw-2rem))] overflow-y-auto overscroll-contain p-2.5 shadow-floating sm:max-h-[calc(100dvh-6.25rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))]"
         >
+          <TooltipProvider delay={300}>
           <div
             key={panelContentKey}
-            className="tool-panel-content flex flex-col gap-3"
+            className="tool-panel-content flex flex-col gap-2.5"
           >
         {activeToolId === 'draw' ? (
-          <ToggleGroup
-            aria-label="Pen presets"
-            value={[String(activeIndex)]}
-            onValueChange={(values) =>
-              values[0] && applyPreset(Number(values[0]))
-            }
-          >
-            {presets.map((preset, index) => {
-              const dotSize = Math.min(18, 8 + preset.size * 0.65);
-              return (
-                <ToggleGroupItem
-                  key={index}
-                  value={String(index)}
-                  aria-label={`Pen preset ${index + 1}`}
-                  title={`Pen preset ${index + 1}`}
-                  className="h-9"
-                >
-                  <span
-                    className="rounded-full border border-border-default"
-                    style={{
-                      backgroundColor: preset.color,
-                      width: dotSize,
-                      height: dotSize,
-                    }}
-                  />
-                </ToggleGroupItem>
-              );
-            })}
-          </ToggleGroup>
+            <ToggleGroup
+              aria-label="Pen presets"
+              value={[String(activeIndex)]}
+              onValueChange={(values) =>
+                values[0] && applyPreset(Number(values[0]))
+              }
+            >
+              {presets.map((preset, index) => {
+                const slot = SIZE_OPTIONS.findIndex(
+                  (option) => option.value === preset.size,
+                );
+                const dotSize = PRESET_DOT_SIZES[slot] ?? 12;
+                return (
+                  <Tooltip key={index}>
+                    <TooltipTrigger
+                      render={
+                        <ToggleGroupItem
+                          value={String(index)}
+                          aria-label={`Pen preset ${index + 1}`}
+                          className="h-8"
+                        />
+                      }
+                    >
+                      <span
+                        className="rounded-full border border-border-muted"
+                        style={{
+                          backgroundColor: preset.color,
+                          width: dotSize,
+                          height: dotSize,
+                        }}
+                      />
+                    </TooltipTrigger>
+                    <TooltipContent side="left">
+                      Pen {index + 1} · edits save here
+                    </TooltipContent>
+                  </Tooltip>
+                );
+              })}
+            </ToggleGroup>
         ) : null}
 
-        <div className="flex flex-col gap-2.5">
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="w-full justify-between"
-                />
-              }
-            >
-              <span className="flex min-w-0 items-center gap-2">
-                <span className="flex shrink-0 items-center gap-1">
-                  {colors.slice(0, 4).map((paletteColor) => (
-                    <span
-                      key={paletteColor.name}
-                      className="size-2.5 rounded-full border border-border-default"
-                      style={{ backgroundColor: paletteColor.value }}
-                    />
-                  ))}
-                </span>
-                <span className="truncate">{activePalette.name}</span>
-              </span>
-              <ChevronsUpDown data-icon="inline-end" aria-hidden="true" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent className="w-(--anchor-width)">
-              <DropdownMenuRadioGroup
-                value={paletteId}
-                onValueChange={setPaletteId}
-              >
-                {PALETTES.map((palette) => (
-                  <DropdownMenuRadioItem
-                    key={palette.id}
-                    value={palette.id}
-                    closeOnClick
+        <div className="flex flex-col gap-2">
+          {showColor ? (
+            <>
+              <div className="flex flex-col gap-1.5">
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    render={
+                      <Button
+                        variant="outline"
+                        size="xs"
+                        aria-label={`Color palette: ${activePalette.name}`}
+                        className="w-full justify-between"
+                      />
+                    }
                   >
-                    <span className="flex min-w-0 items-center gap-2">
-                      <span className="flex shrink-0 items-center gap-1">
-                        {(theme === 'dark' ? palette.dark : palette.light)
-                          .slice(0, 4)
-                          .map((paletteColor) => (
-                            <span
-                              key={paletteColor.name}
-                              className="size-2.5 rounded-full border border-border-default"
-                              style={{ backgroundColor: paletteColor.value }}
-                            />
-                          ))}
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      <span className="flex shrink-0 items-center gap-0.5">
+                        {colors.slice(0, 4).map((paletteColor) => (
+                          <span
+                            key={paletteColor.name}
+                            className="size-2 rounded-full border border-border-muted"
+                            style={{ backgroundColor: paletteColor.value }}
+                          />
+                        ))}
                       </span>
-                      <span className="truncate">{palette.name}</span>
+                      <span className="truncate">{activePalette.name}</span>
                     </span>
-                  </DropdownMenuRadioItem>
-                ))}
-              </DropdownMenuRadioGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
+                    <ChevronsUpDown data-icon="inline-end" aria-hidden="true" />
+                  </DropdownMenuTrigger>
+                  {/* Opens to the side so the swatch grid it controls stays
+                      visible while choosing. */}
+                  <DropdownMenuContent side="left" align="start" className="w-auto">
+                    <DropdownMenuRadioGroup
+                      value={paletteId}
+                      onValueChange={changePalette}
+                    >
+                      {PALETTES.map((palette) => (
+                        <DropdownMenuRadioItem
+                          key={palette.id}
+                          value={palette.id}
+                          closeOnClick
+                        >
+                          <span className="flex min-w-0 items-center gap-2">
+                            <span className="flex shrink-0 items-center gap-1">
+                              {(theme === 'dark' ? palette.dark : palette.light).map(
+                                (paletteColor) => (
+                                  <span
+                                    key={paletteColor.name}
+                                    className="size-2.5 rounded-full border border-border-muted"
+                                    style={{ backgroundColor: paletteColor.value }}
+                                  />
+                                ),
+                              )}
+                            </span>
+                            <span className="truncate">{palette.name}</span>
+                          </span>
+                        </DropdownMenuRadioItem>
+                      ))}
+                    </DropdownMenuRadioGroup>
+                  </DropdownMenuContent>
+                </DropdownMenu>
 
-          <div
-            role="group"
-            aria-label="Color"
-            className="grid grid-cols-4 gap-1.5"
-          >
-            {colors.map((paletteColor) => {
-              const active = color === paletteColor.value;
-              return (
-                <button
-                  key={paletteColor.name}
-                  type="button"
-                  title={paletteColor.name}
-                  aria-label={paletteColor.name}
-                  aria-pressed={active}
-                  onClick={() => applyColor(paletteColor.value)}
-                  className="flex h-9 w-full items-center justify-center rounded-[var(--surface-control-radius)] transition-colors duration-150 ease-out hover:bg-bg-muted active:scale-[0.98] motion-reduce:transition-none"
+                <div
+                  role="radiogroup"
+                  aria-label="Color"
+                  className="grid grid-cols-4 gap-1.5"
                 >
-                  <span
-                    className={cn(
-                      'size-6 rounded-full border border-border-default',
-                      active &&
-                        'ring-2 ring-accent-brand ring-offset-2 ring-offset-bg-default',
-                    )}
-                    style={{ backgroundColor: paletteColor.value }}
-                  />
-                </button>
-              );
-            })}
-          </div>
+                  {swatches.map((paletteColor, index) => {
+                    const active = color === paletteColor.value;
+                    return (
+                      <Tooltip key={paletteColor.value}>
+                        <TooltipTrigger
+                          render={
+                            <button
+                              ref={(node) => {
+                                swatchRefs.current[index] = node;
+                              }}
+                              type="button"
+                              role="radio"
+                              aria-label={paletteColor.name}
+                              aria-checked={active}
+                              tabIndex={active ? 0 : -1}
+                              onClick={() => applyColor(paletteColor.value)}
+                              onKeyDown={(event) => {
+                                const delta =
+                                  event.key === 'ArrowRight' || event.key === 'ArrowDown'
+                                    ? 1
+                                    : event.key === 'ArrowLeft' || event.key === 'ArrowUp'
+                                      ? -1
+                                      : 0;
+                                if (!delta) return;
+                                event.preventDefault();
+                                moveSwatchFocus(index, delta);
+                              }}
+                              className="flex h-8 w-full items-center justify-center rounded-[var(--surface-control-radius)] transition-colors duration-150 ease-out hover:bg-bg-muted active:scale-[0.98] motion-reduce:transition-none"
+                            />
+                          }
+                        >
+                          <span
+                            className={cn(
+                              'size-5 rounded-full border border-border-muted',
+                              active &&
+                                'ring-2 ring-content-emphasis ring-offset-2 ring-offset-bg-muted',
+                            )}
+                            style={{ backgroundColor: paletteColor.value }}
+                          />
+                        </TooltipTrigger>
+                        <TooltipContent side="left">
+                          {paletteColor.name}
+                        </TooltipContent>
+                      </Tooltip>
+                    );
+                  })}
+                </div>
+              </div>
+            </>
+          ) : null}
 
-          <div className="px-0.5">
-            <Slider
-              aria-label="Opacity"
-              min={0}
-              max={1}
-              step={0.01}
-              value={opacity}
-              onValueChange={(value) =>
-                applyOpacity(Array.isArray(value) ? value[0]! : value)
-              }
-            />
-          </div>
+          {/* The only control here with no self-describing glyph, so it keeps
+              a readout; the tooltip names it. */}
+          <Tooltip>
+            <TooltipTrigger
+              render={<div className="flex items-center gap-2 px-0.5" />}
+            >
+              <Slider
+                aria-label="Opacity"
+                valueText={`${Math.round(opacity * 100)}%`}
+                min={0}
+                max={1}
+                step={0.01}
+                value={opacity}
+                onValueChange={(value) =>
+                  applyOpacity(Array.isArray(value) ? value[0]! : value)
+                }
+              />
+              <PanelLabel className="w-8 shrink-0 text-right tabular-nums">
+                {Math.round(opacity * 100)}%
+              </PanelLabel>
+            </TooltipTrigger>
+            <TooltipContent side="left">Opacity</TooltipContent>
+          </Tooltip>
         </div>
 
-        <div className="flex flex-col gap-2.5">
+        <div className="flex flex-col gap-2">
           {showFill ? (
             <ToggleGroup
-              aria-label="Fill style"
-              value={[fill]}
-              onValueChange={(values) =>
-                values[0] && applyFill(values[0] as FillStyle)
-              }
-            >
-              {FILLS.map((fillStyle) => (
-                <ToggleGroupItem
-                  key={fillStyle}
-                  value={fillStyle}
-                  aria-label={FILL_LABELS[fillStyle]}
-                  title={FILL_LABELS[fillStyle]}
-                >
-                  <FillPreview style={fillStyle} />
-                </ToggleGroupItem>
-              ))}
-            </ToggleGroup>
+                aria-label="Fill style"
+                value={[fill]}
+                onValueChange={(values) =>
+                  values[0] && applyFill(values[0] as FillStyle)
+                }
+              >
+                {FILLS.map((fillStyle) => (
+                  <Tooltip key={fillStyle}>
+                    <TooltipTrigger
+                      render={
+                        <ToggleGroupItem
+                          value={fillStyle}
+                          aria-label={FILL_LABELS[fillStyle]}
+                        />
+                      }
+                    >
+                      <FillPreview style={fillStyle} />
+                    </TooltipTrigger>
+                    <TooltipContent side="left">
+                      {FILL_LABELS[fillStyle]}
+                    </TooltipContent>
+                  </Tooltip>
+                ))}
+              </ToggleGroup>
           ) : null}
 
           {showDash ? (
             <ToggleGroup
-              aria-label="Stroke style"
-              value={[dash]}
-              onValueChange={(values) =>
-                values[0] && applyDash(values[0] as StrokeDash)
-              }
-            >
-              {DASHES.map((strokeDash) => (
-                <ToggleGroupItem
-                  key={strokeDash}
-                  value={strokeDash}
-                  aria-label={DASH_LABELS[strokeDash]}
-                  title={DASH_LABELS[strokeDash]}
-                >
-                  <DashPreview dash={strokeDash} />
-                </ToggleGroupItem>
-              ))}
-            </ToggleGroup>
+                aria-label="Stroke style"
+                value={[dash]}
+                onValueChange={(values) =>
+                  values[0] && applyDash(values[0] as StrokeDash)
+                }
+              >
+                {DASHES.map((strokeDash) => (
+                  <Tooltip key={strokeDash}>
+                    <TooltipTrigger
+                      render={
+                        <ToggleGroupItem
+                          value={strokeDash}
+                          aria-label={DASH_LABELS[strokeDash]}
+                        />
+                      }
+                    >
+                      <DashPreview dash={strokeDash} />
+                    </TooltipTrigger>
+                    <TooltipContent side="left">
+                      {DASH_LABELS[strokeDash]}
+                    </TooltipContent>
+                  </Tooltip>
+                ))}
+              </ToggleGroup>
           ) : null}
 
           {showSize ? (
             <ToggleGroup
-              aria-label="Stroke weight"
-              value={[String(size)]}
-              onValueChange={(values) =>
-                values[0] && applySize(Number(values[0]))
-              }
-            >
-              {SIZE_OPTIONS.map((option) => (
-                <ToggleGroupItem
-                  key={option.name}
-                  value={String(option.value)}
-                  aria-label={`${option.name}, ${option.value} pixels`}
-                  title={`${option.value}px`}
-                >
-                  {option.name}
-                </ToggleGroupItem>
-              ))}
-            </ToggleGroup>
+                aria-label="Stroke weight"
+                value={[String(size)]}
+                onValueChange={(values) =>
+                  values[0] && applySize(Number(values[0]))
+                }
+              >
+                {SIZE_OPTIONS.map((option) => (
+                  <Tooltip key={option.name}>
+                    <TooltipTrigger
+                      render={
+                        <ToggleGroupItem
+                          value={String(option.value)}
+                          aria-label={`${option.name}, ${option.value} pixels`}
+                        />
+                      }
+                    >
+                      {option.name}
+                    </TooltipTrigger>
+                    <TooltipContent side="left">
+                      {option.name} — {option.value}px
+                    </TooltipContent>
+                  </Tooltip>
+                ))}
+              </ToggleGroup>
           ) : null}
 
           {showFont ? (
             <ToggleGroup
-              aria-label="Typeface"
-              value={[fontFamily]}
-              onValueChange={(values) =>
-                values[0] && applyFontFamily(values[0] as FontFamily)
-              }
-            >
-              {FONTS.map(({ family, label }) => (
-                <ToggleGroupItem
-                  key={family}
-                  value={family}
-                  aria-label={`${family} typeface`}
-                  title={family}
-                  style={{ fontFamily: fontStack(family) }}
-                >
-                  {label}
-                </ToggleGroupItem>
-              ))}
-            </ToggleGroup>
+                aria-label="Typeface"
+                value={[fontFamily]}
+                onValueChange={(values) =>
+                  values[0] && applyFontFamily(values[0] as FontFamily)
+                }
+              >
+                {FONTS.map(({ family, label }) => (
+                  <Tooltip key={family}>
+                    <TooltipTrigger
+                      render={
+                        <ToggleGroupItem
+                          value={family}
+                          aria-label={`${family} typeface`}
+                          style={{ fontFamily: fontStack(family) }}
+                        />
+                      }
+                    >
+                      {label}
+                    </TooltipTrigger>
+                    <TooltipContent side="left">{family}</TooltipContent>
+                  </Tooltip>
+                ))}
+              </ToggleGroup>
           ) : null}
 
           {showAlign ? (
             <ToggleGroup
-              aria-label="Text alignment"
-              value={[align]}
-              onValueChange={(values) =>
-                values[0] && applyAlign(values[0] as TextAlign)
-              }
-            >
-              {ALIGNS.map(({ align: textAlign, Icon }) => (
-                <ToggleGroupItem
-                  key={textAlign}
-                  value={textAlign}
-                  aria-label={`${textAlign} alignment`}
-                  title={`${textAlign} alignment`}
-                >
-                  <Icon aria-hidden="true" />
-                </ToggleGroupItem>
-              ))}
-            </ToggleGroup>
+                aria-label="Text alignment"
+                value={[align]}
+                onValueChange={(values) =>
+                  values[0] && applyAlign(values[0] as TextAlign)
+                }
+              >
+                {ALIGNS.map(({ align: textAlign, Icon }) => (
+                  <Tooltip key={textAlign}>
+                    <TooltipTrigger
+                      render={
+                        <ToggleGroupItem
+                          value={textAlign}
+                          aria-label={`${textAlign} alignment`}
+                        />
+                      }
+                    >
+                      <Icon aria-hidden="true" />
+                    </TooltipTrigger>
+                    <TooltipContent side="left">
+                      {textAlign} alignment
+                    </TooltipContent>
+                  </Tooltip>
+                ))}
+              </ToggleGroup>
           ) : null}
 
           {showArrows ? (
             <ToggleGroup
-              multiple
-              aria-label="Arrowheads"
-              value={[
-                ...(arrowStart ? ['start'] : []),
-                ...(arrowEnd ? ['end'] : []),
-              ]}
-              onValueChange={(values) => {
-                const nextStart = values.includes('start');
-                const nextEnd = values.includes('end');
-                if (nextStart !== arrowStart) applyArrowStart(nextStart);
-                if (nextEnd !== arrowEnd) applyArrowEnd(nextEnd);
-              }}
-            >
-              <ToggleGroupItem
-                value="start"
-                aria-label="Arrowhead at start"
-                title="Arrowhead at start"
+                multiple
+                aria-label="Arrowheads"
+                value={[
+                  ...(arrowStart ? ['start'] : []),
+                  ...(arrowEnd ? ['end'] : []),
+                ]}
+                onValueChange={(values) => {
+                  const nextStart = values.includes('start');
+                  const nextEnd = values.includes('end');
+                  if (nextStart !== arrowStart) applyArrowStart(nextStart);
+                  if (nextEnd !== arrowEnd) applyArrowEnd(nextEnd);
+                }}
               >
-                <ArrowLeft aria-hidden="true" />
-              </ToggleGroupItem>
-              <ToggleGroupItem
-                value="end"
-                aria-label="Arrowhead at end"
-                title="Arrowhead at end"
-              >
-                <ArrowRight aria-hidden="true" />
-              </ToggleGroupItem>
-            </ToggleGroup>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <ToggleGroupItem
+                        value="start"
+                        aria-label="Arrowhead at start"
+                      />
+                    }
+                  >
+                    <ArrowLeft aria-hidden="true" />
+                  </TooltipTrigger>
+                  <TooltipContent side="left">Arrowhead at start</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <ToggleGroupItem
+                        value="end"
+                        aria-label="Arrowhead at end"
+                      />
+                    }
+                  >
+                    <ArrowRight aria-hidden="true" />
+                  </TooltipTrigger>
+                  <TooltipContent side="left">Arrowhead at end</TooltipContent>
+                </Tooltip>
+              </ToggleGroup>
           ) : null}
         </div>
           </div>
+          </TooltipProvider>
         </Surface>
       ) : null}
     </ToolPanelPresence>

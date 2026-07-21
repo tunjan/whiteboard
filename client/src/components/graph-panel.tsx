@@ -4,6 +4,7 @@ import { Eye, EyeOff, Pause, Play, Plus, RotateCcw, Trash2 } from 'lucide-react'
 import type {
   GraphExpression,
   GraphParameter,
+  GraphPoint,
   GraphProps,
   GraphShape,
   GraphViewport,
@@ -29,6 +30,7 @@ import {
   DEFAULT_GRAPH_VIEWPORT,
   GRAPH_COLORS,
   createGraphExpression,
+  createGraphPoint,
   parseGraphExpression,
   reconcileGraphParameters,
 } from '@/canvas/graph-expressions';
@@ -105,7 +107,7 @@ function CurveStylePopover({
         />
       </PopoverTrigger>
       <PopoverContent side="left" align="start" className="w-44">
-        <PopoverTitle>Curve style</PopoverTitle>
+        <PopoverTitle>Curve Style</PopoverTitle>
         <div className="flex flex-col gap-1.5">
           <PanelLabel>Color</PanelLabel>
           <div role="group" aria-label="Curve color" className="grid grid-cols-4 gap-1">
@@ -133,7 +135,7 @@ function CurveStylePopover({
           </div>
         </div>
         <div className="flex flex-col gap-1.5">
-          <PanelLabel>Line style</PanelLabel>
+          <PanelLabel>Line Style</PanelLabel>
           <ToggleGroup
             aria-label="Line style"
             value={[expression.dash]}
@@ -226,6 +228,137 @@ function ExpressionRow({
           type="button"
           aria-label="Delete curve"
           title="Delete curve"
+          className={cn(buttonVariants({ variant: 'ghost', size: 'icon-xs' }))}
+          onClick={onDelete}
+        >
+          <Trash2 />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Swatch button opening the point's color controls — the color-only sibling
+ * of CurveStylePopover. */
+function PointStylePopover({
+  point,
+  onPatch,
+}: {
+  point: GraphPoint;
+  onPatch: (patch: Partial<GraphPoint>) => void;
+}) {
+  return (
+    <Popover>
+      <PopoverTrigger
+        aria-label="Point color"
+        title="Color"
+        className="flex size-6 items-center justify-center rounded-md transition-colors hover:bg-bg-muted"
+      >
+        <span
+          className="size-4 rounded-full border-2 transition-colors"
+          style={{
+            borderColor: point.color,
+            background: point.visible ? point.color : 'transparent',
+          }}
+        />
+      </PopoverTrigger>
+      <PopoverContent side="left" align="start" className="w-44">
+        <PopoverTitle>Point Style</PopoverTitle>
+        <div className="flex flex-col gap-1.5">
+          <PanelLabel>Color</PanelLabel>
+          <div role="group" aria-label="Point color" className="grid grid-cols-4 gap-1">
+            {GRAPH_COLORS.map((color) => {
+              const active = point.color === color;
+              return (
+                <button
+                  key={color}
+                  type="button"
+                  aria-label={`Use ${color}`}
+                  aria-pressed={active}
+                  onClick={() => onPatch({ color })}
+                  className={cn(
+                    'flex size-7 items-center justify-center rounded-md transition-colors',
+                    active ? 'bg-bg-muted' : 'hover:bg-bg-muted',
+                  )}
+                >
+                  <span
+                    className="size-4 rounded-full border border-border-default"
+                    style={{ background: color }}
+                  />
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/** One point row: style swatch, x/y inputs with draft-commit editing, and
+ * hover-revealed visibility/delete actions. */
+function PointRow({
+  point,
+  onPatch,
+  onDelete,
+}: {
+  point: GraphPoint;
+  onPatch: (patch: Partial<GraphPoint>) => void;
+  onDelete: () => void;
+}) {
+  const [draft, setDraft] = useState({
+    x: String(point.x),
+    y: String(point.y),
+  });
+
+  // Re-sync when the point changes elsewhere (undo, remote collaborators).
+  useEffect(() => {
+    setDraft({ x: String(point.x), y: String(point.y) });
+  }, [point.x, point.y]);
+
+  const commit = (key: 'x' | 'y', raw: string) => {
+    const value = Number(raw);
+    if (raw.trim() !== '' && Number.isFinite(value)) onPatch({ [key]: value });
+    else setDraft((d) => ({ ...d, [key]: String(point[key]) }));
+  };
+
+  return (
+    <div className="group flex items-center gap-1">
+      <div className="flex w-8 shrink-0 items-center justify-center">
+        <PointStylePopover point={point} onPatch={onPatch} />
+      </div>
+      <span className="text-xs text-content-subtle">(</span>
+      <BoundInput
+        label="Point x"
+        value={draft.x}
+        onChange={(value) => setDraft((d) => ({ ...d, x: value }))}
+        onCommit={(value) => commit('x', value)}
+        className="w-14 flex-1"
+      />
+      <span className="text-xs text-content-subtle">,</span>
+      <BoundInput
+        label="Point y"
+        value={draft.y}
+        onChange={(value) => setDraft((d) => ({ ...d, y: value }))}
+        onCommit={(value) => commit('y', value)}
+        className="w-14 flex-1"
+      />
+      <span className="text-xs text-content-subtle">)</span>
+      <div className="touch-reveal flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
+        <button
+          type="button"
+          aria-label={point.visible ? 'Hide point' : 'Show point'}
+          aria-pressed={!point.visible}
+          title={point.visible ? 'Hide point' : 'Show point'}
+          className={cn(buttonVariants({ variant: 'ghost', size: 'icon-xs' }))}
+          onClick={() => onPatch({ visible: !point.visible })}
+        >
+          {point.visible ? <Eye /> : <EyeOff />}
+        </button>
+        <button
+          type="button"
+          aria-label="Delete point"
+          title="Delete point"
           className={cn(buttonVariants({ variant: 'ghost', size: 'icon-xs' }))}
           onClick={onDelete}
         >
@@ -438,7 +571,7 @@ function ViewRange({
   return (
     <FieldGroup className="gap-2">
       <div className="flex items-center justify-between">
-        <PanelLabel>View range</PanelLabel>
+        <PanelLabel>View Range</PanelLabel>
         <Button
           variant="ghost"
           size="xs"
@@ -555,6 +688,26 @@ function GraphPanelContent({ shape }: { shape: GraphShape }) {
     if (target) focusField(target.id);
   };
 
+  const points = props.points ?? [];
+
+  const updatePoints = (next: GraphPoint[]) => updateGraph({ points: next });
+
+  const patchPoint = (pointId: string, patch: Partial<GraphPoint>) => {
+    updatePoints(
+      points.map((point) =>
+        point.id === pointId ? { ...point, ...patch } : point,
+      ),
+    );
+  };
+
+  const addPoint = () => {
+    updatePoints([...points, createGraphPoint(points.length)]);
+  };
+
+  const deletePoint = (pointId: string) => {
+    updatePoints(points.filter((point) => point.id !== pointId));
+  };
+
   const parameterNames = Object.keys(props.parameters).sort((a, b) =>
     a.localeCompare(b),
   );
@@ -563,7 +716,7 @@ function GraphPanelContent({ shape }: { shape: GraphShape }) {
     <Surface
       role="region"
       aria-label="Graph controls"
-      className="touch-targets flex max-h-[calc(100dvh-6.25rem-env(safe-area-inset-top))] w-[min(20rem,calc(100vw-2rem))] flex-col gap-4 overflow-y-auto p-4 shadow-floating"
+      className="touch-targets flex max-h-[calc(100dvh-9rem-env(safe-area-inset-top))] w-[min(20rem,calc(100vw-2rem))] flex-col gap-4 overflow-y-auto p-4 shadow-floating sm:max-h-[calc(100dvh-6.25rem-env(safe-area-inset-top))]"
     >
       <div className="min-w-0">
         <div className="text-sm font-semibold text-content-emphasis">Plotter</div>
@@ -593,15 +746,37 @@ function GraphPanelContent({ shape }: { shape: GraphShape }) {
             }}
           />
         ))}
-        <button
-          type="button"
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={addExpression}
-          className="flex w-full items-center gap-2 px-3.5 py-2 text-left text-sm text-content-subtle transition-colors hover:bg-bg-muted hover:text-content-emphasis"
+          className="w-full justify-start rounded-none px-3.5 text-content-subtle"
         >
-          <Plus className="size-4" aria-hidden="true" />
-          Add curve
-        </button>
+          <Plus data-icon="inline-start" aria-hidden="true" />
+          Add Curve
+        </Button>
       </div>
+
+      <FieldGroup className="gap-2">
+        <PanelLabel>Points</PanelLabel>
+        {points.map((point) => (
+          <PointRow
+            key={point.id}
+            point={point}
+            onPatch={(patch) => patchPoint(point.id, patch)}
+            onDelete={() => deletePoint(point.id)}
+          />
+        ))}
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={addPoint}
+          className="w-full justify-start text-content-subtle"
+        >
+          <Plus data-icon="inline-start" aria-hidden="true" />
+          Add Point
+        </Button>
+      </FieldGroup>
 
       {parameterNames.length > 0 ? (
         <>
@@ -637,11 +812,22 @@ function GraphPanelContent({ shape }: { shape: GraphShape }) {
       />
 
       <Field orientation="horizontal">
-        <FieldLabel>Axis numbers</FieldLabel>
+        <FieldLabel>Axis Numbers</FieldLabel>
         <Switch
           aria-label="Axis numbers"
           checked={showAxisLabels}
           onCheckedChange={(checked) => updateGraph({ showAxisLabels: checked })}
+        />
+      </Field>
+
+      <Field orientation="horizontal">
+        <FieldLabel>Show Intersections</FieldLabel>
+        <Switch
+          aria-label="Show intersections"
+          checked={props.showIntersections === true}
+          onCheckedChange={(checked) =>
+            updateGraph({ showIntersections: checked })
+          }
         />
       </Field>
     </Surface>
@@ -650,12 +836,14 @@ function GraphPanelContent({ shape }: { shape: GraphShape }) {
 
 export function GraphPanel() {
   const selectedIds = useSelectionStore((s) => s.selectedIds);
-  const shapesRecord = useDocumentStore(
-    (s) => s.doc.pages[s.currentPageId]?.shapes,
+  const selectedId = selectedIds.length === 1 ? selectedIds[0] : null;
+  // Subscribe to the one selected shape, not the whole page record — the record
+  // is a fresh object on every mutation, so subscribing to it re-rendered this
+  // panel once per frame of every stroke anywhere on the page.
+  const selectedShape = useDocumentStore((s) =>
+    selectedId ? s.doc.pages[s.currentPageId]?.shapes[selectedId] : undefined,
   );
   const playbackActive = useAnimationStore((s) => s.playbackActive);
-  const selectedId = selectedIds.length === 1 ? selectedIds[0] : null;
-  const selectedShape = selectedId ? shapesRecord?.[selectedId] : undefined;
   const graphShape =
     selectedShape?.type === 'graph' ? selectedShape : undefined;
   const panelVisible = !playbackActive && Boolean(graphShape);
