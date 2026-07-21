@@ -130,13 +130,19 @@ function outlineToPath(points: number[][]): string {
   if (len < 4) {
     return `M ${first[0]!.toFixed(2)} ${first[1]!.toFixed(2)} Z`;
   }
-  let d = `M ${first[0]!.toFixed(2)} ${first[1]!.toFixed(2)} Q`;
+  // Built as segments and joined: `+=` in a loop over a few hundred outline
+  // points reallocates the whole string each time, and this runs on the
+  // per-frame path while a stroke is being drawn.
+  const parts = [`M ${first[0]!.toFixed(2)} ${first[1]!.toFixed(2)} Q`];
   for (let i = 1; i < len - 1; i++) {
     const a = points[i]!;
     const b = points[i + 1]!;
-    d += ` ${a[0]!.toFixed(2)} ${a[1]!.toFixed(2)} ${mid(a[0]!, b[0]!).toFixed(2)} ${mid(a[1]!, b[1]!).toFixed(2)}`;
+    parts.push(
+      ` ${a[0]!.toFixed(2)} ${a[1]!.toFixed(2)} ${mid(a[0]!, b[0]!).toFixed(2)} ${mid(a[1]!, b[1]!).toFixed(2)}`,
+    );
   }
-  return `${d} Z`;
+  parts.push(' Z');
+  return parts.join('');
 }
 
 /**
@@ -152,14 +158,17 @@ export function getInkCenterlinePath(points: DrawPoint[]): string {
     const b = points[1]!;
     return `M ${first.x.toFixed(2)} ${first.y.toFixed(2)} L ${b.x.toFixed(2)} ${b.y.toFixed(2)}`;
   }
-  let d = `M ${first.x.toFixed(2)} ${first.y.toFixed(2)} Q`;
+  const parts = [`M ${first.x.toFixed(2)} ${first.y.toFixed(2)} Q`];
   for (let i = 1; i < len - 1; i++) {
     const a = points[i]!;
     const b = points[i + 1]!;
-    d += ` ${a.x.toFixed(2)} ${a.y.toFixed(2)} ${mid(a.x, b.x).toFixed(2)} ${mid(a.y, b.y).toFixed(2)}`;
+    parts.push(
+      ` ${a.x.toFixed(2)} ${a.y.toFixed(2)} ${mid(a.x, b.x).toFixed(2)} ${mid(a.y, b.y).toFixed(2)}`,
+    );
   }
   const last = points[len - 1]!;
-  return `${d} L ${last.x.toFixed(2)} ${last.y.toFixed(2)}`;
+  parts.push(` L ${last.x.toFixed(2)} ${last.y.toFixed(2)}`);
+  return parts.join('');
 }
 
 /** SVG path data for an ink stroke (local coordinates). */
