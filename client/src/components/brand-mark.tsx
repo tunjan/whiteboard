@@ -5,7 +5,7 @@ export function BrandMark({ className }: { className?: string }) {
     <svg
       aria-hidden="true"
       viewBox="0 0 32 32"
-      className={cn('size-9 text-content-emphasis', className)}
+      className={cn('size-9 text-foreground', className)}
     >
       <rect
         x="0.5"
@@ -13,8 +13,8 @@ export function BrandMark({ className }: { className?: string }) {
         width="31"
         height="31"
         rx="8"
-        fill="var(--bg-default)"
-        stroke="var(--border-subtle)"
+        fill="var(--background)"
+        stroke="var(--border)"
       />
       <path
         d="M5.5 25 C 8 22.5, 10.5 27, 15.5 23.5"

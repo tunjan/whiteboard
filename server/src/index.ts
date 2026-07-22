@@ -8,6 +8,7 @@ import { env } from './env';
 import { authRoutes } from './auth/routes';
 import { blobRoutes } from './blobs/routes';
 import { boardRoutes } from './boards/routes';
+import { documentRoutes } from './documents/routes';
 import { hocuspocus } from './collab/hocuspocus';
 import { musicRoutes } from './music/routes';
 import { recordingRoutes } from './recordings/routes';
@@ -18,6 +19,7 @@ app.get('/health', (c) => c.json({ status: 'ok' }));
 app.route('/api/auth', authRoutes);
 app.route('/api/boards', boardRoutes);
 app.route('/api/blobs', blobRoutes);
+app.route('/api/docs', documentRoutes);
 app.route('/api/music', musicRoutes);
 app.route('/api/recordings', recordingRoutes);
 

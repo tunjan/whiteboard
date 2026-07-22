@@ -1,11 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import {
-  Clapperboard,
-  Pause,
-  Play,
-  RotateCcw,
-  Square,
-} from 'lucide-react';
+import { Clapperboard, Pause, Play, RefreshCw, Square } from 'lucide-react';
 import { genId, type AnimationRecordingV1 } from '@whiteboard/shared';
 import type { Identity } from '@/collab/identity';
 import {
@@ -221,7 +215,7 @@ export function AnimationControls({ identity }: { identity: Identity | null }) {
       data-ui-layer
       role="status"
       aria-label="Recording whiteboard animation"
-      className="touch-targets fixed top-[calc(4.5rem+env(safe-area-inset-top))] left-1/2 z-30 flex -translate-x-1/2 items-center gap-3 py-1.5 pr-1.5 pl-3.5 shadow-floating"
+      className="touch-targets fixed top-[calc(4.5rem+env(safe-area-inset-top))] left-1/2 z-30 flex -translate-x-1/2 items-center gap-3 py-1.5 pr-1.5 pl-3.5"
     >
       <span aria-hidden="true" className="relative flex size-2.5 shrink-0">
         <span className="absolute inline-flex size-full rounded-full bg-content-error opacity-60 motion-safe:animate-ping" />
@@ -250,7 +244,7 @@ export function AnimationControls({ identity }: { identity: Identity | null }) {
       data-ui-layer
       role="region"
       aria-label="Whiteboard animation playback"
-      className="touch-targets fixed top-[calc(4.5rem+env(safe-area-inset-top))] left-1/2 z-30 flex w-[min(24rem,calc(100vw-2rem))] -translate-x-1/2 items-center gap-2 py-1.5 pr-3 pl-2 opacity-30 shadow-floating transition-opacity duration-200 hover:opacity-100 focus-within:opacity-100 motion-reduce:transition-none"
+      className="touch-targets fixed top-[calc(4.5rem+env(safe-area-inset-top))] left-1/2 z-30 flex w-[min(24rem,calc(100vw-2rem))] -translate-x-1/2 items-center gap-2 py-1.5 pr-3 pl-2 opacity-30 transition-opacity duration-200 hover:opacity-100 focus-within:opacity-100 motion-reduce:transition-none"
     >
       {isLocalPlayback ? (
         <span className="shrink-0 pl-1 text-[10px] font-semibold tracking-wide text-content-subtle uppercase">
@@ -301,7 +295,7 @@ export function AnimationControls({ identity }: { identity: Identity | null }) {
             label="Restart"
             onClick={isLocalPlayback ? restartLocalPlayback : restartAnimation}
           >
-            <RotateCcw />
+            <RefreshCw />
           </IconAction>
           <IconAction
             label="Stop"

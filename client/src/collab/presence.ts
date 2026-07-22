@@ -36,10 +36,14 @@ let latestViewport: ViewportPresence | null = null;
 let lastLaserSent = 0;
 let laserTrailingTimer: ReturnType<typeof setTimeout> | null = null;
 let latestLaser: LaserStroke[] = [];
+let localSelection: string[] = [];
+let lastSelectionSent = 0;
+let selectionTrailingTimer: ReturnType<typeof setTimeout> | null = null;
 
 const CURSOR_THROTTLE_MS = 40;
 const VIEWPORT_THROTTLE_MS = 70;
 const LASER_THROTTLE_MS = 40;
+const SELECTION_THROTTLE_MS = 60;
 
 // Previous peer objects keyed by clientId. Awareness fires `change` on any
 // peer's update (cursors publish at 25 Hz), but most peers are unchanged each
@@ -71,6 +75,7 @@ function publishPeers(a: Awareness): void {
     const textSelection =
       (state.textSelection as TextSelectionPresence | null) ?? null;
     const laser = (state.laser as LaserStroke[] | null) ?? null;
+    const selection = (state.selection as string[] | null) ?? null;
     const prev = prevPeers.get(clientId);
     const peer: PeerPresence =
       prev &&
@@ -84,7 +89,8 @@ function publishPeers(a: Awareness): void {
       prev.following === following &&
       prev.latencyMs === latencyMs &&
       prev.textSelection === textSelection &&
-      prev.laser === laser
+      prev.laser === laser &&
+      prev.selection === selection
         ? prev
         : {
             clientId,
@@ -99,6 +105,7 @@ function publishPeers(a: Awareness): void {
             latencyMs,
             textSelection,
             laser,
+            selection,
           };
     next.set(clientId, peer);
     peers.push(peer);
@@ -124,6 +131,10 @@ export function setActiveAwareness(next: Awareness | null): void {
   next.setLocalStateField('following', localFollowing);
   next.setLocalStateField('latencyMs', localLatencyMs);
   next.setLocalStateField('textSelection', localTextSelection);
+  next.setLocalStateField(
+    'selection',
+    localSelection.length > 0 ? localSelection : null,
+  );
   publishPeers(next);
 }
 
@@ -192,6 +203,43 @@ export function setLocalLaser(strokes: LaserStroke[]): void {
     laserTrailingTimer = null;
     sendLaser();
   }, LASER_THROTTLE_MS - elapsed);
+}
+
+function sendSelection(): void {
+  if (!awareness) return;
+  lastSelectionSent = performance.now();
+  awareness.setLocalStateField(
+    'selection',
+    localSelection.length > 0 ? localSelection : null,
+  );
+}
+
+/**
+ * Publish which shapes this client has selected so peers can outline them.
+ * Marquee drags restate the selection every frame, so sends are throttled with
+ * a trailing flush — the same treatment as laser strokes.
+ */
+export function setLocalSelection(ids: string[]): void {
+  // Marquee drags re-emit an identical selection on most frames; skip those
+  // outright so an unchanged selection never wakes every peer's render.
+  if (
+    ids.length === localSelection.length &&
+    ids.every((id, i) => id === localSelection[i])
+  ) {
+    return;
+  }
+  localSelection = ids;
+  if (!awareness) return;
+  if (selectionTrailingTimer !== null) return;
+  const elapsed = performance.now() - lastSelectionSent;
+  if (elapsed >= SELECTION_THROTTLE_MS) {
+    sendSelection();
+    return;
+  }
+  selectionTrailingTimer = setTimeout(() => {
+    selectionTrailingTimer = null;
+    sendSelection();
+  }, SELECTION_THROTTLE_MS - elapsed);
 }
 
 export function setLocalTextSelection(

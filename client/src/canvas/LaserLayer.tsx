@@ -9,7 +9,7 @@ import {
   type LaserStroke,
 } from './use-laser-store';
 
-const LASER_COLOR = '#ff2d55';
+const LASER_COLOR = 'var(--color-destructive)';
 
 function pathFor(points: Point[]): string {
   const first = points[0];
@@ -48,40 +48,53 @@ export function LaserLayer({ camera }: { camera: Camera }) {
     ),
   ];
 
+  // First-seen "done" timestamps, pruned once strokes disappear.
+  const fadeStart = useRef(new Map<string, number>());
+  // The clock the fade is measured against, advanced by the rAF loop below.
+  const [now, setNow] = useState(() => performance.now());
+
+  // Stamp newly-finished strokes and drop vanished ones. This has to happen in
+  // an effect rather than the render body: React can start a render and discard
+  // it, and a discarded render must not be able to set a fade's origin (which
+  // would make the stroke fade from a moment that never displayed) or clear one
+  // the committed tree still needs (restarting a fade that was underway).
+  useEffect(() => {
+    const seen = performance.now();
+    const live = new Set<string>();
+    for (const stroke of strokes) {
+      live.add(stroke.id);
+      if (stroke.done && !fadeStart.current.has(stroke.id)) {
+        fadeStart.current.set(stroke.id, seen);
+      }
+    }
+    for (const strokeId of fadeStart.current.keys()) {
+      if (!live.has(strokeId)) fadeStart.current.delete(strokeId);
+    }
+  });
+
   // Re-render each frame while any stroke is fading so opacity animates.
   const hasFading = strokes.some((s) => s.done);
-  const [, setTick] = useState(0);
   useEffect(() => {
     if (!hasFading) return;
     let raf = requestAnimationFrame(function loop() {
-      setTick((t) => t + 1);
+      setNow(performance.now());
       raf = requestAnimationFrame(loop);
     });
     return () => cancelAnimationFrame(raf);
   }, [hasFading]);
 
-  // First-seen "done" timestamps, pruned once strokes disappear.
-  const fadeStart = useRef(new Map<string, number>());
-  const liveIds = new Set(strokes.map((s) => s.id));
-  for (const strokeId of fadeStart.current.keys()) {
-    if (!liveIds.has(strokeId)) fadeStart.current.delete(strokeId);
-  }
-
   if (strokes.length === 0) return null;
 
-  const now = performance.now();
   return (
     <svg className="pointer-events-none absolute inset-0 h-full w-full">
       <g transform={cameraToTransform(camera)}>
         {strokes.map((stroke) => {
           let opacity = 1;
           if (stroke.done) {
-            let start = fadeStart.current.get(stroke.id);
-            if (start === undefined) {
-              start = now;
-              fadeStart.current.set(stroke.id, start);
-            }
-            opacity = 1 - (now - start) / LASER_FADE_MS;
+            // Not yet stamped = this is the first render since it finished, so
+            // the fade has not started: full opacity, same as stamping `now`.
+            const start = fadeStart.current.get(stroke.id);
+            opacity = start === undefined ? 1 : 1 - (now - start) / LASER_FADE_MS;
             if (opacity <= 0) return null;
           }
           const d = pathFor(stroke.points);

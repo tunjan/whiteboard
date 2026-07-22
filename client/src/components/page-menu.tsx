@@ -26,7 +26,7 @@ import {
 import { Button } from '@/components/ui/button';
 import {
   AlertDialog,
-  AlertDialogClose,
+  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
@@ -383,7 +383,7 @@ export function PageMenu() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
             <Button
               variant="destructive"
               onClick={() => {
@@ -700,7 +700,7 @@ function PageNameForm({
       }}
     >
       <FieldGroup className="gap-2">
-        <Field invalid={invalid} data-invalid={invalid || undefined}>
+        <Field data-invalid={invalid || undefined}>
           <FieldLabel htmlFor={inputId}>{label}</FieldLabel>
           <Input
             ref={inputRef}
@@ -715,7 +715,7 @@ function PageNameForm({
             className="h-9"
           />
           {invalid ? (
-            <FieldError id={errorId} match>
+            <FieldError id={errorId}>
               {error ?? 'Enter a page name.'}
             </FieldError>
           ) : null}

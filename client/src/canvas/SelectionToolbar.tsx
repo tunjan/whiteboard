@@ -9,11 +9,11 @@ import {
   Group,
   ImageDown,
   Lock,
-  LockOpen,
   MoreHorizontal,
   SendToBack,
   Trash2,
   Ungroup,
+  Unlock,
 } from 'lucide-react';
 import type { Camera } from './camera';
 import { worldToScreen } from './camera';
@@ -166,7 +166,7 @@ export function SelectionToolbar({ camera }: SelectionToolbarProps) {
           role="toolbar"
           aria-label="Selection actions"
           className={cn(
-            'touch-targets flex h-11 items-center gap-1.5 p-1.5 shadow-hover',
+            'touch-targets flex h-11 items-center gap-1.5 p-1.5',
             'motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95 motion-safe:duration-200 motion-safe:ease-[var(--ease-out-expo)]',
             below
               ? 'origin-top motion-safe:slide-in-from-top-1'
@@ -203,7 +203,7 @@ export function SelectionToolbar({ camera }: SelectionToolbarProps) {
               active={allLocked}
               onClick={() => setLocked(!allLocked)}
             >
-              {allLocked ? <Lock /> : <LockOpen />}
+              {allLocked ? <Lock /> : <Unlock />}
             </IconButton>
             <IconButton
               label="Delete"
@@ -234,7 +234,7 @@ export function SelectionToolbar({ camera }: SelectionToolbarProps) {
                     />
                   }
                 >
-                  <MoreHorizontal />
+                  <MoreHorizontal className="size-5" />
                 </TooltipTrigger>
                 <TooltipContent side="top">
                   <span>More actions</span>

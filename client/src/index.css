@@ -3,13 +3,14 @@
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
 @import "@fontsource-variable/geist-mono";
+@import "@fontsource-variable/caveat";
 
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
     --font-display: var(--font-sans);
-    --font-heading: var(--font-display);
-    --font-sans: 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
+    --font-heading: var(--font-sans);
+    --font-sans: 'Geist Variable', sans-serif;
     --font-mono: 'Geist Mono Variable', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     --shadow-hover: var(--shadow-ui-hover);
     --shadow-floating: var(--shadow-ui-floating);
@@ -61,6 +62,7 @@
     --color-bg-emphasis: var(--bg-emphasis);
     --color-bg-inverted: var(--bg-inverted);
     --color-border-muted: var(--border-muted);
+    --color-border-swatch: var(--border-swatch);
     --color-border-subtle: var(--border-subtle);
     --color-border-default: var(--border-default);
     --color-border-emphasis: var(--border-emphasis);
@@ -91,10 +93,13 @@
     --color-error-foreground: var(--content-error);
     --ease-out-expo: cubic-bezier(0.23, 1, 0.32, 1);
     /* Radius hierarchy: micro, compact control, control, surface, dialog. */
-    --radius-sm: 4px;
-    --radius-md: 6px;
-    --radius-lg: 8px;
-    --radius-xl: 12px;
+    /* Control geometry follows the instruments: 8px controls nested in 12px
+     * groups inside 14px surfaces, each concentric with the 1px rings and 4px
+     * padding between them. */
+    --radius-sm: 6px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+    --radius-xl: 14px;
     --radius-2xl: 16px;
     --radius-3xl: 20px;
     --radius-4xl: 24px;
@@ -133,6 +138,12 @@
     --bg-emphasis: oklch(0.925 0 0);
     --bg-inverted: oklch(0.145 0 0);
     --border-muted: oklch(0.94 0 0);
+    /* Ring around a colour swatch. A swatch button's only content is the colour
+     * itself, so this ring is what identifies it as a control — WCAG 1.4.11
+     * wants 3:1 against the surface behind it, which --border-muted misses by a
+     * wide margin. Kept separate from --border-muted so hairline separators can
+     * stay quiet. */
+    --border-swatch: oklch(0.60 0 0);
     --border-subtle: oklch(0.90 0 0);
     --border-default: oklch(0.80 0 0);
     --border-emphasis: oklch(0.66 0 0);
@@ -163,37 +174,40 @@
     --panel-close-dur: 150ms;
     --panel-translate-y: 8px;
     --panel-ease: cubic-bezier(0.23, 1, 0.32, 1);
-    --background: var(--bg-muted);
-    --foreground: var(--content-emphasis);
-    --card: var(--bg-default);
-    --card-foreground: var(--content-emphasis);
-    --popover: var(--bg-default);
-    --popover-foreground: var(--content-emphasis);
-    --primary: var(--bg-inverted);
-    --primary-foreground: var(--content-inverted);
-    --secondary: var(--bg-default);
-    --secondary-foreground: var(--content-emphasis);
-    --muted: var(--bg-subtle);
-    --muted-foreground: var(--content-subtle);
+    --background: oklch(1 0 0);
+    --foreground: oklch(0.141 0.005 285.823);
+    --card: oklch(1 0 0);
+    --card-foreground: oklch(0.141 0.005 285.823);
+    --popover: oklch(1 0 0);
+    --popover-foreground: oklch(0.141 0.005 285.823);
+    --primary: oklch(0.21 0.006 285.885);
+    --primary-foreground: oklch(0.985 0 0);
+    --secondary: oklch(0.967 0.001 286.375);
+    --secondary-foreground: oklch(0.21 0.006 285.885);
+    --muted: oklch(0.967 0.001 286.375);
+    --muted-foreground: oklch(0.552 0.016 285.938);
     --faint-foreground: var(--content-muted);
-    --accent: var(--bg-subtle);
-    --accent-foreground: var(--content-emphasis);
-    --destructive: var(--content-error);
+    --accent: oklch(0.967 0.001 286.375);
+    --accent-foreground: oklch(0.21 0.006 285.885);
+    --destructive: oklch(0.577 0.245 27.325);
     --link: var(--content-info);
-    --border: var(--border-subtle);
-    --input: var(--border-subtle);
-    --ring: var(--border-emphasis);
+    --border: oklch(0.92 0.004 286.32);
+    --input: oklch(0.92 0.004 286.32);
+    --ring: oklch(0.705 0.015 286.067);
     --border-control: oklch(0.65 0 0);
     --border-control-hover: oklch(0.55 0 0);
     --border-control-active: oklch(0.45 0 0);
     --disabled-surface: oklch(0.97 0 0);
     --disabled-foreground: oklch(0.58 0 0);
-    --chart-1: var(--content-info);
-    --chart-2: oklch(0.58 0.16 300);
-    --chart-3: oklch(0.56 0.12 185);
-    --chart-4: var(--content-subtle);
-    --chart-5: var(--border-default);
-    --radius: var(--radius-lg);
+    --chart-1: oklch(0.871 0.006 286.286);
+    --chart-2: oklch(0.552 0.016 285.938);
+    --chart-3: oklch(0.442 0.017 285.786);
+    --chart-4: oklch(0.37 0.013 285.805);
+    --chart-5: oklch(0.274 0.006 286.033);
+    /* Single source of truth for radius: everything else (the sm/md/lg/xl
+     * scale above, and any component that reaches for --radius directly)
+     * derives from this app's own control-radius tier. */
+    --radius: 0.625rem;
     /* Blue is reserved for stateful selection and active chrome, not decoration. */
     --accent-brand: var(--content-info);
     --accent-brand-foreground: var(--content-on-color);
@@ -203,14 +217,14 @@
     --grid-major: color-mix(in oklch, var(--foreground) 14%, transparent);
     --grid-dot: color-mix(in oklch, var(--foreground) 80%, transparent);
     --grid-axis: color-mix(in oklch, var(--foreground) 52%, transparent);
-    --sidebar: var(--bg-muted);
-    --sidebar-foreground: var(--content-emphasis);
-    --sidebar-primary: var(--bg-inverted);
-    --sidebar-primary-foreground: var(--content-inverted);
-    --sidebar-accent: var(--bg-subtle);
-    --sidebar-accent-foreground: var(--content-emphasis);
-    --sidebar-border: var(--border-subtle);
-    --sidebar-ring: var(--border-emphasis);
+    --sidebar: oklch(0.985 0 0);
+    --sidebar-foreground: oklch(0.141 0.005 285.823);
+    --sidebar-primary: oklch(0.21 0.006 285.885);
+    --sidebar-primary-foreground: oklch(0.985 0 0);
+    --sidebar-accent: oklch(0.967 0.001 286.375);
+    --sidebar-accent-foreground: oklch(0.21 0.006 285.885);
+    --sidebar-border: oklch(0.92 0.004 286.32);
+    --sidebar-ring: oklch(0.705 0.015 286.067);
 }
 
 .dark {
@@ -221,6 +235,7 @@
     --bg-emphasis: oklch(0.28 0 0);
     --bg-inverted: oklch(0.985 0 0);
     --border-muted: oklch(1 0 0 / 0.08);
+    --border-swatch: oklch(0.58 0 0);
     --border-subtle: oklch(1 0 0 / 0.14);
     --border-default: oklch(1 0 0 / 0.24);
     --border-emphasis: oklch(1 0 0 / 0.38);
@@ -230,22 +245,22 @@
     --content-muted: oklch(0.56 0 0);
     --content-inverted: oklch(0.145 0 0);
     --content-on-color: oklch(0.985 0 0);
-    --background: var(--bg-muted);
-    --foreground: var(--content-emphasis);
-    --card: var(--bg-default);
-    --card-foreground: var(--content-emphasis);
-    --popover: var(--bg-default);
-    --popover-foreground: var(--content-emphasis);
-    --primary: var(--bg-inverted);
-    --primary-foreground: var(--content-inverted);
-    --secondary: var(--bg-default);
-    --secondary-foreground: var(--content-emphasis);
-    --muted: var(--bg-subtle);
-    --muted-foreground: var(--content-subtle);
+    --background: oklch(0.141 0.005 285.823);
+    --foreground: oklch(0.985 0 0);
+    --card: oklch(0.21 0.006 285.885);
+    --card-foreground: oklch(0.985 0 0);
+    --popover: oklch(0.21 0.006 285.885);
+    --popover-foreground: oklch(0.985 0 0);
+    --primary: oklch(0.92 0.004 286.32);
+    --primary-foreground: oklch(0.21 0.006 285.885);
+    --secondary: oklch(0.274 0.006 286.033);
+    --secondary-foreground: oklch(0.985 0 0);
+    --muted: oklch(0.274 0.006 286.033);
+    --muted-foreground: oklch(0.705 0.015 286.067);
     --faint-foreground: var(--content-muted);
-    --accent: var(--bg-subtle);
-    --accent-foreground: var(--content-emphasis);
-    --destructive: oklch(0.70 0.18 28);
+    --accent: oklch(0.274 0.006 286.033);
+    --accent-foreground: oklch(0.985 0 0);
+    --destructive: oklch(0.704 0.191 22.216);
     --link: oklch(0.72 0.14 255);
     --accent-brand: var(--link);
     --accent-brand-foreground: var(--content-inverted);
@@ -255,31 +270,31 @@
     --grid-major: color-mix(in oklch, var(--foreground) 18%, transparent);
     --grid-dot: color-mix(in oklch, var(--foreground) 80%, transparent);
     --grid-axis: color-mix(in oklch, var(--foreground) 58%, transparent);
-    --border: var(--border-subtle);
-    --input: var(--border-subtle);
-    --ring: var(--border-emphasis);
+    --border: oklch(1 0 0 / 10%);
+    --input: oklch(1 0 0 / 15%);
+    --ring: oklch(0.552 0.016 285.938);
     --border-control: oklch(0.50 0 0);
     --border-control-hover: oklch(0.60 0 0);
     --border-control-active: oklch(0.72 0 0);
     --disabled-surface: oklch(0.20 0 0);
     --disabled-foreground: oklch(0.55 0 0);
-    --chart-1: var(--link);
-    --chart-2: oklch(0.72 0.13 300);
-    --chart-3: oklch(0.72 0.10 185);
-    --chart-4: var(--content-subtle);
-    --chart-5: var(--border-default);
+    --chart-1: oklch(0.871 0.006 286.286);
+    --chart-2: oklch(0.552 0.016 285.938);
+    --chart-3: oklch(0.442 0.017 285.786);
+    --chart-4: oklch(0.37 0.013 285.805);
+    --chart-5: oklch(0.274 0.006 286.033);
     --accent-blue: var(--link);
     --neutral-wash: color-mix(in srgb, var(--content-emphasis) 8%, transparent);
     --shadow-ui-hover: 0 1px 2px oklch(0 0 0 / 0.28);
     --shadow-ui-floating: 0 12px 32px oklch(0 0 0 / 0.36), 0 1px 2px oklch(0 0 0 / 0.24);
-    --sidebar: var(--bg-default);
-    --sidebar-foreground: var(--content-emphasis);
-    --sidebar-primary: var(--bg-inverted);
-    --sidebar-primary-foreground: var(--content-inverted);
-    --sidebar-accent: var(--bg-subtle);
-    --sidebar-accent-foreground: var(--content-emphasis);
-    --sidebar-border: var(--border-subtle);
-    --sidebar-ring: var(--border-emphasis);
+    --sidebar: oklch(0.21 0.006 285.885);
+    --sidebar-foreground: oklch(0.985 0 0);
+    --sidebar-primary: oklch(0.488 0.243 264.376);
+    --sidebar-primary-foreground: oklch(0.985 0 0);
+    --sidebar-accent: oklch(0.274 0.006 286.033);
+    --sidebar-accent-foreground: oklch(0.985 0 0);
+    --sidebar-border: oklch(1 0 0 / 10%);
+    --sidebar-ring: oklch(0.552 0.016 285.938);
 }
 
 @layer base {
@@ -287,7 +302,7 @@
     @apply border-border outline-ring/50;
     }
   body {
-    @apply bg-background text-foreground text-sm;
+    @apply text-sm bg-background text-foreground;
     font-synthesis: none;
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
@@ -600,18 +615,74 @@
   }
 
   /* Surfaces and overlays */
+
+  /*
+   * The floating-chrome ramp: toolbar, panels, menus, popovers, and dialogs
+   * all carry it, so descendants (a `bg-bg-muted` hover, a `--border-control`
+   * field border) resolve against the surface instead of the page. Values
+   * alias the shadcn popover/muted/border tokens directly, so surfaces track
+   * the active theme automatically instead of keeping their own light/dark
+   * pair.
+   */
+  .ui-surface,
+  .ui-popup,
+  .ui-dialog-surface {
+    --surface-fill: var(--popover);
+    --bg-default: var(--popover);
+    --bg-muted: var(--muted);
+    --bg-subtle: var(--muted);
+    --bg-emphasis: var(--accent);
+    --border-muted: var(--border);
+    --border-subtle: var(--border);
+    --border-control: var(--input);
+    --border-control-hover: var(--ring);
+    /* Concentric with the surface: the fill's inner edge is 13px (14px outer
+     * less the 1px ring), less the 6px of padding around a control. */
+    --surface-control-radius: 6px;
+    color: var(--popover-foreground);
+  }
+
+  /*
+   * Vanilla shadcn floating-surface treatment — a hairline ring plus a
+   * moderate lift, matching Popover/DropdownMenu/Dialog content.
+   */
+  .ui-surface,
+  .ui-popup,
+  .ui-dialog-surface {
+    border-radius: var(--radius-xl);
+    background: var(--surface-fill);
+    box-shadow:
+      0 0 0 1px color-mix(in oklch, var(--foreground) 16%, transparent),
+      var(--shadow-ui-floating);
+  }
+
   .ui-surface {
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-md);
-    background: var(--bg-muted);
-    color: var(--content-emphasis);
     user-select: none;
-    --surface-control-radius: var(--radius-sm);
   }
 
   .ui-surface-pill {
     border-radius: 9999px;
     --surface-control-radius: 9999px;
+  }
+
+  /*
+   * Floating instruments (the bottom toolbar, the style panel) share the
+   * surface ramp above. The shell stays visually inert — layout and motion
+   * only — so the tray is the only thing that paints the ring and lift,
+   * even when the shell is itself a `Surface`.
+   */
+  .ui-instrument-shell {
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .ui-instrument-tray {
+    /* Concentric with the shell: the outer radius less the 1px ring. */
+    border-radius: calc(var(--radius-xl) - 1px);
+    background: var(--surface-fill);
+    box-shadow:
+      0 0 0 1px color-mix(in oklch, var(--foreground) 16%, transparent),
+      var(--shadow-ui-floating);
   }
 
   .ui-overlay {
@@ -620,20 +691,10 @@
 
   .ui-popup,
   .ui-dialog-surface {
-    border: 1px solid var(--border-subtle);
-    background: var(--bg-default);
-    color: var(--content-default);
-    box-shadow: var(--shadow-ui-floating);
     outline: none;
   }
 
-  /* Compact floating surface (menus, popovers) — one tier below dialogs. */
-  .ui-popup {
-    border-radius: var(--radius-lg);
-  }
-
   .ui-dialog-surface {
-    border-radius: var(--radius-xl);
     padding: var(--ui-dialog-padding);
     font-size: 14px;
   }
@@ -765,13 +826,15 @@
   }
 
   /* Stateful controls */
+  /* A 4px bed around the items: 11px outer, less the 1px border and 4px of
+     padding, lands on the 6px control radius. */
   .ui-toggle-group {
     display: flex;
     width: 100%;
     border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-md);
+    border-radius: 11px;
     background: var(--bg-muted);
-    padding: 2px;
+    padding: 4px;
   }
 
   .ui-toggle-item {
@@ -782,7 +845,7 @@
     align-items: center;
     justify-content: center;
     border: 1px solid transparent;
-    border-radius: var(--radius-sm);
+    border-radius: var(--surface-control-radius, 8px);
     color: var(--content-subtle);
     font-size: 12px;
     line-height: 16px;

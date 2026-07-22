@@ -1,6 +1,11 @@
 // Registers all tools. Importing this module (once) populates the tool
 // registry, which the toolbar and keyboard routing iterate.
-import { ArrowUpRight, Circle, Slash, Square } from 'lucide-react';
+import {
+  ArrowUpRight,
+  Circle,
+  Slash,
+  Square,
+} from 'lucide-react';
 import { toolRegistry } from './tool-registry';
 import { createSelectTool } from './select-tool';
 import { createHandTool } from './hand-tool';

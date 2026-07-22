@@ -1,7 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { RectangleShape, TextShape } from '@whiteboard/shared';
+import type {
+  DrawPoint,
+  DrawShape,
+  RectangleShape,
+  TextShape,
+} from '@whiteboard/shared';
 import './shapes/register';
-import { editor, loadBoard, useDocumentStore } from './use-document-store';
+import {
+  documentByteSize,
+  editor,
+  loadBoard,
+  useDocumentStore,
+} from './use-document-store';
 
 function rect(id: string, index: string): RectangleShape {
   return {
@@ -35,6 +45,26 @@ function text(id: string, value: string): TextShape {
     },
   };
 }
+
+function draw(id: string, points: DrawPoint[]): DrawShape {
+  return {
+    id,
+    type: 'draw',
+    x: 0,
+    y: 0,
+    rotation: 0,
+    index: 'a1',
+    props: { points, isClosed: false, color: '#000000', size: 4 },
+  };
+}
+
+const stroke = (n: number): DrawPoint[] =>
+  Array.from({ length: n }, (_, i) => ({ x: i, y: i * 2, pressure: 0.5 }));
+
+const drawnPoints = (id: string): DrawPoint[] => {
+  const shape = editor.getShape(id);
+  return shape?.type === 'draw' ? shape.props.points : [];
+};
 
 const ids = () => useDocumentStore.getState().shapes.map((s) => s.id);
 
@@ -92,5 +122,59 @@ describe('document store snapshot', () => {
     if (shape?.type !== 'text') return;
     expect(shape.props.text).toBe('Hello world');
     expect(shape.props.align).toBe('middle');
+  });
+});
+
+describe('ink points storage', () => {
+  const N = 200;
+
+  it('grows linearly, not quadratically, as a stroke is drawn', () => {
+    // The draw tool rewrites the full point array once per frame. Stored inside
+    // `props`, each write re-encoded the whole array, so a stroke cost O(n²)
+    // document bytes. As a Y.Array each write appends only the new points.
+    const baseline = documentByteSize();
+    editor.createShape(draw('live', []));
+    const points: DrawPoint[] = [];
+    for (const p of stroke(N)) {
+      points.push(p);
+      editor.updateShape('live', { props: { points: [...points] } });
+    }
+    const incremental = documentByteSize() - baseline;
+
+    // Same stroke, written once — the floor for storing N points at all.
+    const single = documentByteSize();
+    editor.createShape(draw('oneshot', stroke(N)));
+    const oneShot = documentByteSize() - single;
+
+    expect(drawnPoints('live')).toEqual(stroke(N));
+    // Quadratic growth would put this ratio near N/2 (~100x). Appending keeps
+    // it near 1x, plus per-insert framing overhead.
+    expect(incremental / oneShot).toBeLessThan(4);
+  });
+
+  it('replaces the array when the new points are not an extension', () => {
+    // What commit-time simplification does: rewrite the stroke with fewer points.
+    editor.createShape(draw('s', stroke(N)));
+    const simplified = stroke(N).filter((_, i) => i % 5 === 0);
+    editor.updateShape('s', { props: { points: simplified } });
+    expect(drawnPoints('s')).toEqual(simplified);
+  });
+
+  it('round-trips an append followed by an unrelated prop change', () => {
+    editor.createShape(draw('s', stroke(3)));
+    editor.updateShape('s', { props: { points: stroke(6) } });
+    editor.updateShape('s', { props: { color: '#ff0000' } });
+    const shape = editor.getShape('s');
+    expect(shape?.type).toBe('draw');
+    if (shape?.type !== 'draw') return;
+    expect(shape.props.points).toEqual(stroke(6));
+    expect(shape.props.color).toBe('#ff0000');
+  });
+
+  it('handles an empty stroke and a single point', () => {
+    editor.createShape(draw('empty', []));
+    expect(drawnPoints('empty')).toEqual([]);
+    editor.updateShape('empty', { props: { points: stroke(1) } });
+    expect(drawnPoints('empty')).toEqual(stroke(1));
   });
 });

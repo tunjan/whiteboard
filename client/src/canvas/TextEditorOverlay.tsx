@@ -5,6 +5,7 @@ import type { Camera } from './camera';
 import { worldToScreen } from './camera';
 import {
   fontStack,
+  fontWeight,
   layoutTextProps,
   textLineHeight,
 } from './shapes/text-measure';
@@ -152,6 +153,7 @@ export function TextEditorOverlay({
         minHeight: layout.height * zoom,
         boxSizing: 'border-box',
         fontFamily: fontStack(shape.props.fontFamily),
+        fontWeight: fontWeight(shape.props.fontWeight),
         fontSize,
         lineHeight: textLineHeight(shape.props),
         textAlign:

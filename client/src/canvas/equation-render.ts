@@ -32,7 +32,39 @@ interface EquationRenderState {
 }
 
 const renderCache = new Map<string, EquationRender>();
+/**
+ * Bound on typeset expressions held in memory.
+ *
+ * The equation panel typesets on every keystroke so one document patch can
+ * carry both the source and its measured geometry — which means each abandoned
+ * prefix of an expression being edited ("\fra", "\frac", "\frac{") leaves its
+ * own multi-kilobyte SVG string behind. Unbounded, a long editing session grew
+ * this without limit.
+ *
+ * Eviction is safe because an entry is a pure function of its LaTeX: a miss
+ * renders the placeholder and re-typesets (see `equationUtil.Component`). The
+ * limit must stay comfortably above the number of equations that can be on
+ * screen at once, or visible shapes would evict each other and re-typeset in a
+ * loop; a few hundred distinct expressions in one viewport is far beyond any
+ * real document.
+ */
+const RENDER_CACHE_MAX = 512;
 const inFlight = new Map<string, Promise<EquationRender>>();
+
+/** Mark `latex` as most recently used. Map iterates in insertion order, so
+ *  re-inserting moves it to the back of the eviction queue. */
+function touch(latex: string, entry: EquationRender): void {
+  renderCache.delete(latex);
+  renderCache.set(latex, entry);
+}
+
+function evictIfFull(): void {
+  while (renderCache.size >= RENDER_CACHE_MAX) {
+    const oldest = renderCache.keys().next().value;
+    if (oldest === undefined) return;
+    renderCache.delete(oldest);
+  }
+}
 let runtime: MathJaxRuntime | null = null;
 let loadPromise: Promise<void> | null = null;
 
@@ -116,14 +148,27 @@ export function ensureMathJax(): Promise<void> {
   return loadPromise;
 }
 
-/** Synchronously read an already-typeset expression. */
+/**
+ * Synchronously read an already-typeset expression.
+ *
+ * Reading also refreshes the entry's recency, which is what keeps the
+ * expressions currently on screen (re-read on every render) ahead of abandoned
+ * editing prefixes in the eviction order. This mutates only the cache's
+ * internal ordering — never the entry, and never the store version that drives
+ * re-rendering — so it stays safe to call from a component body.
+ */
 export function getEquationRender(latex: string): EquationRender | undefined {
-  return renderCache.get(latex);
+  const entry = renderCache.get(latex);
+  if (entry) touch(latex, entry);
+  return entry;
 }
 
 function convertAndCache(latex: string): EquationRender {
   const cached = renderCache.get(latex);
-  if (cached) return cached;
+  if (cached) {
+    touch(latex, cached);
+    return cached;
+  }
   if (!runtime) throw new Error('MathJax is not ready');
 
   let entry: EquationRender;
@@ -156,6 +201,7 @@ function convertAndCache(latex: string): EquationRender {
     entry = { error: errorMessage(error) };
   }
 
+  evictIfFull();
   renderCache.set(latex, entry);
   publishCacheChange();
   return entry;
@@ -167,7 +213,10 @@ function convertAndCache(latex: string): EquationRender {
  */
 export function typesetEquation(latex: string): Promise<EquationRender> {
   const cached = renderCache.get(latex);
-  if (cached) return Promise.resolve(cached);
+  if (cached) {
+    touch(latex, cached);
+    return Promise.resolve(cached);
+  }
   if (runtime) return Promise.resolve(convertAndCache(latex));
   return ensureMathJax().then(() => convertAndCache(latex));
 }

@@ -1,15 +1,15 @@
 import { useState } from 'react';
 import {
   ArrowLeft,
-  Cog,
   Download,
   EllipsisVertical,
   Moon,
   NotebookPen,
+  Settings,
   Sun,
 } from 'lucide-react';
 import { exportBoardToPng } from '@/canvas/export-png';
-import type { Identity } from '@/collab/identity';
+import { outlineColor, textOnColor, type Identity } from '@/collab/identity';
 import { jumpToPeerViewport } from '@/collab/presence';
 import {
   type PeerPresence,
@@ -18,6 +18,7 @@ import {
 import { BoardNotesDialog } from '@/components/board-notes-dialog';
 import { AnimationControls } from '@/components/animation-controls';
 import { ConnectionIndicator } from '@/components/connection-indicator';
+import { DocumentsPanel } from '@/components/documents-panel';
 import { FollowControls } from '@/components/follow-controls';
 import { MusicPlayer } from '@/music/music-player';
 import { PageMenu } from '@/components/page-menu';
@@ -64,8 +65,12 @@ function ParticipantBadge({
 }) {
   return (
     <span
-      className="flex size-7 shrink-0 items-center justify-center rounded-full border-2 bg-bg-default text-[10px] font-semibold text-content-emphasis"
-      style={{ borderColor: color }}
+      className="flex size-7 shrink-0 items-center justify-center rounded-full border-2 text-[10px] font-semibold"
+      style={{
+        backgroundColor: color,
+        borderColor: outlineColor(color),
+        color: textOnColor(color),
+      }}
     >
       {name.trim().charAt(0).toUpperCase() || '?'}
     </span>
@@ -264,7 +269,7 @@ export function BoardChrome({
           >
             <DropdownMenuGroup>
               <DropdownMenuItem onClick={() => setSettingsOpen(true)}>
-                <Cog />
+                <Settings />
                 Settings
               </DropdownMenuItem>
               {identity?.isTutor && (
@@ -380,6 +385,7 @@ export function BoardChrome({
         <MusicPlayer identity={identity} />
         <FollowControls identity={identity} />
         <AnimationControls identity={identity} />
+        <DocumentsPanel identity={identity} />
         <ShareButton />
       </Surface>
 

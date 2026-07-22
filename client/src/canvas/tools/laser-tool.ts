@@ -1,6 +1,6 @@
-import { WandSparkles } from 'lucide-react';
 import { genId, type Point } from '@whiteboard/shared';
 import { useLaserStore } from '../use-laser-store';
+import { LaserToolIcon } from './laser-tool-icon';
 import type { Tool, ToolPointerInfo } from './types';
 
 /**
@@ -17,7 +17,10 @@ export function createLaserTool(): Tool {
     label: 'Laser',
     hotkey: 'k',
     cursor: 'crosshair',
-    icon: WandSparkles,
+    icon: LaserToolIcon,
+    // Accumulates a polyline; the distance gate below already bounds how many
+    // of these samples become points.
+    wantsCoalescedSamples: true,
 
     onPointerDown(info: ToolPointerInfo) {
       if (info.button !== 0) return;

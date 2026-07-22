@@ -26,4 +26,6 @@ export const env = {
   blobDir: process.env.BLOB_DIR ?? 'data/blobs',
   /** Directory containing local audio files grouped by playlist folders. */
   musicDir: process.env.MUSIC_DIR ?? 'data/music',
+  /** Directory where board repository documents are stored (content-addressed). */
+  docDir: process.env.DOC_DIR ?? 'data/docs',
 } as const;

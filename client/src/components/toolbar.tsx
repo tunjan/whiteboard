@@ -4,9 +4,9 @@ import {
   ChevronUp,
   ImagePlus,
   Lock,
-  LockOpen,
-  MonitorPlay,
+  Presentation,
   Shapes,
+  Unlock as LockOpen,
 } from 'lucide-react';
 import type { PolygonKind } from '@whiteboard/shared';
 import { YouTubeDialog } from '@/components/youtube-dialog';
@@ -25,6 +25,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { Surface } from '@/components/ui/surface';
+import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
 import { pickAndPlaceImages } from '@/canvas/place-image';
 import { polygonPointsForBox } from '@/canvas/shapes/polygon-geometry';
@@ -48,9 +49,8 @@ const GROUP_2 = ['draw', 'eraser', 'laser'];
 const GROUP_3 = ['text', 'graph', 'equation', 'comment'];
 const GROUP_4 = ['rectangle', 'ellipse', 'arrow'];
 const ACTIVE_TOOL_CLASS =
-  'border-transparent bg-bg-inverted text-content-inverted hover:bg-bg-inverted hover:text-content-inverted';
-const ACTIVE_UTILITY_CLASS =
-  'bg-bg-muted text-content-emphasis hover:bg-bg-muted hover:text-content-emphasis';
+  'border-transparent bg-accent text-accent-foreground hover:bg-accent hover:text-accent-foreground';
+const ROW_CLASS = 'flex shrink-0 items-center gap-1.5';
 
 // Less-frequent shape tools folded into the Shapes overflow menu to keep the
 // bar to a single row on narrow (e.g. iPad) screens.
@@ -138,9 +138,7 @@ function MediaMenu() {
             render={
               <DropdownMenuTrigger
                 aria-label="Add media"
-                className={cn(
-                  buttonVariants({ variant: 'ghost', size: 'icon-lg' }),
-                )}
+                className={buttonVariants({ variant: 'ghost', size: 'icon-lg' })}
               />
             }
           >
@@ -157,7 +155,7 @@ function MediaMenu() {
               Add image
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => setOpen(true)}>
-              <MonitorPlay />
+              <Presentation />
               Add YouTube video
             </DropdownMenuItem>
           </DropdownMenuGroup>
@@ -180,7 +178,7 @@ function ToolLockButton() {
         aria-pressed={locked}
         className={cn(
           buttonVariants({ variant: 'ghost', size: 'icon-lg' }),
-          locked && ACTIVE_UTILITY_CLASS,
+          locked && ACTIVE_TOOL_CLASS,
         )}
       >
         <Icon />
@@ -189,7 +187,7 @@ function ToolLockButton() {
         <span>Tool Lock</span>
         <kbd
           data-slot="kbd"
-          className="bg-content-inverted/15 px-1 font-mono text-[10px] uppercase text-content-inverted"
+          className="bg-background/20 px-1 font-mono text-xs uppercase text-background"
         >
           q
         </kbd>
@@ -235,7 +233,7 @@ export function Toolbar() {
           {tool.hotkey ? (
             <kbd
               data-slot="kbd"
-              className="bg-content-inverted/15 px-1 font-mono text-[10px] uppercase text-content-inverted"
+              className="bg-background/20 px-1 font-mono text-xs uppercase text-background"
             >
               {tool.hotkey}
             </kbd>
@@ -258,48 +256,45 @@ export function Toolbar() {
           inert={hidden || playbackActive}
           aria-disabled={playbackActive}
           className={cn(
-            'touch-targets scrollbar-none flex h-12 w-max max-w-[calc(100vw-1rem)] origin-bottom flex-nowrap items-center gap-2 overflow-x-auto overflow-y-hidden p-1 shadow-hover transition-[opacity,transform] duration-150 ease-out motion-reduce:transition-none',
+            ROW_CLASS,
+            'scrollbar-none touch-targets min-w-0 w-max max-w-[calc(100vw-1rem)] origin-bottom flex-nowrap overflow-x-auto overflow-y-hidden p-1.5 transition-[opacity,transform] duration-150 ease-out motion-reduce:transition-none',
             hidden &&
               'pointer-events-none translate-y-[calc(100%+1rem)] opacity-0',
             playbackActive && 'pointer-events-none opacity-40',
           )}
         >
           {/* Group 1: Navigation & Selection */}
-          <div className="flex shrink-0 items-center gap-1">
-            {GROUP_1.map(renderToolButton)}
-          </div>
+          <div className={ROW_CLASS}>{GROUP_1.map(renderToolButton)}</div>
+
+          <Separator orientation="vertical" className="h-6" />
 
           {/* Group 2: Drawing & Annotation */}
-          <div className="flex shrink-0 items-center gap-1">
-            {GROUP_2.map(renderToolButton)}
-          </div>
+          <div className={ROW_CLASS}>{GROUP_2.map(renderToolButton)}</div>
+
+          <Separator orientation="vertical" className="h-6" />
 
           {/* Group 3: Text & Math */}
-          <div className="flex shrink-0 items-center gap-1">
-            {GROUP_3.map(renderToolButton)}
-          </div>
+          <div className={ROW_CLASS}>{GROUP_3.map(renderToolButton)}</div>
 
-          {/* Group 4: Basic Shapes */}
-          <div className="flex shrink-0 items-center gap-1">
+          <Separator orientation="vertical" className="h-6" />
+
+          {/* Group 4: Shapes & Media */}
+          <div className={ROW_CLASS}>
             {GROUP_4.map(renderToolButton)}
             <ShapesMenu active={SHAPES_MENU_TOOLS.includes(activeToolId)} />
-          </div>
-
-          {/* Group 5: Media */}
-          <div className="flex shrink-0 items-center gap-1">
             <MediaMenu />
           </div>
 
-          {/* Group 6: Utilities (tool lock + hide) */}
-          <div className="flex shrink-0 items-center gap-1">
+          <Separator orientation="vertical" className="h-6" />
+
+          {/* Group 5: Utilities (tool lock + hide) */}
+          <div className={ROW_CLASS}>
             <ToolLockButton />
             <Tooltip>
               <TooltipTrigger
                 onClick={() => setHidden(true)}
                 aria-label="Hide toolbar"
-                className={cn(
-                  buttonVariants({ variant: 'ghost', size: 'icon-lg' }),
-                )}
+                className={buttonVariants({ variant: 'ghost', size: 'icon-lg' })}
               >
                 <ChevronDown />
               </TooltipTrigger>
@@ -321,7 +316,7 @@ export function Toolbar() {
             tabIndex={hidden ? 0 : -1}
             className={cn(
               buttonVariants({ variant: 'ghost', size: 'icon-lg' }),
-              'touch-targets absolute bottom-0 left-1/2 -translate-x-1/2 rounded-md border border-border-subtle bg-bg-muted text-content-emphasis shadow-hover transition-[opacity,transform] duration-150 ease-out motion-reduce:transition-none',
+              'touch-targets absolute bottom-0 left-1/2 -translate-x-1/2 rounded-xl border transition-[opacity,transform] duration-150 ease-out motion-reduce:transition-none',
               hidden
                 ? 'translate-y-0 opacity-100'
                 : 'pointer-events-none translate-y-2 opacity-0',

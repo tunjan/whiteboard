@@ -1,5 +1,6 @@
 import { generateNKeysBetween } from 'fractional-indexing';
 import type { Editor } from './editor';
+import { jitterKeyBetween } from './order';
 
 /**
  * Reassign fractional indices to realize `newOrderIds` (ascending z-order),
@@ -29,7 +30,16 @@ function applyOrder(editor: Editor, newOrderIds: string[]): void {
     while (j < n && newOrderIds[j] !== oldOrderIds[j]) j++;
     const left = i > 0 ? keyById.get(newOrderIds[i - 1]!)! : null;
     const right = j < n ? keyById.get(newOrderIds[j]!)! : null;
-    const keys = generateNKeysBetween(left, right, j - i);
+    // Jitter only the lower bound, then fill the run inside it. Jittering each
+    // key independently would scramble the run's own order; this way the keys
+    // stay strictly ascending and strictly within (left, right), while two
+    // clients reordering concurrently land in different sub-ranges instead of
+    // generating identical keys (see `jitterKeyBetween`).
+    const keys = generateNKeysBetween(
+      jitterKeyBetween(left, right),
+      right,
+      j - i,
+    );
     for (let k = i; k < j; k++) {
       updates.push({ id: newOrderIds[k]!, index: keys[k - i]! });
     }

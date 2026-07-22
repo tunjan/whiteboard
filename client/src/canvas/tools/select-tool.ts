@@ -95,6 +95,15 @@ type SelectState =
       bounds0: Bounds | null;
       selectionBefore: string[];
       axis: Axis | null;
+      /**
+       * Snap candidates for this drag, filled on first use and reused for the
+       * rest of the gesture — the same lifetime the resize/handle states
+       * already give their `targets`. Rebuilding it per pointer sample meant an
+       * R-tree query plus a `getShape` over every viewport shape on each one.
+       * Lazy rather than captured at pointer-down so toggling snapping on
+       * mid-drag still finds targets.
+       */
+      targets: Bounds[] | null;
     }
   | {
       type: 'resize';
@@ -222,7 +231,8 @@ function syncStyleFromSelection(editor: Editor): void {
     fillStyle?: 'none' | 'solid' | 'hatch' | 'crosshatch';
     dash?: 'solid' | 'dashed' | 'dotted';
     kind?: 'triangle' | 'diamond' | 'trapezoid' | 'pentagon' | 'hexagon';
-    fontFamily?: 'sans' | 'serif' | 'mono';
+    fontFamily?: 'sans' | 'serif' | 'mono' | 'hand';
+    fontWeight?: 400 | 500 | 600 | 700;
     align?: 'start' | 'middle' | 'end';
     arrowStart?: boolean;
     arrowEnd?: boolean;
@@ -239,6 +249,7 @@ function syncStyleFromSelection(editor: Editor): void {
     if (typeof props.arrowEnd === 'boolean') style.setArrowEnd(props.arrowEnd);
   }
   if (first.type === 'text' && props.fontFamily) style.setFontFamily(props.fontFamily);
+  if (first.type === 'text' && props.fontWeight) style.setFontWeight(props.fontWeight);
   if (first.type === 'text' && props.align) style.setAlign(props.align);
 }
 
@@ -288,7 +299,15 @@ export function createSelectTool(): Tool {
           }
         : bounds;
     }
-    return { type: 'move', start, initial, bounds0, selectionBefore, axis: null };
+    return {
+      type: 'move',
+      start,
+      initial,
+      bounds0,
+      selectionBefore,
+      axis: null,
+      targets: null,
+    };
   }
 
   /** Visible, non-moving shapes in the viewport that permit snapping. */
@@ -347,18 +366,19 @@ export function createSelectTool(): Tool {
         maxY: move.bounds0.maxY + dy,
       };
       const background = useCanvasUiStore.getState().background;
+      move.targets ??= snapTargetBounds(
+        ctx.editor,
+        new Set(move.initial.keys()),
+        snapRegion(ctx, {
+          minX: moving.minX - threshold,
+          minY: moving.minY - threshold,
+          maxX: moving.maxX + threshold,
+          maxY: moving.maxY + threshold,
+        }),
+      );
       const snap = snapBounds(
         moving,
-        snapTargetBounds(
-          ctx.editor,
-          new Set(move.initial.keys()),
-          snapRegion(ctx, {
-            minX: moving.minX - threshold,
-            minY: moving.minY - threshold,
-            maxX: moving.maxX + threshold,
-            maxY: moving.maxY + threshold,
-          }),
-        ),
+        move.targets,
         getSnapGridStep(background, camera),
         threshold,
       );

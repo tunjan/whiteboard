@@ -1,3 +1,4 @@
+import type { ComponentType } from 'react';
 import {
   CircleDot,
   Crosshair,
@@ -6,7 +7,6 @@ import {
   Minus,
   Plus,
   Square,
-  type LucideIcon,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -139,7 +139,7 @@ export function CanvasControls({
   );
 }
 
-const BACKGROUND_ICONS: Record<BackgroundType, LucideIcon> = {
+const BACKGROUND_ICONS: Record<BackgroundType, ComponentType<{ className?: string }>> = {
   blank: Square,
   dot: CircleDot,
   graph: Grid2x2,

@@ -350,32 +350,54 @@ function ellipseOutline(shape: Extract<Shape, { type: 'ellipse' }>): Point[] {
   return rotateOutline(shape, points, { x: cx, y: cy });
 }
 
-function localPointsToWorld(
+/**
+ * World-space pivot a polyline shape rotates about: the center of its local
+ * point bounds. O(n) in the shape's point count (and it re-derives the curve for
+ * connectors), so callers converting many points must compute it once rather
+ * than per point — a 2000-point stroke made that the difference between a linear
+ * and a quadratic marquee test.
+ */
+function polylineRotationCenter(
   shape: Extract<Shape, { type: 'line' | 'arrow' | 'draw' }>,
-  points: readonly Point[],
-): Point[] {
-  return points.map((point) => localPointToWorld(shape, point));
-}
-
-function localPointToWorld(
-  shape: Extract<Shape, { type: 'line' | 'arrow' | 'draw' }>,
-  point: Point,
 ): Point {
   const points =
     shape.type === 'draw'
       ? shape.props.points
       : curvePoints(shape.props.points, shape.props.bend ?? 0);
   const localBounds = pointsBounds(points);
+  return {
+    x: shape.x + (localBounds.minX + localBounds.maxX) / 2,
+    y: shape.y + (localBounds.minY + localBounds.maxY) / 2,
+  };
+}
+
+function localPointsToWorld(
+  shape: Extract<Shape, { type: 'line' | 'arrow' | 'draw' }>,
+  points: readonly Point[],
+): Point[] {
+  if (!shape.rotation) {
+    return points.map((point) => ({
+      x: shape.x + point.x,
+      y: shape.y + point.y,
+    }));
+  }
+  const center = polylineRotationCenter(shape);
+  return points.map((point) =>
+    rotatePoint(
+      { x: shape.x + point.x, y: shape.y + point.y },
+      center,
+      shape.rotation,
+    ),
+  );
+}
+
+function localPointToWorld(
+  shape: Extract<Shape, { type: 'line' | 'arrow' | 'draw' }>,
+  point: Point,
+): Point {
   const world = { x: shape.x + point.x, y: shape.y + point.y };
   if (!shape.rotation) return world;
-  return rotatePoint(
-    world,
-    {
-      x: shape.x + (localBounds.minX + localBounds.maxX) / 2,
-      y: shape.y + (localBounds.minY + localBounds.maxY) / 2,
-    },
-    shape.rotation,
-  );
+  return rotatePoint(world, polylineRotationCenter(shape), shape.rotation);
 }
 
 function rotateOutline(
@@ -453,7 +475,13 @@ function geometryIsContained(geometry: MarqueeGeometry, bounds: Bounds): boolean
 
 function geometryTouchesBounds(geometry: MarqueeGeometry, bounds: Bounds): boolean {
   if (geometry.kind === 'region') return polygonTouchesBounds(geometry.outline, bounds);
-  return geometry.segments.some((segment) => strokeTouchesBounds(segment, geometry.radius, bounds));
+  // The marquee's own edges are the same for every segment; a freehand stroke
+  // has one segment per point, so rebuilding them inside the loop allocated
+  // 8 objects per point on each drag frame.
+  const marqueeEdges = outlineSegments(boxOutline(bounds), true);
+  return geometry.segments.some((segment) =>
+    strokeTouchesBounds(segment, geometry.radius, bounds, marqueeEdges),
+  );
 }
 
 function polygonTouchesBounds(polygon: readonly Point[], bounds: Bounds): boolean {
@@ -468,10 +496,15 @@ function polygonTouchesBounds(polygon: readonly Point[], bounds: Bounds): boolea
   );
 }
 
-function strokeTouchesBounds(segment: Segment, radius: number, bounds: Bounds): boolean {
+function strokeTouchesBounds(
+  segment: Segment,
+  radius: number,
+  bounds: Bounds,
+  /** `bounds`' own edges, hoisted by the caller (see `geometryTouchesBounds`). */
+  edges: Segment[],
+): boolean {
   const [a, b] = segment;
   if (boundsContainsPoint(bounds, a) || boundsContainsPoint(bounds, b)) return true;
-  const edges = outlineSegments(boxOutline(bounds), true);
   return edges.some(([c, d]) => segmentDistance(a, b, c, d) <= radius);
 }
 

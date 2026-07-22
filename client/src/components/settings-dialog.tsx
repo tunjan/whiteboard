@@ -21,16 +21,9 @@ import { Switch } from '@/components/ui/switch';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { cn } from '@/lib/utils';
 import { type Theme, useThemeStore } from '@/use-theme-store';
-import {
-  Gauge,
-  Keyboard,
-  Monitor,
-  PenTool,
-  Wifi,
-  X,
-  type LucideIcon,
-} from 'lucide-react';
+import { Gauge, Keyboard, Monitor, PenTool, Wifi, X } from 'lucide-react';
 import { useId, useState } from 'react';
+import type { ComponentType } from 'react';
 
 import '@/canvas/tools/register';
 
@@ -54,7 +47,7 @@ type SettingsPage =
 interface SettingsNavItem {
   id: SettingsPage;
   label: string;
-  icon: LucideIcon;
+  icon: ComponentType<{ className?: string; 'aria-hidden'?: boolean | 'true' | 'false'; 'data-icon'?: string }>;
 }
 
 const SETTINGS_NAV: SettingsNavItem[] = [

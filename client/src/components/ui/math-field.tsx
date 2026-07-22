@@ -38,6 +38,8 @@ export interface MathFieldProps {
   onEnter?: () => void;
   /** Backspace while the field is empty — used to delete the row. */
   onBackspaceEmpty?: () => void;
+  /** Escape inside the field — used to hand focus back to the canvas. */
+  onEscape?: () => void;
   /** Arrow key pressed with nowhere to go inside the field — used to move
    * focus to the previous/next expression row (Desmos-style). */
   onMoveOut?: (direction: 'upward' | 'downward') => void;
@@ -46,7 +48,7 @@ export interface MathFieldProps {
   id?: string;
   'aria-label'?: string;
   'aria-invalid'?: boolean;
-  disabled?: boolean;
+  'aria-describedby'?: string;
   /** Receives the underlying element so callers can focus a specific row. */
   elementRef?: (el: MathfieldElement | null) => void;
 }
@@ -56,6 +58,7 @@ export function MathField({
   onChange,
   onEnter,
   onBackspaceEmpty,
+  onEscape,
   onMoveOut,
   placeholder,
   className,
@@ -69,8 +72,20 @@ export function MathField({
   formatRef.current = format;
 
   // Keep the latest callbacks reachable from listeners bound once on mount.
-  const handlers = React.useRef({ onChange, onEnter, onBackspaceEmpty, onMoveOut });
-  handlers.current = { onChange, onEnter, onBackspaceEmpty, onMoveOut };
+  const handlers = React.useRef({
+    onChange,
+    onEnter,
+    onBackspaceEmpty,
+    onEscape,
+    onMoveOut,
+  });
+  handlers.current = {
+    onChange,
+    onEnter,
+    onBackspaceEmpty,
+    onEscape,
+    onMoveOut,
+  };
 
   const setRef = React.useCallback(
     (el: MathfieldElement | null) => {
@@ -106,6 +121,10 @@ export function MathField({
         event.preventDefault();
         event.stopPropagation();
         handlers.current.onEnter();
+      } else if (event.key === 'Escape' && handlers.current.onEscape) {
+        event.preventDefault();
+        event.stopPropagation();
+        handlers.current.onEscape();
       } else if (
         event.key === 'Backspace' &&
         handlers.current.onBackspaceEmpty &&

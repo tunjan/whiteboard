@@ -50,6 +50,19 @@ export interface Tool {
   icon?: ComponentType<{ className?: string }>;
   /** Hidden tools are activatable but not shown as flat toolbar buttons. */
   hidden?: boolean;
+  /**
+   * Deliver every coalesced hardware sample to `onPointerMove`, not just the
+   * one position the browser dispatched.
+   *
+   * Only tools that *accumulate a point sequence* need this — ink smoothing is
+   * an EMA over the samples, so their density shapes the curve. Tools that
+   * merely track a current position (select, and the drag-to-create tools) must
+   * leave this off: each sample there overwrites the previous one at the same
+   * shape ids within a single frame, so processing 2-8 samples per event ran
+   * the whole mutate → snapshot → reconcile pipeline once per sample to produce
+   * a result only the last sample could be seen to have set.
+   */
+  wantsCoalescedSamples?: boolean;
 
   onEnter?(ctx: ToolContext): void;
   onExit?(ctx: ToolContext): void;

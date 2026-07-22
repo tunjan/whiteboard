@@ -11,6 +11,35 @@ import type { ShapeUtil } from './types';
 export const EQUATION_DEFAULT_FONT_SIZE = 28;
 export const EQUATION_DEFAULT_SIZE = { w: 120, h: 48 } as const;
 
+/** Warning triangle drawn as geometry, so it survives PNG export unchanged. */
+function ErrorGlyph({
+  cx,
+  cy,
+  size,
+}: {
+  cx: number;
+  cy: number;
+  size: number;
+}) {
+  const half = size / 2;
+  return (
+    <g
+      fill="none"
+      stroke="var(--color-destructive)"
+      strokeWidth={Math.max(1, size * 0.12)}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      pointerEvents="none"
+    >
+      <path
+        d={`M ${cx} ${cy - half} L ${cx + half * 0.92} ${cy + half * 0.72} L ${cx - half * 0.92} ${cy + half * 0.72} Z`}
+      />
+      <path d={`M ${cx} ${cy - half * 0.18} L ${cx} ${cy + half * 0.22}`} />
+      <path d={`M ${cx} ${cy + half * 0.48} L ${cx} ${cy + half * 0.49}`} />
+    </g>
+  );
+}
+
 function EquationPlaceholder({
   shape,
   error = false,
@@ -44,7 +73,15 @@ function EquationPlaceholder({
         strokeDasharray={loading ? undefined : '5 4'}
         vectorEffect="non-scaling-stroke"
       />
-      {!loading ? (
+      {loading ? null : error ? (
+        // A glyph, not just the red stroke: status carried by color alone is
+        // unreadable when zoomed out, and fails for color-blind viewers.
+        <ErrorGlyph
+          cx={shape.x + w / 2}
+          cy={shape.y + h / 2}
+          size={Math.min(20, Math.max(10, h * 0.4))}
+        />
+      ) : (
         <text
           x={shape.x + w / 2}
           y={shape.y + h / 2}
@@ -57,7 +94,7 @@ function EquationPlaceholder({
         >
           √x
         </text>
-      ) : null}
+      )}
     </g>
   );
 }

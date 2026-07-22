@@ -14,7 +14,14 @@ export type PolygonKind =
   | 'hexagon';
 
 /** Text font families (mapped to concrete font stacks on the client). */
-export type FontFamily = 'sans' | 'serif' | 'mono';
+export type FontFamily = 'sans' | 'serif' | 'mono' | 'hand';
+
+/**
+ * Selectable text weights. Capped at 400–700 because that is the range every
+ * family can actually render: the hand family's variable font stops at 700, and
+ * the serif/mono stacks fall back to system faces with only regular and bold.
+ */
+export type FontWeight = 400 | 500 | 600 | 700;
 
 /** Horizontal text alignment. */
 export type TextAlign = 'start' | 'middle' | 'end';
@@ -110,6 +117,8 @@ export interface TextProps {
   color: string;
   fontSize: number;
   fontFamily: FontFamily;
+  /** Omitted legacy values render at 400. */
+  fontWeight?: FontWeight;
   /** Explicit geometry state. Omitted on legacy shapes; inferred from width. */
   sizingMode?: TextSizingMode;
   /** Fixed wrap width in world units. Ignored while sizingMode is auto. */

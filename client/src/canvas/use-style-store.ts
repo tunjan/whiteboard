@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware';
 import type {
   FillStyle,
   FontFamily,
+  FontWeight,
   PolygonKind,
   StrokeDash,
   TextAlign,
@@ -189,6 +190,8 @@ interface StyleStore {
   polygonKind: PolygonKind;
   /** Current font family for new/edited text. */
   fontFamily: FontFamily;
+  /** Current font weight for new/edited text. */
+  fontWeight: FontWeight;
   /** Current horizontal alignment for new/edited text. */
   align: TextAlign;
   /** Selected drawing palette id (theme-aware swatch set). */
@@ -202,6 +205,7 @@ interface StyleStore {
   setArrowEnd: (arrowEnd: boolean) => void;
   setPolygonKind: (kind: PolygonKind) => void;
   setFontFamily: (family: FontFamily) => void;
+  setFontWeight: (weight: FontWeight) => void;
   setAlign: (align: TextAlign) => void;
   setPaletteId: (id: string) => void;
 }
@@ -220,6 +224,7 @@ export const useStyleStore = create<StyleStore>()(
       arrowEnd: true,
       polygonKind: 'triangle',
       fontFamily: 'sans',
+      fontWeight: 400,
       align: 'start',
       paletteId: 'classic',
       setColor: (color) => set({ color }),
@@ -231,6 +236,7 @@ export const useStyleStore = create<StyleStore>()(
       setArrowEnd: (arrowEnd) => set({ arrowEnd }),
       setPolygonKind: (polygonKind) => set({ polygonKind }),
       setFontFamily: (fontFamily) => set({ fontFamily }),
+      setFontWeight: (fontWeight) => set({ fontWeight }),
       setAlign: (align) => set({ align }),
       setPaletteId: (paletteId) => set({ paletteId }),
     }),

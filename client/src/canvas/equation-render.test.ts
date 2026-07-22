@@ -30,4 +30,25 @@ describe('equation SVG rendering', () => {
     });
     expect(getEquationRender(latex)).toBe(render);
   });
+
+  // The panel typesets every keystroke, so an editing session used to leave one
+  // retained SVG per abandoned prefix, forever.
+  it('bounds the cache and evicts least-recently-read expressions', async () => {
+    const onScreen = String.raw`\alpha_{onscreen}`;
+    const first = await typesetEquation(onScreen);
+
+    // Stand in for typing: many one-shot expressions, none read again. Reading
+    // the on-screen one each round is what a mounted shape's render does.
+    for (let i = 0; i < 600; i++) {
+      await typesetEquation(`x_{${i}}+1`);
+      expect(getEquationRender(onScreen)).toBe(first);
+    }
+
+    // The expression still being read survived; the abandoned prefixes did not.
+    expect(getEquationRender(onScreen)).toBe(first);
+    expect(getEquationRender('x_{0}+1')).toBeUndefined();
+    // ...and a miss still re-typesets to an equivalent render.
+    const again = await typesetEquation('x_{0}+1');
+    expect('error' in again).toBe(false);
+  });
 });

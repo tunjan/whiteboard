@@ -1,5 +1,6 @@
 import type {
   FontFamily,
+  FontWeight,
   TextAlign,
   TextProps,
   TextSizingMode,
@@ -21,10 +22,17 @@ export const FONT_STACKS: Record<FontFamily, string> = {
   sans: TEXT_FONT_FAMILY,
   serif: "'Georgia', 'Times New Roman', serif",
   mono: "'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace",
+  hand: "'Caveat Variable', cursive",
 };
 
 export function fontStack(family: FontFamily | undefined): string {
   return FONT_STACKS[family ?? 'sans'];
+}
+
+export const DEFAULT_FONT_WEIGHT: FontWeight = 400;
+
+export function fontWeight(weight: FontWeight | undefined): FontWeight {
+  return weight ?? DEFAULT_FONT_WEIGHT;
 }
 
 export function textSizingMode(
@@ -64,16 +72,19 @@ export function measureTextWidth(
   text: string,
   fontSize: number,
   family?: FontFamily,
+  weight?: FontWeight,
 ): number {
   if (!text) return 0;
-  const key = `${family ?? 'sans'}|${fontSize}|${text}`;
+  // Weight belongs in the key: a bolder face advances wider, so sharing an
+  // entry across weights would wrap and position carets against stale metrics.
+  const key = `${family ?? 'sans'}|${fontWeight(weight)}|${fontSize}|${text}`;
   const cached = widthCache.get(key);
   if (cached !== undefined) return cached;
 
   const c = getCtx();
   let width: number;
   if (c) {
-    c.font = `${fontSize}px ${fontStack(family)}`;
+    c.font = `${fontWeight(weight)} ${fontSize}px ${fontStack(family)}`;
     width = c.measureText(text).width;
   } else {
     width = fallbackWidth(text, fontSize);
@@ -136,6 +147,7 @@ export interface TextLayout {
   text: string;
   fontSize: number;
   fontFamily: FontFamily;
+  fontWeight: FontWeight;
   align: TextAlign;
   mode: TextSizingMode;
   width: number;
@@ -150,6 +162,7 @@ export interface TextLayoutOptions {
   text: string;
   fontSize: number;
   fontFamily?: FontFamily;
+  fontWeight?: FontWeight;
   align?: TextAlign;
   sizingMode?: TextSizingMode;
   width?: number;
@@ -170,6 +183,7 @@ function wrapParagraph(
   width: number,
   fontSize: number,
   family: FontFamily,
+  weight: FontWeight,
 ): UnpositionedLine[] {
   if (text.length === 0) {
     return [{ text: '', start, end: start, width: 0, hardBreak: false }];
@@ -187,7 +201,7 @@ function wrapParagraph(
       const candidateStart = units[lineStartUnit]!.start - start;
       const candidateEnd = units[i]!.end - start;
       const candidate = text.slice(candidateStart, candidateEnd);
-      if (measureTextWidth(candidate, fontSize, family) <= width) {
+      if (measureTextWidth(candidate, fontSize, family, weight) <= width) {
         fitEndUnit = i + 1;
         if (/\s/u.test(units[i]!.text)) lastBreakUnit = i + 1;
         continue;
@@ -210,7 +224,7 @@ function wrapParagraph(
       text: value,
       start: absoluteStart,
       end: absoluteEnd,
-      width: measureTextWidth(value, fontSize, family),
+      width: measureTextWidth(value, fontSize, family, weight),
       hardBreak: false,
     });
     lineStartUnit = fitEndUnit;
@@ -219,10 +233,10 @@ function wrapParagraph(
   return lines;
 }
 
-function fontMetrics(fontSize: number, family: FontFamily) {
+function fontMetrics(fontSize: number, family: FontFamily, weight: FontWeight) {
   const c = getCtx();
   if (c) {
-    c.font = `${fontSize}px ${fontStack(family)}`;
+    c.font = `${weight} ${fontSize}px ${fontStack(family)}`;
     const m = c.measureText('Hg');
     return {
       ascent: m.actualBoundingBoxAscent || fontSize * 0.8,
@@ -237,12 +251,13 @@ export function layoutText(options: TextLayoutOptions): TextLayout {
   const text = options.text ?? '';
   const fontSize = Math.max(1, options.fontSize);
   const fontFamily = options.fontFamily ?? 'sans';
+  const weight = fontWeight(options.fontWeight);
   const align = options.align ?? 'start';
   const requestedWidth = Math.max(MIN_TEXT_WIDTH, options.width ?? 0);
   const mode =
     options.sizingMode ?? ((options.width ?? 0) > 0 ? 'fixed' : 'auto');
   const lineHeight = fontSize * Math.max(0.5, options.lineHeight ?? LINE_HEIGHT_FACTOR);
-  const { ascent, descent } = fontMetrics(fontSize, fontFamily);
+  const { ascent, descent } = fontMetrics(fontSize, fontFamily, weight);
 
   const rawLines: UnpositionedLine[] = [];
   let paragraphStart = 0;
@@ -257,13 +272,14 @@ export function layoutText(options: TextLayoutOptions): TextLayout {
             requestedWidth,
             fontSize,
             fontFamily,
+            weight,
           )
         : [
             {
               text: paragraph,
               start: paragraphStart,
               end: paragraphStart + paragraph.length,
-              width: measureTextWidth(paragraph, fontSize, fontFamily),
+              width: measureTextWidth(paragraph, fontSize, fontFamily, weight),
               hardBreak: false,
             },
           ];
@@ -293,6 +309,7 @@ export function layoutText(options: TextLayoutOptions): TextLayout {
     text,
     fontSize,
     fontFamily,
+    fontWeight: weight,
     align,
     mode,
     width,
@@ -310,6 +327,7 @@ export function layoutTextProps(props: TextProps): TextLayout {
     text: props.text,
     fontSize: props.fontSize,
     fontFamily: props.fontFamily,
+    fontWeight: props.fontWeight,
     align: props.align,
     sizingMode: textSizingMode(props),
     width: props.width,
@@ -329,11 +347,13 @@ export function measureText(
   family?: FontFamily,
   width = 0,
   align: TextAlign = 'start',
+  weight?: FontWeight,
 ): TextMetrics {
   const layout = layoutText({
     text,
     fontSize,
     fontFamily: family,
+    fontWeight: weight,
     width,
     sizingMode: width > 0 ? 'fixed' : 'auto',
     align,
@@ -369,7 +389,14 @@ export function caretForTextIndex(layout: TextLayout, index: number): TextCaret 
   const clamped = Math.max(line.start, Math.min(line.end, index));
   const prefix = layout.text.slice(line.start, clamped);
   return {
-    x: line.x + measureTextWidth(prefix, layout.fontSize, layout.fontFamily),
+    x:
+      line.x +
+      measureTextWidth(
+        prefix,
+        layout.fontSize,
+        layout.fontFamily,
+        layout.fontWeight,
+      ),
     y: line.y,
     height: layout.lineHeight,
     line,
@@ -397,6 +424,7 @@ export function textIndexAtPoint(
       layout.text.slice(line.start, unit.end),
       layout.fontSize,
       layout.fontFamily,
+      layout.fontWeight,
     );
     if (localX < (previousX + nextX) / 2) return unit.start;
     previousX = nextX;
@@ -434,6 +462,7 @@ export function textSelectionRects(
         layout.text.slice(line.start, start),
         layout.fontSize,
         layout.fontFamily,
+        layout.fontWeight,
       );
     const x2 =
       line.x +
@@ -441,6 +470,7 @@ export function textSelectionRects(
         layout.text.slice(line.start, end),
         layout.fontSize,
         layout.fontFamily,
+        layout.fontWeight,
       );
     rects.push({
       x: x1,

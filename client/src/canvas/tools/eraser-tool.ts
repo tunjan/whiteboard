@@ -59,6 +59,10 @@ export function createEraserTool(): Tool {
     hotkey: 'e',
     cursor: 'crosshair',
     icon: Eraser,
+    // Each sample extends the swept segment, so finer samples track a fast
+    // curved swipe more accurately. Erasing is destructive; keep the fidelity.
+    // Costs no document write until pointer-up, so this is not a hot path.
+    wantsCoalescedSamples: true,
 
     onPointerDown(info: ToolPointerInfo, ctx: ToolContext) {
       if (info.button !== 0) return;

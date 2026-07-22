@@ -2,8 +2,10 @@ import { rotatePoint } from '@whiteboard/shared';
 import type { Point, TextShape } from '@whiteboard/shared';
 import { DEFAULT_SHAPE_STYLE } from './style';
 import {
+  DEFAULT_FONT_WEIGHT,
   LINE_HEIGHT_FACTOR,
   fontStack,
+  fontWeight,
   layoutTextProps,
   textIndexAtPoint,
 } from './text-measure';
@@ -37,6 +39,7 @@ export const textUtil: ShapeUtil<'text'> = {
     color: DEFAULT_SHAPE_STYLE.color,
     fontSize: DEFAULT_FONT_SIZE,
     fontFamily: 'sans',
+    fontWeight: DEFAULT_FONT_WEIGHT,
     sizingMode: 'auto',
     width: 0,
     lineHeight: LINE_HEIGHT_FACTOR,
@@ -97,6 +100,7 @@ export const textUtil: ShapeUtil<'text'> = {
         fill={shape.props.color}
         fontSize={shape.props.fontSize}
         fontFamily={fontStack(shape.props.fontFamily)}
+        fontWeight={fontWeight(shape.props.fontWeight)}
         transform={transform}
         xmlSpace="preserve"
       >

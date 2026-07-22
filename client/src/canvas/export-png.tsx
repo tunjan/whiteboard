@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { type Bounds, type Shape, unionBounds } from '@whiteboard/shared';
 import { descendantsOf } from './hierarchy';
-import { typesetEquation } from './equation-render';
+import { getEquationRender, typesetEquation } from './equation-render';
 import { shapeRotatedBounds } from './shape-bounds';
 import { compareIndex, editor, spatialIndex } from './use-document-store';
 import { shapeRegistry } from './shapes/shape-registry';
@@ -18,8 +18,8 @@ const MAX_DIM = 8192;
  *
  * The board is SVG-native, so we re-render every shape (the live canvas is
  * viewport-culled) into a standalone SVG sized to the content bounds, inline
- * everything the page environment would otherwise supply — CSS variables, the
- * Inter web font, and `/api/blobs` images — then rasterize it to PNG.
+ * everything the page environment would otherwise supply — CSS variables, web
+ * fonts, and `/api/blobs` images — then rasterize it to PNG.
  */
 export async function exportBoardToPng(title: string): Promise<void> {
   const bounds = spatialIndex.totalBounds();
@@ -43,17 +43,35 @@ export async function exportSelectionToPng(
     renderSet.add(id);
     for (const d of descendantsOf(shapes, id)) renderSet.add(d.id);
   }
+  // Typeset first: `isExportable` reads the cache to drop equations that would
+  // only contribute a placeholder box to the bounds.
+  await prewarmEquationRenders(shapes, renderSet);
   // Bounds = union of the rotated world bounds of every rendered shape with its
   // own geometry (groups carry none, so they're skipped).
   let bounds: Bounds | null = null;
   for (const s of shapes) {
-    if (!renderSet.has(s.id) || s.type === 'group') continue;
+    if (!renderSet.has(s.id) || s.type === 'group' || !isExportable(s)) {
+      continue;
+    }
     const b = shapeRotatedBounds(s);
     bounds = bounds ? unionBounds(bounds, b) : b;
   }
   if (!bounds) return;
-  await prewarmEquationRenders(shapes, renderSet);
   await renderToPng(renderTree(renderSet), bounds, title);
+}
+
+/**
+ * An equation with no source, or one whose source doesn't typeset, draws an
+ * editing placeholder on the canvas (dashed box, warning glyph). That is
+ * scaffolding for the author, so it stays out of the exported image. Call only
+ * after `prewarmEquationRenders`, which fills the cache this reads.
+ */
+export function isExportable(shape: Shape): boolean {
+  if (shape.type !== 'equation') return true;
+  const latex = shape.props.latex.trim();
+  if (!latex) return false;
+  const render = getEquationRender(latex);
+  return Boolean(render) && !render?.error;
 }
 
 /** Fill the synchronous equation cache before server-rendering the SVG tree. */
@@ -99,7 +117,11 @@ async function renderToPng(
   const shapeMarkup = resolveCssVars(renderToStaticMarkup(tree));
   const inlined = await inlineBlobImages(shapeMarkup);
   const bg = resolveCssVars('var(--color-background)') || '#ffffff';
-  const fontFace = await interFontFace();
+  const fontFace =
+    (await webFontFace(/inter/i, 'Inter Variable')) +
+    (shapeMarkup.includes('Caveat')
+      ? await webFontFace(/caveat/i, 'Caveat Variable')
+      : '');
 
   const svg =
     `<svg xmlns="http://www.w3.org/2000/svg" width="${outW}" height="${outH}" ` +
@@ -123,7 +145,11 @@ async function renderToPng(
 function renderTree(renderSet?: Set<string>): ReactNode {
   const shapes = editor.getShapes();
   const byId = new Map(shapes.map((s) => [s.id, s]));
-  const inSet = (id: string) => !renderSet || renderSet.has(id);
+  const inSet = (id: string) => {
+    if (renderSet && !renderSet.has(id)) return false;
+    const shape = byId.get(id);
+    return !shape || isExportable(shape);
+  };
 
   // A shape is rendered by its frame (not at top level) only when that frame is
   // itself part of the output — otherwise a shape inside an unselected frame
@@ -212,8 +238,8 @@ async function inlineBlobImages(svg: string): Promise<string> {
   return out;
 }
 
-/** Inter is the one bundled web font; embed it so exported text matches metrics. */
-async function interFontFace(): Promise<string> {
+/** Embed a bundled web font (matched by name) so exported text matches metrics. */
+async function webFontFace(match: RegExp, familyName: string): Promise<string> {
   try {
     let url: string | null = null;
     for (const sheet of Array.from(document.styleSheets)) {
@@ -226,7 +252,7 @@ async function interFontFace(): Promise<string> {
       for (const rule of Array.from(rules)) {
         if (
           rule instanceof CSSFontFaceRule &&
-          /inter/i.test(rule.style.getPropertyValue('font-family'))
+          match.test(rule.style.getPropertyValue('font-family'))
         ) {
           const m = rule.style
             .getPropertyValue('src')
@@ -242,12 +268,12 @@ async function interFontFace(): Promise<string> {
     if (!url) return '';
     const buf = await (await fetch(url, { credentials: 'include' })).arrayBuffer();
     return (
-      `@font-face{font-family:'Inter Variable';font-style:normal;` +
+      `@font-face{font-family:'${familyName}';font-style:normal;` +
       `font-weight:100 900;font-display:block;` +
       `src:url(data:font/woff2;base64,${arrayBufferToBase64(buf)}) format('woff2');}`
     );
   } catch {
-    return ''; // fall back to system-ui in the font stack
+    return ''; // fall back to the next font in the stack
   }
 }
 

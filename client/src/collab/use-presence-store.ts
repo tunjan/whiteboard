@@ -36,6 +36,8 @@ export interface PeerPresence {
   latencyMs: number | null;
   /** Ephemeral caret/selection inside an actively edited text shape. */
   textSelection: TextSelectionPresence | null;
+  /** Ids of the shapes this peer has selected, or null when nothing is. */
+  selection: string[] | null;
   /** In-progress laser-pointer strokes, or null when the peer has none. */
   laser: LaserStroke[] | null;
 }

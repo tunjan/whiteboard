@@ -3,8 +3,6 @@ import { genId, type DrawPoint, type DrawProps, type Shape } from '@whiteboard/s
 import { getTopIndex } from '../order';
 import { pencilStabilizationToStreamline } from '../shapes/ink';
 import { shapeRegistry } from '../shapes/shape-registry';
-import { simplifyRDP } from '../shapes/simplify';
-import { DEFAULT_INK_SIZE } from '../shapes/style';
 import { useCanvasUiStore } from '../use-canvas-ui-store';
 import { useStyleStore } from '../use-style-store';
 import type { Tool, ToolContext, ToolPointerInfo } from './types';
@@ -20,9 +18,6 @@ export function createDrawTool(): Tool {
   let origin = { x: 0, y: 0 };
   let points: DrawPoint[] = [];
   let simulatePressure = false;
-  // Brush width of the stroke in progress, captured at pointer-down so the
-  // commit-time simplification tolerance scales with it.
-  let strokeSize = DEFAULT_INK_SIZE;
   let previousSample: { x: number; y: number; timestamp: number } | null = null;
   // Pending rAF for the live stroke write. Pointer Events can deliver many
   // coalesced samples per frame; without this each sample fired its own Yjs
@@ -53,23 +48,20 @@ export function createDrawTool(): Tool {
     const sid = id;
     id = null;
     if (!sid) return;
-    // Final synchronous write. Raw pointer input carries far more samples than
-    // the curve needs, and every one of them is paid for again on each later
-    // render (`getInkPathData` runs perfect-freehand over the whole array), on
-    // each hit test, and in the Yjs payload for every client — forever. Collapse
-    // them once, here on commit only: the live path above still writes every
-    // sample, so mid-stroke feel and what peers see while drawing are untouched.
-    ctx.editor.updateShape(sid, {
-      props: { points: simplifyRDP(points, strokeSize * SIMPLIFY_EPSILON) },
-    });
+    // Final synchronous write, covering the flush this cancelled. The points are
+    // committed exactly as drawn: `getInkPathData` smooths via perfect-freehand's
+    // `streamline`, an EMA over the point *sequence* with no arc-length
+    // normalization, so the rendered curve depends on point density and not just
+    // on point positions. Thinning any samples here — even ones within a small
+    // fraction of the brush width of the curve — changes the smoothing lag and
+    // visibly reshapes the stroke the instant the pointer lifts.
+    ctx.editor.updateShape(sid, { props: { points: points.slice() } });
     points = [];
     previousSample = null;
   };
 
-  // Commit-time simplification tolerance, as a fraction of the brush width.
-  // Deliberately far below the width so removed points are well inside the ink
-  // and the committed curve is visually identical to what was drawn.
-  const SIMPLIFY_EPSILON = 0.06;
+  // Minimum spacing between recorded samples, in world units. See `appendPoint`.
+  const MIN_SAMPLE_DISTANCE = 1;
 
   // Calibrated in screen pixels/ms so a stroke has the same pressure response
   // at every camera zoom level (0.08 = slow, 1.25 = fast).
@@ -139,11 +131,16 @@ export function createDrawTool(): Tool {
 
     const last = points[points.length - 1];
     if (last) {
-      // Keep input density at roughly one sample per screen pixel, independent
-      // of zoom. Pressure is still merged so slow stationary strokes retain
-      // their thickness response.
-      const minDistance = 1 / Math.max(info.zoom, 0.05);
-      if (Math.hypot(last.x - local.x, last.y - local.y) < minDistance) {
+      // Gate on world distance, not screen distance. `streamline` smooths via an
+      // EMA over the point *sequence*, so how densely a stroke is sampled decides
+      // how much it gets smoothed — and a zoom-scaled gate made that a function
+      // of the camera. The same gesture came out ~36% of a brush width apart
+      // drawn at zoom 4 vs zoom 1, and zoomed out the gate was wide enough
+      // (20 world units at zoom 0.05) to throw away real pointer samples.
+      // One world unit is what a zoom-1 stroke already captured, so feel there is
+      // unchanged and every other zoom now matches it. Pressure is still merged
+      // so slow stationary strokes retain their thickness response.
+      if (Math.hypot(last.x - local.x, last.y - local.y) < MIN_SAMPLE_DISTANCE) {
         if (last.pressure === local.pressure) return false;
         // Replace (don't mutate): the previous object was already handed to Yjs
         // by an earlier flush's `points.slice()`, so mutating it in place would
@@ -162,6 +159,10 @@ export function createDrawTool(): Tool {
     hotkey: 'd',
     cursor: 'crosshair',
     icon: Pencil,
+    // `streamline` is an EMA over the point sequence, so every dropped sample
+    // changes the smoothing lag and reshapes the stroke. The rAF flush below
+    // keeps the extra samples from costing extra document writes.
+    wantsCoalescedSamples: true,
 
     onPointerDown(info: ToolPointerInfo, ctx: ToolContext) {
       if (info.button !== 0) return;
@@ -180,7 +181,6 @@ export function createDrawTool(): Tool {
       );
       const sid = genId();
       id = sid;
-      strokeSize = useStyleStore.getState().size;
       const shape = {
         id: sid,
         type: 'draw',
@@ -222,6 +222,14 @@ export function createDrawTool(): Tool {
     // The OS reclaimed the pen/mouse mid-stroke (spurious pointercancel /
     // lostpointercapture). Keep the ink drawn so far rather than discarding it.
     onCommit(ctx: ToolContext) {
+      finalize(ctx);
+    },
+
+    // Switching tools mid-stroke (a hotkey while the pointer is still down)
+    // never routes a pointer-up back here, so without this the stroke kept
+    // whatever the last rAF flush wrote and left that flush pending against an
+    // orphaned shape. Commit it, matching onCommit's "keep what was drawn".
+    onExit(ctx: ToolContext) {
       finalize(ctx);
     },
 

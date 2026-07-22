@@ -61,7 +61,7 @@ function drawPoints(shape: Shape | undefined): DrawProps['points'] | undefined {
 }
 
 describe('draw tool stroke lifecycle', () => {
-  it('onCommit keeps the stroke, collapsing points the curve does not need', () => {
+  it('onCommit keeps every sample, even ones the chord could describe', () => {
     const { ctx, shapes } = context();
     const tool = createDrawTool();
 
@@ -72,19 +72,20 @@ describe('draw tool stroke lifecycle', () => {
 
     expect(shapes.size).toBe(1);
     const points = drawPoints([...shapes.values()][0]);
-    // Commit simplifies (see `SIMPLIFY_EPSILON`). These three samples are
-    // collinear, so the midpoint sits exactly on the chord and contributes
-    // nothing — the endpoints alone describe the same stroke.
-    expect(points?.length).toBe(2);
+    // The midpoint here is collinear and so contributes nothing geometrically,
+    // but it is still kept: perfect-freehand's `streamline` smooths over the
+    // point sequence, so dropping a sample changes the rendered curve and the
+    // stroke would visibly shift the moment the pointer lifts.
+    expect(points?.length).toBe(3);
     expect(points?.[0]).toMatchObject({ x: 0, y: 0 });
-    expect(points?.[1]).toMatchObject({ x: 20, y: 0 });
+    expect(points?.[1]).toMatchObject({ x: 10, y: 0 });
+    expect(points?.[2]).toMatchObject({ x: 20, y: 0 });
   });
 
   it('onCommit preserves points that carry the curve', () => {
     const { ctx, shapes } = context();
     const tool = createDrawTool();
 
-    // The midpoint is far off the chord, so simplification must keep it.
     tool.onPointerDown?.(pointer(0, 0), ctx);
     tool.onPointerMove?.(pointer(10, 5), ctx);
     tool.onPointerMove?.(pointer(20, 0), ctx);
@@ -93,6 +94,29 @@ describe('draw tool stroke lifecycle', () => {
     const points = drawPoints([...shapes.values()][0]);
     expect(points?.length).toBe(3);
     expect(points?.[1]).toMatchObject({ x: 10, y: 5 });
+  });
+
+  it('samples a gesture identically at every zoom', () => {
+    // Point density decides how much `streamline` smooths the stroke, so the
+    // sampling gate must not depend on the camera — otherwise the same world
+    // gesture renders differently depending on the zoom it was drawn at.
+    const walk = (zoom: number) => {
+      const { ctx, shapes } = context();
+      const tool = createDrawTool();
+      tool.onPointerDown?.(pointer(0, 0, { zoom }), ctx);
+      for (let i = 1; i <= 40; i++) {
+        tool.onPointerMove?.(pointer(i * 0.4, 0, { zoom }), ctx);
+      }
+      tool.onCommit?.(ctx);
+      return drawPoints([...shapes.values()][0]);
+    };
+
+    const atZoom1 = walk(1);
+    // 0.4-unit steps clear the 1-unit gate on every third sample, and do so
+    // whether the camera is zoomed in or far out.
+    expect(atZoom1?.length).toBe(14);
+    expect(walk(4)).toEqual(atZoom1);
+    expect(walk(0.05)).toEqual(atZoom1);
   });
 
   it('onCancel discards the in-progress stroke', () => {

@@ -20,6 +20,45 @@ const STUDENT_COLORS = [
   '#14b8a6',
 ];
 
+/** A darker shade of a peer colour, used for outlines on their own fill. */
+export function outlineColor(color: string): string {
+  return `color-mix(in srgb, ${color} 68%, #000)`;
+}
+
+function parseHex(color: string): [number, number, number] | null {
+  const hex = color.trim().replace('#', '');
+  const full =
+    hex.length === 3
+      ? hex
+          .split('')
+          .map((c) => c + c)
+          .join('')
+      : hex;
+  if (!/^[0-9a-f]{6}$/i.test(full)) return null;
+  return [
+    Number.parseInt(full.slice(0, 2), 16),
+    Number.parseInt(full.slice(2, 4), 16),
+    Number.parseInt(full.slice(4, 6), 16),
+  ];
+}
+
+/**
+ * Black or white label text, whichever reads better on a peer colour. The
+ * lighter palette entries (amber, orange) are barely legible under white.
+ */
+export function textOnColor(color: string): string {
+  const rgb = parseHex(color);
+  if (!rgb) return '#fff';
+  const [r, g, b] = rgb.map((channel) => {
+    const c = channel / 255;
+    return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  }) as [number, number, number];
+  const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  // White is the house style, so keep it until its WCAG contrast drops below
+  // 3:1 — strict max-contrast would flip mid-tone blues and reds to black too.
+  return 1.05 / (luminance + 0.05) >= 3 ? '#fff' : '#101010';
+}
+
 const NAME_KEY = 'whiteboard:display-name';
 const COLOR_KEY = 'whiteboard:cursor-color';
 

@@ -4,12 +4,12 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "@/lib/utils"
 
 const surfaceVariants = cva(
-  "ui-surface",
+  "select-none rounded-xl bg-popover text-popover-foreground shadow-md ring-1 ring-foreground/10",
   {
     variants: {
       shape: {
         panel: "",
-        pill: "ui-surface-pill",
+        pill: "rounded-full",
       },
     },
     defaultVariants: {
@@ -18,14 +18,7 @@ const surfaceVariants = cva(
   }
 )
 
-/**
- * Floating chrome surface: the quiet bordered panel used by every piece
- * of board chrome (toolbar, top bars, style panel).
- *
- * The surface also publishes the radius for its inset controls. That keeps
- * hover and focus backgrounds optically aligned with the parent without each
- * caller having to repeat a border-radius override.
- */
+/** Floating chrome surface used by board chrome (toolbar, top bars, style panel). */
 function Surface({
   className,
   shape = "panel",

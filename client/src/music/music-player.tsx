@@ -4,7 +4,7 @@ import {
   Music2,
   Pause,
   Play,
-  RotateCcw,
+  RefreshCw,
   Volume1,
   Volume2,
   VolumeX,
@@ -292,7 +292,7 @@ export function MusicPlayer({ identity }: MusicPlayerProps) {
                 disabled={!currentTrack}
                 onClick={restartTrack}
               >
-                <RotateCcw />
+                <RefreshCw />
               </Button>
               {playback.requestedBy ? (
                 <span className="min-w-0 flex-1 truncate text-right text-[11px] text-content-subtle">

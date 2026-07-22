@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Grid2X2, Pencil, Plus, Trash2 } from 'lucide-react';
+import { Grid2x2, MoreHorizontal, Pencil, Plus, Trash2 } from 'lucide-react';
 import type { BoardMeta } from '@whiteboard/shared';
 import { type AuthState, getAuth, logout } from '@/board/auth';
 import { boardRepository } from '@/board/server-board-repository';
@@ -7,6 +7,12 @@ import { BrandMark } from '@/components/brand-mark';
 import { BoardTitleDialog } from '@/components/board-title-dialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import {
   Empty,
   EmptyContent,
@@ -17,8 +23,16 @@ import {
 } from '@/components/ui/empty';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import {
   AlertDialog,
-  AlertDialogClose,
+  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
@@ -42,42 +56,55 @@ function BoardRow({
   onDelete: () => void;
 }) {
   return (
-    <article className="group flex min-h-16 items-center gap-2 border-b border-border-subtle transition-colors duration-150 hover:bg-bg-muted focus-within:bg-bg-muted">
-      <button
-        type="button"
-        onClick={() => navigate(`/board/${board.id}`)}
-        className="flex min-w-0 flex-1 items-center gap-3 rounded-md py-3 text-left outline-none sm:gap-4"
-      >
-        <span className="grid size-10 shrink-0 place-items-center rounded-md border border-border-subtle bg-bg-default text-content-subtle" aria-hidden="true">
-          <Grid2X2 className="size-4" />
-        </span>
-        <span className="grid min-w-0 flex-1 gap-0.5 sm:grid-cols-[minmax(0,1fr)_10rem] sm:items-center sm:gap-6">
-          <span className="truncate text-sm font-medium text-content-emphasis">
+    <TableRow>
+      <TableCell>
+        <button
+          type="button"
+          onClick={() => navigate(`/board/${board.id}`)}
+          className="flex min-w-0 items-center gap-3 text-left outline-none"
+        >
+          <span
+            className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground"
+            aria-hidden="true"
+          >
+            <Grid2x2 />
+          </span>
+          <span className="truncate font-medium text-foreground">
             {board.name}
           </span>
-          <time
-            dateTime={new Date(board.lastOpenedAt).toISOString()}
-            className="text-xs tabular-nums text-content-subtle sm:text-sm"
+        </button>
+      </TableCell>
+      <TableCell className="text-muted-foreground">
+        <time dateTime={new Date(board.lastOpenedAt).toISOString()}>
+          {new Date(board.lastOpenedAt).toLocaleDateString()}
+        </time>
+      </TableCell>
+      <TableCell className="text-right">
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={`Actions for ${board.name}`}
+              />
+            }
           >
-            Opened {new Date(board.lastOpenedAt).toLocaleDateString()}
-          </time>
-        </span>
-      </button>
-
-      <div className="touch-reveal touch-targets flex shrink-0 gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-        <Button variant="ghost" size="icon-sm" aria-label="Rename" onClick={onRename}>
-          <Pencil />
-        </Button>
-        <Button
-          variant="danger-outline"
-          size="icon-sm"
-          aria-label="Delete"
-          onClick={onDelete}
-        >
-          <Trash2 />
-        </Button>
-      </div>
-    </article>
+            <MoreHorizontal />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={onRename}>
+              <Pencil />
+              Rename
+            </DropdownMenuItem>
+            <DropdownMenuItem variant="destructive" onClick={onDelete}>
+              <Trash2 />
+              Delete
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </TableCell>
+    </TableRow>
   );
 }
 
@@ -101,17 +128,29 @@ export function Home() {
 
   if (auth === null) {
     return (
-      <div className="min-h-dvh bg-bg-default text-content-emphasis">
-        <div className="mx-auto w-full max-w-[70rem] px-4 py-20 sm:px-8">
+      <div className="min-h-dvh">
+        <div className="mx-auto w-full max-w-5xl px-4 py-20 sm:px-6">
           <span className="sr-only" role="status">Loading Boards</span>
           <Skeleton className="h-8 w-32" />
-          <div className="mt-8 border-t border-border-subtle" aria-hidden="true">
-            {[0, 1, 2].map((row) => (
-              <div key={row} className="flex h-16 items-center gap-4 border-b border-border-subtle">
-                <Skeleton className="size-10" />
-                <Skeleton className="h-4 w-48 max-w-[50vw]" />
-              </div>
-            ))}
+          <div className="mt-6 overflow-hidden rounded-md border">
+            <Table>
+              <TableBody>
+                {[0, 1, 2].map((row) => (
+                  <TableRow key={row}>
+                    <TableCell>
+                      <div className="flex items-center gap-3">
+                        <Skeleton className="size-9 rounded-md" />
+                        <Skeleton className="h-4 w-48 max-w-[50vw]" />
+                      </div>
+                    </TableCell>
+                    <TableCell className="w-32">
+                      <Skeleton className="h-4 w-20" />
+                    </TableCell>
+                    <TableCell className="w-12" />
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           </div>
         </div>
       </div>
@@ -141,14 +180,12 @@ export function Home() {
   };
 
   return (
-    <div className="min-h-dvh bg-bg-default text-content-emphasis">
-      <header className="border-b border-border-subtle bg-bg-default">
-        <div className="mx-auto flex h-14 max-w-[70rem] items-center justify-between px-4 sm:px-8">
-          <div className="flex items-center gap-2.5">
+    <div className="min-h-dvh">
+      <header className="border-b bg-background">
+        <div className="mx-auto flex h-14 max-w-5xl items-center justify-between px-4 sm:px-6">
+          <div className="flex items-center gap-2">
             <BrandMark className="size-7" />
-            <span className="text-sm font-semibold tracking-[-0.01em]">
-              Best Whiteboard
-            </span>
+            <span className="text-sm font-semibold">Best Whiteboard</span>
           </div>
           <Button
             variant="ghost"
@@ -163,11 +200,11 @@ export function Home() {
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-[70rem] px-4 py-8 sm:px-8 sm:py-12">
+      <main className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6 sm:py-12">
         <div className="flex items-center justify-between gap-4">
-          <div className="flex items-baseline gap-3">
-            <h1 className="text-balance text-3xl leading-10 font-semibold tracking-[-0.025em]">Boards</h1>
-            <Badge variant="secondary" className="tabular-nums" aria-label={`${boards.length} boards`}>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-bold tracking-tight">Boards</h1>
+            <Badge variant="secondary" aria-label={`${boards.length} boards`}>
               {boards.length}
             </Badge>
           </div>
@@ -180,9 +217,9 @@ export function Home() {
         </div>
 
         {boards.length === 0 ? (
-          <Empty className="min-h-[50vh]">
+          <Empty className="mt-6 min-h-[50vh] border border-dashed">
             <EmptyHeader>
-              <EmptyMedia variant="icon"><Grid2X2 /></EmptyMedia>
+              <EmptyMedia variant="icon"><Grid2x2 /></EmptyMedia>
               <EmptyTitle>No Boards Yet</EmptyTitle>
               <EmptyDescription>
                 Create a shared canvas for sketches, equations, notes, and live collaboration.
@@ -196,17 +233,28 @@ export function Home() {
             </EmptyContent>
           </Empty>
         ) : (
-          <div className="mt-7 border-t border-border-subtle">
-            {boards.map((b) => (
-              <BoardRow
-                key={b.id}
-                board={b}
-                onRename={() => {
-                  setTitleDialog({ mode: 'rename', board: b });
-                }}
-                onDelete={() => setDeleteTarget(b)}
-              />
-            ))}
+          <div className="mt-6 overflow-hidden rounded-md border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Last Opened</TableHead>
+                  <TableHead className="w-12" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {boards.map((b) => (
+                  <BoardRow
+                    key={b.id}
+                    board={b}
+                    onRename={() => {
+                      setTitleDialog({ mode: 'rename', board: b });
+                    }}
+                    onDelete={() => setDeleteTarget(b)}
+                  />
+                ))}
+              </TableBody>
+            </Table>
           </div>
         )}
       </main>
@@ -246,7 +294,7 @@ export function Home() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
             <Button
               variant="destructive"
               onClick={() => {

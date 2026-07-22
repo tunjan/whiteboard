@@ -51,6 +51,7 @@ export function createTextTool(): Tool {
         ...(util.getDefaultProps() as TextProps),
         color: style.color,
         fontFamily: style.fontFamily,
+        fontWeight: style.fontWeight,
         align: style.align,
       };
       const id = genId();

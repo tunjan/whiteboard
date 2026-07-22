@@ -1,0 +1,90 @@
+import { useShallow } from 'zustand/react/shallow';
+import type { Shape } from '@whiteboard/shared';
+import { cameraToTransform, type Camera } from '@/canvas/camera';
+import { getSelectionInfo } from '@/canvas/selection-geometry';
+import { useDocumentStore } from '@/canvas/use-document-store';
+import { usePresenceStore } from '@/collab/use-presence-store';
+
+/** Stable empty array: getSelectionInfo only reads it for group selections. */
+const NO_SHAPES: Shape[] = [];
+
+/**
+ * Outlines of what each peer has selected, drawn in world space so the boxes
+ * track their shapes while a peer drags them. Individual shapes get an oriented
+ * dashed outline; a multi-shape selection adds the union box around them.
+ */
+export function PeerSelectionLayer({ camera }: { camera: Camera }) {
+  const peers = usePresenceStore((s) => s.peers);
+  const currentPageId = useDocumentStore((s) => s.currentPageId);
+  // Only the shapes peers actually have selected — usually a handful. The page
+  // shapes record is rebuilt on every mutation, so subscribing to it directly
+  // would re-render this layer once per frame of every stroke.
+  const shapes = useDocumentStore(
+    useShallow((s) => {
+      const record = s.doc.pages[s.currentPageId]?.shapes;
+      const out: Record<string, Shape> = {};
+      if (!record) return out;
+      for (const peer of peers) {
+        if (peer.page && peer.page !== currentPageId) continue;
+        for (const id of peer.selection ?? []) {
+          const shape = record[id];
+          if (shape) out[id] = shape;
+        }
+      }
+      return out;
+    }),
+  );
+
+  const getShape = (id: string) => shapes[id];
+  return (
+    <svg className="pointer-events-none absolute inset-0 h-full w-full">
+      <g transform={cameraToTransform(camera)}>
+        {peers.map((peer) => {
+          if (peer.page && peer.page !== currentPageId) return null;
+          const ids = (peer.selection ?? []).filter((id) => shapes[id]);
+          if (ids.length === 0) return null;
+          const union =
+            ids.length > 1
+              ? getSelectionInfo(NO_SHAPES, ids, camera.z, getShape)
+              : null;
+          return (
+            <g key={peer.clientId} stroke={peer.color} fill="none">
+              {ids.map((id) => {
+                const info = getSelectionInfo(
+                  NO_SHAPES,
+                  [id],
+                  camera.z,
+                  getShape,
+                );
+                if (!info) return null;
+                const { nw, ne, se, sw } = info.corners;
+                return (
+                  <polygon
+                    key={id}
+                    points={[nw, ne, se, sw]
+                      .map((p) => `${p.x},${p.y}`)
+                      .join(' ')}
+                    strokeWidth={1.5}
+                    vectorEffect="non-scaling-stroke"
+                  />
+                );
+              })}
+              {union ? (
+                <rect
+                  x={union.bounds.minX}
+                  y={union.bounds.minY}
+                  width={union.bounds.maxX - union.bounds.minX}
+                  height={union.bounds.maxY - union.bounds.minY}
+                  strokeWidth={1.5}
+                  strokeDasharray="4 4"
+                  strokeOpacity={0.7}
+                  vectorEffect="non-scaling-stroke"
+                />
+              ) : null}
+            </g>
+          );
+        })}
+      </g>
+    </svg>
+  );
+}

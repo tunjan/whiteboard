@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { MathfieldElement } from 'mathlive';
-import { Eye, EyeOff, Pause, Play, Plus, RotateCcw, Trash2 } from 'lucide-react';
+import { Eye, EyeOff, Pause, Play, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import type {
   GraphExpression,
   GraphParameter,
@@ -11,17 +11,21 @@ import type {
   StrokeDash,
 } from '@whiteboard/shared';
 import { Button, buttonVariants } from '@/components/ui/button';
-import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
+import {
+  Field,
+  FieldLabel,
+  FieldLegend,
+  FieldSeparator,
+  FieldSet,
+} from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { MathField } from '@/components/ui/math-field';
-import { PanelLabel } from '@/components/ui/panel-label';
 import {
   Popover,
   PopoverContent,
   PopoverTitle,
   PopoverTrigger,
 } from '@/components/ui/popover';
-import { Separator } from '@/components/ui/separator';
 import { Slider } from '@/components/ui/slider';
 import { Surface } from '@/components/ui/surface';
 import { Switch } from '@/components/ui/switch';
@@ -42,8 +46,8 @@ import { ToolPanelPresence } from '@/components/tool-panel-presence';
 
 const DASHES: StrokeDash[] = ['solid', 'dashed', 'dotted'];
 
-function valueFromSlider(value: number | number[]): number {
-  return Array.isArray(value) ? value[0]! : value;
+function valueFromSlider(value: number | readonly number[]): number {
+  return typeof value === 'number' ? value : value[0]!;
 }
 
 /** Trails `value` by `delay` ms — used to keep parse errors quiet while the
@@ -108,9 +112,9 @@ function CurveStylePopover({
       </PopoverTrigger>
       <PopoverContent side="left" align="start" className="w-44">
         <PopoverTitle>Curve Style</PopoverTitle>
-        <div className="flex flex-col gap-1.5">
-          <PanelLabel>Color</PanelLabel>
-          <div role="group" aria-label="Curve color" className="grid grid-cols-4 gap-1">
+        <FieldSet className="gap-1.5">
+          <FieldLegend>Color</FieldLegend>
+          <div className="grid grid-cols-4 gap-1">
             {GRAPH_COLORS.map((color) => {
               const active = expression.color === color;
               return (
@@ -133,9 +137,9 @@ function CurveStylePopover({
               );
             })}
           </div>
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <PanelLabel>Line Style</PanelLabel>
+        </FieldSet>
+        <FieldSet className="gap-1.5">
+          <FieldLegend>Line Style</FieldLegend>
           <ToggleGroup
             aria-label="Line style"
             value={[expression.dash]}
@@ -150,7 +154,7 @@ function CurveStylePopover({
               </ToggleGroupItem>
             ))}
           </ToggleGroup>
-        </div>
+        </FieldSet>
       </PopoverContent>
     </Popover>
   );
@@ -264,9 +268,9 @@ function PointStylePopover({
       </PopoverTrigger>
       <PopoverContent side="left" align="start" className="w-44">
         <PopoverTitle>Point Style</PopoverTitle>
-        <div className="flex flex-col gap-1.5">
-          <PanelLabel>Color</PanelLabel>
-          <div role="group" aria-label="Point color" className="grid grid-cols-4 gap-1">
+        <FieldSet className="gap-1.5">
+          <FieldLegend>Color</FieldLegend>
+          <div className="grid grid-cols-4 gap-1">
             {GRAPH_COLORS.map((color) => {
               const active = point.color === color;
               return (
@@ -289,7 +293,7 @@ function PointStylePopover({
               );
             })}
           </div>
-        </div>
+        </FieldSet>
       </PopoverContent>
     </Popover>
   );
@@ -569,16 +573,16 @@ function ViewRange({
   };
 
   return (
-    <FieldGroup className="gap-2">
+    <FieldSet className="gap-2">
       <div className="flex items-center justify-between">
-        <PanelLabel>View Range</PanelLabel>
+        <FieldLegend>View Range</FieldLegend>
         <Button
           variant="ghost"
           size="xs"
           title="Reset to the default view"
           onClick={onReset}
         >
-          <RotateCcw data-icon="inline-start" />
+          <RefreshCw data-icon="inline-start" />
           Reset
         </Button>
       </div>
@@ -609,7 +613,7 @@ function ViewRange({
           </Field>
         ))}
       </div>
-    </FieldGroup>
+    </FieldSet>
   );
 }
 
@@ -716,7 +720,7 @@ function GraphPanelContent({ shape }: { shape: GraphShape }) {
     <Surface
       role="region"
       aria-label="Graph controls"
-      className="touch-targets flex max-h-[calc(100dvh-9rem-env(safe-area-inset-top))] w-[min(20rem,calc(100vw-2rem))] flex-col gap-4 overflow-y-auto p-4 shadow-floating sm:max-h-[calc(100dvh-6.25rem-env(safe-area-inset-top))]"
+      className="touch-targets flex max-h-[calc(100dvh-9rem-env(safe-area-inset-top))] w-[min(20rem,calc(100vw-2rem))] flex-col gap-4 overflow-y-auto p-4 sm:max-h-[calc(100dvh-6.25rem-env(safe-area-inset-top))]"
     >
       <div className="min-w-0">
         <div className="text-sm font-semibold text-content-emphasis">Plotter</div>
@@ -757,8 +761,8 @@ function GraphPanelContent({ shape }: { shape: GraphShape }) {
         </Button>
       </div>
 
-      <FieldGroup className="gap-2">
-        <PanelLabel>Points</PanelLabel>
+      <FieldSet className="gap-2">
+        <FieldLegend>Points</FieldLegend>
         {points.map((point) => (
           <PointRow
             key={point.id}
@@ -776,12 +780,12 @@ function GraphPanelContent({ shape }: { shape: GraphShape }) {
           <Plus data-icon="inline-start" aria-hidden="true" />
           Add Point
         </Button>
-      </FieldGroup>
+      </FieldSet>
 
       {parameterNames.length > 0 ? (
         <>
-          <FieldGroup className="gap-3">
-            <PanelLabel>Sliders</PanelLabel>
+          <FieldSet className="gap-3">
+            <FieldLegend>Sliders</FieldLegend>
             {parameterNames.map((name) => {
               const parameter = props.parameters[name]!;
               return (
@@ -800,8 +804,8 @@ function GraphPanelContent({ shape }: { shape: GraphShape }) {
                 />
               );
             })}
-          </FieldGroup>
-          <Separator />
+          </FieldSet>
+          <FieldSeparator />
         </>
       ) : null}
 

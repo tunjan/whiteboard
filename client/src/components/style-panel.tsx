@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import type { ComponentType } from 'react';
 import {
   AlignCenter,
   AlignLeft,
@@ -10,12 +11,12 @@ import {
 import type {
   FillStyle,
   FontFamily,
+  FontWeight,
   StrokeDash,
   TextAlign,
 } from '@whiteboard/shared';
 import { fontStack } from '@/canvas/shapes/text-measure';
 import { editor, useDocumentStore } from '@/canvas/use-document-store';
-import { usePenPresetsStore } from '@/canvas/use-pen-presets-store';
 import { useSelectionStore } from '@/canvas/use-selection-store';
 import {
   PALETTES,
@@ -52,10 +53,6 @@ const DASHES: StrokeDash[] = ['solid', 'dashed', 'dotted'];
 const FILLABLE = new Set(['rectangle', 'ellipse', 'polygon']);
 const DASHABLE = new Set(['rectangle', 'ellipse', 'polygon', 'line', 'arrow', 'draw']);
 
-/** Pen-preset dot diameters, indexed to match SIZE_OPTIONS. Spread wide enough
- * that adjacent sizes stay distinguishable at a glance. */
-const PRESET_DOT_SIZES = [8, 12, 16, 20];
-
 const FILL_LABELS: Record<FillStyle, string> = {
   none: 'No fill',
   solid: 'Solid fill',
@@ -71,8 +68,16 @@ const FONTS: { family: FontFamily; label: string }[] = [
   { family: 'sans', label: 'Aa' },
   { family: 'serif', label: 'Aa' },
   { family: 'mono', label: 'Aa' },
+  { family: 'hand', label: 'Aa' },
 ];
-const ALIGNS: { align: TextAlign; Icon: typeof AlignLeft }[] = [
+const WEIGHTS: { weight: FontWeight; label: string }[] = [
+  { weight: 400, label: 'Regular' },
+  { weight: 500, label: 'Medium' },
+  { weight: 600, label: 'Semibold' },
+  { weight: 700, label: 'Bold' },
+];
+const swatchBorder = (color: string) => `color-mix(in srgb, ${color} 75%, #000)`;
+const ALIGNS: { align: TextAlign; Icon: ComponentType<{ className?: string; 'aria-hidden'?: boolean | 'true' | 'false' }> }[] = [
   { align: 'start', Icon: AlignLeft },
   { align: 'middle', Icon: AlignCenter },
   { align: 'end', Icon: AlignRight },
@@ -124,8 +129,19 @@ function DashPreview({ dash }: { dash: StrokeDash }) {
 /** Color, stroke width, fill, dash, and text styling - applied to the
  * selection and to new shapes. */
 export function StylePanel() {
-  const { color, size, fill, dash, opacity, arrowStart, arrowEnd, fontFamily, align, paletteId } =
-    useStyleStore();
+  const {
+    color,
+    size,
+    fill,
+    dash,
+    opacity,
+    arrowStart,
+    arrowEnd,
+    fontFamily,
+    fontWeight,
+    align,
+    paletteId,
+  } = useStyleStore();
   const theme = useThemeStore((s) => s.theme);
   const activePalette = PALETTES.find((p) => p.id === paletteId) ?? PALETTES[0]!;
   const colors = paletteColors(paletteId, theme);
@@ -138,6 +154,7 @@ export function StylePanel() {
     setArrowStart,
     setArrowEnd,
     setFontFamily,
+    setFontWeight,
     setAlign,
     setPaletteId,
   } = useStyleStore.getState();
@@ -159,24 +176,10 @@ export function StylePanel() {
     return allSameType ? firstShape.type : 'mixed';
   });
   const playbackActive = useAnimationStore((s) => s.playbackActive);
-  const { presets, activeIndex } = usePenPresetsStore();
-
-  // The pen tool has 3 dedicated presets; re-applying the active one whenever
-  // the draw tool becomes active keeps the drawing style in sync even if the
-  // user changed color/size on another tool in the meantime.
-  useEffect(() => {
-    if (activeToolId !== 'draw') return;
-    const { presets, activeIndex } = usePenPresetsStore.getState();
-    const preset = presets[activeIndex];
-    if (preset) {
-      setColor(preset.color);
-      setSize(preset.size);
-    }
-  }, [activeToolId]);
 
   // Contextual visibility checks
   const isStylePanelVisible = (() => {
-    if (activeToolId === 'eraser' || activeToolId === 'hand') {
+    if (activeToolId === 'eraser' || activeToolId === 'hand' || activeToolId === 'laser') {
       return false;
     }
     if (activeToolId === 'select') {
@@ -195,9 +198,11 @@ export function StylePanel() {
     targetType !== 'graph' &&
     targetType !== 'equation';
 
-  // Frames are fixed chrome: they carry no color/size/fill/dash props, so those
-  // controls would be inert. Opacity is a shape-level field and still applies.
-  const showColor = targetType !== 'frame';
+  // Frames are fixed chrome, images/videos are media with no style props: none
+  // of them carry a color/size/fill/dash prop, so that control would be inert.
+  // Opacity is a shape-level field and still applies to all of them.
+  const showColor =
+    targetType !== 'frame' && targetType !== 'image' && targetType !== 'video';
 
   const showSize =
     targetType === 'draw' ||
@@ -231,9 +236,9 @@ export function StylePanel() {
       ? `selection-${targetType ?? 'default'}`
       : `tool-${targetType ?? 'default'}`;
 
-  // Swatches always include the active color: a pen preset or a persisted
-  // choice can hold a value the current palette does not contain, and a color
-  // grid with nothing selected reads as "no color set".
+  // Swatches always include the active color: a persisted choice can hold a
+  // value the current palette does not contain, and a color grid with
+  // nothing selected reads as "no color set".
   const offPalette = !colors.some((c) => c.value === color);
   const swatches = offPalette
     ? [...colors, { name: 'Current color', value: color }]
@@ -255,7 +260,6 @@ export function StylePanel() {
 
   const applyColor = (c: string) => {
     setColor(c);
-    if (activeToolId === 'draw') usePenPresetsStore.getState().updateActive({ color: c });
     for (const id of selectedIds) editor.updateShape(id, { props: { color: c } });
   };
 
@@ -277,23 +281,12 @@ export function StylePanel() {
 
   const applySize = (n: number) => {
     setSize(n);
-    if (activeToolId === 'draw') usePenPresetsStore.getState().updateActive({ size: n });
     for (const id of selectedIds) {
       const shape = editor.getShape(id);
       if (shape && shape.type !== 'text') {
         editor.updateShape(id, { props: { size: n } });
       }
     }
-  };
-
-  // Selects a pen preset: makes it active and applies its color/size so new
-  // strokes use it (Miro-style pen slots).
-  const applyPreset = (i: number) => {
-    const preset = presets[i];
-    if (!preset) return;
-    usePenPresetsStore.getState().setActive(i);
-    setColor(preset.color);
-    setSize(preset.size);
   };
 
   const applyFill = (f: FillStyle) => {
@@ -350,6 +343,15 @@ export function StylePanel() {
     }
   };
 
+  const applyFontWeight = (w: FontWeight) => {
+    setFontWeight(w);
+    for (const id of selectedIds) {
+      if (editor.getShape(id)?.type === 'text') {
+        editor.updateShape(id, { props: { fontWeight: w } });
+      }
+    }
+  };
+
   const applyAlign = (a: TextAlign) => {
     setAlign(a);
     for (const id of selectedIds) {
@@ -365,55 +367,13 @@ export function StylePanel() {
         <Surface
           role="region"
           aria-label="Style controls"
-          className="touch-targets max-h-[calc(100dvh-9rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] w-[min(12.5rem,calc(100vw-2rem))] overflow-y-auto overscroll-contain p-2.5 shadow-floating sm:max-h-[calc(100dvh-6.25rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))]"
+          className="touch-targets w-[min(12.5rem,calc(100vw-2rem))] max-h-[calc(100dvh-9rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] overflow-y-auto overscroll-contain p-2.5 sm:max-h-[calc(100dvh-6.25rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))]"
         >
           <TooltipProvider delay={300}>
           <div
             key={panelContentKey}
             className="tool-panel-content flex flex-col gap-2.5"
           >
-        {activeToolId === 'draw' ? (
-            <ToggleGroup
-              aria-label="Pen presets"
-              value={[String(activeIndex)]}
-              onValueChange={(values) =>
-                values[0] && applyPreset(Number(values[0]))
-              }
-            >
-              {presets.map((preset, index) => {
-                const slot = SIZE_OPTIONS.findIndex(
-                  (option) => option.value === preset.size,
-                );
-                const dotSize = PRESET_DOT_SIZES[slot] ?? 12;
-                return (
-                  <Tooltip key={index}>
-                    <TooltipTrigger
-                      render={
-                        <ToggleGroupItem
-                          value={String(index)}
-                          aria-label={`Pen preset ${index + 1}`}
-                          className="h-8"
-                        />
-                      }
-                    >
-                      <span
-                        className="rounded-full border border-border-muted"
-                        style={{
-                          backgroundColor: preset.color,
-                          width: dotSize,
-                          height: dotSize,
-                        }}
-                      />
-                    </TooltipTrigger>
-                    <TooltipContent side="left">
-                      Pen {index + 1} · edits save here
-                    </TooltipContent>
-                  </Tooltip>
-                );
-              })}
-            </ToggleGroup>
-        ) : null}
-
         <div className="flex flex-col gap-2">
           {showColor ? (
             <>
@@ -434,8 +394,11 @@ export function StylePanel() {
                         {colors.slice(0, 4).map((paletteColor) => (
                           <span
                             key={paletteColor.name}
-                            className="size-2 rounded-full border border-border-muted"
-                            style={{ backgroundColor: paletteColor.value }}
+                            className="size-2 rounded-full border"
+                            style={{
+                              backgroundColor: paletteColor.value,
+                              borderColor: swatchBorder(paletteColor.value),
+                            }}
                           />
                         ))}
                       </span>
@@ -462,8 +425,11 @@ export function StylePanel() {
                                 (paletteColor) => (
                                   <span
                                     key={paletteColor.name}
-                                    className="size-2.5 rounded-full border border-border-muted"
-                                    style={{ backgroundColor: paletteColor.value }}
+                                    className="size-2.5 rounded-full border"
+                                    style={{
+                                      backgroundColor: paletteColor.value,
+                                      borderColor: swatchBorder(paletteColor.value),
+                                    }}
                                   />
                                 ),
                               )}
@@ -508,17 +474,20 @@ export function StylePanel() {
                                 event.preventDefault();
                                 moveSwatchFocus(index, delta);
                               }}
-                              className="flex h-8 w-full items-center justify-center rounded-[var(--surface-control-radius)] transition-colors duration-150 ease-out hover:bg-bg-muted active:scale-[0.98] motion-reduce:transition-none"
+                              className="flex h-8 w-full items-center justify-center rounded-md transition-colors duration-150 ease-out hover:bg-accent active:scale-[0.98] motion-reduce:transition-none"
                             />
                           }
                         >
                           <span
                             className={cn(
-                              'size-5 rounded-full border border-border-muted',
+                              'size-5 rounded-full border',
                               active &&
-                                'ring-2 ring-content-emphasis ring-offset-2 ring-offset-bg-muted',
+                                'ring-2 ring-ring ring-offset-2 ring-offset-background',
                             )}
-                            style={{ backgroundColor: paletteColor.value }}
+                            style={{
+                              backgroundColor: paletteColor.value,
+                              borderColor: swatchBorder(paletteColor.value),
+                            }}
                           />
                         </TooltipTrigger>
                         <TooltipContent side="left">
@@ -540,7 +509,6 @@ export function StylePanel() {
             >
               <Slider
                 aria-label="Opacity"
-                valueText={`${Math.round(opacity * 100)}%`}
                 min={0}
                 max={1}
                 step={0.01}
@@ -557,6 +525,7 @@ export function StylePanel() {
           </Tooltip>
         </div>
 
+        {showFill || showDash || showSize || showFont || showAlign || showArrows ? (
         <div className="flex flex-col gap-2">
           {showFill ? (
             <ToggleGroup
@@ -669,6 +638,35 @@ export function StylePanel() {
               </ToggleGroup>
           ) : null}
 
+          {showFont ? (
+            <ToggleGroup
+                aria-label="Font weight"
+                value={[String(fontWeight)]}
+                onValueChange={(values) =>
+                  values[0] && applyFontWeight(Number(values[0]) as FontWeight)
+                }
+              >
+                {WEIGHTS.map(({ weight, label }) => (
+                  <Tooltip key={weight}>
+                    <TooltipTrigger
+                      render={
+                        <ToggleGroupItem
+                          value={String(weight)}
+                          aria-label={`${label} weight`}
+                          // Preview each option in the weight it applies, using
+                          // the typeface currently selected.
+                          style={{ fontFamily: fontStack(fontFamily), fontWeight: weight }}
+                        />
+                      }
+                    >
+                      A
+                    </TooltipTrigger>
+                    <TooltipContent side="left">{label}</TooltipContent>
+                  </Tooltip>
+                ))}
+              </ToggleGroup>
+          ) : null}
+
           {showAlign ? (
             <ToggleGroup
                 aria-label="Text alignment"
@@ -741,6 +739,7 @@ export function StylePanel() {
               </ToggleGroup>
           ) : null}
         </div>
+        ) : null}
           </div>
           </TooltipProvider>
         </Surface>

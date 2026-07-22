@@ -5,11 +5,14 @@ import { create } from 'zustand';
 import {
   DEFAULT_ANIMATION_PLAYBACK,
   DEFAULT_MUSIC_PLAYBACK,
+  MAX_DOCUMENTS_PER_BOARD,
   genId,
   isAnimationRecording,
   type AnimationPlaybackState,
   type AnimationPlaybackStatus,
   type AnimationRecordingV1,
+  type BoardDocumentMeta,
+  type DrawPoint,
   type MusicPlaybackState,
   type MusicPlaybackStatus,
   type Page,
@@ -17,13 +20,19 @@ import {
   type WhiteboardDocument,
 } from '@whiteboard/shared';
 import type { Editor, ShapePatch } from './editor';
-import { generateKeyBetween } from './order';
+import { generateKeyBetween, jitterKeyBetween } from './order';
+import {
+  ensurePointsArray,
+  readPoints,
+  syncYPoints,
+} from './shapes/ink-points';
 import { shapeRegistry } from './shapes/shape-registry';
 import { shapeRotatedBounds } from './shape-bounds';
 import { SpatialIndex } from './spatial-index';
 import { useCameraStore } from './use-camera-store';
 import { useSelectionStore } from './use-selection-store';
 import { type CommentMessage, useCommentsStore } from './use-comments-store';
+import { useDocumentsStore } from './use-documents-store';
 import { useConnectionStore } from '@/collab/use-connection-store';
 import { startLatencyMonitor } from '@/collab/latency';
 import {
@@ -52,6 +61,10 @@ const ANIMATION_ORIGIN = 'animation-system';
 // Comments are never part of undo history (not shapes, not selectable), so
 // their origin is deliberately excluded from the UndoManager's trackedOrigins.
 const COMMENT_ORIGIN = 'comments';
+// Repository documents are board-level attachments, not canvas content — like
+// comments, they're excluded from the UndoManager's trackedOrigins so Ctrl+Z
+// never silently removes a file someone shared.
+const DOCUMENTS_ORIGIN = 'documents';
 
 /** Room name for a board's Yjs content (IndexedDB + Hocuspocus). */
 export function boardRoom(boardId: string): string {
@@ -71,8 +84,25 @@ function collabUrl(): string {
 
 export const spatialIndex = new SpatialIndex();
 
+/**
+ * Order by fractional index, breaking ties on id.
+ *
+ * The tiebreaker is what makes the result identical on every client. Without it
+ * `sort` is merely stable, so two records sharing an index would fall back to
+ * insertion order — which reflects the order events happened to arrive locally,
+ * and so differs between clients. Shapes and pages both rely on this.
+ */
+function byIndexThenId(
+  a: { id: string; index: string },
+  b: { id: string; index: string },
+): number {
+  if (a.index !== b.index) return a.index < b.index ? -1 : 1;
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+}
+
+/** Z-order comparator for shapes. */
 export function compareIndex(a: Shape, b: Shape): number {
-  return a.index < b.index ? -1 : a.index > b.index ? 1 : 0;
+  return byIndexThenId(a, b);
 }
 
 // --- Pages registry helpers ---
@@ -104,7 +134,7 @@ function readPages(pages: Y.Map<YPageMeta>): PageMeta[] {
       index: (m.get('index') as string) ?? 'a0',
     });
   }
-  out.sort((a, b) => (a.index < b.index ? -1 : a.index > b.index ? 1 : 0));
+  out.sort(byIndexThenId);
   return out;
 }
 
@@ -131,6 +161,15 @@ function shapeToY(shape: Shape): YShape {
     const { text, ...props } = shape.props;
     m.set('props', props);
     m.set('text', new Y.Text(text));
+  } else if (shape.type === 'draw') {
+    // Ink points are a growing sequence, for the same reason text is one. A
+    // stroke is written once per frame while it is drawn; storing the array
+    // inside `props` re-encoded the whole array each time, so an n-point stroke
+    // cost O(n²) document bytes — paid by every peer and kept forever. As a
+    // Y.Array the live path appends only the new points: O(n) for the stroke.
+    const { points, ...props } = shape.props;
+    m.set('props', props);
+    m.set('points', Y.Array.from(points));
   } else {
     m.set('props', shape.props);
   }
@@ -151,7 +190,9 @@ function yToShape(m: YShape): Shape {
                 ? storedProps.text
                 : '',
         }
-      : storedProps;
+      : type === 'draw'
+        ? { ...storedProps, points: readPoints(m, storedProps) }
+        : storedProps;
   return {
     id: m.get('id'),
     type,
@@ -215,6 +256,11 @@ function applyPatchToY(m: YShape, patch: ShapePatch): void {
       syncYText(text, nextProps.text);
       delete nextProps.text;
     }
+    if (m.get('type') === 'draw' && Array.isArray(nextProps.points)) {
+      // Promotes a legacy stroke to a Y.Array on first write (mirrors Y.Text).
+      syncYPoints(ensurePointsArray(m), nextProps.points as DrawPoint[]);
+      delete nextProps.points;
+    }
     if (Object.keys(nextProps).length > 0) {
       const current =
         (m.get('props') as Record<string, unknown> | undefined) ?? {};
@@ -222,6 +268,11 @@ function applyPatchToY(m: YShape, patch: ShapePatch): void {
       // Once a legacy shape has a Y.Text, remove its stale scalar copy.
       if (m.get('type') === 'text' && m.get('text') instanceof Y.Text) {
         delete merged.text;
+      }
+      // Same for a promoted stroke: without this, any later prop change (a
+      // recolor, say) would write the superseded point array back into `props`.
+      if (m.get('type') === 'draw' && m.get('points') instanceof Y.Array) {
+        delete merged.points;
       }
       m.set('props', merged);
     }
@@ -243,6 +294,8 @@ interface Session {
   animationPlayback: Y.Map<unknown>;
   /** Comment thread messages, flat map keyed by message id (all pages). */
   comments: Y.Map<CommentMessage>;
+  /** Board document repository metadata; the bytes live at /api/docs. */
+  documents: Y.Map<BoardDocumentMeta>;
   /** Shapes map for the active page (root `shapes` for page-default). */
   currentShapes: Y.Map<YShape>;
   currentPageId: string;
@@ -256,6 +309,7 @@ interface Session {
   animationsObserver: () => void;
   animationPlaybackObserver: () => void;
   commentsObserver: () => void;
+  documentsObserver: () => void;
   persistence: IndexeddbPersistence | null;
   provider: HocuspocusProvider | null;
   cleanup: () => void;
@@ -352,13 +406,15 @@ function rebuildPagesCache(): void {
     };
   }
   cachedPages = pages;
-  // `metas` is already index-sorted; keep that order and append the unseeded
-  // fallback page (if any) at the front so it stays deterministic.
-  cachedPageOrder = Object.keys(pages).sort((a, b) => {
-    const ia = metas.find((m) => m.id === a)?.index ?? '';
-    const ib = metas.find((m) => m.id === b)?.index ?? '';
-    return ia < ib ? -1 : ia > ib ? 1 : 0;
-  });
+  // `metas` is already index-sorted (with an id tiebreaker), so take that order
+  // directly rather than re-deriving it — re-sorting the keys here would drop
+  // that tiebreaker and reintroduce per-client divergence on equal indices.
+  // The unseeded fallback page (if any) keeps its historical spot at the front.
+  const currentPageId = session.currentPageId;
+  const ordered = metas.map((m) => m.id);
+  cachedPageOrder = metas.some((m) => m.id === currentPageId)
+    ? ordered
+    : [currentPageId, ...ordered];
 }
 
 function rebuildSnapshot(): void {
@@ -471,6 +527,19 @@ function publishComments(): void {
   useCommentsStore.getState().setMessages(readComments());
 }
 
+// --- Repository documents (flat map: document id -> BoardDocumentMeta) ---
+
+function readDocuments(): Record<string, BoardDocumentMeta> {
+  if (!session) return {};
+  const out: Record<string, BoardDocumentMeta> = {};
+  for (const [id, meta] of session.documents) out[id] = meta;
+  return out;
+}
+
+function publishDocuments(): void {
+  useDocumentsStore.getState().setDocuments(readDocuments());
+}
+
 function asStringOrNull(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
 }
@@ -566,6 +635,11 @@ function maybeSeedDefaultPage(): void {
     const m = new Y.Map<unknown>();
     m.set('id', DEFAULT_PAGE_ID);
     m.set('name', DEFAULT_PAGE_NAME);
+    // Deliberately NOT jittered, unlike every other index write. Two clients
+    // seeding concurrently both write the same registry key, so Yjs keeps one
+    // and discards the other; a fixed index makes the two candidates byte-identical,
+    // so it does not matter which side wins. Jitter is for distinct records that
+    // must not tie, which is the opposite situation.
     m.set('index', generateKeyBetween(null, null));
     session!.pages.set(DEFAULT_PAGE_ID, m);
   });
@@ -595,6 +669,7 @@ export function loadBoard(
   useMusicPlaybackStore.getState().reset();
   useAnimationStore.getState().reset();
   useCommentsStore.getState().reset();
+  useDocumentsStore.getState().reset();
 
   const doc = new Y.Doc();
   const pages = doc.getMap('pages') as Y.Map<YPageMeta>;
@@ -602,6 +677,7 @@ export function loadBoard(
   const animations = doc.getMap<AnimationRecordingV1>('animations');
   const animationPlayback = doc.getMap('animation-playback');
   const comments = doc.getMap<CommentMessage>('comments');
+  const documents = doc.getMap<BoardDocumentMeta>('documents');
   const currentShapes = getShapesMap(doc, DEFAULT_PAGE_ID);
   const undo = new Y.UndoManager(currentShapes, {
     trackedOrigins: new Set([LOCAL_ORIGIN]),
@@ -633,6 +709,8 @@ export function loadBoard(
   animationPlayback.observe(animationPlaybackObserver);
   const commentsObserver = () => publishComments();
   comments.observe(commentsObserver);
+  const documentsObserver = () => publishDocuments();
+  documents.observe(documentsObserver);
 
   const persistence = opts.persist
     ? new IndexeddbPersistence(boardRoom(boardId), doc)
@@ -663,6 +741,7 @@ export function loadBoard(
     animations,
     animationPlayback,
     comments,
+    documents,
     currentShapes,
     currentPageId: DEFAULT_PAGE_ID,
     undo,
@@ -673,6 +752,7 @@ export function loadBoard(
     animationsObserver,
     animationPlaybackObserver,
     commentsObserver,
+    documentsObserver,
     persistence,
     provider,
     cleanup: () => {
@@ -683,6 +763,7 @@ export function loadBoard(
       animations.unobserve(animationsObserver);
       animationPlayback.unobserve(animationPlaybackObserver);
       comments.unobserve(commentsObserver);
+      documents.unobserve(documentsObserver);
       session?.unbindUndoState();
       session?.undo.destroy();
       stopLatencyMonitor();
@@ -692,6 +773,7 @@ export function loadBoard(
       useMusicPlaybackStore.getState().reset();
       useAnimationStore.getState().reset();
       useCommentsStore.getState().reset();
+      useDocumentsStore.getState().reset();
     },
   };
 
@@ -710,6 +792,7 @@ export function loadBoard(
   notifyLegacyAnimations();
   publishAnimationPlayback();
   publishComments();
+  publishDocuments();
 
   let disposed = false;
   return () => {
@@ -782,7 +865,7 @@ export function createPage(name?: string): string {
   const before =
     at >= 0 ? (metas[at]?.index ?? null) : (metas.at(-1)?.index ?? null);
   const after = at >= 0 ? (metas[at + 1]?.index ?? null) : null;
-  const index = generateKeyBetween(before, after);
+  const index = jitterKeyBetween(before, after);
   const pageName = name?.trim() || `Page ${metas.length + 1}`;
   session.doc.transact(() => {
     const m = new Y.Map<unknown>();
@@ -835,7 +918,7 @@ export function movePageToIndex(id: string, targetIndex: number): void {
   const remaining = metas.filter((meta) => meta.id !== id);
   const before = remaining[clampedTarget - 1]?.index ?? null;
   const after = remaining[clampedTarget]?.index ?? null;
-  const index = generateKeyBetween(before, after);
+  const index = jitterKeyBetween(before, after);
   session.doc.transact(() => {
     session!.pages.get(id)?.set('index', index);
   });
@@ -983,6 +1066,45 @@ export function deleteCommentThread(threadId: string): void {
       if (message.threadId === threadId) session!.comments.delete(id);
     }
   }, COMMENT_ORIGIN);
+}
+
+/** How many documents the board's repository currently holds. */
+export function boardDocumentCount(): number {
+  return session?.documents.size ?? 0;
+}
+
+/** Whether the repository has room for another document. */
+export function boardDocumentsFull(): boolean {
+  return boardDocumentCount() >= MAX_DOCUMENTS_PER_BOARD;
+}
+
+/** Publish an uploaded document to everyone on the board. */
+export function addBoardDocument(meta: BoardDocumentMeta): void {
+  if (!session) return;
+  session.doc.transact(() => {
+    session?.documents.set(meta.id, meta);
+  }, DOCUMENTS_ORIGIN);
+}
+
+/** Remove a document from the board. The stored bytes are left in place —
+ *  they're content-addressed and may be shared with another board. */
+export function removeBoardDocument(id: string): void {
+  if (!session) return;
+  session.doc.transact(() => {
+    session?.documents.delete(id);
+  }, DOCUMENTS_ORIGIN);
+}
+
+/**
+ * Encoded size of the whole board document, in bytes.
+ *
+ * Every edit is retained by the CRDT, so this measures accumulated write cost,
+ * not just live content — which makes it the direct way to check that drawing a
+ * stroke stays linear in its point count rather than quadratic.
+ */
+export function documentByteSize(): number {
+  if (!session) return 0;
+  return Y.encodeStateAsUpdate(session.doc).byteLength;
 }
 
 // --- Editor (stable; mutates the current page's Yjs map) ---

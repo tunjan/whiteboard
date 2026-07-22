@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { Bounds } from '@whiteboard/shared';
+import { setLocalSelection } from '@/collab/presence';
 import type { MarqueeMode } from './selection-geometry';
 import type { SnapGuide } from './snapping';
 
@@ -25,21 +26,33 @@ interface SelectionStore {
   setSnapGuides: (guides: SnapGuide[]) => void;
 }
 
-// Selection is per-user, local UI state — never in the shared CRDT.
+// Selection is per-user, local UI state — never in the shared CRDT. It is
+// mirrored to peers through awareness (setLocalSelection) so they can see what
+// each collaborator is working on, the same way laser strokes are shared.
 export const useSelectionStore = create<SelectionStore>((set, get) => ({
   selectedIds: [],
   marquee: null,
   snapGuides: [],
-  setSelection: (selectedIds) => set({ selectedIds }),
-  add: (ids) =>
-    set((s) => ({ selectedIds: [...new Set([...s.selectedIds, ...ids])] })),
-  toggle: (id) =>
+  setSelection: (selectedIds) => {
+    set({ selectedIds });
+    setLocalSelection(selectedIds);
+  },
+  add: (ids) => {
+    set((s) => ({ selectedIds: [...new Set([...s.selectedIds, ...ids])] }));
+    setLocalSelection(get().selectedIds);
+  },
+  toggle: (id) => {
     set((s) => ({
       selectedIds: s.selectedIds.includes(id)
         ? s.selectedIds.filter((x) => x !== id)
         : [...s.selectedIds, id],
-    })),
-  clear: () => set({ selectedIds: [] }),
+    }));
+    setLocalSelection(get().selectedIds);
+  },
+  clear: () => {
+    set({ selectedIds: [] });
+    setLocalSelection([]);
+  },
   has: (id) => get().selectedIds.includes(id),
   setMarquee: (marquee) => set({ marquee }),
   setSnapGuides: (snapGuides) => set({ snapGuides }),

@@ -19,10 +19,12 @@ import {
 import { quantizedCullRegion, viewportWorldBounds } from './geometry';
 import { PerformanceOverlay } from '@/components/performance-overlay';
 import { CursorsLayer } from '@/collab/CursorsLayer';
+import { PeerSelectionLayer } from '@/collab/PeerSelectionLayer';
 import { CommentsLayer } from './CommentsLayer';
 import { DrawingCursor } from './DrawingCursor';
 import { LaserLayer } from './LaserLayer';
 import {
+  getLocalUser,
   setLocalCursor,
   setLocalFollowing,
   setLocalViewport,
@@ -52,6 +54,8 @@ import {
   wbClipToken,
 } from './clipboard';
 import { writeShapesToOsClipboard } from '@/board/clipboard-os';
+import { addFilesToRepository } from '@/board/documents';
+import { useDocumentsStore } from './use-documents-store';
 import { deleteTargetIds } from './hierarchy';
 import { placeImageFiles } from './place-image';
 import { createYoutubeShape, parseYoutubeId } from './place-video';
@@ -715,15 +719,23 @@ export function Canvas() {
         pan.onPointerMove(e);
       } else if (gesture.current === 'tool') {
         // Pointer Events may combine high-frequency hardware samples into one
-        // dispatch. Passing every sample through preserves pen curves; the
-        // draw tool then applies its zoom-aware decimation in world space.
-        const coalesced = e.nativeEvent.getCoalescedEvents?.() ?? [];
-        const samples = coalesced.length
-          ? [...coalesced, e.nativeEvent]
-          : [e.nativeEvent];
-        for (const sample of samples) {
-          activeTool()?.onPointerMove?.(toInfo(sample, rect), ctx);
+        // dispatch. Point-accumulating tools (see `wantsCoalescedSamples`) opt
+        // into receiving every sample, which preserves pen curves; the draw
+        // tool then applies its zoom-aware decimation in world space. Everyone
+        // else gets the dispatched position only — for a tool that just tracks
+        // where the pointer is, the earlier samples are overwritten in the same
+        // frame, so running the full mutation pipeline for each was pure waste.
+        const tool = activeTool();
+        if (!tool?.onPointerMove) return;
+        const coalesced = tool.wantsCoalescedSamples
+          ? e.nativeEvent.getCoalescedEvents?.() ?? []
+          : [];
+        if (coalesced.length) {
+          for (const sample of coalesced) {
+            tool.onPointerMove(toInfo(sample, rect), ctx);
+          }
         }
+        tool.onPointerMove(toInfo(e.nativeEvent, rect), ctx);
       }
     },
     [
@@ -1216,24 +1228,33 @@ export function Canvas() {
     return () => window.removeEventListener('paste', onPaste);
   }, []);
 
-  // Drag-and-drop image files onto the canvas (placed at the drop point).
+  // Drag-and-drop files onto the canvas: images are placed at the drop point,
+  // anything else goes to the board's document repository.
   const onDragOver = useCallback((e: ReactDragEvent) => {
     if (Array.from(e.dataTransfer.types).includes('Files')) e.preventDefault();
   }, []);
   const onDrop = useCallback(
     (e: ReactDragEvent) => {
       if (playbackActive) return;
-      const files = Array.from(e.dataTransfer.files).filter((f) =>
-        f.type.startsWith('image/'),
-      );
-      if (!files.length) return;
+      const dropped = Array.from(e.dataTransfer.files);
+      const images = dropped.filter((f) => f.type.startsWith('image/'));
+      const documents = dropped.filter((f) => !f.type.startsWith('image/'));
+      if (!images.length && !documents.length) return;
       e.preventDefault();
+
+      if (documents.length) {
+        addFilesToRepository(documents, getLocalUser()?.name ?? 'Someone');
+        // Reveal the repository so the file doesn't seem to vanish.
+        useDocumentsStore.getState().setPanelOpen(true);
+      }
+      if (!images.length) return;
+
       const rect = containerRef.current?.getBoundingClientRect();
       const world = screenToWorld(
         { x: e.clientX - (rect?.left ?? 0), y: e.clientY - (rect?.top ?? 0) },
         useCameraStore.getState().camera,
       );
-      void placeImageFiles(files, world).then((ids) => {
+      void placeImageFiles(images, world).then((ids) => {
         if (ids.length) {
           useToolStore.getState().setTool('select');
           useSelectionStore.getState().setSelection(ids);
@@ -1333,6 +1354,7 @@ export function Canvas() {
           wheel events still bubble to the container's handlers below it. */}
       {cameraMoving && <div className="absolute inset-0" />}
 
+      {!playbackActive && <PeerSelectionLayer camera={camera} />}
       {!playbackActive && !editingShape && <SelectionLayer camera={camera} />}
       {!playbackActive && !editingShape && <SelectionToolbar camera={camera} />}
       <CursorsLayer camera={camera} viewportSize={size} />
