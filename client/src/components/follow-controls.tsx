@@ -13,6 +13,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
+import { Toggle } from '@/components/ui/toggle';
 import { cn } from '@/lib/utils';
 
 interface FollowControlsProps {
@@ -87,13 +88,13 @@ export function FollowControls({ identity }: FollowControlsProps) {
         <Tooltip>
           <TooltipTrigger
             render={
-              <Button
-                variant={following ? 'outline' : 'ghost'}
+              <Toggle
+                pressed={following}
+                onPressedChange={toggle}
                 size="sm"
                 aria-label={following ? 'Stop following tutor' : 'Follow tutor'}
-                aria-pressed={following}
-                onClick={toggle}
                 className={cn(
+                  'gap-1.5 border border-transparent text-sm font-medium',
                   following &&
                     'border-[var(--follow-color)] bg-[color-mix(in_oklch,var(--follow-color),transparent_84%)] text-content-emphasis hover:bg-[color-mix(in_oklch,var(--follow-color),transparent_78%)]',
                 )}

@@ -1,6 +1,6 @@
 import { Fragment } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { MousePointer2, Navigation } from 'lucide-react';
+import { MousePointer2, Navigation2 } from 'lucide-react';
 import { rotatePoint, type Shape, type TextShape } from '@whiteboard/shared';
 import type { Camera } from '@/canvas/camera';
 import { worldToScreen } from '@/canvas/camera';
@@ -74,14 +74,14 @@ function OffscreenCursorIndicator({
         className="absolute inset-0"
         style={{ transform: `rotate(${rotation}deg)` }}
       >
-        <Navigation
-          className="absolute -top-5 left-1/2 size-4 -translate-x-1/2"
+        <Navigation2
+          className="absolute -top-2 left-1/2 size-4 -translate-x-1/2"
           fill={outlineColor(color)}
           stroke={outlineColor(color)}
           strokeWidth={3}
         />
-        <Navigation
-          className="absolute -top-5 left-1/2 size-4 -translate-x-1/2"
+        <Navigation2
+          className="absolute -top-2 left-1/2 size-4 -translate-x-1/2"
           fill={color}
           stroke={color}
           strokeWidth={1.5}

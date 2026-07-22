@@ -24,6 +24,12 @@ import { MusicPlayer } from '@/music/music-player';
 import { PageMenu } from '@/components/page-menu';
 import { SettingsDialog } from '@/components/settings-dialog';
 import { ShareButton } from '@/components/share-button';
+import {
+  Avatar,
+  AvatarFallback,
+  AvatarGroup,
+  AvatarGroupCount,
+} from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -56,7 +62,7 @@ function peerLatencyLabel(peer: PeerPresence): string {
   return peer.latencyMs === null ? 'Measuring…' : `${peer.latencyMs} ms`;
 }
 
-function ParticipantBadge({
+function ParticipantAvatar({
   color,
   name,
 }: {
@@ -64,16 +70,17 @@ function ParticipantBadge({
   name: string;
 }) {
   return (
-    <span
-      className="flex size-7 shrink-0 items-center justify-center rounded-full border-2 text-[10px] font-semibold"
-      style={{
-        backgroundColor: color,
-        borderColor: outlineColor(color),
-        color: textOnColor(color),
-      }}
+    <Avatar
+      className="size-7 shrink-0 border-2 after:hidden"
+      style={{ borderColor: outlineColor(color) }}
     >
-      {name.trim().charAt(0).toUpperCase() || '?'}
-    </span>
+      <AvatarFallback
+        className="text-[10px] font-semibold"
+        style={{ backgroundColor: color, color: textOnColor(color) }}
+      >
+        {name.trim().charAt(0).toUpperCase() || '?'}
+      </AvatarFallback>
+    </Avatar>
   );
 }
 
@@ -86,12 +93,12 @@ function OverflowParticipants({
 }) {
   const label = `${participants.length} more present`;
   const badge = (
-    <div
-      className="flex size-7 items-center justify-center rounded-full border-2 border-bg-default bg-bg-subtle text-[10px] font-semibold text-content-subtle"
+    <AvatarGroupCount
+      className="size-7 border-2 border-bg-default bg-bg-subtle text-[10px] font-semibold text-content-subtle"
       title={showPeerLatency ? undefined : label}
     >
       +{participants.length}
-    </div>
+    </AvatarGroupCount>
   );
 
   if (!showPeerLatency) return badge;
@@ -302,7 +309,7 @@ export function BoardChrome({
         <ConnectionIndicator />
         <div className="flex items-center px-1">
           <TooltipProvider delay={300}>
-            <div className="flex -space-x-1.5">
+            <AvatarGroup className="-space-x-1.5">
               {visibleParticipants.map((participant) => {
                 const label = participant.isLocal
                   ? `${participant.name} (you)`
@@ -324,7 +331,7 @@ export function BoardChrome({
                         />
                       }
                     >
-                      <ParticipantBadge
+                      <ParticipantAvatar
                         color={participant.color}
                         name={participant.name}
                       />
@@ -343,7 +350,7 @@ export function BoardChrome({
                         />
                       }
                     >
-                      <ParticipantBadge
+                      <ParticipantAvatar
                         color={participant.color}
                         name={participant.name}
                       />
@@ -352,7 +359,7 @@ export function BoardChrome({
                 } else {
                   trigger = (
                     <TooltipTrigger render={<span />}>
-                      <ParticipantBadge
+                      <ParticipantAvatar
                         color={participant.color}
                         name={participant.name}
                       />
@@ -379,7 +386,7 @@ export function BoardChrome({
                   showPeerLatency={identity?.isTutor === true}
                 />
               ) : null}
-            </div>
+            </AvatarGroup>
           </TooltipProvider>
         </div>
         <MusicPlayer identity={identity} />

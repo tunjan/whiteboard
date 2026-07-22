@@ -15,9 +15,11 @@ import {
   FieldGroup,
   FieldLabel,
 } from '@/components/ui/field';
+import { Kbd } from '@/components/ui/kbd';
 import { PanelLabel } from '@/components/ui/panel-label';
 import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { cn } from '@/lib/utils';
 import { type Theme, useThemeStore } from '@/use-theme-store';
@@ -58,9 +60,6 @@ const SETTINGS_NAV: SettingsNavItem[] = [
   { id: 'debug', label: 'Debug', icon: Gauge },
 ];
 
-const ACTIVE_SECTION_CLASS =
-  'bg-bg-subtle text-content-emphasis hover:bg-bg-subtle hover:text-content-emphasis';
-
 const ACTION_SHORTCUTS: Shortcut[] = [
   { label: 'Undo', keys: `${MOD} Z` },
   { label: 'Redo', keys: `${MOD} ⇧ Z` },
@@ -98,7 +97,7 @@ function PreferenceRow({
     <Field
       orientation="horizontal"
       className={cn(
-        'min-h-16 border-b border-border-muted py-3 max-sm:flex-col max-sm:items-stretch',
+        'min-h-16 border-b py-3 max-sm:flex-col max-sm:items-stretch',
         className,
       )}
     >
@@ -152,47 +151,32 @@ function SliderField({
   );
 }
 
-function Kbd({ children }: { children: React.ReactNode }) {
-  return (
-    <kbd className="shrink-0 rounded-sm border border-border-subtle bg-bg-muted px-2 py-1 font-mono text-xs text-content-subtle">
-      {children}
-    </kbd>
-  );
-}
-
 function SettingsNavigation({
-  activePage,
-  onPageChange,
-  className,
+  listClassName,
+  triggerClassName,
 }: {
-  activePage: SettingsPage;
-  onPageChange: (page: SettingsPage) => void;
-  className?: string;
+  listClassName?: string;
+  triggerClassName?: string;
 }) {
   return (
-    <nav aria-label="Settings sections" className={className}>
-      {SETTINGS_NAV.map(({ id, label, icon: Icon }) => {
-        const isActive = activePage === id;
-
-        return (
-          <Button
-            key={id}
-            type="button"
-            variant="ghost"
-            size="default"
-            aria-current={isActive ? 'page' : undefined}
-            onClick={() => onPageChange(id)}
-            className={cn(
-              'w-full justify-start gap-2.5 text-left max-sm:w-auto',
-              isActive && ACTIVE_SECTION_CLASS,
-            )}
-          >
-            <Icon aria-hidden="true" data-icon="inline-start" />
-            {label}
-          </Button>
-        );
-      })}
-    </nav>
+    <TabsList
+      aria-label="Settings sections"
+      className={cn('h-auto justify-start gap-1', listClassName)}
+    >
+      {SETTINGS_NAV.map(({ id, label, icon: Icon }) => (
+        <TabsTrigger
+          key={id}
+          value={id}
+          className={cn(
+            'h-auto shrink-0 justify-start gap-2.5 px-2.5 py-2',
+            triggerClassName,
+          )}
+        >
+          <Icon aria-hidden="true" data-icon="inline-start" />
+          {label}
+        </TabsTrigger>
+      ))}
+    </TabsList>
   );
 }
 
@@ -348,16 +332,18 @@ function PencilSettings() {
 
 function ShortcutList({ shortcuts }: { shortcuts: Shortcut[] }) {
   return (
-    <div className="flex flex-col divide-y divide-border-muted border-y border-border-subtle">
+    <div className="flex flex-col divide-y border-y">
       {shortcuts.map((shortcut) => (
         <div
           key={shortcut.label}
           className="flex min-h-10 items-center justify-between gap-3 py-2"
         >
-          <span className="min-w-0 leading-5 text-content-default">
+          <span className="min-w-0 leading-5">
             {shortcut.label}
           </span>
-          <Kbd>{shortcut.keys}</Kbd>
+          <Kbd className="h-auto shrink-0 whitespace-nowrap px-2 py-1 font-mono">
+            {shortcut.keys}
+          </Kbd>
         </div>
       ))}
     </div>
@@ -373,13 +359,13 @@ function ShortcutsSettings() {
   return (
     <div className="grid gap-5 p-4 sm:p-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
       <section className="flex min-w-0 flex-col gap-2">
-        <PanelLabel as="h3" className="text-content-muted">
+        <PanelLabel as="h3">
           Tools
         </PanelLabel>
         <ShortcutList shortcuts={toolShortcuts} />
       </section>
       <section className="flex min-w-0 flex-col gap-2">
-        <PanelLabel as="h3" className="text-content-muted">
+        <PanelLabel as="h3">
           Actions
         </PanelLabel>
         <ShortcutList shortcuts={ACTION_SHORTCUTS} />
@@ -392,7 +378,7 @@ function ConnectionSettings() {
   return (
     <FieldGroup className="gap-0 px-4 py-2 sm:px-8 sm:py-3">
       <PreferenceRow label="Board Connection">
-        <div className="flex size-8 items-center justify-center rounded-full bg-bg-subtle [--surface-control-radius:9999px]">
+        <div className="flex size-8 items-center justify-center rounded-full bg-muted [--surface-control-radius:9999px]">
           <ConnectionIndicator />
         </div>
       </PreferenceRow>
@@ -437,51 +423,62 @@ export function SettingsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        showCloseButton={false}
-        className="!flex h-[min(52rem,calc(100dvh-2rem))] w-[calc(100%_-_2rem)] max-w-none gap-0 overflow-hidden border-border-subtle bg-bg-default p-0 sm:w-[min(64rem,calc(100%_-_4rem))] sm:max-w-none"
+      <Tabs
+        value={activePage}
+        onValueChange={(value) => setActivePage(value as SettingsPage)}
+        className="contents"
       >
-        <aside className="hidden w-52 shrink-0 flex-col border-r border-border-subtle bg-bg-default p-3 sm:flex">
-          <SettingsNavigation
-            activePage={activePage}
-            onPageChange={setActivePage}
-            className="flex flex-col gap-1"
-          />
-        </aside>
-
-        <div className="flex min-w-0 flex-1 flex-col">
-          <div className="border-b border-border-subtle bg-bg-default px-2 py-2 sm:hidden">
+        <DialogContent
+          showCloseButton={false}
+          className="!flex h-[min(52rem,calc(100dvh-2rem))] w-[calc(100%_-_2rem)] max-w-none gap-0 overflow-hidden p-0 sm:w-[min(64rem,calc(100%_-_4rem))] sm:max-w-none"
+        >
+          <aside className="hidden w-52 shrink-0 flex-col border-r p-3 sm:flex">
             <SettingsNavigation
-              activePage={activePage}
-              onPageChange={setActivePage}
-              className="scrollbar-none flex gap-1 overflow-x-auto"
+              listClassName="w-full flex-col items-stretch"
+              triggerClassName="w-full"
             />
-          </div>
+          </aside>
 
-          <DialogHeader className="flex-row items-center justify-between gap-4 border-b border-border-subtle bg-bg-default px-4 py-3 sm:px-8 sm:py-4">
-            <DialogTitle>{activeItem.label}</DialogTitle>
-            <DialogClose
-              render={
-                <Button
-                  variant="outline"
-                  size="icon"
-                  aria-label="Close settings"
-                />
-              }
-            >
-              <X aria-hidden="true" />
-            </DialogClose>
-          </DialogHeader>
+          <div className="flex min-w-0 flex-1 flex-col">
+            <div className="border-b px-2 py-2 sm:hidden">
+              <SettingsNavigation listClassName="w-full scrollbar-none overflow-x-auto" />
+            </div>
 
-          <div className="min-h-0 flex-1 overflow-y-auto bg-bg-default">
-            {activePage === 'general' ? <GeneralSettings /> : null}
-            {activePage === 'pencil' ? <PencilSettings /> : null}
-            {activePage === 'shortcuts' ? <ShortcutsSettings /> : null}
-            {activePage === 'connection' ? <ConnectionSettings /> : null}
-            {activePage === 'debug' ? <DebugSettings /> : null}
+            <DialogHeader className="flex-row items-center justify-between gap-4 border-b px-4 py-3 sm:px-8 sm:py-4">
+              <DialogTitle>{activeItem.label}</DialogTitle>
+              <DialogClose
+                render={
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    aria-label="Close settings"
+                  />
+                }
+              >
+                <X aria-hidden="true" />
+              </DialogClose>
+            </DialogHeader>
+
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              <TabsContent value="general">
+                <GeneralSettings />
+              </TabsContent>
+              <TabsContent value="pencil">
+                <PencilSettings />
+              </TabsContent>
+              <TabsContent value="shortcuts">
+                <ShortcutsSettings />
+              </TabsContent>
+              <TabsContent value="connection">
+                <ConnectionSettings />
+              </TabsContent>
+              <TabsContent value="debug">
+                <DebugSettings />
+              </TabsContent>
+            </div>
           </div>
-        </div>
-      </DialogContent>
+        </DialogContent>
+      </Tabs>
     </Dialog>
   );
 }

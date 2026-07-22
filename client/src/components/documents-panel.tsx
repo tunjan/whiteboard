@@ -26,6 +26,7 @@ import {
 import { removeBoardDocument } from '@/canvas/use-document-store';
 import { useDocumentsStore } from '@/canvas/use-documents-store';
 import type { Identity } from '@/collab/identity';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
   AlertDialog,
@@ -43,6 +44,7 @@ import {
   PopoverTitle,
   PopoverTrigger,
 } from '@/components/ui/popover';
+import { Progress } from '@/components/ui/progress';
 import {
   Tooltip,
   TooltipContent,
@@ -190,17 +192,11 @@ function UploadRow({
             <p className="text-xs tabular-nums text-content-muted">
               {formatBytes(Math.round(size * progress))} of {formatBytes(size)}
             </p>
-            <div
-              className="mt-1 h-0.5 w-full overflow-hidden rounded-full bg-bg-muted"
-              role="progressbar"
+            <Progress
+              value={Math.round(progress * 100)}
               aria-label={`Uploading ${name}`}
-              aria-valuenow={Math.round(progress * 100)}
-            >
-              <div
-                className="h-full rounded-full bg-content-default transition-[width] duration-150"
-                style={{ width: `${Math.round(progress * 100)}%` }}
-              />
-            </div>
+              className="mt-1"
+            />
           </>
         )}
       </div>
@@ -275,12 +271,12 @@ export function DocumentsPanel({ identity }: { identity: Identity | null }) {
         >
           <Folder />
           {list.length > 0 ? (
-            <span
+            <Badge
               aria-hidden="true"
-              className="absolute -top-0.5 -right-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-content-default px-1 text-[9px] font-semibold tabular-nums text-bg-default"
+              className="absolute -top-0.5 -right-0.5 h-3.5 min-w-3.5 rounded-full px-1 text-[9px] tabular-nums"
             >
               {list.length}
-            </span>
+            </Badge>
           ) : null}
         </PopoverTrigger>
         <PopoverContent
@@ -307,14 +303,15 @@ export function DocumentsPanel({ identity }: { identity: Identity | null }) {
           </PopoverHeader>
 
           <div className="px-1 pb-1">
-            <button
+            <Button
               type="button"
+              variant="ghost"
               onClick={() => inputRef.current?.click()}
-              className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-sm text-content-default outline-hidden transition-colors hover:bg-bg-muted hover:text-content-emphasis focus-visible:bg-bg-muted focus-visible:text-content-emphasis"
+              className="w-full justify-start gap-2.5 text-content-default hover:bg-bg-muted hover:text-content-emphasis"
             >
               <Upload className="size-4 shrink-0" />
               Add Files
-            </button>
+            </Button>
             <input
               ref={inputRef}
               type="file"

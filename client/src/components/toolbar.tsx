@@ -18,6 +18,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Kbd } from '@/components/ui/kbd';
 import {
   Tooltip,
   TooltipContent,
@@ -26,6 +27,7 @@ import {
 } from '@/components/ui/tooltip';
 import { Surface } from '@/components/ui/surface';
 import { Separator } from '@/components/ui/separator';
+import { Toggle } from '@/components/ui/toggle';
 import { cn } from '@/lib/utils';
 import { pickAndPlaceImages } from '@/canvas/place-image';
 import { polygonPointsForBox } from '@/canvas/shapes/polygon-geometry';
@@ -148,7 +150,12 @@ function MediaMenu() {
             <span>Add Media</span>
           </TooltipContent>
         </Tooltip>
-        <DropdownMenuContent side="top" align="center" sideOffset={8}>
+        <DropdownMenuContent
+          side="top"
+          align="center"
+          sideOffset={8}
+          className="w-48"
+        >
           <DropdownMenuGroup>
             <DropdownMenuItem onClick={() => void pickAndPlaceImages()}>
               <ImagePlus />
@@ -173,24 +180,23 @@ function ToolLockButton() {
   return (
     <Tooltip>
       <TooltipTrigger
-        onClick={toggle}
-        aria-label="Tool lock"
-        aria-pressed={locked}
-        className={cn(
-          buttonVariants({ variant: 'ghost', size: 'icon-lg' }),
-          locked && ACTIVE_TOOL_CLASS,
-        )}
+        render={
+          <Toggle
+            pressed={locked}
+            onPressedChange={toggle}
+            aria-label="Tool lock"
+            className={cn(
+              buttonVariants({ variant: 'ghost', size: 'icon-lg' }),
+              locked && ACTIVE_TOOL_CLASS,
+            )}
+          />
+        }
       >
         <Icon />
       </TooltipTrigger>
       <TooltipContent side="top">
         <span>Tool Lock</span>
-        <kbd
-          data-slot="kbd"
-          className="bg-background/20 px-1 font-mono text-xs uppercase text-background"
-        >
-          q
-        </kbd>
+        <Kbd className="font-mono uppercase">q</Kbd>
       </TooltipContent>
     </Tooltip>
   );
@@ -231,12 +237,7 @@ export function Toolbar() {
         <TooltipContent side="top">
           <span>{tool.label}</span>
           {tool.hotkey ? (
-            <kbd
-              data-slot="kbd"
-              className="bg-background/20 px-1 font-mono text-xs uppercase text-background"
-            >
-              {tool.hotkey}
-            </kbd>
+            <Kbd className="font-mono uppercase">{tool.hotkey}</Kbd>
           ) : null}
         </TooltipContent>
       </Tooltip>

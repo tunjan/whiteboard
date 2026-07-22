@@ -21,8 +21,10 @@ import {
   PopoverTitle,
   PopoverTrigger,
 } from '@/components/ui/popover';
+import { Progress } from '@/components/ui/progress';
 import { Separator } from '@/components/ui/separator';
 import { Slider } from '@/components/ui/slider';
+import { Toggle } from '@/components/ui/toggle';
 import { cn } from '@/lib/utils';
 import { useMusicPlaybackStore } from './use-music-playback-store';
 
@@ -222,11 +224,11 @@ export function MusicPlayer({ identity }: MusicPlayerProps) {
       <Popover>
         <PopoverTrigger
           render={
-            <Button
-              variant={isPlaying ? 'outline' : 'ghost'}
-              size="icon-sm"
+            <Toggle
+              pressed={isPlaying}
               aria-label="Music player"
-              aria-pressed={isPlaying}
+              size="sm"
+              className="size-8 p-0"
             />
           }
         >
@@ -261,15 +263,7 @@ export function MusicPlayer({ identity }: MusicPlayerProps) {
                 </div>
               </div>
             </div>
-            <div
-              className="h-1.5 overflow-hidden rounded-full bg-bg-subtle"
-              aria-hidden="true"
-            >
-              <div
-                className="h-full rounded-full bg-bg-inverted transition-[width]"
-                style={{ width: `${progress}%` }}
-              />
-            </div>
+            <Progress value={progress} aria-hidden="true" />
             <div className="flex items-center justify-between text-[11px] tabular-nums text-content-subtle">
               <span>{formatTime(displayTime)}</span>
               <span>{duration > 0 ? formatTime(duration) : '--:--'}</span>
@@ -364,16 +358,14 @@ export function MusicPlayer({ identity }: MusicPlayerProps) {
                 {activeTracks.map((track) => {
                   const active = track.id === currentTrack?.id;
                   return (
-                    <button
+                    <Toggle
                       key={track.id}
-                      type="button"
-                      aria-pressed={active}
-                      onClick={() => playTrack(track)}
+                      pressed={active}
+                      onPressedChange={() => playTrack(track)}
                       className={cn(
-                        'flex min-h-10 w-full items-center gap-2 rounded-md px-2 text-left transition-colors outline-none focus-visible:ring-2 focus-visible:ring-border-emphasis',
-                        active
-                          ? 'bg-bg-info text-content-info'
-                          : 'hover:bg-bg-muted',
+                        'h-auto min-h-10 w-full justify-start gap-2 rounded-md px-2 text-left transition-colors',
+                        'aria-pressed:bg-bg-info aria-pressed:text-content-info',
+                        !active && 'hover:bg-bg-muted',
                       )}
                     >
                       <Music2
@@ -398,7 +390,7 @@ export function MusicPlayer({ identity }: MusicPlayerProps) {
                       {active ? (
                         <Volume2 className="size-4 shrink-0 text-content-info" />
                       ) : null}
-                    </button>
+                    </Toggle>
                   );
                 })}
               </div>

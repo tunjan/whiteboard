@@ -346,17 +346,18 @@ export function AnimationControls({ identity }: { identity: Identity | null }) {
               </PopoverHeader>
               {isTutor ? (
                 <div className="px-1 pb-1">
-                  <button
+                  <Button
                     type="button"
+                    variant="ghost"
                     onClick={() => beginRecordingCountdown()}
-                    className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-sm text-content-default outline-hidden transition-colors hover:bg-bg-muted hover:text-content-emphasis focus-visible:bg-bg-muted focus-visible:text-content-emphasis"
+                    className="w-full justify-start gap-2.5 text-content-default hover:bg-bg-muted hover:text-content-emphasis"
                   >
                     <span
                       aria-hidden="true"
                       className="size-2.5 shrink-0 rounded-full bg-content-error"
                     />
                     Record This Page
-                  </button>
+                  </Button>
                 </div>
               ) : null}
               <RecordingsLibrary boardId={boardId} isTutor={isTutor} />
