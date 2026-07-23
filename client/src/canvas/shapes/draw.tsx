@@ -106,7 +106,7 @@ export const drawUtil: ShapeUtil<'draw'> = {
     const transform = `translate(${shape.x} ${shape.y})${rotate}`;
 
     // Dashed/dotted ink strokes a uniform-width centerline (like lines and
-    // polygons); solid keeps the variable-width perfect-freehand fill.
+    // polygons); solid keeps the variable-width freehand-engine fill.
     if (dash && dash !== 'solid' && points.length >= 2) {
       return (
         <path

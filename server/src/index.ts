@@ -42,7 +42,12 @@ const server = serve({ fetch: app.fetch, port: env.port }, (info) => {
 // the board id (capability URL) is the secret. In Hocuspocus v4 the
 // ClientConnection returned by handleConnection must be fed socket messages
 // explicitly.
-const wss = new WebSocketServer({ noServer: true });
+const wss = new WebSocketServer({
+  noServer: true,
+  // Collaboration updates are compact and binary assets use HTTP endpoints.
+  // Bound raw frames before Hocuspocus decodes stateless payloads into strings.
+  maxPayload: 5 * 1024 * 1024,
+});
 server.on('upgrade', (request, socket, head) => {
   wss.handleUpgrade(request, socket, head, (ws) => {
     const connection = hocuspocus.handleConnection(ws, request);

@@ -8,6 +8,7 @@
     "start": "tsx src/index.ts",
     "build": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
     "db:push": "drizzle-kit push"
   },
   "dependencies": {
@@ -27,6 +28,7 @@
     "@types/pg": "^8.20.0",
     "@types/ws": "^8.18.1",
     "drizzle-kit": "^0.31.10",
-    "tsx": "^4.19.2"
+    "tsx": "^4.19.2",
+    "vitest": "^4.1.9"
   }
 }

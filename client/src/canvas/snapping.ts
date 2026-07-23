@@ -26,6 +26,8 @@ export interface ResizeSnapResult extends SnapResult {
 
 /** Discrete points plus a sampled/linear outline used by connector handles. */
 export interface PointSnapTarget {
+  /** Owning shape, when this target came from document geometry. */
+  shapeId?: string;
   points: Point[];
   outline: Point[];
   closed: boolean;
@@ -34,6 +36,7 @@ export interface PointSnapTarget {
 export interface PointSnapResult {
   point: Point;
   guides: SnapGuide[];
+  targetId?: string;
 }
 
 const EPS = 0.01;
@@ -369,18 +372,20 @@ export function snapPoint(
   let bestPoint: Point = point;
   let bestDistance = threshold + 1;
   let found = false;
-  const consider = (candidate: Point) => {
+  let targetId: string | undefined;
+  const consider = (candidate: Point, candidateTargetId?: string) => {
     const dist = Math.hypot(candidate.x - point.x, candidate.y - point.y);
     if (dist < bestDistance) {
       bestDistance = dist;
       bestPoint = candidate;
       found = true;
+      targetId = candidateTargetId;
     }
   };
 
   // Discrete snap points win ties over outline projections.
   for (const target of targets) {
-    for (const candidate of target.points) consider(candidate);
+    for (const candidate of target.points) consider(candidate, target.shapeId);
   }
   for (const target of targets) {
     const { outline } = target;
@@ -388,13 +393,16 @@ export function snapPoint(
     for (let i = 0; i < segmentCount; i++) {
       const a = outline[i];
       const b = outline[(i + 1) % outline.length];
-      if (a && b) consider(closestPointOnSegment(point, a, b));
+      if (a && b) {
+        consider(closestPointOnSegment(point, a, b), target.shapeId);
+      }
     }
   }
 
   if (!found || bestDistance > threshold) return { point, guides: [] };
   return {
     point: bestPoint,
+    targetId,
     guides: [
       {
         kind: 'point',

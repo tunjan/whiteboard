@@ -1,9 +1,32 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
-@import "@fontsource-variable/geist";
-@import "@fontsource-variable/geist-mono";
-@import "@fontsource-variable/caveat";
+
+/* The board only needs the Latin subsets. Importing each package's default
+ * stylesheet also emitted Cyrillic, Vietnamese, and Latin-ext font files. */
+@font-face {
+    font-family: 'Geist Variable';
+    font-style: normal;
+    font-display: swap;
+    font-weight: 100 900;
+    src: url('@fontsource-variable/geist/files/geist-latin-wght-normal.woff2') format('woff2-variations');
+}
+
+@font-face {
+    font-family: 'Geist Mono Variable';
+    font-style: normal;
+    font-display: swap;
+    font-weight: 100 900;
+    src: url('@fontsource-variable/geist-mono/files/geist-mono-latin-wght-normal.woff2') format('woff2-variations');
+}
+
+@font-face {
+    font-family: 'Caveat Variable';
+    font-style: normal;
+    font-display: swap;
+    font-weight: 400 700;
+    src: url('@fontsource-variable/caveat/files/caveat-latin-wght-normal.woff2') format('woff2-variations');
+}
 
 @custom-variant dark (&:is(.dark *));
 
@@ -1165,6 +1188,15 @@
       min-height: 2.5rem;
       min-width: 2.5rem;
     }
+
+    /* Equation templates are dense and used while a virtual keyboard is open,
+       so give this authoring surface the full recommended touch target. */
+    .equation-panel button,
+    .equation-panel [role="button"],
+    .equation-panel [data-slot="button"] {
+      min-height: 2.75rem;
+      min-width: 2.75rem;
+    }
   }
 }
 
@@ -1286,4 +1318,35 @@
 .graph-math-field::part(menu-toggle),
 .graph-math-field::part(virtual-keyboard-toggle) {
   display: none;
+}
+
+/* Equation authoring keeps mathematical lines explicit. When a formula grows
+   past the comfortable width, indicate horizontal continuation without
+   clipping the MathLive field's own scrolling surface. */
+.equation-field-shell {
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.equation-field-shell[data-overflow]::after {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: 0;
+  width: 1.75rem;
+  content: '';
+  pointer-events: none;
+  background: linear-gradient(to right, transparent, var(--bg-muted));
+}
+
+.equation-output-preview {
+  flex: none;
+  min-width: max-content;
+}
+
+.equation-output-preview > svg {
+  display: block;
+  width: auto;
+  max-width: none;
+  height: 3rem;
 }

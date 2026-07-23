@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Shape } from '@whiteboard/shared';
 import '../shapes/register';
 import type { Editor } from '../editor';
@@ -37,7 +37,12 @@ function context(): { ctx: ToolContext; shapes: Map<string, Shape> } {
     transact: (fn) => fn(),
   };
   return {
-    ctx: { editor, setTool: () => undefined, complete: () => undefined },
+    ctx: {
+      editor,
+      getViewportBounds: () => ({ minX: 20, minY: 10, maxX: 220, maxY: 110 }),
+      setTool: () => undefined,
+      complete: () => undefined,
+    },
     shapes,
   };
 }
@@ -88,5 +93,21 @@ describe('equation tool placement', () => {
     createEquationTool().onPointerDown?.({ ...pointer(0, 0), button: 2 }, ctx);
 
     expect(shapes.size).toBe(0);
+  });
+
+  it('places at the viewport center when Enter is pressed', () => {
+    const { ctx, shapes } = context();
+    const preventDefault = vi.fn();
+
+    const handled = createEquationTool().onKeyDown?.(
+      { key: 'Enter', preventDefault } as unknown as KeyboardEvent,
+      ctx,
+    );
+
+    const shape = placedEquation(shapes);
+    expect(handled).toBe(true);
+    expect(preventDefault).toHaveBeenCalledOnce();
+    expect(shape.x + shape.props.w / 2).toBe(120);
+    expect(shape.y + shape.props.h / 2).toBe(60);
   });
 });

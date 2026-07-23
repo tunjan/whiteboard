@@ -1,6 +1,7 @@
 import type { ReactElement } from 'react';
 import type {
   Point,
+  Shape,
   ShapeDefinition,
   ShapeMap,
   ShapeType,
@@ -20,7 +21,7 @@ export interface ShapeComponentProps<T extends ShapeType> {
  */
 export interface ShapeHandle {
   id: string;
-  kind: 'vertex' | 'bend';
+  kind: 'vertex' | 'bend' | 'create' | 'route';
   point: Point;
 }
 
@@ -56,6 +57,6 @@ export interface ShapeUtil<T extends ShapeType = ShapeType>
     shape: ShapeMap[T],
     handleId: string,
     point: Point,
-    opts: { shiftKey: boolean },
+    opts: { shiftKey: boolean; bindingTarget?: Shape },
   ): HandleDragResult<T>;
 }

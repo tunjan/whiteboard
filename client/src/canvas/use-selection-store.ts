@@ -7,13 +7,13 @@ import type { SnapGuide } from './snapping';
 export interface MarqueeSelection {
   /** World-space bounds of the live selection rectangle. */
   bounds: Bounds;
-  /** Left-to-right encloses; right-to-left touches. */
+  /** Intersect is the default; Ctrl/Command temporarily switches to wrap. */
   mode: MarqueeMode;
 }
 
 interface SelectionStore {
   selectedIds: string[];
-  /** Live directional marquee while drag-selecting, else null. */
+  /** Live rectangle selection while drag-selecting, else null. */
   marquee: MarqueeSelection | null;
   /** Live alignment guides during a snapping drag. */
   snapGuides: SnapGuide[];
@@ -34,6 +34,13 @@ export const useSelectionStore = create<SelectionStore>((set, get) => ({
   marquee: null,
   snapGuides: [],
   setSelection: (selectedIds) => {
+    const current = get().selectedIds;
+    if (
+      current.length === selectedIds.length &&
+      current.every((id) => selectedIds.includes(id))
+    ) {
+      return;
+    }
     set({ selectedIds });
     setLocalSelection(selectedIds);
   },

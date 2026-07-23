@@ -1,5 +1,8 @@
 import type { Awareness } from 'y-protocols/awareness';
-import type { Point } from '@whiteboard/shared';
+import {
+  parseVoicePresence,
+  type Point,
+} from '@whiteboard/shared';
 import type { Camera } from '@/canvas/camera';
 import type { LaserStroke } from '@/canvas/use-laser-store';
 import { viewportWorldBounds } from '@/canvas/geometry';
@@ -10,6 +13,7 @@ import { isAnimationPlaybackActive } from '@/animation/use-animation-store';
 import {
   type PeerPresence,
   type TextSelectionPresence,
+  type VoicePresence,
   type ViewportPresence,
   usePresenceStore,
 } from './use-presence-store';
@@ -29,6 +33,7 @@ let localPage: string | null = null;
 let localFollowing = false;
 let localLatencyMs: number | null = null;
 let localTextSelection: TextSelectionPresence | null = null;
+let localVoice: VoicePresence | null = null;
 let lastCursorSent = 0;
 let lastViewportSent = 0;
 let lastSummonSent = 0;
@@ -77,6 +82,16 @@ function publishPeers(a: Awareness): void {
     const laser = (state.laser as LaserStroke[] | null) ?? null;
     const selection = (state.selection as string[] | null) ?? null;
     const prev = prevPeers.get(clientId);
+    const parsedVoice = parseVoicePresence(state.voice);
+    const voice =
+      parsedVoice &&
+      prev?.voice &&
+      parsedVoice.inCall === prev.voice.inCall &&
+      parsedVoice.muted === prev.voice.muted &&
+      parsedVoice.speaking === prev.voice.speaking &&
+      parsedVoice.sessionId === prev.voice.sessionId
+        ? prev.voice
+        : parsedVoice;
     const peer: PeerPresence =
       prev &&
       prev.name === user.name &&
@@ -90,7 +105,8 @@ function publishPeers(a: Awareness): void {
       prev.latencyMs === latencyMs &&
       prev.textSelection === textSelection &&
       prev.laser === laser &&
-      prev.selection === selection
+      prev.selection === selection &&
+      prev.voice === voice
         ? prev
         : {
             clientId,
@@ -106,6 +122,7 @@ function publishPeers(a: Awareness): void {
             textSelection,
             laser,
             selection,
+            voice,
           };
     next.set(clientId, peer);
     peers.push(peer);
@@ -131,6 +148,7 @@ export function setActiveAwareness(next: Awareness | null): void {
   next.setLocalStateField('following', localFollowing);
   next.setLocalStateField('latencyMs', localLatencyMs);
   next.setLocalStateField('textSelection', localTextSelection);
+  next.setLocalStateField('voice', localVoice);
   next.setLocalStateField(
     'selection',
     localSelection.length > 0 ? localSelection : null,
@@ -164,6 +182,12 @@ export function setLocalFollowing(following: boolean): void {
 export function setLocalLatency(latencyMs: number | null): void {
   localLatencyMs = latencyMs;
   awareness?.setLocalStateField('latencyMs', latencyMs);
+}
+
+/** Publish this client's in-board voice membership and mute state. */
+export function setLocalVoice(voice: VoicePresence | null): void {
+  localVoice = voice;
+  awareness?.setLocalStateField('voice', voice);
 }
 
 export function setLocalCursor(point: Point | null): void {

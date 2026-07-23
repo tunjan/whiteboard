@@ -1,5 +1,9 @@
-import { describe, expect, it } from 'vitest';
-import { consumeEquationFocus, requestEquationFocus } from './equation-focus';
+import { describe, expect, it, vi } from 'vitest';
+import {
+  consumeEquationFocus,
+  requestEquationFocus,
+  subscribeEquationFocus,
+} from './equation-focus';
 
 describe('equation focus hand-off', () => {
   it('grants focus once, to the shape that asked for it', () => {
@@ -22,5 +26,15 @@ describe('equation focus hand-off', () => {
     consumeEquationFocus('eq-1');
 
     expect(consumeEquationFocus('eq-1')).toBe(false);
+  });
+
+  it('notifies an already-mounted equation panel', () => {
+    const listener = vi.fn();
+    const unsubscribe = subscribeEquationFocus(listener);
+
+    requestEquationFocus('eq-1');
+
+    expect(listener).toHaveBeenCalledWith('eq-1');
+    unsubscribe();
   });
 });

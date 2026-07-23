@@ -32,6 +32,7 @@ interface EquationRenderState {
 }
 
 const renderCache = new Map<string, EquationRender>();
+let renderCacheBytes = 0;
 /**
  * Bound on typeset expressions held in memory.
  *
@@ -49,7 +50,16 @@ const renderCache = new Map<string, EquationRender>();
  * real document.
  */
 const RENDER_CACHE_MAX = 512;
+// Entry count alone does not protect against a handful of very long equations
+// retaining megabytes of generated SVG. This is an approximate UTF-16 budget,
+// intentionally conservative rather than an exact heap measurement.
+const RENDER_CACHE_MAX_BYTES = 16 * 1024 * 1024;
 const inFlight = new Map<string, Promise<EquationRender>>();
+
+function cacheEntryBytes(latex: string, entry: EquationRender): number {
+  const content = entry.error ?? entry.svg ?? '';
+  return (latex.length + content.length) * 2;
+}
 
 /** Mark `latex` as most recently used. Map iterates in insertion order, so
  *  re-inserting moves it to the back of the eviction queue. */
@@ -58,10 +68,16 @@ function touch(latex: string, entry: EquationRender): void {
   renderCache.set(latex, entry);
 }
 
-function evictIfFull(): void {
-  while (renderCache.size >= RENDER_CACHE_MAX) {
+function evictFor(entryBytes: number): void {
+  while (
+    renderCache.size >= RENDER_CACHE_MAX ||
+    (renderCache.size > 0 &&
+      renderCacheBytes + entryBytes > RENDER_CACHE_MAX_BYTES)
+  ) {
     const oldest = renderCache.keys().next().value;
     if (oldest === undefined) return;
+    const entry = renderCache.get(oldest);
+    if (entry) renderCacheBytes -= cacheEntryBytes(oldest, entry);
     renderCache.delete(oldest);
   }
 }
@@ -100,6 +116,25 @@ function exLengthToPixels(value: unknown, attribute: string): number {
   return ex * BASE_EX;
 }
 
+function decodeMathJaxAttribute(value: string): string {
+  return value
+    .replaceAll('&quot;', '"')
+    .replaceAll('&#39;', "'")
+    .replaceAll('&lt;', '<')
+    .replaceAll('&gt;', '>')
+    .replaceAll('&amp;', '&');
+}
+
+/** MathJax represents some TeX failures (notably undefined commands) as an
+ * inline merror node instead of throwing through `formatError`. Treat those as
+ * real errors so the panel and assistive technology receive the same status as
+ * they do for missing braces and environments. */
+function embeddedMathJaxError(svg: string): string | null {
+  const match = /data-mjx-error=(?:"([^"]*)"|'([^']*)')/.exec(svg);
+  const message = match?.[1] ?? match?.[2];
+  return message ? decodeMathJaxAttribute(message) : null;
+}
+
 async function loadMathJax(): Promise<void> {
   const [
     { mathjax },
@@ -121,7 +156,13 @@ async function loadMathJax(): Promise<void> {
   RegisterHTMLHandler(adaptor);
   const input = new TeX({
     packages: AllPackages.filter(
-      (name) => name !== 'require' && name !== 'autoload',
+      (name) =>
+        name !== 'require' &&
+        name !== 'autoload' &&
+        // `noundefined` intentionally paints unknown commands as red text.
+        // The editor needs a real error instead so it can explain, announce,
+        // and exclude invalid content consistently.
+        name !== 'noundefined',
     ),
     formatError: (_jax: unknown, error: unknown) => {
       throw error;
@@ -192,17 +233,23 @@ function convertAndCache(latex: string): EquationRender {
     // attributes here would make canvas size depend on the surrounding font.
     runtime.adaptor.removeAttribute(svg, 'width');
     runtime.adaptor.removeAttribute(svg, 'height');
-    entry = {
-      svg: runtime.adaptor.outerHTML(svg),
-      width,
-      height,
-    };
+    const markup = runtime.adaptor.outerHTML(svg);
+    const embeddedError = embeddedMathJaxError(markup);
+    entry = embeddedError
+      ? { error: embeddedError }
+      : {
+          svg: markup,
+          width,
+          height,
+        };
   } catch (error) {
     entry = { error: errorMessage(error) };
   }
 
-  evictIfFull();
+  const entryBytes = cacheEntryBytes(latex, entry);
+  evictFor(entryBytes);
   renderCache.set(latex, entry);
+  renderCacheBytes += entryBytes;
   publishCacheChange();
   return entry;
 }

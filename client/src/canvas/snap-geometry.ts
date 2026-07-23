@@ -6,7 +6,7 @@ import {
   rotatePoint,
 } from '@whiteboard/shared';
 import type { PointSnapTarget } from './snapping';
-import { curvePoints } from './shapes/line-geometry';
+import { arrowPoints, curvePoints } from './shapes/line-geometry';
 import { normalizedPolygonPoints } from './shapes/polygon-geometry';
 import { shapeRegistry } from './shapes/shape-registry';
 
@@ -83,7 +83,19 @@ function polygonTarget(shape: Extract<Shape, { type: 'polygon' }>): PointSnapTar
 function connectorTarget(
   shape: Extract<Shape, { type: 'line' | 'arrow' }>,
 ): PointSnapTarget {
-  const local = curvePoints(shape.props.points, shape.props.bend ?? 0);
+  const local =
+    shape.type === 'arrow'
+      ? arrowPoints(
+          shape.props.points,
+          shape.props.topology ??
+            (Math.abs(shape.props.bend ?? 0) >= 0.5 ? 'arc' : 'straight'),
+          shape.props.bend ?? 0,
+        )
+      : curvePoints(
+          shape.props.points,
+          shape.props.bend ?? 0,
+          shape.props.spline ?? 'linear',
+        );
   const bounds = pointsBounds(local);
   const center = {
     x: shape.x + (bounds.minX + bounds.maxX) / 2,

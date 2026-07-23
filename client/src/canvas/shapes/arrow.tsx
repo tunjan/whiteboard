@@ -1,10 +1,11 @@
-import { connectorHandleDrag, connectorHandles } from './connector-handles';
+import { arrowHandleDrag, arrowHandles } from './connector-handles';
 import { DEFAULT_SHAPE_STYLE } from './style';
 import {
   arrowheadLength,
   arrowheadPath,
-  curvePath,
-  curvePoints,
+  arrowPath,
+  arrowPoints,
+  pathMidpoint,
   polylineBounds,
   polylineHitTest,
   polylineTransform,
@@ -26,23 +27,41 @@ export const arrowUtil: ShapeUtil<'arrow'> = {
     arrowStart: false,
     arrowEnd: true,
     bend: 0,
+    topology: 'straight',
+    bindings: {},
+    label: '',
   }),
 
   // Pad bounds by the arrowhead length so heads aren't clipped/culled.
-  getBounds: (s) =>
-    polylineBounds(
+  getBounds: (s) => {
+    const fontSize = Math.max(12, s.props.size * 3);
+    const labelPad = s.props.label?.trim()
+      ? s.props.label.trim().length * fontSize * 0.3 + fontSize
+      : 0;
+    return polylineBounds(
       s.x,
       s.y,
-      curvePoints(s.props.points, s.props.bend ?? 0),
-      arrowheadLength(s.props.size),
-    ),
+      arrowPoints(
+        s.props.points,
+        s.props.topology ??
+          (Math.abs(s.props.bend ?? 0) >= 0.5 ? 'arc' : 'straight'),
+        s.props.bend ?? 0,
+      ),
+      Math.max(arrowheadLength(s.props.size), labelPad),
+    );
+  },
 
   hitTest: (s, p, tol) =>
     polylineHitTest(
       s.x,
       s.y,
       s.rotation,
-      curvePoints(s.props.points, s.props.bend ?? 0),
+      arrowPoints(
+        s.props.points,
+        s.props.topology ??
+          (Math.abs(s.props.bend ?? 0) >= 0.5 ? 'arc' : 'straight'),
+        s.props.bend ?? 0,
+      ),
       p,
       tol,
       s.props.size / 2,
@@ -61,20 +80,39 @@ export const arrowUtil: ShapeUtil<'arrow'> = {
     };
   },
 
-  getHandles: (s) => connectorHandles(s),
-  onHandleDrag: (s, handleId, point) => connectorHandleDrag(s, handleId, point),
+  getHandles: (s) => arrowHandles(s),
+  onHandleDrag: (s, handleId, point, opts) =>
+    arrowHandleDrag(s, handleId, point, opts),
 
   Component: ({ shape }) => {
-    const { points, color, size, dash, arrowStart, arrowEnd, bend } = shape.props;
+    const {
+      points,
+      color,
+      size,
+      dash,
+      arrowStart,
+      arrowEnd,
+      bend,
+      label,
+    } = shape.props;
     if (points.length < 2) return null;
-    const b = bend ?? 0;
-    const first = points[0]!;
-    const last = points[points.length - 1]!;
-    // Arrowheads stay solid even when the line is dashed/dotted, and follow the
-    // curve's tangent at each end.
-    let heads = '';
-    if (arrowEnd) heads += ` ${arrowheadPath(tangentAnchor(points, b, false), last, size)}`;
-    if (arrowStart) heads += ` ${arrowheadPath(tangentAnchor(points, b, true), first, size)}`;
+    const topology =
+      shape.props.topology ?? (Math.abs(bend ?? 0) >= 0.5 ? 'arc' : 'straight');
+    const bodyPoints = arrowPoints(points, topology, bend ?? 0);
+    const first = bodyPoints[0]!;
+    const last = bodyPoints[bodyPoints.length - 1]!;
+    const startHead = arrowStart
+      ? arrowheadPath(tangentAnchor(bodyPoints, true), first, size)
+      : '';
+    const endHead = arrowEnd
+      ? arrowheadPath(tangentAnchor(bodyPoints, false), last, size)
+      : '';
+    const middle = pathMidpoint(bodyPoints);
+    const tangentLength = Math.hypot(middle.tangent.x, middle.tangent.y) || 1;
+    const labelPoint = {
+      x: middle.point.x - (middle.tangent.y / tangentLength) * (size + 9),
+      y: middle.point.y + (middle.tangent.x / tangentLength) * (size + 9),
+    };
     const stroke = {
       stroke: color,
       strokeWidth: size,
@@ -87,16 +125,34 @@ export const arrowUtil: ShapeUtil<'arrow'> = {
         transform={polylineTransform(
           shape.x,
           shape.y,
-          curvePoints(points, b),
+          bodyPoints,
           shape.rotation,
         )}
       >
         <path
-          d={curvePath(points, b)}
+          d={arrowPath(points, topology, bend ?? 0)}
           {...stroke}
           strokeDasharray={strokeDashArray(dash, size)}
         />
-        {heads ? <path d={heads.trim()} {...stroke} /> : null}
+        {startHead || endHead ? (
+          <path d={`${startHead} ${endHead}`.trim()} {...stroke} />
+        ) : null}
+        {label?.trim() ? (
+          <text
+            x={labelPoint.x}
+            y={labelPoint.y}
+            fill={color}
+            stroke="var(--color-background)"
+            strokeWidth={4}
+            paintOrder="stroke"
+            textAnchor="middle"
+            dominantBaseline="central"
+            fontFamily="'Inter Variable', system-ui, sans-serif"
+            fontSize={Math.max(12, size * 3)}
+          >
+            {label.trim()}
+          </text>
+        ) : null}
       </g>
     );
   },

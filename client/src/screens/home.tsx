@@ -61,14 +61,8 @@ function BoardRow({
         <button
           type="button"
           onClick={() => navigate(`/board/${board.id}`)}
-          className="flex min-w-0 items-center gap-3 text-left outline-none"
+          className="flex min-w-0 items-center text-left outline-none hover:underline focus-visible:underline"
         >
-          <span
-            className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground"
-            aria-hidden="true"
-          >
-            <Grid2x2 />
-          </span>
           <span className="truncate font-medium text-foreground">
             {board.name}
           </span>
@@ -138,10 +132,7 @@ export function Home() {
                 {[0, 1, 2].map((row) => (
                   <TableRow key={row}>
                     <TableCell>
-                      <div className="flex items-center gap-3">
-                        <Skeleton className="size-9 rounded-md" />
-                        <Skeleton className="h-4 w-48 max-w-[50vw]" />
-                      </div>
+                      <Skeleton className="h-4 w-48 max-w-[50vw]" />
                     </TableCell>
                     <TableCell className="w-32">
                       <Skeleton className="h-4 w-20" />

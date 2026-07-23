@@ -58,7 +58,24 @@ function EquationPlaceholder({
     shape.rotation,
   );
   return (
-    <g transform={transform}>
+    <g
+      transform={transform}
+      role="img"
+      aria-label={
+        error
+          ? `Invalid equation: ${shape.props.latex}`
+          : loading
+            ? `Rendering equation: ${shape.props.latex}`
+            : 'Empty equation'
+      }
+    >
+      <title>
+        {error
+          ? `Invalid equation: ${shape.props.latex}`
+          : loading
+            ? `Rendering equation: ${shape.props.latex}`
+            : 'Empty equation'}
+      </title>
       <rect
         x={shape.x}
         y={shape.y}
@@ -162,7 +179,12 @@ export const equationUtil: ShapeUtil<'equation'> = {
     const scale = fontSize / 16;
 
     return (
-      <g transform={transform}>
+      <g
+        transform={transform}
+        role="img"
+        aria-label={`Equation: ${latex}`}
+      >
+        <title>{`Equation: ${latex}`}</title>
         <rect
           x={shape.x}
           y={shape.y}

@@ -6,12 +6,15 @@ import {
   Maximize2,
   Minus,
   Plus,
+  Sigma,
   Square,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
@@ -32,6 +35,8 @@ interface CanvasControlsProps {
   onZoomOut: () => void;
   onZoomReset: () => void;
   onZoomToFit: () => void;
+  equations: Array<{ id: string; label: string; locked: boolean }>;
+  onEquationSelect: (id: string) => void;
   disabled?: boolean;
 }
 
@@ -43,6 +48,8 @@ export function CanvasControls({
   onZoomOut,
   onZoomReset,
   onZoomToFit,
+  equations,
+  onEquationSelect,
   disabled = false,
 }: CanvasControlsProps) {
   const BackgroundIcon = BACKGROUND_ICONS[background];
@@ -52,7 +59,7 @@ export function CanvasControls({
       data-ui-layer
       className="touch-targets absolute right-[env(safe-area-inset-right)] bottom-[env(safe-area-inset-bottom)] [@media(pointer:coarse)]:bottom-[calc(7rem+env(safe-area-inset-bottom))] select-none"
     >
-      <Surface className="flex h-10 items-center gap-1 rounded-none rounded-tl-md border-b-0 border-r-0 p-1">
+      <Surface className="flex h-10 items-center gap-1 rounded-none rounded-tl-md border-b-0 border-r-0 p-1 shadow-none">
         <div className="flex items-center gap-0.5">
           <Button
             variant="ghost"
@@ -95,6 +102,48 @@ export function CanvasControls({
           >
             <Maximize2 />
           </Button>
+          {equations.length ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label="Find an equation"
+                    disabled={disabled}
+                  />
+                }
+              >
+                <Sigma />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                side="top"
+                align="end"
+                sideOffset={8}
+                className="max-h-72 w-72 overflow-y-auto"
+              >
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel>Equations</DropdownMenuLabel>
+                  {equations.map((equation, index) => (
+                    <DropdownMenuItem
+                      key={equation.id}
+                      onClick={() => onEquationSelect(equation.id)}
+                    >
+                      <Sigma aria-hidden="true" />
+                      <span className="min-w-0 flex-1 truncate font-mono text-xs">
+                        {index + 1}. {equation.label}
+                      </span>
+                      {equation.locked ? (
+                        <span className="text-xs text-content-subtle">
+                          Locked
+                        </span>
+                      ) : null}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : null}
           <DropdownMenu>
             <DropdownMenuTrigger
               render={

@@ -1,5 +1,8 @@
-import getStroke, { type StrokeOptions } from 'perfect-freehand';
 import type { DrawPoint } from '@whiteboard/shared';
+import {
+  getFreehandPathData,
+  type FreehandEngineOptions,
+} from './ink-engine';
 
 export interface InkStrokeDynamics {
   simulatePressure?: boolean;
@@ -14,9 +17,6 @@ const MIN_STREAMLINE_RAW_WEIGHT = 0.15;
 const STREAMLINE_RAW_WEIGHT_RANGE = 0.85;
 const RAW_WEIGHT_AT_HALF_STABILIZATION = 0.425;
 export const DEFAULT_PENCIL_STABILIZATION = 0.35;
-const ENDPOINT_FILTER_POINTS = 5;
-/** Taper length (in brush widths) when endTaper is `true`. Tunable feel knob. */
-const END_TAPER_SIZE_FACTOR = 2.5;
 
 function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value));
@@ -57,98 +57,28 @@ export const DEFAULT_PENCIL_DYNAMICS = {
   endTaper: false,
 } as const satisfies Required<InkStrokeDynamics>;
 
-/**
- * Resolve a taper option into an absolute pixel length. `true` scales the taper
- * to the brush width so thin and thick pencils both end in a proportional point.
- */
-function resolveTaper(taper: number | boolean | undefined, size: number): number {
-  if (taper === true) return size * END_TAPER_SIZE_FACTOR;
-  if (typeof taper === 'number') return taper;
-  return 0;
-}
+const linearPressureEasing = (pressure: number): number => pressure;
+/** Reused because the engine is intentionally synchronous and non-reentrant. */
+const engineOptions: FreehandEngineOptions = {
+  size: 1,
+  last: false,
+  thinning: 0,
+  smoothing: 0.5,
+  streamline: 0.5,
+  simulatePressure: false,
+  easing: linearPressureEasing,
+  startTaper: 0,
+  endTaper: false,
+};
 
 function mid(a: number, b: number): number {
   return (a + b) / 2;
 }
 
-function pressureOf(point: DrawPoint): number {
-  return Math.max(0, Math.min(1, point.pressure ?? 0.5));
-}
-
-function withPressure(point: DrawPoint, pressure: number): DrawPoint {
-  return { ...point, pressure: Math.max(pressureOf(point), pressure) };
-}
-
-function pointDistance(a: DrawPoint, b: DrawPoint): number {
-  return Math.hypot(a.x - b.x, a.y - b.y);
-}
-
-function filterEndpointJitter(points: DrawPoint[], size: number): DrawPoint[] {
-  if (points.length <= 2 || size <= 0) return points.slice();
-
-  const minDistance = size / 3;
-  const start = points[0]!;
-  let startPressure = pressureOf(start);
-  let firstKept = 1;
-  const startLimit = Math.min(points.length - 1, ENDPOINT_FILTER_POINTS);
-
-  for (let i = 1; i <= startLimit; i++) {
-    const point = points[i]!;
-    if (pointDistance(start, point) >= minDistance) break;
-    startPressure = Math.max(startPressure, pressureOf(point));
-    firstKept = i + 1;
-  }
-
-  const trimmedStart = [withPressure(start, startPressure), ...points.slice(firstKept)];
-  if (trimmedStart.length <= 2) return trimmedStart;
-
-  const lastIndex = trimmedStart.length - 1;
-  const end = trimmedStart[lastIndex]!;
-  let endPressure = pressureOf(end);
-  let lastPrefixIndex = lastIndex;
-  const endLimit = Math.max(0, lastIndex - ENDPOINT_FILTER_POINTS);
-
-  for (let i = lastIndex - 1; i >= endLimit; i--) {
-    const point = trimmedStart[i]!;
-    if (pointDistance(point, end) >= minDistance) break;
-    endPressure = Math.max(endPressure, pressureOf(point));
-    lastPrefixIndex = i;
-  }
-
-  if (lastPrefixIndex === lastIndex) return trimmedStart;
-  return [
-    ...trimmedStart.slice(0, lastPrefixIndex),
-    withPressure(end, endPressure),
-  ];
-}
-
-/** Convert a perfect-freehand outline into a filled SVG path (quadratics). */
-function outlineToPath(points: number[][]): string {
-  const len = points.length;
-  if (len === 0) return '';
-  const first = points[0]!;
-  if (len < 4) {
-    return `M ${first[0]!.toFixed(2)} ${first[1]!.toFixed(2)} Z`;
-  }
-  // Built as segments and joined: `+=` in a loop over a few hundred outline
-  // points reallocates the whole string each time, and this runs on the
-  // per-frame path while a stroke is being drawn.
-  const parts = [`M ${first[0]!.toFixed(2)} ${first[1]!.toFixed(2)} Q`];
-  for (let i = 1; i < len - 1; i++) {
-    const a = points[i]!;
-    const b = points[i + 1]!;
-    parts.push(
-      ` ${a[0]!.toFixed(2)} ${a[1]!.toFixed(2)} ${mid(a[0]!, b[0]!).toFixed(2)} ${mid(a[1]!, b[1]!).toFixed(2)}`,
-    );
-  }
-  parts.push(' Z');
-  return parts.join('');
-}
-
 /**
  * Smoothed centerline path (quadratic through midpoints) for an ink stroke.
  * Used for dashed/dotted pencils, which stroke a uniform-width line instead of
- * filling the variable-width perfect-freehand outline.
+ * filling the variable-width freehand-engine outline.
  */
 export function getInkCenterlinePath(points: DrawPoint[]): string {
   const len = points.length;
@@ -178,31 +108,13 @@ export function getInkPathData(
   last: boolean,
   dynamics: InkStrokeDynamics = {},
 ): string {
-  const input = filterEndpointJitter(points, size).map((p) => [
-    p.x,
-    p.y,
-    pressureOf(p),
-  ]);
-  const endTaper = resolveTaper(dynamics.endTaper, size);
-  const strokeOptions: StrokeOptions = {
-    size,
-    last,
-    thinning: dynamics.thinning ?? 0,
-    smoothing: dynamics.smoothing ?? 0.5,
-    streamline: dynamics.streamline ?? 0.5,
-    simulatePressure: dynamics.simulatePressure ?? false,
-    easing: (pressure) => pressure,
-    start: {
-      cap: !(dynamics.startTaper ?? 0),
-      taper: dynamics.startTaper ?? 0,
-      easing: (distance) => distance * distance,
-    },
-    end: {
-      cap: endTaper <= 0,
-      taper: endTaper,
-      easing: (distance) => --distance * distance * distance + 1,
-    },
-  };
-  const outline = getStroke(input, strokeOptions);
-  return outlineToPath(outline);
+  engineOptions.size = size;
+  engineOptions.last = last;
+  engineOptions.thinning = dynamics.thinning ?? 0;
+  engineOptions.smoothing = dynamics.smoothing ?? 0.5;
+  engineOptions.streamline = dynamics.streamline ?? 0.5;
+  engineOptions.simulatePressure = dynamics.simulatePressure ?? false;
+  engineOptions.startTaper = dynamics.startTaper ?? 0;
+  engineOptions.endTaper = dynamics.endTaper ?? false;
+  return getFreehandPathData(points, engineOptions);
 }

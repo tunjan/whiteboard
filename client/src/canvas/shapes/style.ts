@@ -6,7 +6,7 @@ export const DEFAULT_SHAPE_STYLE = {
   size: 2,
 } as const;
 
-/** Default freehand ink width (perfect-freehand `size`). */
+/** Default freehand ink width. */
 export const DEFAULT_INK_SIZE = 6;
 
 /** Corner radius for media shapes (image, video), matching --radius-xl. */

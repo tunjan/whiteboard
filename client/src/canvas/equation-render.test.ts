@@ -31,6 +31,16 @@ describe('equation SVG rendering', () => {
     expect(getEquationRender(latex)).toBe(render);
   });
 
+  it('turns MathJax inline errors into recoverable render errors', async () => {
+    const latex = String.raw`\notacommand{x}`;
+    const render = await typesetEquation(latex);
+
+    expect(render).toMatchObject({
+      error: expect.stringMatching(/undefined control sequence/i),
+    });
+    expect(getEquationRender(latex)).toBe(render);
+  });
+
   // The panel typesets every keystroke, so an editing session used to leave one
   // retained SVG per abandoned prefix, forever.
   it('bounds the cache and evicts least-recently-read expressions', async () => {

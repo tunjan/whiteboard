@@ -30,22 +30,32 @@ import { shapeRegistry } from './shapes/shape-registry';
 import { shapeRotatedBounds } from './shape-bounds';
 import { SpatialIndex } from './spatial-index';
 import { useCameraStore } from './use-camera-store';
-import { useSelectionStore } from './use-selection-store';
 import { type CommentMessage, useCommentsStore } from './use-comments-store';
 import { useDocumentsStore } from './use-documents-store';
 import { useConnectionStore } from '@/collab/use-connection-store';
 import { startLatencyMonitor } from '@/collab/latency';
+import { bindVoiceProvider } from '@/collab/voice/voice-session';
 import {
   setActiveAwareness,
+  setLocalCursor,
   setLocalLatency,
   setLocalPage,
 } from '@/collab/presence';
+import { stopFollowingForManualCameraChange } from '@/collab/use-follow-store';
 import { useMusicPlaybackStore } from '@/music/use-music-playback-store';
 import {
   isAnimationPageLocked,
   isAnimationPlaybackActive,
   useAnimationStore,
 } from '@/animation/use-animation-store';
+import {
+  deletePageInteractionState,
+  enterPageInteractionState,
+  leavePageInteractionState,
+  resetPageInteractionStates,
+} from './page-interaction-state';
+import { readPageSession, writePageSession } from './page-session-state';
+import { completeInteractionBeforePageSwitch } from './page-transition';
 
 // page-default's shapes live at the doc root map `shapes` (unchanged from Pass 1),
 // which keeps the Yjs structure idempotent across IndexedDB + server sync. Every
@@ -299,7 +309,11 @@ interface Session {
   /** Shapes map for the active page (root `shapes` for page-default). */
   currentShapes: Y.Map<YShape>;
   currentPageId: string;
+  /** True until stored local session state is restored or user navigation wins. */
+  pageRestorePending: boolean;
   undo: Y.UndoManager;
+  /** Per-page managers retain undo and redo stacks while their page is inactive. */
+  undoByPage: Map<string, Y.UndoManager>;
   /** Detaches the undo-state listeners; swapped on page switch. */
   unbindUndoState: () => void;
   /** Deep observer bound to `currentShapes`; swapped on page switch. */
@@ -653,8 +667,10 @@ export function loadBoard(
   boardId: string,
   opts: { persist?: boolean; collab?: boolean } = {},
 ): () => void {
+  const storedPageId = readPageSession(boardId);
   session?.cleanup();
   session = null;
+  resetPageInteractionStates();
   shapeCache.clear();
   sortedShapesCache = null;
   spatialIndex.clear();
@@ -682,22 +698,38 @@ export function loadBoard(
   const undo = new Y.UndoManager(currentShapes, {
     trackedOrigins: new Set([LOCAL_ORIGIN]),
   });
+  const undoByPage = new Map([[DEFAULT_PAGE_ID, undo]]);
 
   const shapesObserver = makeShapesObserver();
   currentShapes.observeDeep(shapesObserver);
 
+  let restorePageFromSession = () => {};
   const pagesObserver = () => {
     if (!session) return;
-    // A peer deleted the page we're on — fall back to the first remaining page.
+    const previousOrder = [...cachedPageOrder];
+    const removedPageIds = previousOrder.filter(
+      (pageId) => !session!.pages.has(pageId),
+    );
+
+    // A peer deleted the page we're on — prefer its previous neighbor, matching
+    // local deletion. If the old order is unavailable, use the first page.
     if (session.pages.size > 0 && !session.pages.has(session.currentPageId)) {
-      const first = readPages(session.pages)[0];
-      if (first) {
-        switchToPageInternal(first.id);
-        return;
+      const at = previousOrder.indexOf(session.currentPageId);
+      const fallbackId =
+        (at > 0 ? previousOrder[at - 1] : previousOrder[at + 1]) ??
+        readPages(session.pages)[0]?.id;
+      if (fallbackId && session.pages.has(fallbackId)) {
+        switchToPageInternal(fallbackId, 'integrity');
       }
+    } else {
+      rebuildPagesCache();
+      rebuildSnapshot();
     }
-    rebuildPagesCache();
-    rebuildSnapshot();
+
+    for (const pageId of removedPageIds) {
+      cleanupDeletedPageState(pageId);
+    }
+    restorePageFromSession();
   };
   pages.observeDeep(pagesObserver);
 
@@ -718,6 +750,7 @@ export function loadBoard(
 
   let provider: HocuspocusProvider | null = null;
   let stopLatencyMonitor = () => {};
+  let stopVoiceProvider = () => {};
   if (opts.collab) {
     provider = new HocuspocusProvider({
       url: collabUrl(),
@@ -728,6 +761,7 @@ export function loadBoard(
       useConnectionStore.getState().setStatus(event.status);
     });
     stopLatencyMonitor = startLatencyMonitor(provider, setLocalLatency);
+    stopVoiceProvider = bindVoiceProvider(provider);
     setActiveAwareness(provider.awareness ?? null);
   } else {
     useConnectionStore.getState().setStatus('disconnected');
@@ -744,7 +778,9 @@ export function loadBoard(
     documents,
     currentShapes,
     currentPageId: DEFAULT_PAGE_ID,
+    pageRestorePending: true,
     undo,
+    undoByPage,
     unbindUndoState: bindUndoState(undo),
     shapesObserver,
     pagesObserver,
@@ -756,6 +792,7 @@ export function loadBoard(
     persistence,
     provider,
     cleanup: () => {
+      stopVoiceProvider();
       setActiveAwareness(null);
       session?.currentShapes.unobserveDeep(session.shapesObserver);
       pages.unobserveDeep(pagesObserver);
@@ -765,7 +802,9 @@ export function loadBoard(
       comments.unobserve(commentsObserver);
       documents.unobserve(documentsObserver);
       session?.unbindUndoState();
-      session?.undo.destroy();
+      for (const manager of session?.undoByPage.values() ?? []) {
+        manager.destroy();
+      }
       stopLatencyMonitor();
       provider?.destroy();
       persistence?.destroy();
@@ -780,12 +819,51 @@ export function loadBoard(
   useCameraStore.getState().switchTo(boardId, DEFAULT_PAGE_ID);
   setLocalPage(DEFAULT_PAGE_ID);
 
+  // Restore only after every configured document source has hydrated. A manual
+  // switch (including a deep link) clears `pageRestorePending`, so late sync
+  // events can never pull the user back to an older stored page.
+  let persistenceReady = !persistence;
+  let providerReady = !provider;
+  restorePageFromSession = () => {
+    if (
+      !session ||
+      session.doc !== doc ||
+      !session.pageRestorePending ||
+      !persistenceReady ||
+      !providerReady
+    ) {
+      return;
+    }
+    const metas = readPages(session.pages);
+    const targetId =
+      storedPageId && session.pages.has(storedPageId)
+        ? storedPageId
+        : metas[0]?.id;
+    if (!targetId) return;
+
+    if (session.currentPageId !== targetId) {
+      switchToPageInternal(targetId, 'restore');
+    }
+    if (!session || session.doc !== doc) return;
+    session.pageRestorePending = false;
+    writePageSession(boardId, session.currentPageId);
+  };
+
   // Seed page-default once the board's existing state is known. We only seed
   // when the registry is still empty after sync, so a deliberately deleted
   // page-default is never resurrected (other pages keep the registry non-empty).
   maybeSeedDefaultPage();
   persistence?.on('synced', maybeSeedDefaultPage);
   provider?.on('synced', maybeSeedDefaultPage);
+  persistence?.on('synced', () => {
+    persistenceReady = true;
+    restorePageFromSession();
+  });
+  provider?.on('synced', () => {
+    providerReady = true;
+    restorePageFromSession();
+  });
+  restorePageFromSession();
 
   fullResync();
   publishMusicPlayback();
@@ -818,41 +896,88 @@ export function redo(): void {
 
 // --- Pages API ---
 
-/** Switch the active page (re-scopes observer, undo, cache, and camera). */
-function switchToPageInternal(pageId: string): void {
+function cleanupDeletedPageState(pageId: string): void {
   if (!session) return;
+  // If the registry is temporarily empty, keep the active manager/camera alive
+  // until a valid fallback arrives and the transition can complete.
+  if (session.currentPageId === pageId) return;
+  const manager = session.undoByPage.get(pageId);
+  if (manager) manager.destroy();
+  session.undoByPage.delete(pageId);
+  useCameraStore.getState().deletePage(session.boardId, pageId);
+  deletePageInteractionState(pageId);
+}
+
+type PageSwitchSource =
+  | 'user'
+  | 'follow'
+  | 'animation'
+  | 'restore'
+  | 'integrity';
+
+/** Switch the active page as one coordinated interaction-state handoff. */
+function switchToPageInternal(
+  pageId: string,
+  source: PageSwitchSource = 'user',
+): boolean {
+  if (!session || !session.pages.has(pageId)) return false;
+  if (session.currentPageId === pageId) {
+    if (source !== 'restore' && source !== 'integrity') {
+      session.pageRestorePending = false;
+      writePageSession(session.boardId, pageId);
+    }
+    return false;
+  }
+
+  if (source !== 'restore' && source !== 'integrity') {
+    session.pageRestorePending = false;
+  }
+  completeInteractionBeforePageSwitch();
+  if (source !== 'follow') stopFollowingForManualCameraChange();
+  const previousPageId = session.currentPageId;
+  leavePageInteractionState(previousPageId);
+  setLocalCursor(null);
+
   session.currentShapes.unobserveDeep(session.shapesObserver);
   session.unbindUndoState();
-  session.undo.destroy();
 
   const map = getShapesMap(session.doc, pageId);
   session.currentShapes = map;
   session.currentPageId = pageId;
   session.shapesObserver = makeShapesObserver();
   map.observeDeep(session.shapesObserver);
-  session.undo = new Y.UndoManager(map, {
-    trackedOrigins: new Set([LOCAL_ORIGIN]),
-  });
+  session.undo =
+    session.undoByPage.get(pageId) ??
+    new Y.UndoManager(map, {
+      trackedOrigins: new Set([LOCAL_ORIGIN]),
+    });
+  session.undoByPage.set(pageId, session.undo);
   session.unbindUndoState = bindUndoState(session.undo);
 
-  useSelectionStore.getState().clear();
   useCameraStore.getState().switchTo(session.boardId, pageId);
   setLocalPage(pageId);
   fullResync();
+  enterPageInteractionState(pageId, (id) => shapeCache.get(id));
+  if (source !== 'integrity' || !session.pageRestorePending) {
+    writePageSession(session.boardId, pageId);
+  }
+  return true;
 }
 
 export function setCurrentPage(pageId: string): void {
   if (isAnimationPageLocked()) return;
-  if (!session || session.currentPageId === pageId) return;
   switchToPageInternal(pageId);
+}
+
+/** Follow mode must be able to track a tutor across pages without cancelling itself. */
+export function setCurrentPageForFollow(pageId: string): void {
+  if (isAnimationPageLocked()) return;
+  switchToPageInternal(pageId, 'follow');
 }
 
 /** Playback-only page switch that bypasses the local interaction lock. */
 export function setCurrentPageForAnimation(pageId: string): void {
-  if (!session || session.currentPageId === pageId || !session.pages.has(pageId)) {
-    return;
-  }
-  switchToPageInternal(pageId);
+  switchToPageInternal(pageId, 'animation');
 }
 
 /** Create a new page after the current one and switch to it. Returns its id. */
@@ -896,7 +1021,7 @@ export function deletePage(id: string): void {
   if (metas.length <= 1) return; // never delete the last page
   if (session.currentPageId === id) {
     const at = metas.findIndex((m) => m.id === id);
-    const neighbor = metas[at + 1] ?? metas[at - 1];
+    const neighbor = at > 0 ? metas[at - 1] : metas[at + 1];
     if (neighbor) switchToPageInternal(neighbor.id);
   }
   session.doc.transact(() => {

@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, it, vi } from 'vitest';
 import type { DrawProps, Shape } from '@whiteboard/shared';
 import '../shapes/register';
 import type { Editor } from '../editor';
+import { useCanvasUiStore } from '../use-canvas-ui-store';
 import { createDrawTool } from './draw-tool';
 import type { ToolContext, ToolPointerInfo } from './types';
 
@@ -73,9 +74,9 @@ describe('draw tool stroke lifecycle', () => {
     expect(shapes.size).toBe(1);
     const points = drawPoints([...shapes.values()][0]);
     // The midpoint here is collinear and so contributes nothing geometrically,
-    // but it is still kept: perfect-freehand's `streamline` smooths over the
-    // point sequence, so dropping a sample changes the rendered curve and the
-    // stroke would visibly shift the moment the pointer lifts.
+    // but it is still kept: the engine streamlines over the point sequence, so
+    // dropping a sample changes the rendered curve and the stroke would visibly
+    // shift the moment the pointer lifts.
     expect(points?.length).toBe(3);
     expect(points?.[0]).toMatchObject({ x: 0, y: 0 });
     expect(points?.[1]).toMatchObject({ x: 10, y: 0 });
@@ -128,5 +129,53 @@ describe('draw tool stroke lifecycle', () => {
     tool.onCancel?.(ctx);
 
     expect(shapes.size).toBe(0);
+  });
+
+  it('applies the stylus pressure gain exactly once at ingestion', () => {
+    const { ctx, shapes } = context();
+    const tool = createDrawTool();
+
+    tool.onPointerDown?.(
+      pointer(0, 0, { pointerType: 'pen', pressure: 0.6 }),
+      ctx,
+    );
+    tool.onPointerUp?.(
+      pointer(10, 0, { pointerType: 'pen', pressure: 0.9 }),
+      ctx,
+    );
+
+    const shape = [...shapes.values()][0];
+    expect(shape?.type).toBe('draw');
+    if (shape?.type !== 'draw') return;
+    expect(shape.props.simulatePressure).toBe(false);
+    expect(shape.props.points[0]?.pressure).toBe(0.75);
+    expect(shape.props.points[1]?.pressure).toBe(1);
+  });
+
+  it('stores neutral mouse pressure for engine-side velocity simulation', () => {
+    const previous = useCanvasUiStore.getState().pencilSimulatePressure;
+    useCanvasUiStore.getState().setPencilSimulatePressure(true);
+    const { ctx, shapes } = context();
+    const tool = createDrawTool();
+
+    tool.onPointerDown?.(
+      pointer(0, 0, { pointerType: 'mouse', pressure: 0 }),
+      ctx,
+    );
+    tool.onPointerUp?.(
+      pointer(20, 0, { pointerType: 'mouse', pressure: 0 }),
+      ctx,
+    );
+
+    const shape = [...shapes.values()][0];
+    expect(shape?.type).toBe('draw');
+    if (shape?.type === 'draw') {
+      expect(shape.props.simulatePressure).toBe(true);
+      expect(shape.props.points.map((point) => point.pressure)).toEqual([
+        0.5,
+        0.5,
+      ]);
+    }
+    useCanvasUiStore.getState().setPencilSimulatePressure(previous);
   });
 });

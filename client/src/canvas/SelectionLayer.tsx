@@ -184,10 +184,29 @@ export function SelectionLayer({ camera }: SelectionLayerProps) {
         );
       })()}
 
-      {/* Connector handles: endpoints (square) and the curve bend (circle). */}
+      {/* Connector handles: vertices, bend/route controls, and insert points. */}
       {info?.customHandles?.map((h) => {
         const p = toScreen(h.point);
-        return h.kind === 'bend' ? (
+        if (h.kind === 'create') {
+          return (
+            <g key={h.id} opacity={0.72}>
+              <circle
+                cx={p.x}
+                cy={p.y}
+                r={HANDLE / 2 - 0.5}
+                fill="var(--color-background)"
+                stroke={ACCENT}
+                strokeWidth={1.25}
+              />
+              <path
+                d={`M ${p.x - 2} ${p.y} H ${p.x + 2} M ${p.x} ${p.y - 2} V ${p.y + 2}`}
+                stroke={ACCENT}
+                strokeWidth={1}
+              />
+            </g>
+          );
+        }
+        return h.kind === 'bend' || h.kind === 'route' ? (
           <circle
             key={h.id}
             cx={p.x}

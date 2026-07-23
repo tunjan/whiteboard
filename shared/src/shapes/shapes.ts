@@ -5,6 +5,18 @@ import type { BaseShape } from './base';
 export type FillStyle = 'none' | 'solid' | 'hatch' | 'crosshatch';
 export type StrokeDash = 'solid' | 'dashed' | 'dotted';
 
+/** How a multi-point line interpolates between its editable vertices. */
+export type LineSpline = 'linear' | 'smooth';
+
+/** Principal geometry used by an arrow body. */
+export type ArrowTopology = 'straight' | 'arc' | 'elbow';
+
+/** A terminal pinned to a normalized position on another shape's surface. */
+export interface ConnectorBinding {
+  shapeId: string;
+  anchor: Vec;
+}
+
 /** Regular/normalized polygons that fit a w x h box. */
 export type PolygonKind =
   | 'triangle'
@@ -99,6 +111,10 @@ export interface LineProps {
    * from the chord midpoint. 0 = straight; non-zero bends into a quadratic arc.
    */
   bend: number;
+  /** Multi-point interpolation. Omitted legacy lines remain linear. */
+  spline?: LineSpline;
+  /** Optional centered label. */
+  label?: string;
 }
 
 export interface ArrowProps {
@@ -110,6 +126,15 @@ export interface ArrowProps {
   arrowEnd: boolean;
   /** See {@link LineProps.bend}. */
   bend: number;
+  /** Omitted legacy arrows render as straight, unless their bend is non-zero. */
+  topology?: ArrowTopology;
+  /** Optional live bindings to closed target shapes. */
+  bindings?: {
+    start?: ConnectorBinding | null;
+    end?: ConnectorBinding | null;
+  };
+  /** Optional centered label. */
+  label?: string;
 }
 
 export interface TextProps {

@@ -1,13 +1,12 @@
-/**
- * One-shot hand-off from the equation tool to the equation panel: only a
- * freshly placed equation grabs the formula field. Selecting an existing one
- * leaves focus on the canvas, so Delete, arrow-nudge and tool hotkeys keep
- * working (the global key handler ignores events from inside a <math-field>).
- */
+/** One-shot hand-off to the equation panel. Placement and the explicit Enter
+ * edit command request focus; ordinary pointer selection intentionally does
+ * not, so Delete, arrow-nudge, and tool hotkeys keep working. */
 let pendingFocusId: string | null = null;
+const focusListeners = new Set<(id: string) => void>();
 
 export function requestEquationFocus(id: string): void {
   pendingFocusId = id;
+  for (const listener of focusListeners) listener(id);
 }
 
 /** True once, for the shape that was just placed. */
@@ -15,4 +14,12 @@ export function consumeEquationFocus(id: string): boolean {
   if (pendingFocusId !== id) return false;
   pendingFocusId = null;
   return true;
+}
+
+/** Receive focus requests while an equation panel is already mounted. */
+export function subscribeEquationFocus(
+  listener: (id: string) => void,
+): () => void {
+  focusListeners.add(listener);
+  return () => focusListeners.delete(listener);
 }

@@ -65,18 +65,22 @@ import {
   editor,
   redo,
   setCurrentPage,
+  setCurrentPageForFollow,
   spatialIndex,
   undo,
   useDocumentStore,
   useUndoStore,
 } from './use-document-store';
 import { shapeRegistry } from './shapes/shape-registry';
+import { syncBoundArrows } from './shapes/connector-routing';
 import { useCameraStore } from './use-camera-store';
+import { subscribeCanvasZoomToBounds } from './camera-requests';
 import { useCameraInteraction } from './use-camera-interaction';
 import { useCanvasUiStore } from './use-canvas-ui-store';
 import { useElementSize } from './use-element-size';
 import { useSafariGestures } from './use-safari-gestures';
 import { getSelectionInfo } from './selection-geometry';
+import { shapeRotatedBounds } from './shape-bounds';
 import { isSelectable } from './selectable';
 import { resolveOpacity } from './opacity';
 import { useEraserStore } from './use-eraser-store';
@@ -84,6 +88,7 @@ import { useHiddenStore } from './use-hidden-store';
 import { useSelectionStore } from './use-selection-store';
 import { useSpacePan } from './use-space-pan';
 import { useTextEditingStore } from './use-text-editing-store';
+import { requestEquationFocus } from './equation-focus';
 import { useVideoPlayingStore } from './use-video-playing-store';
 import { useImageCroppingStore } from './use-image-cropping-store';
 import { useToolStore } from './use-tool-store';
@@ -100,6 +105,7 @@ import {
   type PinchState,
 } from './pinch';
 import { useWheel } from './use-wheel';
+import { registerPageSwitchInteractionCompleter } from './page-transition';
 import {
   bringForward,
   bringToFront,
@@ -127,6 +133,29 @@ function isTouchPointer(e: ReactPointerEvent): boolean {
 // A touch/pen that hasn't fired an event in this long is treated as released,
 // even without a pointerup/cancel — recovers from iOS dropping those events.
 const STALE_TOUCH_MS = 2000;
+
+function CanvasSelectionStatus() {
+  const selectedIds = useSelectionStore((state) => state.selectedIds);
+  let message = 'No objects selected.';
+  if (selectedIds.length === 1) {
+    const shape = editor.getShape(selectedIds[0]!);
+    message = shape
+      ? shape.type === 'equation'
+        ? shape.locked
+          ? 'Locked equation selected.'
+          : 'Equation selected. Press Enter to edit.'
+        : `${shape.type} selected.`
+      : 'No objects selected.';
+  } else if (selectedIds.length > 1) {
+    message = `${selectedIds.length} objects selected.`;
+  }
+
+  return (
+    <span className="sr-only" role="status" aria-live="polite">
+      {message}
+    </span>
+  );
+}
 
 export function Canvas() {
   const [containerRef, size] = useElementSize<HTMLDivElement>();
@@ -215,6 +244,24 @@ export function Canvas() {
   // Shared, pre-sorted array from the store (stable across camera-only renders).
   const liveShapes = useDocumentStore((s) => s.shapes);
   const shapes = playbackActive ? playbackShapes : liveShapes;
+  useEffect(() => {
+    if (!playbackActive) syncBoundArrows(liveShapes, editor);
+  }, [liveShapes, playbackActive]);
+  const equationItems = useMemo(
+    () =>
+      shapes
+        .filter(
+          (shape): shape is Extract<Shape, { type: 'equation' }> =>
+            shape.type === 'equation' && !hidden[shape.id],
+        )
+        .map((shape) => ({
+          id: shape.id,
+          label:
+            shape.props.latex.trim().replace(/\s+/g, ' ') || 'Empty equation',
+          locked: Boolean(shape.locked),
+        })),
+    [hidden, shapes],
+  );
   const shapesRecord = useMemo<Record<string, Shape>>(() => {
     if (!playbackActive) return liveShapesRecord ?? {};
     return Object.fromEntries(playbackShapes.map((shape) => [shape.id, shape]));
@@ -540,6 +587,37 @@ export function Canvas() {
     }
     longPressOrigin.current = null;
   }, []);
+
+  useEffect(
+    () =>
+      registerPageSwitchInteractionCompleter(() => {
+        clearLongPress();
+        const target = containerRef.current;
+        const pointerId = toolPointerId.current;
+        if (gesture.current === 'tool' && target) {
+          endToolGesture(target, 'commit');
+        } else if (gesture.current === 'pan') {
+          gesture.current = null;
+          toolPointerId.current = null;
+          pan.cancel();
+          if (
+            target &&
+            pointerId !== null &&
+            target.hasPointerCapture(pointerId)
+          ) {
+            target.releasePointerCapture(pointerId);
+          }
+        }
+        if (pinchGraphId.current) breakUndoCapture();
+        activeTouches.current.clear();
+        pinch.current = null;
+        pinchGraphId.current = null;
+        pinchLatch.current = false;
+        penActive.current = false;
+        pointerRef.current = null;
+      }),
+    [clearLongPress, containerRef, endToolGesture, pan],
+  );
 
   // Arm a long-press on a one-finger touch: holding still for ~500ms aborts the
   // in-progress stroke and opens the context menu (touch has no right-click).
@@ -911,7 +989,9 @@ export function Canvas() {
       return;
     }
     // Follow the tutor across pages, then mirror their viewport.
-    if (tutorPage && tutorPage !== currentPageId) setCurrentPage(tutorPage);
+    if (tutorPage && tutorPage !== currentPageId) {
+      setCurrentPageForFollow(tutorPage);
+    }
     if (!tutorViewport || size.width <= 0 || size.height <= 0) return;
     const bounds = viewportWorldBounds(
       tutorViewport.camera,
@@ -979,6 +1059,19 @@ export function Canvas() {
     if (activeToolId !== 'select') useSelectionStore.getState().clear();
   }, [activeToolId]);
 
+  useEffect(
+    () =>
+      subscribeCanvasZoomToBounds((bounds) => {
+        const viewport = sizeRef.current;
+        if (viewport.width <= 0 || viewport.height <= 0) return;
+        stopFollowingForManualCameraChange();
+        useCameraStore
+          .getState()
+          .animateToBounds(bounds, viewport.width, viewport.height, 0.75);
+      }),
+    [],
+  );
+
   // Drop any pending long-press timer on unmount.
   useEffect(() => clearLongPress, [clearLongPress]);
 
@@ -999,6 +1092,18 @@ export function Canvas() {
       if (isAnimationPlaybackActive()) return;
       const mod = e.metaKey || e.ctrlKey;
       const ids = useSelectionStore.getState().selectedIds;
+      const isModifierKey =
+        e.key === 'Shift' || e.key === 'Control' || e.key === 'Meta';
+
+      // Active tools get the first chance at unmodified keys and live modifier
+      // changes. The select tool re-tests an in-progress marquee when
+      // Shift/Ctrl/Command changes without any pointer movement.
+      if ((!mod && !e.altKey) || isModifierKey) {
+        const handled = toolRegistry
+          .get(useToolStore.getState().activeToolId)
+          ?.onKeyDown?.(e, ctx);
+        if (handled) return;
+      }
 
       if (mod && (e.key === 'z' || e.key === 'Z')) {
         e.preventDefault();
@@ -1134,6 +1239,11 @@ export function Canvas() {
             });
           return;
         }
+        if (shape?.type === 'equation' && !shape.locked) {
+          e.preventDefault();
+          requestEquationFocus(shape.id);
+          return;
+        }
       }
       if (e.key === 'Escape') {
         useEnteredGroupStore.getState().exit();
@@ -1166,9 +1276,21 @@ export function Canvas() {
         useToolStore.getState().setTool(tool.id);
       }
     };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (isTypingTarget(e.target)) return;
+      if (isAnimationPlaybackActive()) return;
+      if (e.key !== 'Shift' && e.key !== 'Control' && e.key !== 'Meta') return;
+      toolRegistry
+        .get(useToolStore.getState().activeToolId)
+        ?.onKeyUp?.(e, ctx);
+    };
     window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
+    window.addEventListener('keyup', onKeyUp);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+    };
+  }, [ctx]);
 
   // The single paste path (Cmd+V). Prefers our own tagged copy (editable
   // shapes), then a clipboard image, then the in-app buffer as a fallback.
@@ -1294,6 +1416,25 @@ export function Canvas() {
     if (!bounds) s.reset();
     else s.animateToBounds(bounds, size.width, size.height);
   }, [size.width, size.height]);
+  const onEquationSelect = useCallback(
+    (id: string) => {
+      const shape = editor.getShape(id);
+      if (!shape || shape.type !== 'equation') return;
+      useToolStore.getState().setTool('select');
+      useSelectionStore.getState().setSelection([id]);
+      stopFollowingForManualCameraChange();
+      useCameraStore
+        .getState()
+        .animateToBounds(
+          shapeRotatedBounds(shape),
+          size.width,
+          size.height,
+          0.75,
+        );
+      if (!shape.locked) requestEquationFocus(id);
+    },
+    [size.height, size.width],
+  );
 
   const toolCursor = toolRegistry.get(activeToolId)?.cursor ?? 'default';
   const showDrawingCursor = activeToolId === 'draw' && !pan.isSpaceDown;
@@ -1308,6 +1449,11 @@ export function Canvas() {
   return (
     <div
       ref={containerRef}
+      data-canvas-surface
+      role="region"
+      aria-label="Whiteboard canvas"
+      aria-describedby="canvas-keyboard-help"
+      tabIndex={0}
       className="absolute inset-0 overflow-hidden bg-bg-default"
       style={{ touchAction: 'none', cursor }}
       onPointerDown={onPointerDown}
@@ -1336,6 +1482,11 @@ export function Canvas() {
         pointerRef.current = null;
       }}
     >
+      <span id="canvas-keyboard-help" className="sr-only">
+        Press M for the equation tool, then Enter to place an equation at the
+        center. Press Enter on a selected equation to edit it.
+      </span>
+      <CanvasSelectionStatus />
       <Background
         type={background}
         camera={camera}
@@ -1392,6 +1543,8 @@ export function Canvas() {
         onZoomOut={onZoomOut}
         onZoomReset={onZoomReset}
         onZoomToFit={onZoomToFit}
+        equations={equationItems}
+        onEquationSelect={onEquationSelect}
         disabled={playbackActive}
       />
 

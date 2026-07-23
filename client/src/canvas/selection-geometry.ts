@@ -12,7 +12,7 @@ import {
 } from '@whiteboard/shared';
 import { containerBounds } from './hierarchy';
 import { shapeRotatedBounds } from './shape-bounds';
-import { curvePoints, tangentAnchor } from './shapes/line-geometry';
+import { arrowPoints, curvePoints, tangentAnchor } from './shapes/line-geometry';
 import { normalizedPolygonPoints } from './shapes/polygon-geometry';
 import { shapeRegistry } from './shapes/shape-registry';
 import type { ShapeHandle } from './shapes/types';
@@ -33,7 +33,7 @@ export type CornerHandleId = Extract<
   'nw' | 'ne' | 'se' | 'sw'
 >;
 export type RotationHandleId = `rotate-${CornerHandleId}`;
-export type MarqueeMode = 'contain' | 'touch';
+export type MarqueeMode = 'intersect' | 'wrap';
 
 type Segment = readonly [Point, Point];
 
@@ -231,9 +231,10 @@ export function getSelectionInfo(
 }
 
 /**
- * Tests a shape against a directional marquee using the geometry it visibly
+ * Tests a shape against the active marquee rule using the geometry it visibly
  * contributes to the canvas. Filled shapes are evaluated as regions; outlined
- * boxes and freehand/connector shapes are evaluated as stroked paths.
+ * boxes and freehand/connector shapes are evaluated as stroked paths. Frames
+ * are container-like and therefore always require full enclosure.
  */
 export function matchesMarquee(
   shape: Shape,
@@ -242,9 +243,27 @@ export function matchesMarquee(
 ): boolean {
   const geometry = marqueeGeometry(shape);
   if (!geometry) return false;
-  return mode === 'contain'
+  return mode === 'wrap' || shape.type === 'frame'
     ? geometryIsContained(geometry, marquee)
     : geometryTouchesBounds(geometry, marquee);
+}
+
+/**
+ * Whether a marquee reaches a shape-backed clipping mask. The current shape
+ * model uses frames as masks, but keeping this geometry-based avoids assuming
+ * they will always remain unrotated axis-aligned boxes.
+ */
+export function marqueeIntersectsMask(
+  shape: Shape,
+  marquee: Bounds,
+  pointer: Point,
+): boolean {
+  const geometry = marqueeGeometry(shape);
+  if (!geometry || geometry.kind !== 'region') return false;
+  return (
+    polygonTouchesBounds(geometry.outline, marquee) ||
+    pointInPolygon(pointer, geometry.outline)
+  );
 }
 
 function marqueeGeometry(shape: Shape): MarqueeGeometry | null {
@@ -279,20 +298,31 @@ function marqueeGeometry(shape: Shape): MarqueeGeometry | null {
     case 'line': {
       const points = localPointsToWorld(
         shape,
-        curvePoints(shape.props.points, shape.props.bend ?? 0),
+        curvePoints(
+          shape.props.points,
+          shape.props.bend ?? 0,
+          shape.props.spline ?? 'linear',
+        ),
       );
       return strokeGeometry(points, shape.props.size / 2, false);
     }
     case 'arrow': {
-      const curve = curvePoints(shape.props.points, shape.props.bend ?? 0);
+      const topology =
+        shape.props.topology ??
+        (Math.abs(shape.props.bend ?? 0) >= 0.5 ? 'arc' : 'straight');
+      const curve = arrowPoints(
+        shape.props.points,
+        topology,
+        shape.props.bend ?? 0,
+      );
       const segments = outlineSegments(localPointsToWorld(shape, curve), false);
       if (shape.props.points.length >= 2) {
-        const first = shape.props.points[0]!;
-        const last = shape.props.points[shape.props.points.length - 1]!;
+        const first = curve[0]!;
+        const last = curve[curve.length - 1]!;
         if (shape.props.arrowStart) {
           segments.push(
             ...arrowHeadSegments(
-              localPointToWorld(shape, tangentAnchor(shape.props.points, shape.props.bend ?? 0, true)),
+              localPointToWorld(shape, tangentAnchor(curve, true)),
               localPointToWorld(shape, first),
               shape.props.size,
             ),
@@ -301,7 +331,7 @@ function marqueeGeometry(shape: Shape): MarqueeGeometry | null {
         if (shape.props.arrowEnd) {
           segments.push(
             ...arrowHeadSegments(
-              localPointToWorld(shape, tangentAnchor(shape.props.points, shape.props.bend ?? 0, false)),
+              localPointToWorld(shape, tangentAnchor(curve, false)),
               localPointToWorld(shape, last),
               shape.props.size,
             ),

@@ -45,15 +45,15 @@ function line(overrides: Partial<Extract<Shape, { type: 'line' }>> = {}) {
   };
 }
 
-describe('directional marquee geometry', () => {
+describe('rectangle selection geometry', () => {
   it('contains rotated filled shapes only when the full visible region fits', () => {
     const shape = rectangle({ rotation: Math.PI / 4 });
 
     expect(
-      matchesMarquee(shape, { minX: -20, minY: -30, maxX: 120, maxY: 100 }, 'contain'),
+      matchesMarquee(shape, { minX: -20, minY: -30, maxX: 120, maxY: 100 }, 'wrap'),
     ).toBe(true);
     expect(
-      matchesMarquee(shape, { minX: 0, minY: 0, maxX: 100, maxY: 60 }, 'contain'),
+      matchesMarquee(shape, { minX: 0, minY: 0, maxX: 100, maxY: 60 }, 'wrap'),
     ).toBe(false);
   });
 
@@ -66,10 +66,10 @@ describe('directional marquee geometry', () => {
     });
 
     expect(
-      matchesMarquee(shape, { minX: 40, minY: 20, maxX: 60, maxY: 40 }, 'touch'),
+      matchesMarquee(shape, { minX: 40, minY: 20, maxX: 60, maxY: 40 }, 'intersect'),
     ).toBe(false);
     expect(
-      matchesMarquee(shape, { minX: -2, minY: 20, maxX: 4, maxY: 40 }, 'touch'),
+      matchesMarquee(shape, { minX: -2, minY: 20, maxX: 4, maxY: 40 }, 'intersect'),
     ).toBe(true);
   });
 
@@ -77,14 +77,41 @@ describe('directional marquee geometry', () => {
     const shape = line();
 
     expect(
-      matchesMarquee(shape, { minX: 40, minY: -3, maxX: 60, maxY: 3 }, 'touch'),
+      matchesMarquee(shape, { minX: 40, minY: -3, maxX: 60, maxY: 3 }, 'intersect'),
     ).toBe(true);
     expect(
-      matchesMarquee(shape, { minX: -3, minY: -3, maxX: 103, maxY: 3 }, 'contain'),
+      matchesMarquee(shape, { minX: -3, minY: -3, maxX: 103, maxY: 3 }, 'wrap'),
     ).toBe(true);
     expect(
-      matchesMarquee(shape, { minX: 40, minY: -3, maxX: 60, maxY: 3 }, 'contain'),
+      matchesMarquee(shape, { minX: 40, minY: -3, maxX: 60, maxY: 3 }, 'wrap'),
     ).toBe(false);
+  });
+
+  it('requires complete enclosure for frames in both modes', () => {
+    const shape: Extract<Shape, { type: 'frame' }> = {
+      id: 'frame',
+      type: 'frame',
+      x: 0,
+      y: 0,
+      rotation: 0,
+      index: 'a0',
+      props: { w: 100, h: 60, name: 'Frame' },
+    };
+
+    expect(
+      matchesMarquee(
+        shape,
+        { minX: 20, minY: 20, maxX: 80, maxY: 40 },
+        'intersect',
+      ),
+    ).toBe(false);
+    expect(
+      matchesMarquee(
+        shape,
+        { minX: -1, minY: -1, maxX: 101, maxY: 61 },
+        'intersect',
+      ),
+    ).toBe(true);
   });
 });
 

@@ -1,6 +1,11 @@
 import type { ComponentType } from 'react';
 import { genId, type ArrowProps, type LineProps, type Shape } from '@whiteboard/shared';
 import { getTopIndex } from '../order';
+import {
+  bindingForPoint,
+  findBindableShapeAt,
+  orthogonalRoute,
+} from '../shapes/connector-routing';
 import { shapeRegistry } from '../shapes/shape-registry';
 import { useCameraStore } from '../use-camera-store';
 import { useSelectionStore } from '../use-selection-store';
@@ -20,6 +25,7 @@ interface LineToolOptions {
 /** Drag-to-create tool shared by line and arrow (two-point polylines). */
 export function createLineTool(opts: LineToolOptions): Tool {
   let creatingId: string | null = null;
+  let startTargetId: string | null = null;
   let start = { x: 0, y: 0 };
 
   // Finish the in-flight line/arrow. Shared by pointer-up (normal finish) and
@@ -28,6 +34,7 @@ export function createLineTool(opts: LineToolOptions): Tool {
   function finalize(ctx: ToolContext): void {
     const id = creatingId;
     creatingId = null;
+    startTargetId = null;
     if (!id) return;
     const shape = ctx.editor.getShape(id);
     const z = useCameraStore.getState().camera.z;
@@ -60,6 +67,15 @@ export function createLineTool(opts: LineToolOptions): Tool {
       creatingId = id;
       const base = util.getDefaultProps() as LineProps | ArrowProps;
       const style = useStyleStore.getState();
+      startTargetId =
+        opts.type === 'arrow'
+          ? findBindableShapeAt(
+              ctx.editor.getShapes(),
+              start,
+              10 / info.zoom,
+              id,
+            )?.id ?? null
+          : null;
       const shape = {
         id,
         type: opts.type,
@@ -75,8 +91,14 @@ export function createLineTool(opts: LineToolOptions): Tool {
           dash: style.dash,
           // Arrowhead direction only applies to arrows; line props ignore it.
           ...(opts.type === 'arrow'
-            ? { arrowStart: style.arrowStart, arrowEnd: style.arrowEnd }
-            : {}),
+            ? {
+                arrowStart: style.arrowStart,
+                arrowEnd: style.arrowEnd,
+                topology: style.arrowTopology ?? 'straight',
+                bindings: {},
+                label: '',
+              }
+            : { spline: style.lineSpline ?? 'linear', label: '' }),
           points: [
             { x: 0, y: 0 },
             { x: 0, y: 0 },
@@ -96,12 +118,56 @@ export function createLineTool(opts: LineToolOptions): Tool {
         if (Math.abs(dx) >= Math.abs(dy)) dy = 0;
         else dx = 0;
       }
+      const shape = ctx.editor.getShape(creatingId);
+      if (!shape || (shape.type !== 'line' && shape.type !== 'arrow')) return;
+      if (shape.type === 'line') {
+        ctx.editor.updateShape(creatingId, {
+          props: { points: [{ x: 0, y: 0 }, { x: dx, y: dy }] },
+        });
+        return;
+      }
+
+      const rawEnd = { x: start.x + dx, y: start.y + dy };
+      const startTarget = startTargetId
+        ? ctx.editor.getShape(startTargetId)
+        : undefined;
+      const endTarget = findBindableShapeAt(
+        ctx.editor.getShapes(),
+        rawEnd,
+        10 / info.zoom,
+        creatingId,
+      );
+      let startPoint = start;
+      let endPoint = rawEnd;
+      let startBinding = null;
+      let endBinding = null;
+      if (startTarget) {
+        const resolved = bindingForPoint(startTarget, startPoint, endPoint);
+        if (resolved) {
+          startPoint = resolved.point;
+          startBinding = resolved.binding;
+        }
+      }
+      if (endTarget) {
+        const resolved = bindingForPoint(endTarget, endPoint, startPoint);
+        if (resolved) {
+          endPoint = resolved.point;
+          endBinding = resolved.binding;
+        }
+      }
+      const first = { x: startPoint.x - shape.x, y: startPoint.y - shape.y };
+      const last = { x: endPoint.x - shape.x, y: endPoint.y - shape.y };
+      const topology = shape.props.topology ?? 'straight';
+      const length = Math.hypot(last.x - first.x, last.y - first.y);
       ctx.editor.updateShape(creatingId, {
         props: {
-          points: [
-            { x: 0, y: 0 },
-            { x: dx, y: dy },
-          ],
+          points:
+            topology === 'elbow' ? orthogonalRoute(first, last) : [first, last],
+          bend:
+            topology === 'arc'
+              ? Math.max(18, Math.min(80, length * 0.2))
+              : 0,
+          bindings: { start: startBinding, end: endBinding },
         },
       });
     },
@@ -120,6 +186,7 @@ export function createLineTool(opts: LineToolOptions): Tool {
     onCancel(ctx: ToolContext) {
       const id = creatingId;
       creatingId = null;
+      startTargetId = null;
       if (id) ctx.editor.deleteShapes([id]);
     },
   };

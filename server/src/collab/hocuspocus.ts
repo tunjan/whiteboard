@@ -4,6 +4,12 @@ import { LATENCY_MESSAGE_PREFIX } from '@whiteboard/shared';
 import { eq } from 'drizzle-orm';
 import { db } from '../db/client';
 import { boardDocuments } from '../db/schema';
+import {
+  createVoiceSignalRouter,
+  sanitizeVoiceAwareness,
+} from './voice-signaling';
+
+const routeVoiceSignal = createVoiceSignalRouter();
 
 /**
  * Hocuspocus collaboration server. Persists each board's opaque Yjs state in a
@@ -14,9 +20,15 @@ import { boardDocuments } from '../db/schema';
  * Configured now; clients connect starting Phase 19.
  */
 export const hocuspocus = new Hocuspocus({
-  onStateless: async ({ connection, payload }) => {
+  beforeHandleAwareness: async ({ connection, document, states }) => {
+    if (!connection) return;
+    sanitizeVoiceAwareness({ connection, document, states });
+  },
+  onStateless: async ({ connection, document, payload }) => {
     if (payload.startsWith(LATENCY_MESSAGE_PREFIX)) {
       connection.sendStateless(payload);
+    } else {
+      routeVoiceSignal({ connection, document, payload });
     }
   },
   extensions: [

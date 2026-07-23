@@ -26,7 +26,6 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { Surface } from '@/components/ui/surface';
-import { Separator } from '@/components/ui/separator';
 import { Toggle } from '@/components/ui/toggle';
 import { cn } from '@/lib/utils';
 import { pickAndPlaceImages } from '@/canvas/place-image';
@@ -51,7 +50,7 @@ const GROUP_2 = ['draw', 'eraser', 'laser'];
 const GROUP_3 = ['text', 'graph', 'equation', 'comment'];
 const GROUP_4 = ['rectangle', 'ellipse', 'arrow'];
 const ACTIVE_TOOL_CLASS =
-  'border-transparent bg-accent text-accent-foreground hover:bg-accent hover:text-accent-foreground';
+  'border-transparent bg-bg-info text-content-info hover:bg-bg-info hover:text-content-info';
 const ROW_CLASS = 'flex shrink-0 items-center gap-1.5';
 
 // Less-frequent shape tools folded into the Shapes overflow menu to keep the
@@ -267,17 +266,11 @@ export function Toolbar() {
           {/* Group 1: Navigation & Selection */}
           <div className={ROW_CLASS}>{GROUP_1.map(renderToolButton)}</div>
 
-          <Separator orientation="vertical" className="h-6" />
-
           {/* Group 2: Drawing & Annotation */}
           <div className={ROW_CLASS}>{GROUP_2.map(renderToolButton)}</div>
 
-          <Separator orientation="vertical" className="h-6" />
-
           {/* Group 3: Text & Math */}
           <div className={ROW_CLASS}>{GROUP_3.map(renderToolButton)}</div>
-
-          <Separator orientation="vertical" className="h-6" />
 
           {/* Group 4: Shapes & Media */}
           <div className={ROW_CLASS}>
@@ -285,8 +278,6 @@ export function Toolbar() {
             <ShapesMenu active={SHAPES_MENU_TOOLS.includes(activeToolId)} />
             <MediaMenu />
           </div>
-
-          <Separator orientation="vertical" className="h-6" />
 
           {/* Group 5: Utilities (tool lock + hide) */}
           <div className={ROW_CLASS}>

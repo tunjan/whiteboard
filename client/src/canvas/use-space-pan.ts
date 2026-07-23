@@ -81,5 +81,17 @@ export function useSpacePan(disabled = false) {
     [isPanning],
   );
 
-  return { isSpaceDown, isPanning, onPointerDown, onPointerMove, onPointerUp };
+  const cancel = useCallback(() => {
+    last.current = null;
+    setPanning(false);
+  }, []);
+
+  return {
+    isSpaceDown,
+    isPanning,
+    onPointerDown,
+    onPointerMove,
+    onPointerUp,
+    cancel,
+  };
 }

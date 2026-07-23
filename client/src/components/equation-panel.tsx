@@ -1,9 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import type { MathfieldElement } from 'mathlive';
-import { Keyboard } from 'lucide-react';
+import { Keyboard, Maximize2 } from 'lucide-react';
 import type { EquationShape } from '@whiteboard/shared';
 import { useAnimationStore } from '@/animation/use-animation-store';
-import { consumeEquationFocus } from '@/canvas/equation-focus';
+import { requestCanvasZoomToBounds } from '@/canvas/camera-requests';
+import {
+  consumeEquationFocus,
+  subscribeEquationFocus,
+} from '@/canvas/equation-focus';
 import {
   ensureMathJax,
   getEquationRender,
@@ -12,34 +16,35 @@ import {
   type EquationRender,
 } from '@/canvas/equation-render';
 import { EQUATION_DEFAULT_SIZE } from '@/canvas/shapes/equation';
+import { shapeRotatedBounds } from '@/canvas/shape-bounds';
 import { editor, useDocumentStore } from '@/canvas/use-document-store';
 import { useSelectionStore } from '@/canvas/use-selection-store';
-import { paletteColors, useStyleStore } from '@/canvas/use-style-store';
 import { ToolPanelPresence } from '@/components/tool-panel-presence';
 import { Button } from '@/components/ui/button';
 import {
   Field,
+  FieldDescription,
   FieldError,
   FieldGroup,
   FieldLabel,
 } from '@/components/ui/field';
 import { MathField } from '@/components/ui/math-field';
+import { Kbd } from '@/components/ui/kbd';
 import { PanelLabel } from '@/components/ui/panel-label';
 import { Surface } from '@/components/ui/surface';
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
-import { useThemeStore } from '@/use-theme-store';
 
-const swatchBorder = (color: string) => `color-mix(in srgb, ${color} 75%, #000)`;
+// Every heading below the panel title sits at one weight, so the eye ranks
+// title → tabs → sections instead of treating field labels as a second title.
+const SECTION_LABEL = 'text-xs font-medium text-muted-foreground';
 
-// Equations reflow on every keystroke, so dragging a resize handle to a target
-// size fights a moving box. These presets give repeatable sizes instead.
-const FONT_SIZES = [
-  { name: 'S', value: 20 },
-  { name: 'M', value: 28 },
-  { name: 'L', value: 40 },
-  { name: 'XL', value: 56 },
-];
+type EquationInputMode = 'visual' | 'source';
+
+const LONG_EQUATION_SOURCE_LENGTH = 240;
+const LONG_EQUATION_RENDER_DELAY_MS = 120;
+const LONG_EQUATION_WARNING_WIDTH = 1200;
 
 function useDebouncedValue<T>(value: T, delay: number): T {
   const [debounced, setDebounced] = useState(value);
@@ -109,13 +114,13 @@ function patchEquationFromRender(
 
 function EquationPanelContent({ shape }: { shape: EquationShape }) {
   const fieldRef = useRef<MathfieldElement | null>(null);
+  const sourceRef = useRef<HTMLTextAreaElement | null>(null);
   const inputVersion = useRef(0);
+  const longRenderTimer = useRef<number | null>(null);
   const [ready, setReady] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [keyboardOpen, setKeyboardOpen] = useState(false);
-  const theme = useThemeStore((state) => state.theme);
-  const paletteId = useStyleStore((state) => state.paletteId);
-  const setStyleColor = useStyleStore((state) => state.setColor);
+  const [inputMode, setInputMode] = useState<EquationInputMode>('visual');
   useEquationRenderStore((state) => state.version);
 
   useEffect(() => {
@@ -139,25 +144,45 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
     };
   }, []);
 
-  // Only a freshly placed equation takes focus, and only a touch device opens
-  // the math keyboard with it — on desktop the physical keyboard is enough and
-  // the panel would otherwise cover the canvas on every selection.
+  // Focus both freshly placed and already-selected equations on request. Only
+  // touch-primary devices open the virtual keyboard automatically.
   useEffect(() => {
-    if (!consumeEquationFocus(shape.id)) return;
     let frame = 0;
     const focusField = (tries: number) => {
-      if (fieldRef.current) {
-        fieldRef.current.focus();
-        if (prefersVirtualKeyboard()) {
+      const target =
+        inputMode === 'source' ? sourceRef.current : fieldRef.current;
+      if (target) {
+        target.focus();
+        if (inputMode === 'visual' && prefersVirtualKeyboard()) {
           window.mathVirtualKeyboard.show({ animate: true });
         }
       } else if (tries > 0) {
         frame = requestAnimationFrame(() => focusField(tries - 1));
       }
     };
-    frame = requestAnimationFrame(() => focusField(5));
-    return () => cancelAnimationFrame(frame);
-  }, [shape.id]);
+    const handleFocusRequest = (id: string) => {
+      if (id !== shape.id || !consumeEquationFocus(id)) return;
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => focusField(5));
+    };
+    const unsubscribe = subscribeEquationFocus(handleFocusRequest);
+    if (consumeEquationFocus(shape.id)) {
+      frame = requestAnimationFrame(() => focusField(5));
+    }
+    return () => {
+      unsubscribe();
+      cancelAnimationFrame(frame);
+    };
+  }, [inputMode, shape.id]);
+
+  useEffect(
+    () => () => {
+      if (longRenderTimer.current !== null) {
+        window.clearTimeout(longRenderTimer.current);
+      }
+    },
+    [],
+  );
 
   // Track the keyboard's real visibility (it can also be dismissed from its own
   // close button) and make sure it never outlives the panel.
@@ -174,6 +199,12 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
     };
   }, []);
 
+  useEffect(() => {
+    if (inputMode === 'visual') return;
+    window.mathVirtualKeyboard.hide({ animate: true });
+    setKeyboardOpen(false);
+  }, [inputMode]);
+
   const settledLatex = useDebouncedValue(shape.props.latex, 500);
   const settledKey = settledLatex.trim();
   const settledRender = settledKey
@@ -184,10 +215,21 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
   const rawError = loadError ?? renderError ?? null;
   const error = rawError ? readableError(rawError) : null;
   const errorId = `equation-error-${shape.id}`;
+  const visualHelpId = `equation-visual-help-${shape.id}`;
+  const sourceHelpId = `equation-source-help-${shape.id}`;
+  const currentKey = shape.props.latex.trim();
+  const currentRender = currentKey ? getEquationRender(currentKey) : undefined;
+  const isLongEquation =
+    currentKey.length >= LONG_EQUATION_SOURCE_LENGTH ||
+    shape.props.w >= LONG_EQUATION_WARNING_WIDTH;
 
   const updateLatex = (latex: string) => {
     const version = ++inputVersion.current;
     const key = latex.trim();
+    if (longRenderTimer.current !== null) {
+      window.clearTimeout(longRenderTimer.current);
+      longRenderTimer.current = null;
+    }
     if (!key) {
       editor.updateShape(shape.id, {
         ...centeredMove(shape, EQUATION_DEFAULT_SIZE.w, EQUATION_DEFAULT_SIZE.h),
@@ -197,6 +239,25 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
           h: EQUATION_DEFAULT_SIZE.h,
         },
       });
+      return;
+    }
+
+    // Very long expressions can take longer than a frame to convert. Preserve
+    // the source immediately, but wait briefly for a pause before replacing the
+    // measured geometry. Ordinary equations keep the instant path below.
+    if (key.length >= LONG_EQUATION_SOURCE_LENGTH) {
+      editor.updateShape(shape.id, { props: { latex } });
+      longRenderTimer.current = window.setTimeout(() => {
+        longRenderTimer.current = null;
+        void typesetEquation(key).then((render) => {
+          if (version !== inputVersion.current) return;
+          const current = editor.getShape(shape.id);
+          if (current?.type !== 'equation' || current.props.latex.trim() !== key) {
+            return;
+          }
+          patchEquationFromRender(shape.id, latex, render);
+        });
+      }, LONG_EQUATION_RENDER_DELAY_MS);
       return;
     }
 
@@ -216,38 +277,6 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
     });
   };
 
-  // Swatches always include the active color, so a value from another palette
-  // or theme still reads as selected (mirrors the style panel).
-  const colors = paletteColors(paletteId, theme);
-  const swatches = colors.some((c) => c.value === shape.props.color)
-    ? colors
-    : [...colors, { name: 'Current color', value: shape.props.color }];
-  const swatchRefs = useRef<(HTMLButtonElement | null)[]>([]);
-
-  const applyColor = (color: string) => {
-    setStyleColor(color);
-    editor.updateShape(shape.id, { props: { color } });
-  };
-
-  const moveSwatchFocus = (from: number, delta: number) => {
-    const next = (from + delta + swatches.length) % swatches.length;
-    const swatch = swatches[next];
-    if (!swatch) return;
-    applyColor(swatch.value);
-    swatchRefs.current[next]?.focus();
-  };
-
-  // Font size scales the cached render, so the box scales with it.
-  const applyFontSize = (fontSize: number) => {
-    const scale = fontSize / shape.props.fontSize;
-    const w = shape.props.w * scale;
-    const h = shape.props.h * scale;
-    editor.updateShape(shape.id, {
-      ...centeredMove(shape, w, h),
-      props: { fontSize, w, h },
-    });
-  };
-
   const toggleKeyboard = () => {
     const keyboard = window.mathVirtualKeyboard;
     const next = !keyboard.visible;
@@ -264,14 +293,24 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
   // hotkeys work again.
   const releaseFocus = () => {
     fieldRef.current?.blur();
+    sourceRef.current?.blur();
     window.mathVirtualKeyboard.hide({ animate: true });
+    requestAnimationFrame(() => {
+      document
+        .querySelector<HTMLElement>('[data-canvas-surface]')
+        ?.focus({ preventScroll: true });
+    });
+  };
+
+  const zoomToEquation = () => {
+    requestCanvasZoomToBounds(shapeRotatedBounds(shape));
   };
 
   return (
     <Surface
       role="region"
       aria-label="Equation controls"
-      className="touch-targets flex max-h-[calc(100dvh-9rem-env(safe-area-inset-top))] w-[min(20rem,calc(100vw-2rem))] flex-col gap-4 overflow-y-auto p-4 sm:max-h-[calc(100dvh-6.25rem-env(safe-area-inset-top))]"
+      className="equation-panel touch-targets flex max-h-[calc(100dvh-9rem-env(safe-area-inset-top))] w-[min(20rem,calc(100vw-2rem))] flex-col gap-3 overflow-y-auto p-4 sm:max-h-[calc(100dvh-6.25rem-env(safe-area-inset-top))]"
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
@@ -282,127 +321,186 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
             {loadError
               ? 'Renderer unavailable'
               : ready
-                ? 'Type LaTeX, e.g. \\frac{a}{b}'
+                ? 'Standalone display math'
                 : 'Preparing renderer…'}
           </div>
         </div>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label="Math keyboard"
-          aria-pressed={keyboardOpen}
-          title="Math keyboard"
-          onClick={toggleKeyboard}
-          className={cn('shrink-0', keyboardOpen && 'bg-bg-muted')}
-        >
-          <Keyboard aria-hidden="true" />
-        </Button>
-      </div>
-
-      <FieldGroup className="gap-2">
-        <Field data-invalid={error ? true : undefined}>
-          <FieldLabel htmlFor={`equation-${shape.id}`}>Formula</FieldLabel>
-          <div
-            className={cn(
-              'rounded-md border border-border-subtle bg-bg-muted px-1 py-2 transition-[background-color,border-color,box-shadow] duration-150',
-              'focus-within:border-border-emphasis focus-within:ring-2 focus-within:ring-border-emphasis',
-              'group-data-[invalid]/field:border-content-error group-data-[invalid]/field:ring-2 group-data-[invalid]/field:ring-content-error/20',
-            )}
+        {inputMode === 'visual' ? (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Math keyboard"
+            aria-pressed={keyboardOpen}
+            title="Math keyboard"
+            onClick={toggleKeyboard}
+            className={cn('shrink-0', keyboardOpen && 'bg-bg-muted')}
           >
-            <MathField
-              id={`equation-${shape.id}`}
-              // Matches the visible label: a mismatch breaks voice control.
-              aria-label="Formula"
-              aria-invalid={error ? true : undefined}
-              aria-describedby={error ? errorId : undefined}
-              className="w-full"
-              value={shape.props.latex}
-              format="latex"
-              virtualKeyboardPolicy="manual"
-              placeholder="Type an equation…"
-              elementRef={(element) => {
-                fieldRef.current = element;
-              }}
-              onChange={updateLatex}
-              onEscape={releaseFocus}
-            />
-          </div>
-          {error ? (
-            <FieldError id={errorId} role="status">
-              {error}
-            </FieldError>
-          ) : null}
-        </Field>
-      </FieldGroup>
-
-      <div className="flex flex-col gap-1.5">
-        <PanelLabel>Size</PanelLabel>
-        <ToggleGroup
-          aria-label="Equation size"
-          value={[String(shape.props.fontSize)]}
-          onValueChange={(values) =>
-            values[0] && applyFontSize(Number(values[0]))
-          }
-        >
-          {FONT_SIZES.map((size) => (
-            <ToggleGroupItem key={size.value} value={String(size.value)}>
-              {size.name}
-            </ToggleGroupItem>
-          ))}
-        </ToggleGroup>
+            <Keyboard aria-hidden="true" />
+          </Button>
+        ) : null}
       </div>
 
-      <div className="flex flex-col gap-1.5">
-        <PanelLabel>Color</PanelLabel>
-        <div
-          role="radiogroup"
-          aria-label="Equation color"
-          className="grid grid-cols-4 gap-1"
-        >
-          {swatches.map((swatch, index) => {
-            const active = shape.props.color === swatch.value;
-            return (
-              <button
-                key={swatch.value}
-                ref={(node) => {
-                  swatchRefs.current[index] = node;
-                }}
-                type="button"
-                role="radio"
-                aria-label={swatch.name}
-                aria-checked={active}
-                tabIndex={active ? 0 : -1}
-                title={swatch.name}
-                onClick={() => applyColor(swatch.value)}
-                onKeyDown={(event) => {
-                  const delta =
-                    event.key === 'ArrowRight' || event.key === 'ArrowDown'
-                      ? 1
-                      : event.key === 'ArrowLeft' || event.key === 'ArrowUp'
-                        ? -1
-                        : 0;
-                  if (!delta) return;
-                  event.preventDefault();
-                  moveSwatchFocus(index, delta);
-                }}
-                className="flex size-8 items-center justify-center rounded-md transition-colors hover:bg-bg-muted"
+      <Tabs
+        value={inputMode}
+        onValueChange={(value) => setInputMode(value as EquationInputMode)}
+        className="gap-2"
+      >
+        <TabsList aria-label="Equation input mode" className="w-full">
+          <TabsTrigger value="visual">Visual</TabsTrigger>
+          <TabsTrigger value="source">LaTeX source</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="visual">
+          <FieldGroup className="gap-2">
+            <Field data-invalid={error ? true : undefined}>
+              <FieldLabel
+                htmlFor={`equation-visual-${shape.id}`}
+                className={SECTION_LABEL}
               >
-                <span
-                  className={cn(
-                    'size-4 rounded-full border',
-                    active &&
-                      'ring-2 ring-content-emphasis ring-offset-2 ring-offset-bg-default',
-                  )}
-                  style={{
-                    background: swatch.value,
-                    borderColor: swatchBorder(swatch.value),
+                Formula
+              </FieldLabel>
+              <div
+                data-overflow={isLongEquation ? true : undefined}
+                className={cn(
+                  'equation-field-shell rounded-md border border-border-subtle bg-bg-muted px-0.5 py-1.5 transition-[background-color,border-color,box-shadow] duration-150',
+                  'focus-within:border-border-emphasis focus-within:ring-2 focus-within:ring-border-emphasis',
+                  'group-data-[invalid]/field:border-content-error group-data-[invalid]/field:ring-2 group-data-[invalid]/field:ring-content-error/20',
+                )}
+              >
+                <MathField
+                  id={`equation-visual-${shape.id}`}
+                  // Matches the visible label: a mismatch breaks voice control.
+                  aria-label="Formula"
+                  aria-invalid={error ? true : undefined}
+                  aria-describedby={
+                    error ? `${visualHelpId} ${errorId}` : visualHelpId
+                  }
+                  className="w-full"
+                  value={shape.props.latex}
+                  format="latex"
+                  virtualKeyboardPolicy="manual"
+                  // MathLive typesets the placeholder, so plain words arrive as
+                  // spaceless italic math ("Typeanequation"). \text keeps the
+                  // spacing and an upright, non-formula look.
+                  placeholder={String.raw`\text{Type an equation…}`}
+                  elementRef={(element) => {
+                    fieldRef.current = element;
                   }}
+                  onChange={updateLatex}
+                  onEscape={releaseFocus}
                 />
-              </button>
-            );
-          })}
+              </div>
+              <FieldDescription
+                id={visualHelpId}
+                className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs"
+              >
+                <span>
+                  <Kbd>\</Kbd> searches commands
+                </span>
+                <span aria-hidden="true">·</span>
+                <span>
+                  <Kbd>Esc</Kbd> returns to the canvas
+                </span>
+              </FieldDescription>
+            </Field>
+          </FieldGroup>
+        </TabsContent>
+
+        <TabsContent value="source" className="flex flex-col gap-3">
+          <FieldGroup className="gap-2">
+            <Field data-invalid={error ? true : undefined}>
+              <FieldLabel
+                htmlFor={`equation-source-${shape.id}`}
+                className={SECTION_LABEL}
+              >
+                LaTeX source
+              </FieldLabel>
+              <Textarea
+                ref={sourceRef}
+                id={`equation-source-${shape.id}`}
+                aria-invalid={error ? true : undefined}
+                aria-describedby={
+                  error ? `${sourceHelpId} ${errorId}` : sourceHelpId
+                }
+                value={shape.props.latex}
+                onChange={(event) => updateLatex(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key !== 'Escape') return;
+                  event.preventDefault();
+                  releaseFocus();
+                }}
+                placeholder="\\frac{a}{b}"
+                spellCheck={false}
+                className="min-h-24 resize-y font-mono text-sm"
+              />
+              <FieldDescription id={sourceHelpId} className="text-xs">
+                Edit raw LaTeX. The preview below uses the same renderer as the
+                canvas.
+              </FieldDescription>
+            </Field>
+          </FieldGroup>
+
+          <div className="flex flex-col gap-1.5">
+            <PanelLabel>Canvas preview</PanelLabel>
+            <div
+              role="img"
+              aria-label={
+                currentKey
+                  ? `Preview of equation: ${currentKey}`
+                  : 'Empty equation preview'
+              }
+              className="flex min-h-16 items-center overflow-x-auto rounded-md border border-border-subtle bg-bg-muted p-3"
+            >
+              {!currentKey ? (
+                <span className="text-xs text-content-subtle">
+                  Start typing to preview the equation.
+                </span>
+              ) : currentRender && !('error' in currentRender) ? (
+                <div
+                  aria-hidden="true"
+                  className="equation-output-preview"
+                  style={{ color: shape.props.color }}
+                  dangerouslySetInnerHTML={{ __html: currentRender.svg }}
+                />
+              ) : error ? (
+                <span className="text-xs text-content-error">
+                  Preview unavailable until the equation is fixed.
+                </span>
+              ) : (
+                <span className="text-xs text-content-subtle">Rendering…</span>
+              )}
+            </div>
+          </div>
+        </TabsContent>
+      </Tabs>
+
+      {error ? (
+        <FieldError id={errorId}>
+          <div className="flex flex-col gap-0.5">
+            <span>{error}</span>
+            <span>This equation won’t be included in exports until fixed.</span>
+          </div>
+        </FieldError>
+      ) : null}
+
+      {isLongEquation && !error ? (
+        <div className="flex items-center justify-between gap-2">
+          <p className="min-w-0 text-xs text-content-subtle">
+            Long equations stay on one line. Use a structure template for
+            explicit breaks.
+          </p>
+          <Button
+            type="button"
+            variant="outline"
+            size="xs"
+            onClick={zoomToEquation}
+          >
+            <Maximize2 data-icon="inline-start" aria-hidden="true" />
+            Zoom to equation
+          </Button>
         </div>
-      </div>
+      ) : null}
+
     </Surface>
   );
 }

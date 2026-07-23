@@ -24,7 +24,9 @@ const MAX_DIM = 8192;
 export async function exportBoardToPng(title: string): Promise<void> {
   const bounds = spatialIndex.totalBounds();
   if (!bounds) return; // empty board: nothing to export
-  await prewarmEquationRenders(editor.getShapes());
+  const shapes = editor.getShapes();
+  await prewarmEquationRenders(shapes);
+  if (!confirmInvalidEquationExport(countInvalidEquations(shapes))) return;
   await renderToPng(renderTree(), bounds, title);
 }
 
@@ -46,6 +48,11 @@ export async function exportSelectionToPng(
   // Typeset first: `isExportable` reads the cache to drop equations that would
   // only contribute a placeholder box to the bounds.
   await prewarmEquationRenders(shapes, renderSet);
+  if (
+    !confirmInvalidEquationExport(countInvalidEquations(shapes, renderSet))
+  ) {
+    return;
+  }
   // Bounds = union of the rotated world bounds of every rendered shape with its
   // own geometry (groups carry none, so they're skipped).
   let bounds: Bounds | null = null;
@@ -72,6 +79,34 @@ export function isExportable(shape: Shape): boolean {
   if (!latex) return false;
   const render = getEquationRender(latex);
   return Boolean(render) && !render?.error;
+}
+
+/** Count non-empty equations that would otherwise disappear from an export. */
+export function countInvalidEquations(
+  shapes: Shape[],
+  renderSet?: Set<string>,
+): number {
+  let count = 0;
+  for (const shape of shapes) {
+    if (
+      shape.type !== 'equation' ||
+      (renderSet && !renderSet.has(shape.id)) ||
+      !shape.props.latex.trim()
+    ) {
+      continue;
+    }
+    const render = getEquationRender(shape.props.latex.trim());
+    if (render?.error) count++;
+  }
+  return count;
+}
+
+function confirmInvalidEquationExport(count: number): boolean {
+  if (!count) return true;
+  const noun = count === 1 ? 'equation contains' : 'equations contain';
+  return window.confirm(
+    `${count} ${noun} errors and will not be included. Export the rest?`,
+  );
 }
 
 /** Fill the synchronous equation cache before server-rendering the SVG tree. */

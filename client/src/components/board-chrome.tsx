@@ -1,8 +1,11 @@
 import { useState } from 'react';
 import {
+  AudioLines,
   ArrowLeft,
   Download,
   EllipsisVertical,
+  Mic,
+  MicOff,
   Moon,
   NotebookPen,
   Settings,
@@ -13,8 +16,10 @@ import { outlineColor, textOnColor, type Identity } from '@/collab/identity';
 import { jumpToPeerViewport } from '@/collab/presence';
 import {
   type PeerPresence,
+  type VoicePresence,
   usePresenceStore,
 } from '@/collab/use-presence-store';
+import { useVoiceStore } from '@/collab/voice/use-voice-store';
 import { BoardNotesDialog } from '@/components/board-notes-dialog';
 import { AnimationControls } from '@/components/animation-controls';
 import { ConnectionIndicator } from '@/components/connection-indicator';
@@ -24,8 +29,10 @@ import { MusicPlayer } from '@/music/music-player';
 import { PageMenu } from '@/components/page-menu';
 import { SettingsDialog } from '@/components/settings-dialog';
 import { ShareButton } from '@/components/share-button';
+import { VoiceControls } from '@/components/voice-controls';
 import {
   Avatar,
+  AvatarBadge,
   AvatarFallback,
   AvatarGroup,
   AvatarGroupCount,
@@ -56,7 +63,10 @@ interface Participant {
   color: string;
   isLocal: boolean;
   peer: PeerPresence | null;
+  voice: VoiceDisplayState | null;
 }
+
+type VoiceDisplayState = Omit<VoicePresence, 'sessionId'>;
 
 function peerLatencyLabel(peer: PeerPresence): string {
   return peer.latencyMs === null ? 'Measuring…' : `${peer.latencyMs} ms`;
@@ -65,9 +75,11 @@ function peerLatencyLabel(peer: PeerPresence): string {
 function ParticipantAvatar({
   color,
   name,
+  voice,
 }: {
   color: string;
   name: string;
+  voice: VoiceDisplayState | null;
 }) {
   return (
     <Avatar
@@ -80,6 +92,26 @@ function ParticipantAvatar({
       >
         {name.trim().charAt(0).toUpperCase() || '?'}
       </AvatarFallback>
+      {voice?.inCall ? (
+        <AvatarBadge
+          aria-hidden="true"
+          className={
+            voice.muted
+              ? 'bg-bg-default text-content-muted'
+              : voice.speaking
+                ? 'bg-bg-success text-content-success ring-content-success/30'
+                : 'bg-bg-default text-content-subtle'
+          }
+        >
+          {voice.muted ? (
+            <MicOff />
+          ) : voice.speaking ? (
+            <AudioLines />
+          ) : (
+            <Mic />
+          )}
+        </AvatarBadge>
+      ) : null}
     </Avatar>
   );
 }
@@ -159,6 +191,17 @@ export function BoardChrome({
   const theme = useThemeStore((s) => s.theme);
   const toggle = useThemeStore((s) => s.toggle);
   const peers = usePresenceStore((s) => s.peers);
+  const voiceStatus = useVoiceStore((s) => s.status);
+  const voiceMuted = useVoiceStore((s) => s.muted);
+  const voiceSpeaking = useVoiceStore((s) => s.speaking);
+  const localVoice: VoiceDisplayState | null =
+    voiceStatus === 'joined'
+      ? {
+          inCall: true,
+          muted: voiceMuted,
+          speaking: voiceSpeaking,
+        }
+      : null;
   const participants: Participant[] = [
     ...peers.map((peer) => ({
       id: `peer-${peer.clientId}`,
@@ -166,6 +209,7 @@ export function BoardChrome({
       color: peer.color,
       isLocal: false,
       peer,
+      voice: peer.voice,
     })),
     ...(identity
       ? [
@@ -175,6 +219,7 @@ export function BoardChrome({
             color: identity.color,
             isLocal: true,
             peer: null,
+            voice: localVoice,
           },
         ]
       : []),
@@ -198,7 +243,7 @@ export function BoardChrome({
   return (
     <>
       {/* Top-left panel: board navigation and the current page. */}
-      <Surface role="navigation" aria-label="Board navigation" className="touch-targets absolute top-[env(safe-area-inset-top)] left-[env(safe-area-inset-left)] z-20 flex h-10 max-w-[calc(100vw-1rem)] items-center gap-0.5 rounded-none rounded-br-md border-t-0 border-l-0 p-1 sm:max-w-[calc(50vw-1.5rem)]">
+      <Surface role="navigation" aria-label="Board navigation" className="touch-targets absolute top-[env(safe-area-inset-top)] left-[env(safe-area-inset-left)] z-20 flex h-10 max-w-[calc(100vw-1rem)] items-center gap-0.5 rounded-none rounded-br-md border-t-0 border-l-0 p-1 shadow-none sm:max-w-[calc(50vw-1.5rem)]">
         {/* Back navigates to the boards list, which is tutor-only. Students join
             via a shared link and aren't authenticated, so following it would
             bounce them to the login page — hide it for them. */}
@@ -305,7 +350,7 @@ export function BoardChrome({
       </Surface>
 
       {/* Top-right panel (presence, session controls, and sharing). */}
-      <Surface role="toolbar" aria-label="Session controls" className="touch-targets scrollbar-none absolute top-[calc(2.75rem+env(safe-area-inset-top))] right-[env(safe-area-inset-right)] z-20 flex h-10 max-w-[calc(100vw-1rem)] items-center gap-0.5 overflow-x-auto rounded-none rounded-bl-md border-t-0 border-r-0 p-1 sm:top-[env(safe-area-inset-top)] sm:max-w-[calc(50vw-1.5rem)]">
+      <Surface role="toolbar" aria-label="Session controls" className="touch-targets scrollbar-none absolute top-[calc(2.75rem+env(safe-area-inset-top))] right-[env(safe-area-inset-right)] z-20 flex h-10 max-w-[calc(100vw-1rem)] items-center gap-0.5 overflow-x-auto rounded-none rounded-bl-md border-t-0 border-r-0 p-1 shadow-none sm:top-[env(safe-area-inset-top)] sm:max-w-[calc(50vw-1.5rem)]">
         <ConnectionIndicator />
         <div className="flex items-center px-1">
           <TooltipProvider delay={300}>
@@ -334,6 +379,7 @@ export function BoardChrome({
                       <ParticipantAvatar
                         color={participant.color}
                         name={participant.name}
+                        voice={participant.voice}
                       />
                     </TooltipTrigger>
                   );
@@ -353,6 +399,7 @@ export function BoardChrome({
                       <ParticipantAvatar
                         color={participant.color}
                         name={participant.name}
+                        voice={participant.voice}
                       />
                     </TooltipTrigger>
                   );
@@ -362,6 +409,7 @@ export function BoardChrome({
                       <ParticipantAvatar
                         color={participant.color}
                         name={participant.name}
+                        voice={participant.voice}
                       />
                     </TooltipTrigger>
                   );
@@ -374,6 +422,17 @@ export function BoardChrome({
                       {latencyLabel ? (
                         <span className="font-mono tabular-nums">
                           · {latencyLabel}
+                        </span>
+                      ) : null}
+                      {participant.voice?.inCall ? (
+                        <span>
+                          {' '}
+                          ·{' '}
+                          {participant.voice.muted
+                            ? 'Voice muted'
+                            : participant.voice.speaking
+                              ? 'Speaking'
+                              : 'Mic listening'}
                         </span>
                       ) : null}
                     </TooltipContent>
@@ -393,6 +452,7 @@ export function BoardChrome({
         <FollowControls identity={identity} />
         <AnimationControls identity={identity} />
         <DocumentsPanel identity={identity} />
+        <VoiceControls identity={identity} />
         <ShareButton />
       </Surface>
 

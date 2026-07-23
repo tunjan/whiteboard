@@ -75,13 +75,13 @@ function OffscreenCursorIndicator({
         style={{ transform: `rotate(${rotation}deg)` }}
       >
         <Navigation2
-          className="absolute -top-2 left-1/2 size-4 -translate-x-1/2"
+          className="absolute -top-4 left-1/2 size-4 -translate-x-1/2"
           fill={outlineColor(color)}
           stroke={outlineColor(color)}
           strokeWidth={3}
         />
         <Navigation2
-          className="absolute -top-2 left-1/2 size-4 -translate-x-1/2"
+          className="absolute -top-4 left-1/2 size-4 -translate-x-1/2"
           fill={color}
           stroke={color}
           strokeWidth={1.5}

@@ -1,6 +1,8 @@
 import { MousePointer2 } from 'lucide-react';
 import {
+  type ArrowTopology,
   type Bounds,
+  type LineSpline,
   type Point,
   type Shape,
   boundsCenter,
@@ -11,6 +13,7 @@ import {
 } from '@whiteboard/shared';
 import {
   getSelectionInfo,
+  marqueeIntersectsMask,
   matchesMarquee,
   ROTATION_HANDLE_HIT_SCREEN,
   shapeRotatedBounds,
@@ -26,6 +29,7 @@ import { getSnapGridStep } from '../grid';
 import { isSelectable, isVisible } from '../selectable';
 import { useEnteredGroupStore } from '../use-entered-group-store';
 import { shapeRegistry } from '../shapes/shape-registry';
+import { findBindableShapeAt } from '../shapes/connector-routing';
 import { textIndexAtWorldPoint } from '../shapes/text';
 import { layoutTextProps, MIN_TEXT_WIDTH } from '../shapes/text-measure';
 import type { ShapeUtil } from '../shapes/types';
@@ -132,9 +136,10 @@ type SelectState =
   | {
       type: 'marquee';
       start: Point;
-      base: string[];
+      current: Point;
       selectionBefore: string[];
       mode: MarqueeMode;
+      additive: boolean;
     };
 
 /** Topmost selectable shape under a world point, after an R-tree broad phase. */
@@ -236,6 +241,8 @@ function syncStyleFromSelection(editor: Editor): void {
     align?: 'start' | 'middle' | 'end';
     arrowStart?: boolean;
     arrowEnd?: boolean;
+    topology?: ArrowTopology;
+    spline?: LineSpline;
   };
   const style = useStyleStore.getState();
   style.setOpacity(typeof first.opacity === 'number' ? first.opacity : 1);
@@ -247,7 +254,12 @@ function syncStyleFromSelection(editor: Editor): void {
   if (first.type === 'arrow') {
     if (typeof props.arrowStart === 'boolean') style.setArrowStart(props.arrowStart);
     if (typeof props.arrowEnd === 'boolean') style.setArrowEnd(props.arrowEnd);
+    style.setArrowTopology(
+      props.topology ??
+        (Math.abs(first.props.bend ?? 0) >= 0.5 ? 'arc' : 'straight'),
+    );
   }
+  if (first.type === 'line') style.setLineSpline(props.spline ?? 'linear');
   if (first.type === 'text' && props.fontFamily) style.setFontFamily(props.fontFamily);
   if (first.type === 'text' && props.fontWeight) style.setFontWeight(props.fontWeight);
   if (first.type === 'text' && props.align) style.setAlign(props.align);
@@ -266,8 +278,8 @@ function marqueeBounds(start: Point, point: Point): Bounds {
   };
 }
 
-function marqueeMode(start: Point, current: Point): MarqueeMode {
-  return current.x >= start.x ? 'contain' : 'touch';
+function marqueeMode(ctrlKey: boolean, metaKey: boolean): MarqueeMode {
+  return ctrlKey || metaKey ? 'wrap' : 'intersect';
 }
 
 export function createSelectTool(): Tool {
@@ -399,32 +411,103 @@ export function createSelectTool(): Tool {
     });
   }
 
-  function selectMarquee(bounds: Bounds, mode: MarqueeMode, base: string[], editor: Editor): void {
-    const shapes = editor.getShapes();
-    const candidates = new Set(spatialIndex.search(bounds));
+  function intersectsAncestorMasks(
+    shape: Shape,
+    bounds: Bounds,
+    pointer: Point,
+    editor: Editor,
+  ): boolean {
+    let current: Shape | undefined = shape;
+    const visited = new Set<string>();
+    while (current?.parentId && !visited.has(current.id)) {
+      visited.add(current.id);
+      const parent = editor.getShape(current.parentId);
+      if (!parent) break;
+      if (
+        parent.type === 'frame' &&
+        !marqueeIntersectsMask(parent, bounds, pointer)
+      ) {
+        return false;
+      }
+      current = parent;
+    }
+    return true;
+  }
+
+  function selectMarquee(
+    bounds: Bounds,
+    mode: MarqueeMode,
+    additive: boolean,
+    selectionBefore: string[],
+    pointer: Point,
+    editor: Editor,
+  ): void {
     const entered = useEnteredGroupStore.getState().enteredGroupId;
     const found = new Set<string>();
     const containingGroups = new Set<string>();
 
-    for (const shape of shapes) {
-      if (!candidates.has(shape.id) || !isSelectable(shape)) continue;
+    // Iterate the R-tree result directly: filtering the whole document after
+    // the broad phase would still make every pointer frame O(N).
+    for (const id of spatialIndex.search(bounds)) {
+      const shape = editor.getShape(id);
+      if (!shape || !isSelectable(shape)) continue;
       if (!matchesMarquee(shape, bounds, mode)) continue;
+      if (!intersectsAncestorMasks(shape, bounds, pointer, editor)) continue;
       const target = selectionTargetId(editor.getShape, shape.id, entered);
-      if (editor.getShape(target)?.type === 'group' && mode === 'contain') {
+      if (editor.getShape(target)?.type === 'group' && mode === 'wrap') {
         containingGroups.add(target);
       } else {
         found.add(target);
       }
     }
 
-    for (const groupId of containingGroups) {
-      const leaves = leafDescendants(shapes, groupId).filter(isSelectable);
-      if (leaves.length > 0 && leaves.every((shape) => matchesMarquee(shape, bounds, mode))) {
-        found.add(groupId);
+    if (containingGroups.size > 0) {
+      const shapes = editor.getShapes();
+      for (const groupId of containingGroups) {
+        const leaves = leafDescendants(shapes, groupId).filter(isSelectable);
+        if (
+          leaves.length > 0 &&
+          leaves.every(
+            (shape) =>
+              matchesMarquee(shape, bounds, mode) &&
+              intersectsAncestorMasks(shape, bounds, pointer, editor),
+          )
+        ) {
+          found.add(groupId);
+        }
       }
     }
 
-    useSelectionStore.getState().setSelection([...new Set([...base, ...found])]);
+    useSelectionStore
+      .getState()
+      .setSelection(
+        additive
+          ? [...new Set([...selectionBefore, ...found])]
+          : [...found],
+      );
+  }
+
+  function updateMarquee(
+    marquee: Extract<SelectState, { type: 'marquee' }>,
+    point: Point,
+    shiftKey: boolean,
+    ctrlKey: boolean,
+    metaKey: boolean,
+    editor: Editor,
+  ): void {
+    const bounds = marqueeBounds(marquee.start, point);
+    marquee.current = point;
+    marquee.mode = marqueeMode(ctrlKey, metaKey);
+    marquee.additive = shiftKey;
+    useSelectionStore.getState().setMarquee({ bounds, mode: marquee.mode });
+    selectMarquee(
+      bounds,
+      marquee.mode,
+      marquee.additive,
+      marquee.selectionBefore,
+      point,
+      editor,
+    );
   }
 
   function reparentMovedLeaves(move: Extract<SelectState, { type: 'move' }>, ctx: ToolContext): void {
@@ -505,7 +588,7 @@ export function createSelectTool(): Tool {
               snapRegion(ctx, selectionInfo.bounds),
             ).flatMap((target) => {
               const geometry = shapeSnapGeometry(target);
-              return geometry ? [geometry] : [];
+              return geometry ? [{ ...geometry, shapeId: target.id }] : [];
             });
             state = {
               type: 'handle',
@@ -516,6 +599,19 @@ export function createSelectTool(): Tool {
               targets,
               canSnap: handle.kind === 'vertex',
             };
+            if (handle.kind === 'create') {
+              const result = util.onHandleDrag(
+                shape as never,
+                handle.id,
+                handle.point,
+                { shiftKey: false },
+              );
+              if (result.props) {
+                ctx.editor.updateShape(shape.id, {
+                  props: result.props as unknown as Record<string, unknown>,
+                });
+              }
+            }
             return;
           }
         }
@@ -673,20 +769,23 @@ export function createSelectTool(): Tool {
         case 'pending-empty': {
           if (!hasCrossedDragSlop(state.screenStart, info.screenPoint)) return;
           const start = state.start;
-          const base = state.additive ? state.selectionBefore : [];
-          if (!state.additive) useSelectionStore.getState().clear();
           state = {
             type: 'marquee',
             start,
-            base,
+            current: info.point,
             selectionBefore: state.selectionBefore,
-            mode: marqueeMode(start, info.point),
+            mode: marqueeMode(info.ctrlKey, info.metaKey),
+            additive: info.shiftKey,
           };
-          // Fall through on the same sample so the marquee starts at the first drag frame.
-          const bounds = marqueeBounds(state.start, info.point);
-          state.mode = marqueeMode(start, info.point);
-          useSelectionStore.getState().setMarquee({ bounds, mode: state.mode });
-          selectMarquee(bounds, state.mode, state.base, ctx.editor);
+          // Evaluate on the first drag sample rather than waiting for another move.
+          updateMarquee(
+            state,
+            info.point,
+            info.shiftKey,
+            info.ctrlKey,
+            info.metaKey,
+            ctx.editor,
+          );
           return;
         }
         case 'move':
@@ -805,6 +904,7 @@ export function createSelectTool(): Tool {
           const shape = ctx.editor.getShape(state.shapeId);
           if (!shape || !state.util.onHandleDrag) return;
           let point = info.point;
+          let bindingTarget: Shape | undefined;
           if (
             useCanvasUiStore.getState().snappingEnabled &&
             !info.altKey &&
@@ -813,13 +913,35 @@ export function createSelectTool(): Tool {
             const camera = useCameraStore.getState().camera;
             const snapped = snapPoint(point, state.targets, SNAP_SCREEN / camera.z);
             point = snapped.point;
+            bindingTarget = snapped.targetId
+              ? ctx.editor.getShape(snapped.targetId)
+              : undefined;
+            if (
+              !bindingTarget &&
+              shape.type === 'arrow' &&
+              (state.handleId === 'start' || state.handleId === 'end')
+            ) {
+              bindingTarget =
+                findBindableShapeAt(
+                  ctx.editor.getShapes(),
+                  point,
+                  0,
+                  shape.id,
+                ) ?? undefined;
+            }
             useSelectionStore.getState().setSnapGuides(snapped.guides);
           } else {
             useSelectionStore.getState().setSnapGuides([]);
           }
-          const result = state.util.onHandleDrag(shape as never, state.handleId, point, {
-            shiftKey: info.shiftKey,
-          });
+          // Use the gesture-start snapshot. Create handles insert exactly one
+          // vertex, and endpoint/curve drags remain stable even when the live
+          // shape's point count or route changes under the pointer.
+          const result = state.util.onHandleDrag(
+            state.initial as never,
+            state.handleId,
+            point,
+            { shiftKey: info.shiftKey, bindingTarget },
+          );
           const patch: { x?: number; y?: number; props?: Record<string, unknown> } = {};
           if (result.x !== undefined) patch.x = result.x;
           if (result.y !== undefined) patch.y = result.y;
@@ -838,17 +960,71 @@ export function createSelectTool(): Tool {
           return;
         }
         case 'marquee': {
-          const bounds = marqueeBounds(state.start, info.point);
-          state.mode = marqueeMode(state.start, info.point);
-          useSelectionStore.getState().setMarquee({ bounds, mode: state.mode });
-          selectMarquee(bounds, state.mode, state.base, ctx.editor);
+          updateMarquee(
+            state,
+            info.point,
+            info.shiftKey,
+            info.ctrlKey,
+            info.metaKey,
+            ctx.editor,
+          );
           return;
         }
       }
     },
 
-    onPointerUp(_info: ToolPointerInfo, ctx: ToolContext) {
+    onPointerUp(info: ToolPointerInfo, ctx: ToolContext) {
+      if (state.type === 'marquee') {
+        updateMarquee(
+          state,
+          info.point,
+          info.shiftKey,
+          info.ctrlKey,
+          info.metaKey,
+          ctx.editor,
+        );
+      }
       commit(ctx);
+    },
+
+    onKeyDown(event: KeyboardEvent, ctx: ToolContext) {
+      if (
+        state.type !== 'marquee' ||
+        (event.key !== 'Shift' &&
+          event.key !== 'Control' &&
+          event.key !== 'Meta')
+      ) {
+        return;
+      }
+      updateMarquee(
+        state,
+        state.current,
+        event.shiftKey,
+        event.ctrlKey,
+        event.metaKey,
+        ctx.editor,
+      );
+      return true;
+    },
+
+    onKeyUp(event: KeyboardEvent, ctx: ToolContext) {
+      if (
+        state.type !== 'marquee' ||
+        (event.key !== 'Shift' &&
+          event.key !== 'Control' &&
+          event.key !== 'Meta')
+      ) {
+        return;
+      }
+      updateMarquee(
+        state,
+        state.current,
+        event.shiftKey,
+        event.ctrlKey,
+        event.metaKey,
+        ctx.editor,
+      );
+      return true;
     },
 
     // The OS reclaimed the pointer mid-gesture (spurious pointercancel /

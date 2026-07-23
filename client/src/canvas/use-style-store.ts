@@ -1,12 +1,14 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type {
+  ArrowTopology,
   FillStyle,
   FontFamily,
   FontWeight,
   PolygonKind,
   StrokeDash,
   TextAlign,
+  LineSpline,
 } from '@whiteboard/shared';
 import type { Theme } from '@/use-theme-store';
 
@@ -15,7 +17,7 @@ export interface PaletteColor {
   value: string;
 }
 
-// A drawing palette carries a fixed 4×2 set of swatches for each theme, so the
+// A drawing palette carries a fixed 4×3 set of swatches for each theme, so the
 // pen always has colors that read against the current canvas. Light variants are
 // tuned for the light canvas; dark variants are brightened to read on the dark one.
 export interface Palette {
@@ -38,6 +40,10 @@ export const PALETTES: Palette[] = [
       { name: 'Teal', value: '#4d8584' },
       { name: 'Rust', value: '#a62f03' },
       { name: 'Dark Brown', value: '#400d01' },
+      { name: 'Moss', value: 'oklch(0.48 0.1 120)' },
+      { name: 'Terracotta', value: 'oklch(0.55 0.14 45)' },
+      { name: 'Plum', value: 'oklch(0.46 0.12 330)' },
+      { name: 'Navy', value: 'oklch(0.38 0.09 250)' },
     ],
     dark: [
       { name: 'Forest Green', value: '#7cae3f' },
@@ -48,6 +54,10 @@ export const PALETTES: Palette[] = [
       { name: 'Teal', value: '#6fb3b1' },
       { name: 'Rust', value: '#e0613a' },
       { name: 'Tan', value: '#b07a5e' },
+      { name: 'Moss', value: 'oklch(0.72 0.11 120)' },
+      { name: 'Terracotta', value: 'oklch(0.72 0.13 45)' },
+      { name: 'Plum', value: 'oklch(0.72 0.12 330)' },
+      { name: 'Navy', value: 'oklch(0.7 0.1 250)' },
     ],
   },
   {
@@ -62,6 +72,10 @@ export const PALETTES: Palette[] = [
       { name: 'Blue', value: '#2563eb' },
       { name: 'Violet', value: '#7c3aed' },
       { name: 'Pink', value: '#db2777' },
+      { name: 'Lime', value: 'oklch(0.68 0.18 125)' },
+      { name: 'Turquoise', value: 'oklch(0.6 0.15 175)' },
+      { name: 'Indigo', value: 'oklch(0.48 0.21 275)' },
+      { name: 'Purple', value: 'oklch(0.52 0.22 310)' },
     ],
     dark: [
       { name: 'Red', value: '#fb7185' },
@@ -72,6 +86,10 @@ export const PALETTES: Palette[] = [
       { name: 'Blue', value: '#60a5fa' },
       { name: 'Violet', value: '#a78bfa' },
       { name: 'Pink', value: '#f472b6' },
+      { name: 'Lime', value: 'oklch(0.82 0.17 125)' },
+      { name: 'Turquoise', value: 'oklch(0.8 0.14 175)' },
+      { name: 'Indigo', value: 'oklch(0.72 0.18 275)' },
+      { name: 'Purple', value: 'oklch(0.74 0.18 310)' },
     ],
   },
   {
@@ -86,6 +104,10 @@ export const PALETTES: Palette[] = [
       { name: 'Sky', value: '#64b5f6' },
       { name: 'Lavender', value: '#9575cd' },
       { name: 'Blossom', value: '#f06ba8' },
+      { name: 'Mint', value: 'oklch(0.78 0.09 145)' },
+      { name: 'Seafoam', value: 'oklch(0.76 0.08 185)' },
+      { name: 'Periwinkle', value: 'oklch(0.72 0.1 270)' },
+      { name: 'Lilac', value: 'oklch(0.74 0.09 315)' },
     ],
     dark: [
       { name: 'Coral', value: '#f4a3a3' },
@@ -96,6 +118,10 @@ export const PALETTES: Palette[] = [
       { name: 'Sky', value: '#a0d2fb' },
       { name: 'Lavender', value: '#c4b0e6' },
       { name: 'Blossom', value: '#f7a8cf' },
+      { name: 'Mint', value: 'oklch(0.86 0.08 145)' },
+      { name: 'Seafoam', value: 'oklch(0.85 0.07 185)' },
+      { name: 'Periwinkle', value: 'oklch(0.82 0.09 270)' },
+      { name: 'Lilac', value: 'oklch(0.84 0.08 315)' },
     ],
   },
   {
@@ -110,6 +136,10 @@ export const PALETTES: Palette[] = [
       { name: 'Blue', value: '#0066ff' },
       { name: 'Purple', value: '#7a00cc' },
       { name: 'Magenta', value: '#cc007a' },
+      { name: 'Scarlet', value: 'oklch(0.58 0.25 25)' },
+      { name: 'Yellow', value: 'oklch(0.78 0.18 95)' },
+      { name: 'Electric Indigo', value: 'oklch(0.5 0.27 285)' },
+      { name: 'Hot Purple', value: 'oklch(0.58 0.25 325)' },
     ],
     dark: [
       { name: 'Pink', value: '#ff1a75' },
@@ -120,6 +150,10 @@ export const PALETTES: Palette[] = [
       { name: 'Blue', value: '#4d94ff' },
       { name: 'Purple', value: '#b366ff' },
       { name: 'Magenta', value: '#ff4dd2' },
+      { name: 'Scarlet', value: 'oklch(0.72 0.23 25)' },
+      { name: 'Yellow', value: 'oklch(0.9 0.18 95)' },
+      { name: 'Electric Indigo', value: 'oklch(0.7 0.23 285)' },
+      { name: 'Hot Purple', value: 'oklch(0.74 0.22 325)' },
     ],
   },
   {
@@ -134,6 +168,10 @@ export const PALETTES: Palette[] = [
       { name: 'Slate', value: '#808080' },
       { name: 'Light Gray', value: '#999999' },
       { name: 'Silver', value: '#b3b3b3' },
+      { name: 'Graphite', value: 'oklch(0.22 0 0)' },
+      { name: 'Iron', value: 'oklch(0.32 0 0)' },
+      { name: 'Ash', value: 'oklch(0.52 0 0)' },
+      { name: 'Pearl', value: 'oklch(0.82 0 0)' },
     ],
     dark: [
       { name: 'Near White', value: '#fafafa' },
@@ -144,6 +182,10 @@ export const PALETTES: Palette[] = [
       { name: 'Slate', value: '#808080' },
       { name: 'Dark Gray', value: '#666666' },
       { name: 'Charcoal', value: '#525252' },
+      { name: 'Cloud', value: 'oklch(0.94 0 0)' },
+      { name: 'Mist', value: 'oklch(0.88 0 0)' },
+      { name: 'Pewter', value: 'oklch(0.72 0 0)' },
+      { name: 'Graphite', value: 'oklch(0.42 0 0)' },
     ],
   },
 ];
@@ -186,6 +228,10 @@ interface StyleStore {
   arrowStart: boolean;
   /** Whether new arrows draw an arrowhead at the end point. */
   arrowEnd: boolean;
+  /** Geometry inherited by newly created arrows. */
+  arrowTopology: ArrowTopology;
+  /** Interpolation inherited by newly created lines. */
+  lineSpline: LineSpline;
   /** Current polygon kind for the polygon tool. */
   polygonKind: PolygonKind;
   /** Current font family for new/edited text. */
@@ -203,6 +249,8 @@ interface StyleStore {
   setOpacity: (opacity: number) => void;
   setArrowStart: (arrowStart: boolean) => void;
   setArrowEnd: (arrowEnd: boolean) => void;
+  setArrowTopology: (arrowTopology: ArrowTopology) => void;
+  setLineSpline: (lineSpline: LineSpline) => void;
   setPolygonKind: (kind: PolygonKind) => void;
   setFontFamily: (family: FontFamily) => void;
   setFontWeight: (weight: FontWeight) => void;
@@ -222,6 +270,8 @@ export const useStyleStore = create<StyleStore>()(
       opacity: 1,
       arrowStart: false,
       arrowEnd: true,
+      arrowTopology: 'straight',
+      lineSpline: 'linear',
       polygonKind: 'triangle',
       fontFamily: 'sans',
       fontWeight: 400,
@@ -234,6 +284,8 @@ export const useStyleStore = create<StyleStore>()(
       setOpacity: (opacity) => set({ opacity }),
       setArrowStart: (arrowStart) => set({ arrowStart }),
       setArrowEnd: (arrowEnd) => set({ arrowEnd }),
+      setArrowTopology: (arrowTopology) => set({ arrowTopology }),
+      setLineSpline: (lineSpline) => set({ lineSpline }),
       setPolygonKind: (polygonKind) => set({ polygonKind }),
       setFontFamily: (fontFamily) => set({ fontFamily }),
       setFontWeight: (fontWeight) => set({ fontWeight }),

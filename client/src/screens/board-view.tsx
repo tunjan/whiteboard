@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { boardRepository } from '@/board/server-board-repository';
 import { Canvas } from '@/canvas/Canvas';
 import {
@@ -9,18 +9,32 @@ import {
 import {
   type Identity,
   resolveIdentity,
+  setStoredColor,
   setStoredName,
 } from '@/collab/identity';
 import { setLocalUser } from '@/collab/presence';
+import { VoiceAudioSinks } from '@/collab/voice/VoiceAudioSinks';
 import { BoardChrome } from '@/components/board-chrome';
 import { BoardTitleDialog } from '@/components/board-title-dialog';
 import { CanvasContextMenu } from '@/components/canvas-context-menu';
-import { EquationPanel } from '@/components/equation-panel';
-import { GraphPanel } from '@/components/graph-panel';
+import { LatencyWarningToast } from '@/components/latency-warning-toast';
 import { NameDialog } from '@/components/name-dialog';
 import { StylePanel } from '@/components/style-panel';
 import { Toolbar } from '@/components/toolbar';
 import { navigate } from '@/router';
+
+// These panels pull in MathLive and its KaTeX assets. Keep them outside the
+// entry bundle so the browser can parse and cache them independently.
+const EquationPanel = lazy(() =>
+  import('@/components/equation-panel').then(({ EquationPanel }) => ({
+    default: EquationPanel,
+  })),
+);
+const GraphPanel = lazy(() =>
+  import('@/components/graph-panel').then(({ GraphPanel }) => ({
+    default: GraphPanel,
+  })),
+);
 
 /** The board editor for one board id. Loads content + sets up presence. */
 export function BoardView({ boardId }: { boardId: string }) {
@@ -100,22 +114,27 @@ export function BoardView({ boardId }: { boardId: string }) {
         onEditIdentity={identity ? () => setEditingIdentity(true) : undefined}
         identity={identity}
       />
+      <LatencyWarningToast />
+      <VoiceAudioSinks />
       <Toolbar />
-      <GraphPanel />
-      <EquationPanel />
+      <Suspense fallback={null}>
+        <GraphPanel />
+        <EquationPanel />
+      </Suspense>
       <StylePanel />
 
       <NameDialog
         open={needsName || editingIdentity}
         editing={editingIdentity}
         initialName={identity?.name ?? ''}
-        onSubmit={(n) => {
+        initialColor={identity?.color ?? assignedColor}
+        colorEditable={!identity?.isTutor}
+        onSubmit={(n, c) => {
           setStoredName(n);
-          setIdentity({
-            name: n,
-            color: identity?.color ?? assignedColor,
-            isTutor: identity?.isTutor ?? false,
-          });
+          const isTutor = identity?.isTutor ?? false;
+          const color = isTutor ? (identity?.color ?? assignedColor) : c;
+          if (!isTutor) setStoredColor(color);
+          setIdentity({ name: n, color, isTutor });
           setNeedsName(false);
           setEditingIdentity(false);
         }}

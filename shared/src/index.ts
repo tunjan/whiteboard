@@ -15,3 +15,4 @@ export * from './animation';
 export * from './recordings';
 export * from './documents';
 export * from './latency';
+export * from './voice';

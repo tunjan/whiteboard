@@ -3,7 +3,7 @@ import { type Point, distanceToSegment } from '@whiteboard/shared';
 /**
  * Ramer–Douglas–Peucker polyline simplification. Removes points that don't
  * meaningfully change the curve, so fast/jagged pointer input collapses to a
- * clean set of points before `perfect-freehand` renders it. Preserves any extra
+ * clean set of points before a stroke renderer consumes it. Preserves any extra
  * fields on each point (e.g. pressure).
  */
 export function simplifyRDP<T extends Point>(points: T[], epsilon: number): T[] {

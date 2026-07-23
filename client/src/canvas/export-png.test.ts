@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { EquationShape, Shape } from '@whiteboard/shared';
 import { typesetEquation } from './equation-render';
-import { isExportable } from './export-png';
+import { countInvalidEquations, isExportable } from './export-png';
 
 function equation(latex: string): EquationShape {
   return {
@@ -33,6 +33,24 @@ describe('export placeholder filtering', () => {
     await typesetEquation(latex);
 
     expect(isExportable(equation(latex))).toBe(false);
+  });
+
+  it('counts invalid non-empty equations for export preflight', async () => {
+    const invalid = equation(String.raw`\notacommand{x}`);
+    const valid = { ...equation('x+1'), id: 'valid' };
+    const empty = { ...equation(''), id: 'empty' };
+    await Promise.all([
+      typesetEquation(invalid.props.latex),
+      typesetEquation(valid.props.latex),
+    ]);
+
+    expect(countInvalidEquations([invalid, valid, empty])).toBe(1);
+    expect(
+      countInvalidEquations(
+        [invalid, valid, empty],
+        new Set([valid.id]),
+      ),
+    ).toBe(0);
   });
 
   it('leaves every other shape type alone', () => {

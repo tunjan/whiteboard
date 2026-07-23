@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Point } from '@whiteboard/shared';
+import type { Point, VoicePresence } from '@whiteboard/shared';
 import type { Camera } from '@/canvas/camera';
 import type { LaserStroke } from '@/canvas/use-laser-store';
 
@@ -16,6 +16,8 @@ export interface TextSelectionPresence {
   anchor: number;
   head: number;
 }
+
+export type { VoicePresence } from '@whiteboard/shared';
 
 export interface PeerPresence {
   clientId: number;
@@ -40,6 +42,8 @@ export interface PeerPresence {
   selection: string[] | null;
   /** In-progress laser-pointer strokes, or null when the peer has none. */
   laser: LaserStroke[] | null;
+  /** This peer's current in-board voice membership and mute state. */
+  voice: VoicePresence | null;
 }
 
 interface PresenceStore {

@@ -18,7 +18,6 @@ export function createDrawTool(): Tool {
   let origin = { x: 0, y: 0 };
   let points: DrawPoint[] = [];
   let simulatePressure = false;
-  let previousSample: { x: number; y: number; timestamp: number } | null = null;
   // Pending rAF for the live stroke write. Pointer Events can deliver many
   // coalesced samples per frame; without this each sample fired its own Yjs
   // transaction → full document-snapshot rebuild → React commit. Coalescing the
@@ -49,44 +48,25 @@ export function createDrawTool(): Tool {
     id = null;
     if (!sid) return;
     // Final synchronous write, covering the flush this cancelled. The points are
-    // committed exactly as drawn: `getInkPathData` smooths via perfect-freehand's
-    // `streamline`, an EMA over the point *sequence* with no arc-length
-    // normalization, so the rendered curve depends on point density and not just
-    // on point positions. Thinning any samples here — even ones within a small
-    // fraction of the brush width of the curve — changes the smoothing lag and
-    // visibly reshapes the stroke the instant the pointer lifts.
+    // committed exactly as drawn: the ink engine streamlines with an EMA over
+    // the point sequence, so thinning samples here would change its smoothing
+    // lag and visibly reshape the stroke when the pointer lifts.
     ctx.editor.updateShape(sid, { props: { points: points.slice() } });
     points = [];
-    previousSample = null;
   };
 
   // Minimum spacing between recorded samples, in world units. See `appendPoint`.
   const MIN_SAMPLE_DISTANCE = 1;
 
-  // Calibrated in screen pixels/ms so a stroke has the same pressure response
-  // at every camera zoom level (0.08 = slow, 1.25 = fast).
-  const PRESSURE_MIN_SPEED = 0.08;
-  const PRESSURE_MAX_SPEED = 1.25;
-
   const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
 
   const pressureFor = (info: ToolPointerInfo): number => {
-    const previous = previousSample;
-    previousSample = {
-      x: info.screenPoint.x,
-      y: info.screenPoint.y,
-      timestamp: info.timestamp,
-    };
-    if (!simulatePressure) return clamp01(info.pressure);
-    if (!previous) return 0.5;
-
-    const elapsed = Math.max(1, info.timestamp - previous.timestamp);
-    const speed =
-      Math.hypot(
-        info.screenPoint.x - previous.x,
-        info.screenPoint.y - previous.y,
-      ) / elapsed;
-    return 1 - clamp01((speed - PRESSURE_MIN_SPEED) / (PRESSURE_MAX_SPEED - PRESSURE_MIN_SPEED));
+    // Stylus pressure is conditioned once at ingestion and then persisted.
+    // Mouse/touch samples carry the neutral default; the vector engine derives
+    // their pressure from inter-sample distance when simulation is enabled.
+    return info.pointerType === 'pen'
+      ? clamp01(info.pressure * 1.25)
+      : 0.5;
   };
 
   const snapToAngle = (point: DrawPoint): DrawPoint => {
@@ -174,7 +154,6 @@ export function createDrawTool(): Tool {
       // user's velocity-based simulation preference.
       simulatePressure =
         info.pointerType !== 'pen' && pencil.pencilSimulatePressure;
-      previousSample = null;
       points = [{ x: 0, y: 0, pressure: pressureFor(info) }];
       const streamline = pencilStabilizationToStreamline(
         pencil.pencilStabilization,
@@ -195,9 +174,7 @@ export function createDrawTool(): Tool {
           color: useStyleStore.getState().color,
           size: useStyleStore.getState().size,
           dash: useStyleStore.getState().dash,
-          // Pressure has been conditioned at input time, so the renderer must
-          // not simulate it again.
-          simulatePressure: false,
+          simulatePressure,
           thinning: pencil.pencilThinning,
           smoothing: pencil.pencilSmoothing,
           streamline,
@@ -239,7 +216,6 @@ export function createDrawTool(): Tool {
       const sid = id;
       id = null;
       points = [];
-      previousSample = null;
       if (sid) ctx.editor.deleteShapes([sid]);
     },
   };

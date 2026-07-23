@@ -83,5 +83,9 @@ export interface Tool {
    */
   onCommit?(ctx: ToolContext): void;
   onDoubleClick?(info: ToolPointerInfo, ctx: ToolContext): void;
-  onKeyDown?(e: KeyboardEvent, ctx: ToolContext): void;
+  /** Return true when the tool handled the key and global canvas shortcuts
+   * should stop processing it. */
+  onKeyDown?(e: KeyboardEvent, ctx: ToolContext): boolean | void;
+  /** Modifier releases can change an active gesture without pointer movement. */
+  onKeyUp?(e: KeyboardEvent, ctx: ToolContext): boolean | void;
 }

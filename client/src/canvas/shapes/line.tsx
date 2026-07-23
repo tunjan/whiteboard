@@ -1,8 +1,9 @@
-import { connectorHandleDrag, connectorHandles } from './connector-handles';
+import { lineHandleDrag, lineHandles } from './connector-handles';
 import { DEFAULT_SHAPE_STYLE } from './style';
 import {
   curvePath,
   curvePoints,
+  pathMidpoint,
   polylineBounds,
   polylineHitTest,
   polylineTransform,
@@ -21,22 +22,37 @@ export const lineUtil: ShapeUtil<'line'> = {
     size: DEFAULT_SHAPE_STYLE.size,
     dash: 'solid',
     bend: 0,
+    spline: 'linear',
+    label: '',
   }),
 
-  getBounds: (s) =>
-    polylineBounds(
+  getBounds: (s) => {
+    const fontSize = Math.max(12, s.props.size * 3);
+    const labelPad = s.props.label?.trim()
+      ? Math.max(s.props.size / 2, s.props.label.trim().length * fontSize * 0.3 + fontSize)
+      : s.props.size / 2;
+    return polylineBounds(
       s.x,
       s.y,
-      curvePoints(s.props.points, s.props.bend ?? 0),
-      s.props.size / 2,
-    ),
+      curvePoints(
+        s.props.points,
+        s.props.bend ?? 0,
+        s.props.spline ?? 'linear',
+      ),
+      labelPad,
+    );
+  },
 
   hitTest: (s, p, tol) =>
     polylineHitTest(
       s.x,
       s.y,
       s.rotation,
-      curvePoints(s.props.points, s.props.bend ?? 0),
+      curvePoints(
+        s.props.points,
+        s.props.bend ?? 0,
+        s.props.spline ?? 'linear',
+      ),
       p,
       tol,
       s.props.size / 2,
@@ -55,24 +71,48 @@ export const lineUtil: ShapeUtil<'line'> = {
     };
   },
 
-  getHandles: (s) => connectorHandles(s),
-  onHandleDrag: (s, handleId, point) => connectorHandleDrag(s, handleId, point),
+  getHandles: (s) => lineHandles(s),
+  onHandleDrag: (s, handleId, point, opts) =>
+    lineHandleDrag(s, handleId, point, opts),
 
   Component: ({ shape }) => {
-    const { points, color, size, dash, bend } = shape.props;
+    const { points, color, size, dash, bend, spline, label } = shape.props;
     if (points.length < 2) return null;
-    const pts = curvePoints(points, bend ?? 0);
+    const pts = curvePoints(points, bend ?? 0, spline ?? 'linear');
+    const middle = pathMidpoint(pts);
+    const tangentLength = Math.hypot(middle.tangent.x, middle.tangent.y) || 1;
+    const labelPoint = {
+      x: middle.point.x - (middle.tangent.y / tangentLength) * (size + 9),
+      y: middle.point.y + (middle.tangent.x / tangentLength) * (size + 9),
+    };
     return (
-      <path
-        d={curvePath(points, bend ?? 0)}
-        fill="none"
-        stroke={color}
-        strokeWidth={size}
-        strokeDasharray={strokeDashArray(dash, size)}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        transform={polylineTransform(shape.x, shape.y, pts, shape.rotation)}
-      />
+      <g transform={polylineTransform(shape.x, shape.y, pts, shape.rotation)}>
+        <path
+          d={curvePath(points, bend ?? 0, spline ?? 'linear')}
+          fill="none"
+          stroke={color}
+          strokeWidth={size}
+          strokeDasharray={strokeDashArray(dash, size)}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        {label?.trim() ? (
+          <text
+            x={labelPoint.x}
+            y={labelPoint.y}
+            fill={color}
+            stroke="var(--color-background)"
+            strokeWidth={4}
+            paintOrder="stroke"
+            textAnchor="middle"
+            dominantBaseline="central"
+            fontFamily="'Inter Variable', system-ui, sans-serif"
+            fontSize={Math.max(12, size * 3)}
+          >
+            {label.trim()}
+          </text>
+        ) : null}
+      </g>
     );
   },
 };

@@ -9,12 +9,15 @@ import {
   ChevronsUpDown,
 } from 'lucide-react';
 import type {
+  ArrowTopology,
   FillStyle,
   FontFamily,
   FontWeight,
+  LineSpline,
   StrokeDash,
   TextAlign,
 } from '@whiteboard/shared';
+import { orthogonalRoute } from '@/canvas/shapes/connector-routing';
 import { fontStack } from '@/canvas/shapes/text-measure';
 import { editor, useDocumentStore } from '@/canvas/use-document-store';
 import { useSelectionStore } from '@/canvas/use-selection-store';
@@ -36,6 +39,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { PanelLabel } from '@/components/ui/panel-label';
+import { Input } from '@/components/ui/input';
 import { Slider } from '@/components/ui/slider';
 import { Surface } from '@/components/ui/surface';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
@@ -77,10 +81,19 @@ const WEIGHTS: { weight: FontWeight; label: string }[] = [
   { weight: 700, label: 'Bold' },
 ];
 const swatchBorder = (color: string) => `color-mix(in srgb, ${color} 75%, #000)`;
+// Toggle rows span the panel and divide it evenly, so every row lines up with
+// the swatch grid's edges (and its columns, for four-option rows).
+const TOGGLE_ROW = 'w-full';
+const TOGGLE_ITEM = 'grow basis-0';
 const ALIGNS: { align: TextAlign; Icon: ComponentType<{ className?: string; 'aria-hidden'?: boolean | 'true' | 'false' }> }[] = [
   { align: 'start', Icon: AlignLeft },
   { align: 'middle', Icon: AlignCenter },
   { align: 'end', Icon: AlignRight },
+];
+const ARROW_TOPOLOGIES: Array<{ value: ArrowTopology; label: string; glyph: string }> = [
+  { value: 'straight', label: 'Straight arrow', glyph: '—' },
+  { value: 'arc', label: 'Curved arrow', glyph: '⌒' },
+  { value: 'elbow', label: 'Elbow arrow', glyph: '└' },
 ];
 
 function FillPreview({ style }: { style: FillStyle }) {
@@ -137,6 +150,8 @@ export function StylePanel() {
     opacity,
     arrowStart,
     arrowEnd,
+    arrowTopology,
+    lineSpline,
     fontFamily,
     fontWeight,
     align,
@@ -153,6 +168,8 @@ export function StylePanel() {
     setOpacity,
     setArrowStart,
     setArrowEnd,
+    setArrowTopology,
+    setLineSpline,
     setFontFamily,
     setFontWeight,
     setAlign,
@@ -174,6 +191,14 @@ export function StylePanel() {
       (id) => id && record[id]?.type === firstShape.type,
     );
     return allSameType ? firstShape.type : 'mixed';
+  });
+  const connectorLabel = useDocumentStore((s) => {
+    if (selectedIds.length !== 1) return '';
+    const id = selectedIds[0];
+    const shape = id ? s.doc.pages[s.currentPageId]?.shapes[id] : undefined;
+    return shape && (shape.type === 'line' || shape.type === 'arrow')
+      ? shape.props.label ?? ''
+      : '';
   });
   const playbackActive = useAnimationStore((s) => s.playbackActive);
 
@@ -231,6 +256,11 @@ export function StylePanel() {
   const showFont = targetType === 'text' || targetType === 'mixed';
   const showAlign = targetType === 'text' || targetType === 'mixed';
   const showArrows = targetType === 'arrow';
+  const showLineOptions = targetType === 'line';
+  const showConnectorLabel =
+    activeToolId === 'select' &&
+    selectedIds.length === 1 &&
+    (targetType === 'line' || targetType === 'arrow');
   const panelContentKey =
     activeToolId === 'select'
       ? `selection-${targetType ?? 'default'}`
@@ -316,21 +346,61 @@ export function StylePanel() {
     for (const id of selectedIds) editor.updateShape(id, { opacity: o });
   };
 
-  const applyArrowEnd = (v: boolean) => {
-    setArrowEnd(v);
+  const applyArrowTopology = (topology: ArrowTopology) => {
+    setArrowTopology(topology);
+    for (const id of selectedIds) {
+      const shape = editor.getShape(id);
+      if (shape?.type !== 'arrow' || shape.props.points.length < 2) continue;
+      const first = shape.props.points[0]!;
+      const last = shape.props.points[shape.props.points.length - 1]!;
+      const length = Math.hypot(last.x - first.x, last.y - first.y);
+      editor.updateShape(id, {
+        props: {
+          topology,
+          points: topology === 'elbow' ? orthogonalRoute(first, last) : [first, last],
+          bend:
+            topology === 'arc'
+              ? Math.abs(shape.props.bend ?? 0) >= 0.5
+                ? shape.props.bend
+                : Math.max(18, Math.min(80, length * 0.2))
+              : 0,
+        },
+      });
+    }
+  };
+
+  const applyArrowStart = (value: boolean) => {
+    setArrowStart(value);
     for (const id of selectedIds) {
       if (editor.getShape(id)?.type === 'arrow') {
-        editor.updateShape(id, { props: { arrowEnd: v } });
+        editor.updateShape(id, { props: { arrowStart: value } });
       }
     }
   };
 
-  const applyArrowStart = (v: boolean) => {
-    setArrowStart(v);
+  const applyArrowEnd = (value: boolean) => {
+    setArrowEnd(value);
     for (const id of selectedIds) {
       if (editor.getShape(id)?.type === 'arrow') {
-        editor.updateShape(id, { props: { arrowStart: v } });
+        editor.updateShape(id, { props: { arrowEnd: value } });
       }
+    }
+  };
+
+  const applyLineSpline = (spline: LineSpline) => {
+    setLineSpline(spline);
+    for (const id of selectedIds) {
+      if (editor.getShape(id)?.type === 'line') {
+        editor.updateShape(id, { props: { spline } });
+      }
+    }
+  };
+
+  const applyConnectorLabel = (label: string) => {
+    const id = selectedIds[0];
+    const shape = id ? editor.getShape(id) : undefined;
+    if (shape && (shape.type === 'line' || shape.type === 'arrow')) {
+      editor.updateShape(shape.id, { props: { label } });
     }
   };
 
@@ -505,7 +575,7 @@ export function StylePanel() {
               a readout; the tooltip names it. */}
           <Tooltip>
             <TooltipTrigger
-              render={<div className="flex items-center gap-2 px-0.5" />}
+              render={<div className="flex items-center gap-2" />}
             >
               <Slider
                 aria-label="Opacity"
@@ -525,10 +595,12 @@ export function StylePanel() {
           </Tooltip>
         </div>
 
-        {showFill || showDash || showSize || showFont || showAlign || showArrows ? (
+        {showFill || showDash || showSize || showFont || showAlign || showArrows || showLineOptions || showConnectorLabel ? (
         <div className="flex flex-col gap-2">
           {showFill ? (
             <ToggleGroup
+                className={TOGGLE_ROW}
+                spacing={1.5}
                 aria-label="Fill style"
                 value={[fill]}
                 onValueChange={(values) =>
@@ -540,6 +612,7 @@ export function StylePanel() {
                     <TooltipTrigger
                       render={
                         <ToggleGroupItem
+                          className={TOGGLE_ITEM}
                           value={fillStyle}
                           aria-label={FILL_LABELS[fillStyle]}
                         />
@@ -557,6 +630,8 @@ export function StylePanel() {
 
           {showDash ? (
             <ToggleGroup
+                className={TOGGLE_ROW}
+                spacing={1.5}
                 aria-label="Stroke style"
                 value={[dash]}
                 onValueChange={(values) =>
@@ -568,6 +643,7 @@ export function StylePanel() {
                     <TooltipTrigger
                       render={
                         <ToggleGroupItem
+                          className={TOGGLE_ITEM}
                           value={strokeDash}
                           aria-label={DASH_LABELS[strokeDash]}
                         />
@@ -585,6 +661,8 @@ export function StylePanel() {
 
           {showSize ? (
             <ToggleGroup
+                className={TOGGLE_ROW}
+                spacing={1.5}
                 aria-label="Stroke weight"
                 value={[String(size)]}
                 onValueChange={(values) =>
@@ -596,6 +674,7 @@ export function StylePanel() {
                     <TooltipTrigger
                       render={
                         <ToggleGroupItem
+                          className={TOGGLE_ITEM}
                           value={String(option.value)}
                           aria-label={`${option.name}, ${option.value} pixels`}
                         />
@@ -613,6 +692,8 @@ export function StylePanel() {
 
           {showFont ? (
             <ToggleGroup
+                className={TOGGLE_ROW}
+                spacing={1.5}
                 aria-label="Typeface"
                 value={[fontFamily]}
                 onValueChange={(values) =>
@@ -624,6 +705,7 @@ export function StylePanel() {
                     <TooltipTrigger
                       render={
                         <ToggleGroupItem
+                          className={TOGGLE_ITEM}
                           value={family}
                           aria-label={`${family} typeface`}
                           style={{ fontFamily: fontStack(family) }}
@@ -640,6 +722,8 @@ export function StylePanel() {
 
           {showFont ? (
             <ToggleGroup
+                className={TOGGLE_ROW}
+                spacing={1.5}
                 aria-label="Font weight"
                 value={[String(fontWeight)]}
                 onValueChange={(values) =>
@@ -651,6 +735,7 @@ export function StylePanel() {
                     <TooltipTrigger
                       render={
                         <ToggleGroupItem
+                          className={TOGGLE_ITEM}
                           value={String(weight)}
                           aria-label={`${label} weight`}
                           // Preview each option in the weight it applies, using
@@ -669,6 +754,8 @@ export function StylePanel() {
 
           {showAlign ? (
             <ToggleGroup
+                className={TOGGLE_ROW}
+                spacing={1.5}
                 aria-label="Text alignment"
                 value={[align]}
                 onValueChange={(values) =>
@@ -680,6 +767,7 @@ export function StylePanel() {
                     <TooltipTrigger
                       render={
                         <ToggleGroupItem
+                          className={TOGGLE_ITEM}
                           value={textAlign}
                           aria-label={`${textAlign} alignment`}
                         />
@@ -695,8 +783,58 @@ export function StylePanel() {
               </ToggleGroup>
           ) : null}
 
-          {showArrows ? (
+          {showLineOptions ? (
             <ToggleGroup
+              className={TOGGLE_ROW}
+              spacing={1.5}
+              aria-label="Line interpolation"
+              value={[lineSpline ?? 'linear']}
+              onValueChange={(values) =>
+                values[0] && applyLineSpline(values[0] as LineSpline)
+              }
+            >
+              <ToggleGroupItem className={TOGGLE_ITEM} value="linear">
+                Linear
+              </ToggleGroupItem>
+              <ToggleGroupItem className={TOGGLE_ITEM} value="smooth">
+                Smooth
+              </ToggleGroupItem>
+            </ToggleGroup>
+          ) : null}
+
+          {showArrows ? (
+            <>
+              <ToggleGroup
+                className={TOGGLE_ROW}
+                spacing={1.5}
+                aria-label="Arrow route"
+                value={[arrowTopology ?? 'straight']}
+                onValueChange={(values) =>
+                  values[0] && applyArrowTopology(values[0] as ArrowTopology)
+                }
+              >
+                {ARROW_TOPOLOGIES.map((option) => (
+                  <Tooltip key={option.value}>
+                    <TooltipTrigger
+                      render={
+                        <ToggleGroupItem
+                          className={TOGGLE_ITEM}
+                          value={option.value}
+                          aria-label={option.label}
+                        />
+                      }
+                    >
+                      <span className="text-base leading-none" aria-hidden="true">
+                        {option.glyph}
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent side="left">{option.label}</TooltipContent>
+                  </Tooltip>
+                ))}
+              </ToggleGroup>
+              <ToggleGroup
+                className={TOGGLE_ROW}
+                spacing={1.5}
                 multiple
                 aria-label="Arrowheads"
                 value={[
@@ -704,16 +842,15 @@ export function StylePanel() {
                   ...(arrowEnd ? ['end'] : []),
                 ]}
                 onValueChange={(values) => {
-                  const nextStart = values.includes('start');
-                  const nextEnd = values.includes('end');
-                  if (nextStart !== arrowStart) applyArrowStart(nextStart);
-                  if (nextEnd !== arrowEnd) applyArrowEnd(nextEnd);
+                  applyArrowStart(values.includes('start'));
+                  applyArrowEnd(values.includes('end'));
                 }}
               >
                 <Tooltip>
                   <TooltipTrigger
                     render={
                       <ToggleGroupItem
+                        className={TOGGLE_ITEM}
                         value="start"
                         aria-label="Arrowhead at start"
                       />
@@ -727,6 +864,7 @@ export function StylePanel() {
                   <TooltipTrigger
                     render={
                       <ToggleGroupItem
+                        className={TOGGLE_ITEM}
                         value="end"
                         aria-label="Arrowhead at end"
                       />
@@ -737,6 +875,16 @@ export function StylePanel() {
                   <TooltipContent side="left">Arrowhead at end</TooltipContent>
                 </Tooltip>
               </ToggleGroup>
+            </>
+          ) : null}
+
+          {showConnectorLabel ? (
+            <Input
+              aria-label="Connector label"
+              placeholder="Label"
+              value={connectorLabel}
+              onChange={(event) => applyConnectorLabel(event.target.value)}
+            />
           ) : null}
         </div>
         ) : null}

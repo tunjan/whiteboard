@@ -29,7 +29,7 @@ export function UndoControls({
       className="touch-targets absolute left-[env(safe-area-inset-left)] bottom-[env(safe-area-inset-bottom)] [@media(pointer:coarse)]:bottom-[calc(7rem+env(safe-area-inset-bottom))] select-none"
     >
       <TooltipProvider delay={300}>
-        <Surface className="flex h-12 items-center gap-1 rounded-none rounded-tr-md border-b-0 border-l-0 p-1">
+        <Surface className="flex h-12 items-center gap-1 rounded-none rounded-tr-md border-b-0 border-l-0 p-1 shadow-none">
           <Tooltip>
             <TooltipTrigger
               render={

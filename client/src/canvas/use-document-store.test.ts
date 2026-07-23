@@ -1,17 +1,31 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   DrawPoint,
   DrawShape,
+  GroupShape,
   RectangleShape,
   TextShape,
 } from '@whiteboard/shared';
 import './shapes/register';
 import {
+  createPage,
+  deletePage,
   documentByteSize,
   editor,
   loadBoard,
+  redo,
+  setCurrentPage,
+  setCurrentPageForFollow,
+  undo,
   useDocumentStore,
 } from './use-document-store';
+import { useCameraStore } from './use-camera-store';
+import { useEnteredGroupStore } from './use-entered-group-store';
+import { useSelectionStore } from './use-selection-store';
+import { useTextEditingStore } from './use-text-editing-store';
+import { registerPageSwitchInteractionCompleter } from './page-transition';
+import { readPageSession } from './page-session-state';
+import { useFollowStore } from '@/collab/use-follow-store';
 
 function rect(id: string, index: string): RectangleShape {
   return {
@@ -58,6 +72,18 @@ function draw(id: string, points: DrawPoint[]): DrawShape {
   };
 }
 
+function group(id: string): GroupShape {
+  return {
+    id,
+    type: 'group',
+    x: 0,
+    y: 0,
+    rotation: 0,
+    index: 'a0',
+    props: {},
+  };
+}
+
 const stroke = (n: number): DrawPoint[] =>
   Array.from({ length: n }, (_, i) => ({ x: i, y: i * 2, pressure: 0.5 }));
 
@@ -68,11 +94,144 @@ const drawnPoints = (id: string): DrawPoint[] => {
 
 const ids = () => useDocumentStore.getState().shapes.map((s) => s.id);
 
+function memoryStorage(): Storage {
+  const values = new Map<string, string>();
+  return {
+    get length() {
+      return values.size;
+    },
+    clear: () => values.clear(),
+    getItem: (key) => values.get(key) ?? null,
+    key: (index) => [...values.keys()][index] ?? null,
+    removeItem: (key) => values.delete(key),
+    setItem: (key, value) => values.set(key, String(value)),
+  } as Storage;
+}
+
 let dispose: () => void;
 beforeEach(() => {
+  vi.stubGlobal('localStorage', memoryStorage());
+  vi.stubGlobal('sessionStorage', memoryStorage());
   dispose = loadBoard('test-doc-store', { persist: false, collab: false });
 });
 afterEach(() => dispose());
+
+describe('page transitions', () => {
+  it('finishes the current interaction and ignores unknown page ids', () => {
+    let completed = 0;
+    const unregister = registerPageSwitchInteractionCompleter(() => {
+      completed += 1;
+    });
+    const firstPageId = useDocumentStore.getState().currentPageId;
+
+    setCurrentPage('page-does-not-exist');
+    expect(useDocumentStore.getState().currentPageId).toBe(firstPageId);
+    expect(completed).toBe(0);
+
+    const secondPageId = createPage('Page 2');
+    expect(useDocumentStore.getState().currentPageId).toBe(secondPageId);
+    expect(completed).toBe(1);
+    unregister();
+  });
+
+  it('persists the exact last page selected or created for the board', () => {
+    const firstPageId = useDocumentStore.getState().currentPageId;
+    const secondPageId = createPage('Page 2');
+    expect(readPageSession('test-doc-store')).toBe(secondPageId);
+
+    setCurrentPage(firstPageId);
+    expect(readPageSession('test-doc-store')).toBe(firstPageId);
+  });
+
+  it('restores each page camera, selection, entered group, and text editor', () => {
+    const firstPageId = useDocumentStore.getState().currentPageId;
+    editor.createShape(group('group-a'));
+    editor.createShape(rect('rect-a', 'a1'));
+    editor.createShape(text('text-a', 'hello'));
+    useSelectionStore.getState().setSelection(['rect-a', 'text-a']);
+    useEnteredGroupStore.getState().enter('group-a');
+    useTextEditingStore.getState().start('text-a', { anchor: 1, head: 4 });
+    useCameraStore.getState().setCamera({ x: 10, y: 20, z: 2 });
+
+    const secondPageId = createPage('Page 2');
+    expect(useSelectionStore.getState().selectedIds).toEqual([]);
+    expect(useEnteredGroupStore.getState().enteredGroupId).toBeNull();
+    expect(useTextEditingStore.getState().editingId).toBeNull();
+    expect(useCameraStore.getState().camera).toEqual({ x: 0, y: 0, z: 1 });
+
+    editor.createShape(rect('rect-b', 'a1'));
+    useSelectionStore.getState().setSelection(['rect-b']);
+    useCameraStore.getState().setCamera({ x: -30, y: 5, z: 0.5 });
+
+    setCurrentPage(firstPageId);
+    expect(useDocumentStore.getState().shapes.map((shape) => shape.id)).toEqual([
+      'group-a',
+      'rect-a',
+      'text-a',
+    ]);
+    expect(useSelectionStore.getState().selectedIds).toEqual([
+      'rect-a',
+      'text-a',
+    ]);
+    expect(useEnteredGroupStore.getState().enteredGroupId).toBe('group-a');
+    expect(useTextEditingStore.getState()).toMatchObject({
+      editingId: 'text-a',
+      anchor: 1,
+      head: 4,
+    });
+    expect(useCameraStore.getState().camera).toEqual({ x: 10, y: 20, z: 2 });
+
+    setCurrentPage(secondPageId);
+    expect(useSelectionStore.getState().selectedIds).toEqual(['rect-b']);
+    expect(useCameraStore.getState().camera).toEqual({ x: -30, y: 5, z: 0.5 });
+  });
+
+  it('keeps undo and redo history when switching away and back', () => {
+    const firstPageId = useDocumentStore.getState().currentPageId;
+    editor.createShape(rect('rect-a', 'a1'));
+    const secondPageId = createPage('Page 2');
+    editor.createShape(rect('rect-b', 'a1'));
+
+    setCurrentPage(firstPageId);
+    undo();
+    expect(editor.getShape('rect-a')).toBeUndefined();
+
+    setCurrentPage(secondPageId);
+    expect(editor.getShape('rect-b')).toBeDefined();
+    setCurrentPage(firstPageId);
+    redo();
+    expect(editor.getShape('rect-a')).toBeDefined();
+  });
+
+  it('falls back to the previous page and purges the deleted camera', () => {
+    const firstPageId = useDocumentStore.getState().currentPageId;
+    const secondPageId = createPage('Page 2');
+    createPage('Page 3');
+    setCurrentPage(secondPageId);
+    useCameraStore.getState().setCamera({ x: 40, y: 50, z: 1.5 });
+
+    deletePage(secondPageId);
+
+    expect(useDocumentStore.getState().currentPageId).toBe(firstPageId);
+    expect(
+      useCameraStore.getState().cameras[`test-doc-store/${secondPageId}`],
+    ).toBeUndefined();
+  });
+
+  it('ends follow mode for manual switches but preserves follow-driven switches', () => {
+    const firstPageId = useDocumentStore.getState().currentPageId;
+    const secondPageId = createPage('Page 2');
+
+    useFollowStore.getState().setFollowing(true);
+    setCurrentPage(firstPageId);
+    expect(useFollowStore.getState().following).toBe(false);
+
+    useFollowStore.getState().setFollowing(true);
+    setCurrentPageForFollow(secondPageId);
+    expect(useFollowStore.getState().following).toBe(true);
+    useFollowStore.getState().setFollowing(false);
+  });
+});
 
 describe('document store snapshot', () => {
   it('applies an index-unchanged update incrementally, preserving order and untouched identities', () => {

@@ -1,9 +1,6 @@
 import type { SVGProps } from 'react';
 
-/**
- * Lucide-style laser pointer for the presentation laser tool.
- * 24×24, stroke 2, round caps/joins, currentColor — matches lucide-react icons.
- */
+/** Lucide-style laser pointer: 24px grid, 2px stroke, round caps and joins. */
 export function LaserToolIcon({ className, ...props }: SVGProps<SVGSVGElement>) {
   return (
     <svg
@@ -20,14 +17,10 @@ export function LaserToolIcon({ className, ...props }: SVGProps<SVGSVGElement>) 
       aria-hidden="true"
       {...props}
     >
-      {/* Laser pen body (angled capsule outline) */}
-      <path d="M13 11 5.5 18.5c-1 1-1 2.5 0 3.4l.6.6c1 1 2.5 1 3.4 0L17 15" />
-      {/* Grip band */}
-      <path d="m9 15 3 3" />
-      {/* Beam */}
-      <path d="M15 9 19 5" />
-      {/* Laser spot */}
-      <circle cx="21" cy="3" r="1" />
+      <path d="m13 9 3 3-7.5 7.5a2.12 2.12 0 0 1-3-3Z" />
+      <path d="m10 14 3 3" />
+      <path d="m16.5 8.5 2-2" />
+      <circle cx="21" cy="4" r="1" />
     </svg>
   );
 }

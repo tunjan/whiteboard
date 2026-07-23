@@ -66,7 +66,12 @@ function frame(
 function pointer(
   x: number,
   y: number,
-  keys: Partial<Pick<ToolPointerInfo, 'shiftKey' | 'altKey'>> = {},
+  keys: Partial<
+    Pick<
+      ToolPointerInfo,
+      'shiftKey' | 'altKey' | 'ctrlKey' | 'metaKey'
+    >
+  > = {},
 ): ToolPointerInfo {
   return {
     point: { x, y },
@@ -77,8 +82,8 @@ function pointer(
     pointerType: 'mouse',
     shiftKey: keys.shiftKey ?? false,
     altKey: keys.altKey ?? false,
-    ctrlKey: false,
-    metaKey: false,
+    ctrlKey: keys.ctrlKey ?? false,
+    metaKey: keys.metaKey ?? false,
     button: 0,
   };
 }
@@ -187,7 +192,7 @@ describe('select tool state machine', () => {
     expect(shapes.get('a')?.x).toBe(30);
   });
 
-  it('uses full containment for left-to-right group selection and touch for right-to-left', () => {
+  it('intersects in either direction and uses Ctrl/Command for wrap selection', () => {
     const root = group('group', 'a0');
     const first = { ...rectangle('first', 0, 0, 'a1'), parentId: root.id };
     const second = { ...rectangle('second', 70, 0, 'a2'), parentId: root.id };
@@ -197,12 +202,99 @@ describe('select tool state machine', () => {
     tool.onPointerDown?.(pointer(-10, -10), ctx);
     tool.onPointerMove?.(pointer(50, 50), ctx);
     tool.onPointerUp?.(pointer(50, 50), ctx);
-    expect(useSelectionStore.getState().selectedIds).toEqual([]);
+    expect(useSelectionStore.getState().selectedIds).toEqual(['group']);
 
     tool.onPointerDown?.(pointer(130, 50), ctx);
     tool.onPointerMove?.(pointer(-10, -10), ctx);
     tool.onPointerUp?.(pointer(-10, -10), ctx);
     expect(useSelectionStore.getState().selectedIds).toEqual(['group']);
+
+    tool.onPointerDown?.(pointer(-10, -10), ctx);
+    tool.onPointerMove?.(pointer(50, 50, { ctrlKey: true }), ctx);
+    tool.onPointerUp?.(pointer(50, 50, { ctrlKey: true }), ctx);
+    expect(useSelectionStore.getState().selectedIds).toEqual([]);
+
+    tool.onPointerDown?.(pointer(-10, -10), ctx);
+    tool.onPointerMove?.(pointer(120, 50, { metaKey: true }), ctx);
+    tool.onPointerUp?.(pointer(120, 50, { metaKey: true }), ctx);
+    expect(useSelectionStore.getState().selectedIds).toEqual(['group']);
+  });
+
+  it('re-tests the live marquee when selection modifiers change', () => {
+    const a = rectangle('a', 0, 0, 'a0');
+    const existing = rectangle('existing', 100, 0, 'a1');
+    const { ctx } = context([a, existing]);
+    const tool = createSelectTool();
+    useSelectionStore.getState().setSelection(['existing']);
+
+    tool.onPointerDown?.(pointer(-10, -10), ctx);
+    tool.onPointerMove?.(pointer(20, 20, { shiftKey: true }), ctx);
+    expect(useSelectionStore.getState().selectedIds).toEqual(['existing', 'a']);
+
+    tool.onKeyUp?.(
+      {
+        key: 'Shift',
+        shiftKey: false,
+        ctrlKey: false,
+        metaKey: false,
+      } as KeyboardEvent,
+      ctx,
+    );
+    expect(useSelectionStore.getState().selectedIds).toEqual(['a']);
+
+    tool.onKeyDown?.(
+      {
+        key: 'Control',
+        shiftKey: false,
+        ctrlKey: true,
+        metaKey: false,
+      } as KeyboardEvent,
+      ctx,
+    );
+    expect(useSelectionStore.getState().selectedIds).toEqual([]);
+
+    tool.onKeyUp?.(
+      {
+        key: 'Control',
+        shiftKey: false,
+        ctrlKey: false,
+        metaKey: false,
+      } as KeyboardEvent,
+      ctx,
+    );
+    expect(useSelectionStore.getState().selectedIds).toEqual(['a']);
+
+    tool.onPointerUp?.(pointer(20, 20), ctx);
+  });
+
+  it('ignores clipped descendants when the marquee does not reach their frame', () => {
+    const parent = frame('frame', 0, 0, 'a0');
+    const clipped = {
+      ...rectangle('clipped', 120, 0, 'a1'),
+      parentId: parent.id,
+    };
+    const { ctx } = context([parent, clipped]);
+    const tool = createSelectTool();
+
+    tool.onPointerDown?.(pointer(115, -5), ctx);
+    tool.onPointerMove?.(pointer(165, 35), ctx);
+    tool.onPointerUp?.(pointer(165, 35), ctx);
+
+    expect(useSelectionStore.getState().selectedIds).toEqual([]);
+  });
+
+  it('does not publish an unchanged selection set again', () => {
+    let selectionUpdates = 0;
+    const unsubscribe = useSelectionStore.subscribe((next, previous) => {
+      if (next.selectedIds !== previous.selectedIds) selectionUpdates++;
+    });
+
+    useSelectionStore.getState().setSelection(['a', 'b']);
+    useSelectionStore.getState().setSelection(['a', 'b']);
+    useSelectionStore.getState().setSelection(['b', 'a']);
+
+    unsubscribe();
+    expect(selectionUpdates).toBe(1);
   });
 
   it('clears selection only after an empty click completes', () => {

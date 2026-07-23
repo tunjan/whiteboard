@@ -50,11 +50,22 @@ interface CameraStore {
    * camera and restores (or defaults) the target page's camera.
    */
   switchTo: (boardId: string, pageId: string) => void;
+  /** Forget the saved viewport for a page that no longer exists. */
+  deletePage: (boardId: string, pageId: string) => void;
   reset: () => void;
 }
 
 function cameraKey(boardId: string, pageId: string): string {
   return `${boardId}/${pageId}`;
+}
+
+function constrainCamera(camera: Camera | undefined): Camera {
+  if (!camera) return DEFAULT_CAMERA;
+  return {
+    x: Number.isFinite(camera.x) ? camera.x : DEFAULT_CAMERA.x,
+    y: Number.isFinite(camera.y) ? camera.y : DEFAULT_CAMERA.y,
+    z: clampZoom(Number.isFinite(camera.z) ? camera.z : DEFAULT_CAMERA.z),
+  };
 }
 
 /** Camera that fits `bounds` centered in the viewport, or null if degenerate. */
@@ -210,8 +221,21 @@ export const useCameraStore = create<CameraStore>((set, get) => ({
       return {
         cameras,
         activeKey: key,
-        camera: cameras[key] ?? DEFAULT_CAMERA,
+        camera: constrainCamera(cameras[key]),
       };
+    });
+  },
+  deletePage: (boardId, pageId) => {
+    cancelCameraAnimation();
+    set((s) => {
+      const key = cameraKey(boardId, pageId);
+      if (!(key in s.cameras) && key !== s.activeKey) return {};
+      const cameras = { ...s.cameras };
+      delete cameras[key];
+      saveCameras(cameras);
+      return key === s.activeKey
+        ? { cameras, activeKey: '', camera: DEFAULT_CAMERA }
+        : { cameras };
     });
   },
   reset: () => {

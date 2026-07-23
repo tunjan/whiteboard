@@ -9,7 +9,7 @@ export interface Identity {
 /** The tutor's cursor color is reserved so students can always spot them. */
 export const TUTOR_COLOR = '#e5484d';
 
-const STUDENT_COLORS = [
+export const STUDENT_COLORS = [
   '#2f6df6',
   '#1ea672',
   '#f5a524',
@@ -64,6 +64,10 @@ const COLOR_KEY = 'whiteboard:cursor-color';
 
 export function setStoredName(name: string): void {
   localStorage.setItem(NAME_KEY, name);
+}
+
+export function setStoredColor(color: string): void {
+  localStorage.setItem(COLOR_KEY, color);
 }
 
 function getStoredName(): string | null {
