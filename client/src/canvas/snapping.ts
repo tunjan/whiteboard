@@ -129,6 +129,51 @@ interface GapCandidate {
   guides: SnapGuide[];
 }
 
+interface GapBest {
+  dist: number;
+  offset: number;
+  /** Spacing this placement reproduces, used to find the rest of the chain. */
+  gapLength: number;
+  /** Cross-axis coordinate the guides are drawn at. */
+  at: number;
+  /** Cross-axis band the participating boxes share. */
+  cross: readonly [number, number];
+  intervals: Array<readonly [number, number]>;
+}
+
+/**
+ * Every equally spaced gap in the run containing the snapped box, so a chain of
+ * three or more evenly spaced shapes shows a marker per gap rather than only
+ * for the pair that drove the snap.
+ */
+function gapChainIntervals(
+  axis: 'x' | 'y',
+  boxes: Bounds[],
+  gapLength: number,
+  cross: readonly [number, number],
+): Array<readonly [number, number]> {
+  const start = (b: Bounds) => (axis === 'x' ? b.minX : b.minY);
+  const end = (b: Bounds) => (axis === 'x' ? b.maxX : b.maxY);
+  const crossStart = (b: Bounds) => (axis === 'x' ? b.minY : b.minX);
+  const crossEnd = (b: Bounds) => (axis === 'x' ? b.maxY : b.maxX);
+
+  // Only boxes sharing the band can be part of the same visual run.
+  const band = boxes
+    .filter((b) => overlaps(crossStart(b), crossEnd(b), cross[0], cross[1]))
+    .sort((a, b) => start(a) - start(b));
+
+  const intervals: Array<readonly [number, number]> = [];
+  for (let i = 0; i + 1 < band.length; i++) {
+    const a = band[i]!;
+    const b = band[i + 1]!;
+    if (end(a) >= start(b)) continue;
+    if (Math.abs(start(b) - end(a) - gapLength) < EPS) {
+      intervals.push([end(a), start(b)]);
+    }
+  }
+  return intervals;
+}
+
 /**
  * Find a centered-gap or repeated-gap placement along one axis. Static pairs
  * must overlap on the cross axis, which prevents unrelated rows/columns from
@@ -146,36 +191,46 @@ function bestGapAlong(
   const crossEnd = (b: Bounds) => (axis === 'x' ? b.maxY : b.maxX);
   const movingSize = end(moving) - start(moving);
   const movingCenter = (start(moving) + end(moving)) / 2;
-  let best: GapCandidate | null = null;
+  let best: GapBest | null = null;
 
   const register = (
     offset: number,
     pair: readonly [Bounds, Bounds],
+    gapLength: number,
     intervals: Array<readonly [number, number]>,
   ) => {
     const dist = Math.abs(offset);
-    if (dist > threshold || (best && dist >= best.dist)) return;
-    const cross0 = Math.max(
-      crossStart(moving),
-      crossStart(pair[0]),
-      crossStart(pair[1]),
-    );
-    const cross1 = Math.min(
-      crossEnd(moving),
-      crossEnd(pair[0]),
-      crossEnd(pair[1]),
-    );
+    if (dist > threshold) return;
+    const pairCross: readonly [number, number] = [
+      Math.max(crossStart(pair[0]), crossStart(pair[1])),
+      Math.min(crossEnd(pair[0]), crossEnd(pair[1])),
+    ];
+    if (best) {
+      if (dist > best.dist + EPS) return;
+      // Equally good placements: keep the tighter gap when the two candidates
+      // share a band, so a nested run wins over the gap enclosing it.
+      if (Math.abs(dist - best.dist) <= EPS) {
+        const sameBand = overlaps(
+          pairCross[0],
+          pairCross[1],
+          best.cross[0],
+          best.cross[1],
+        );
+        if (!sameBand || best.gapLength <= gapLength) return;
+      }
+    }
+    const cross0 = Math.max(crossStart(moving), pairCross[0]);
+    const cross1 = Math.min(crossEnd(moving), pairCross[1]);
     const at = cross0 <= cross1
       ? (cross0 + cross1) / 2
-      : (Math.max(crossStart(pair[0]), crossStart(pair[1])) +
-          Math.min(crossEnd(pair[0]), crossEnd(pair[1]))) /
-        2;
+      : (pairCross[0] + pairCross[1]) / 2;
     best = {
       dist,
       offset,
-      guides: intervals
-        .filter(([from, to]) => to - from > EPS)
-        .map(([from, to]) => ({ kind: 'gap', axis, at, from, to })),
+      gapLength,
+      at,
+      cross: pairCross,
+      intervals,
     };
   };
 
@@ -201,7 +256,7 @@ function bestGapAlong(
         const offset = desiredCenter - movingCenter;
         const movedStart = start(moving) + offset;
         const movedEnd = end(moving) + offset;
-        register(offset, pair, [
+        register(offset, pair, (gap - movingSize) / 2, [
           [end(a), movedStart],
           [movedEnd, start(b)],
         ]);
@@ -209,18 +264,46 @@ function bestGapAlong(
 
       // Extend the pair on either side using its existing gap length.
       const leftOffset = start(a) - gap - end(moving);
-      register(leftOffset, pair, [
+      register(leftOffset, pair, gap, [
         [end(moving) + leftOffset, start(a)],
         [end(a), start(b)],
       ]);
       const rightOffset = end(b) + gap - start(moving);
-      register(rightOffset, pair, [
+      register(rightOffset, pair, gap, [
         [end(a), start(b)],
         [end(b), start(moving) + rightOffset],
       ]);
     }
   }
-  return best;
+
+  if (!best) return null;
+  const chosen: GapBest = best;
+  const snapped: Bounds = axis === 'x'
+    ? {
+        ...moving,
+        minX: moving.minX + chosen.offset,
+        maxX: moving.maxX + chosen.offset,
+      }
+    : {
+        ...moving,
+        minY: moving.minY + chosen.offset,
+        maxY: moving.maxY + chosen.offset,
+      };
+  const intervals = [
+    ...chosen.intervals,
+    ...gapChainIntervals(axis, [...others, snapped], chosen.gapLength, chosen.cross),
+  ];
+
+  const seen = new Set<string>();
+  const guides: SnapGuide[] = [];
+  for (const [from, to] of [...intervals].sort((a, b) => a[0] - b[0])) {
+    if (to - from <= EPS) continue;
+    const key = `${Math.round(from / EPS)}:${Math.round(to / EPS)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    guides.push({ kind: 'gap', axis, at: chosen.at, from, to });
+  }
+  return { dist: chosen.dist, offset: chosen.offset, guides };
 }
 
 /**
@@ -399,7 +482,7 @@ export function snapPoint(
     }
   }
 
-  if (!found || bestDistance > threshold) return { point, guides: [] };
+  if (!found || bestDistance > threshold) return alignPoint(point, targets, threshold);
   return {
     point: bestPoint,
     targetId,
@@ -413,4 +496,53 @@ export function snapPoint(
       },
     ],
   };
+}
+
+/**
+ * Fallback for a handle with no point or outline within reach: line it up with
+ * a key point's X and/or Y independently, drawing a guide to that point.
+ */
+function alignPoint(
+  point: Point,
+  targets: PointSnapTarget[],
+  threshold: number,
+): PointSnapResult {
+  let bestX: { dist: number; at: number; other: number } | null = null;
+  let bestY: { dist: number; at: number; other: number } | null = null;
+
+  for (const target of targets) {
+    for (const candidate of target.points) {
+      const dx = Math.abs(candidate.x - point.x);
+      if (dx <= threshold && (!bestX || dx < bestX.dist)) {
+        bestX = { dist: dx, at: candidate.x, other: candidate.y };
+      }
+      const dy = Math.abs(candidate.y - point.y);
+      if (dy <= threshold && (!bestY || dy < bestY.dist)) {
+        bestY = { dist: dy, at: candidate.y, other: candidate.x };
+      }
+    }
+  }
+
+  if (!bestX && !bestY) return { point, guides: [] };
+  const snapped = { x: bestX ? bestX.at : point.x, y: bestY ? bestY.at : point.y };
+  const guides: SnapGuide[] = [];
+  if (bestX) {
+    guides.push({
+      kind: 'alignment',
+      axis: 'x',
+      at: snapped.x,
+      from: Math.min(snapped.y, bestX.other),
+      to: Math.max(snapped.y, bestX.other),
+    });
+  }
+  if (bestY) {
+    guides.push({
+      kind: 'alignment',
+      axis: 'y',
+      at: snapped.y,
+      from: Math.min(snapped.x, bestY.other),
+      to: Math.max(snapped.x, bestY.other),
+    });
+  }
+  return { point: snapped, guides };
 }

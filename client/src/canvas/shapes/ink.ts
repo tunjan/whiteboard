@@ -1,5 +1,6 @@
 import type { DrawPoint } from '@whiteboard/shared';
 import {
+  buildInkCenterline,
   getFreehandPathData,
   type FreehandEngineOptions,
 } from './ink-engine';
@@ -57,7 +58,26 @@ export const DEFAULT_PENCIL_DYNAMICS = {
   endTaper: false,
 } as const satisfies Required<InkStrokeDynamics>;
 
+/**
+ * Legacy simulated-pressure strokes keep the flat response they were drawn
+ * with. Their width comes from sample spacing rather than from a real reading,
+ * and re-shaping it would rewrite how every stroke saved before that looks.
+ */
 const linearPressureEasing = (pressure: number): number => pressure;
+
+/**
+ * Pressure response for strokes carrying a real signal — stylus hardware or
+ * the draw tool's velocity measurement.
+ *
+ * Smoothstep pins 0, 0.5 and 1 to themselves, so a stroke held at neutral
+ * pressure keeps exactly the width it had and nothing about the default pencil
+ * moves. What changes is the slope either side of neutral, which is where a
+ * hand actually varies: it runs at 1.5x, so ordinary pressure changes carry
+ * more weight, while the extremes ease off instead of clipping flat.
+ */
+const smoothPressureEasing = (pressure: number): number =>
+  pressure * pressure * (3 - 2 * pressure);
+
 /** Reused because the engine is intentionally synchronous and non-reentrant. */
 const engineOptions: FreehandEngineOptions = {
   size: 1,
@@ -78,26 +98,30 @@ function mid(a: number, b: number): number {
 /**
  * Smoothed centerline path (quadratic through midpoints) for an ink stroke.
  * Used for dashed/dotted pencils, which stroke a uniform-width line instead of
- * filling the variable-width freehand-engine outline.
+ * filling the variable-width freehand-engine outline. Built on the engine's own
+ * conditioned centerline (final point pinned to the raw lift position), so a
+ * dashed stroke follows exactly the line its solid twin would.
  */
-export function getInkCenterlinePath(points: DrawPoint[]): string {
-  const len = points.length;
+export function getInkCenterlinePath(
+  points: DrawPoint[],
+  size: number,
+  streamlineAmount = 0.5,
+): string {
+  const line = buildInkCenterline(points, size, streamlineAmount, true);
+  const len = line.count;
   if (len < 2) return '';
-  const first = points[0]!;
+  const sx = line.x;
+  const sy = line.y;
   if (len === 2) {
-    const b = points[1]!;
-    return `M ${first.x.toFixed(2)} ${first.y.toFixed(2)} L ${b.x.toFixed(2)} ${b.y.toFixed(2)}`;
+    return `M ${sx[0]!.toFixed(2)} ${sy[0]!.toFixed(2)} L ${sx[1]!.toFixed(2)} ${sy[1]!.toFixed(2)}`;
   }
-  const parts = [`M ${first.x.toFixed(2)} ${first.y.toFixed(2)} Q`];
+  const parts = [`M ${sx[0]!.toFixed(2)} ${sy[0]!.toFixed(2)} Q`];
   for (let i = 1; i < len - 1; i++) {
-    const a = points[i]!;
-    const b = points[i + 1]!;
     parts.push(
-      ` ${a.x.toFixed(2)} ${a.y.toFixed(2)} ${mid(a.x, b.x).toFixed(2)} ${mid(a.y, b.y).toFixed(2)}`,
+      ` ${sx[i]!.toFixed(2)} ${sy[i]!.toFixed(2)} ${mid(sx[i]!, sx[i + 1]!).toFixed(2)} ${mid(sy[i]!, sy[i + 1]!).toFixed(2)}`,
     );
   }
-  const last = points[len - 1]!;
-  parts.push(` L ${last.x.toFixed(2)} ${last.y.toFixed(2)}`);
+  parts.push(` L ${sx[len - 1]!.toFixed(2)} ${sy[len - 1]!.toFixed(2)}`);
   return parts.join('');
 }
 
@@ -114,6 +138,9 @@ export function getInkPathData(
   engineOptions.smoothing = dynamics.smoothing ?? 0.5;
   engineOptions.streamline = dynamics.streamline ?? 0.5;
   engineOptions.simulatePressure = dynamics.simulatePressure ?? false;
+  engineOptions.easing = engineOptions.simulatePressure
+    ? linearPressureEasing
+    : smoothPressureEasing;
   engineOptions.startTaper = dynamics.startTaper ?? 0;
   engineOptions.endTaper = dynamics.endTaper ?? false;
   return getFreehandPathData(points, engineOptions);

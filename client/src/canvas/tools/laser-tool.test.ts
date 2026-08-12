@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Editor } from '../editor';
-import { LASER_FADE_MS, useLaserStore } from '../use-laser-store';
+import { LASER_FADE_MS, LASER_HOLD_MS, useLaserStore } from '../use-laser-store';
 import { createLaserTool } from './laser-tool';
 import type { ToolContext, ToolPointerInfo } from './types';
 
@@ -61,10 +61,44 @@ describe('laser tool stroke lifecycle', () => {
     ]);
     expect(stroke?.done).toBe(false);
 
+    // Pointer up alone does not start the fade: the stroke stays fully visible
+    // until drawing has been idle for the hold window.
     tool.onPointerUp?.(pointer(20, 5), ctx);
+    vi.advanceTimersByTime(LASER_HOLD_MS - 1);
+    expect(useLaserStore.getState().strokes[0]?.done).toBe(false);
+
+    vi.advanceTimersByTime(1);
     expect(useLaserStore.getState().strokes[0]?.done).toBe(true);
 
-    // The stroke never touches the document; it evaporates after the fade.
+    // The stroke never touches the document; it evaporates once faded.
+    vi.advanceTimersByTime(LASER_FADE_MS);
+    expect(useLaserStore.getState().strokes).toEqual([]);
+  });
+
+  it('keeps held strokes visible when drawing resumes within the hold', () => {
+    const tool = createLaserTool();
+
+    tool.onPointerDown?.(pointer(0, 0), ctx);
+    tool.onPointerUp?.(pointer(0, 0), ctx);
+
+    // A second stroke just before the hold expires re-arms it, so the first
+    // stroke is still up — a multi-stroke annotation clears as one.
+    vi.advanceTimersByTime(LASER_HOLD_MS - 1);
+    tool.onPointerDown?.(pointer(50, 50), ctx);
+    tool.onPointerUp?.(pointer(50, 50), ctx);
+
+    vi.advanceTimersByTime(LASER_HOLD_MS - 1);
+    expect(useLaserStore.getState().strokes.map((s) => s.done)).toEqual([
+      false,
+      false,
+    ]);
+
+    vi.advanceTimersByTime(1);
+    expect(useLaserStore.getState().strokes.map((s) => s.done)).toEqual([
+      true,
+      true,
+    ]);
+
     vi.advanceTimersByTime(LASER_FADE_MS);
     expect(useLaserStore.getState().strokes).toEqual([]);
   });
@@ -88,12 +122,27 @@ describe('laser tool stroke lifecycle', () => {
     expect(useLaserStore.getState().strokes).toEqual([]);
   });
 
+  it('still fades earlier strokes when a later gesture is cancelled', () => {
+    const tool = createLaserTool();
+
+    tool.onPointerDown?.(pointer(0, 0), ctx);
+    tool.onPointerUp?.(pointer(0, 0), ctx);
+    // The pinch cancels only its own stroke; the held one must not be stranded.
+    tool.onPointerDown?.(pointer(40, 40), ctx);
+    tool.onCancel?.(ctx);
+
+    expect(useLaserStore.getState().strokes).toHaveLength(1);
+    vi.advanceTimersByTime(LASER_HOLD_MS + LASER_FADE_MS);
+    expect(useLaserStore.getState().strokes).toEqual([]);
+  });
+
   it('keeps the stroke and fades it when capture is lost mid-stroke', () => {
     const tool = createLaserTool();
 
     tool.onPointerDown?.(pointer(0, 0), ctx);
     tool.onCommit?.(ctx);
 
+    vi.advanceTimersByTime(LASER_HOLD_MS);
     expect(useLaserStore.getState().strokes[0]?.done).toBe(true);
     vi.advanceTimersByTime(LASER_FADE_MS);
     expect(useLaserStore.getState().strokes).toEqual([]);

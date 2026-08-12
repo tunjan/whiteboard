@@ -7,38 +7,48 @@ import { shapeRotatedBounds } from './shape-bounds';
 import { compareIndex, editor, spatialIndex } from './use-document-store';
 import { shapeRegistry } from './shapes/shape-registry';
 import { FrameView } from './shapes/frame';
+import { withPhysChunk } from './png-phys';
+import { writePngToClipboard } from '@/board/clipboard-os';
 
 // World-space padding added around the content bounds in the exported image.
 const PADDING = 32;
 // Cap either output dimension so a sprawling board can't allocate a huge canvas.
 const MAX_DIM = 8192;
 
+/** A scene ready to rasterize: what to draw, how big, and what got dropped. */
+interface Scene {
+  tree: ReactNode;
+  bounds: Bounds;
+  /** Non-empty equations excluded because they don't typeset. */
+  invalidEquations: number;
+}
+
 /**
- * Export the whole current page as a PNG and trigger a download.
+ * The whole current page as a rasterizable scene.
  *
  * The board is SVG-native, so we re-render every shape (the live canvas is
  * viewport-culled) into a standalone SVG sized to the content bounds, inline
  * everything the page environment would otherwise supply — CSS variables, web
  * fonts, and `/api/blobs` images — then rasterize it to PNG.
  */
-export async function exportBoardToPng(title: string): Promise<void> {
+async function boardScene(): Promise<Scene | null> {
   const bounds = spatialIndex.totalBounds();
-  if (!bounds) return; // empty board: nothing to export
+  if (!bounds) return null; // empty board: nothing to export
   const shapes = editor.getShapes();
   await prewarmEquationRenders(shapes);
-  if (!confirmInvalidEquationExport(countInvalidEquations(shapes))) return;
-  await renderToPng(renderTree(), bounds, title);
+  return {
+    tree: renderTree(),
+    bounds,
+    invalidEquations: countInvalidEquations(shapes),
+  };
 }
 
 /**
- * Export just the selected shapes (and their descendants) as a PNG, sized to
- * their combined bounds — the tldraw-style "export selection" action.
+ * Just the selected shapes (and their descendants) as a rasterizable scene,
+ * sized to their combined bounds — the tldraw-style "export selection" action.
  */
-export async function exportSelectionToPng(
-  ids: string[],
-  title: string,
-): Promise<void> {
-  if (!ids.length) return;
+async function selectionScene(ids: string[]): Promise<Scene | null> {
+  if (!ids.length) return null;
   const shapes = editor.getShapes();
   const renderSet = new Set<string>();
   for (const id of ids) {
@@ -48,11 +58,6 @@ export async function exportSelectionToPng(
   // Typeset first: `isExportable` reads the cache to drop equations that would
   // only contribute a placeholder box to the bounds.
   await prewarmEquationRenders(shapes, renderSet);
-  if (
-    !confirmInvalidEquationExport(countInvalidEquations(shapes, renderSet))
-  ) {
-    return;
-  }
   // Bounds = union of the rotated world bounds of every rendered shape with its
   // own geometry (groups carry none, so they're skipped).
   let bounds: Bounds | null = null;
@@ -63,8 +68,65 @@ export async function exportSelectionToPng(
     const b = shapeRotatedBounds(s);
     bounds = bounds ? unionBounds(bounds, b) : b;
   }
-  if (!bounds) return;
-  await renderToPng(renderTree(renderSet), bounds, title);
+  if (!bounds) return null;
+  return {
+    tree: renderTree(renderSet),
+    bounds,
+    invalidEquations: countInvalidEquations(shapes, renderSet),
+  };
+}
+
+/** Export the whole current page as a PNG and trigger a download. */
+export async function exportBoardToPng(title: string): Promise<void> {
+  const scene = await boardScene();
+  if (!scene) return;
+  if (!confirmInvalidEquationExport(scene.invalidEquations)) return;
+  download(await renderPngBlob(scene), `${safeFilename(title)}.png`);
+}
+
+/** Export just the selected shapes as a PNG and trigger a download. */
+export async function exportSelectionToPng(
+  ids: string[],
+  title: string,
+): Promise<void> {
+  const scene = await selectionScene(ids);
+  if (!scene) return;
+  if (!confirmInvalidEquationExport(scene.invalidEquations)) return;
+  download(await renderPngBlob(scene), `${safeFilename(title)}.png`);
+}
+
+/**
+ * Copy the whole current page to the system clipboard as a PNG.
+ *
+ * The blob promise is started but deliberately not awaited here: Safari only
+ * honours `navigator.clipboard.write` while the user gesture that triggered it
+ * is still the current task, so the write has to be handed an unresolved
+ * promise rather than a finished blob. See `writePngToClipboard`.
+ */
+export function copyBoardToPngClipboard(): Promise<void> {
+  return writePngToClipboard(renderSceneForClipboard(boardScene()));
+}
+
+/** Copy just the selected shapes to the system clipboard as a PNG. */
+export function copySelectionToPngClipboard(ids: string[]): Promise<void> {
+  return writePngToClipboard(renderSceneForClipboard(selectionScene(ids)));
+}
+
+/**
+ * Rasterize a pending scene for the clipboard.
+ *
+ * Unlike the download path this never prompts about equations that failed to
+ * typeset: the confirm would have to run inside the pending clipboard promise,
+ * where a modal blocks long enough for Safari to abandon the write. Those
+ * equations are dropped from the image exactly as they are once the download
+ * prompt is accepted.
+ */
+async function renderSceneForClipboard(
+  pending: Promise<Scene | null>,
+): Promise<Blob> {
+  const scene = await pending;
+  if (!scene) throw new Error('Nothing to copy');
+  return renderPngBlob(scene);
 }
 
 /**
@@ -132,12 +194,8 @@ async function prewarmEquationRenders(
   );
 }
 
-/** Rasterize a rendered shape tree, sized to `bounds`, and trigger a download. */
-async function renderToPng(
-  tree: ReactNode,
-  bounds: Bounds,
-  title: string,
-): Promise<void> {
+/** Rasterize a scene to a PNG blob at the largest scale the caps allow. */
+async function renderPngBlob({ tree, bounds }: Scene): Promise<Blob> {
   const minX = bounds.minX - PADDING;
   const minY = bounds.minY - PADDING;
   const w = bounds.maxX - bounds.minX + PADDING * 2;
@@ -165,8 +223,11 @@ async function renderToPng(
     `<rect x="${minX}" y="${minY}" width="${w}" height="${h}" fill="${bg}"/>` +
     `${inlined}</svg>`;
 
-  const blob = await rasterize(svg, outW, outH);
-  download(blob, `${safeFilename(title)}.png`);
+  const raster = await rasterize(svg, outW, outH);
+  // The raster is `scale`x the board's own units, so declare that as a physical
+  // resolution — otherwise every consumer reads the pixel grid as the logical
+  // size and shows the image at `scale` times the size it had on the board.
+  return withPhysChunk(await raster.arrayBuffer(), scale);
 }
 
 /**

@@ -1,14 +1,21 @@
 import type { ReactElement } from 'react';
 import type { FillStyle, StrokeDash } from '@whiteboard/shared';
 
-/** strokeDasharray for a dash style at a given stroke width (or undefined). */
+/**
+ * strokeDasharray for a dash style at a given stroke width (or undefined).
+ *
+ * `dotLength` overrides the zero length a dot normally has; see
+ * {@link useDotLength}. It defaults to 0, so callers that don't pass one keep
+ * the plain round dot.
+ */
 export function strokeDashArray(
   dash: StrokeDash,
   size: number,
+  dotLength = 0,
 ): string | undefined {
   if (dash === 'dashed') return `${size * 2.5} ${size * 2}`;
   // dot = zero-length dash with round linecaps.
-  if (dash === 'dotted') return `0 ${size * 1.8}`;
+  if (dash === 'dotted') return `${dotLength} ${size * 1.8}`;
   return undefined;
 }
 

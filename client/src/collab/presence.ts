@@ -9,7 +9,6 @@ import { viewportWorldBounds } from '@/canvas/geometry';
 import { setCurrentPage } from '@/canvas/use-document-store';
 import { useCameraStore } from '@/canvas/use-camera-store';
 import { stopFollowingForManualCameraChange } from '@/collab/use-follow-store';
-import { isAnimationPlaybackActive } from '@/animation/use-animation-store';
 import {
   type PeerPresence,
   type TextSelectionPresence,
@@ -299,7 +298,6 @@ export function summonAll(): void {
  * the peer has published a viewport and we have a measured local viewport.
  */
 export function jumpToPeerViewport(peer: PeerPresence): void {
-  if (isAnimationPlaybackActive()) return;
   if (!peer.viewport) return;
   const localSize = latestViewport?.size;
   if (!localSize || localSize.width <= 0 || localSize.height <= 0) return;

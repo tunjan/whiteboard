@@ -29,7 +29,7 @@ import {
 } from '@/canvas/use-style-store';
 import { useToolStore } from '@/canvas/use-tool-store';
 import { useThemeStore } from '@/use-theme-store';
-import { cn } from '@/lib/utils';
+import { cn, swatchBorder } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -38,7 +38,6 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { PanelLabel } from '@/components/ui/panel-label';
 import { Input } from '@/components/ui/input';
 import { Slider } from '@/components/ui/slider';
 import { Surface } from '@/components/ui/surface';
@@ -49,12 +48,13 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-import { useAnimationStore } from '@/animation/use-animation-store';
 import { ToolPanelPresence } from '@/components/tool-panel-presence';
 
 const FILLS: FillStyle[] = ['none', 'solid', 'hatch', 'crosshatch'];
 const DASHES: StrokeDash[] = ['solid', 'dashed', 'dotted'];
-const FILLABLE = new Set(['rectangle', 'ellipse', 'polygon']);
+// Draw shapes take a fill too, but only show it once the stroke closed on
+// itself — an open squiggle has no interior to paint.
+const FILLABLE = new Set(['rectangle', 'ellipse', 'polygon', 'draw']);
 const DASHABLE = new Set(['rectangle', 'ellipse', 'polygon', 'line', 'arrow', 'draw']);
 
 const FILL_LABELS: Record<FillStyle, string> = {
@@ -80,7 +80,6 @@ const WEIGHTS: { weight: FontWeight; label: string }[] = [
   { weight: 600, label: 'Semibold' },
   { weight: 700, label: 'Bold' },
 ];
-const swatchBorder = (color: string) => `color-mix(in srgb, ${color} 75%, #000)`;
 // Toggle rows span the panel and divide it evenly, so every row lines up with
 // the swatch grid's edges (and its columns, for four-option rows).
 const TOGGLE_ROW = 'w-full';
@@ -192,6 +191,16 @@ export function StylePanel() {
     );
     return allSameType ? firstShape.type : 'mixed';
   });
+  // Whether the selection holds a stroke that closed on itself. Only those have
+  // an interior, so the fill control would be inert on any other pen stroke.
+  const hasClosedDraw = useDocumentStore((s) => {
+    const record = s.doc.pages[s.currentPageId]?.shapes;
+    if (!record) return false;
+    return selectedIds.some((id) => {
+      const shape = id ? record[id] : undefined;
+      return shape?.type === 'draw' && shape.props.isClosed;
+    });
+  });
   const connectorLabel = useDocumentStore((s) => {
     if (selectedIds.length !== 1) return '';
     const id = selectedIds[0];
@@ -200,8 +209,6 @@ export function StylePanel() {
       ? shape.props.label ?? ''
       : '';
   });
-  const playbackActive = useAnimationStore((s) => s.playbackActive);
-
   // Contextual visibility checks
   const isStylePanelVisible = (() => {
     if (activeToolId === 'eraser' || activeToolId === 'hand' || activeToolId === 'laser') {
@@ -213,21 +220,29 @@ export function StylePanel() {
     return true;
   })();
 
-  // Dynamic filter based on tool/selection type
+  // Dynamic filter based on tool/selection type. The wand draws pen strokes, so
+  // it wants the pen's controls.
   const targetType =
-    activeToolId !== 'select' ? activeToolId : selectedType;
+    activeToolId === 'wand'
+      ? 'draw'
+      : activeToolId !== 'select'
+        ? activeToolId
+        : selectedType;
 
   const panelVisible =
-    !playbackActive &&
     isStylePanelVisible &&
     targetType !== 'graph' &&
     targetType !== 'equation';
 
-  // Frames are fixed chrome, images/videos are media with no style props: none
-  // of them carry a color/size/fill/dash prop, so that control would be inert.
-  // Opacity is a shape-level field and still applies to all of them.
+  // Frames are fixed chrome, images/videos are media and stickers carry their
+  // own fixed artwork colors: none of them carry a color/size/fill/dash prop,
+  // so that control would be inert. Opacity is a shape-level field and still
+  // applies to all of them.
   const showColor =
-    targetType !== 'frame' && targetType !== 'image' && targetType !== 'video';
+    targetType !== 'frame' &&
+    targetType !== 'image' &&
+    targetType !== 'sticker' &&
+    targetType !== 'video';
 
   const showSize =
     targetType === 'draw' ||
@@ -242,7 +257,8 @@ export function StylePanel() {
     targetType === 'rectangle' ||
     targetType === 'ellipse' ||
     targetType === 'polygon' ||
-    targetType === 'mixed';
+    targetType === 'mixed' ||
+    (targetType === 'draw' && hasClosedDraw);
 
   const showDash =
     targetType === 'draw' ||
@@ -437,7 +453,7 @@ export function StylePanel() {
         <Surface
           role="region"
           aria-label="Style controls"
-          className="touch-targets w-[min(12.5rem,calc(100vw-2rem))] max-h-[calc(100dvh-9rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] overflow-y-auto overscroll-contain p-2.5 sm:max-h-[calc(100dvh-6.25rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))]"
+          className="touch-targets w-[min(14.5rem,calc(100vw-2rem))] max-h-[calc(100dvh-8rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] overflow-y-auto overscroll-contain p-3.5 sm:max-h-[calc(100dvh-5.5rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))]"
         >
           <TooltipProvider delay={300}>
           <div
@@ -587,9 +603,9 @@ export function StylePanel() {
                   applyOpacity(Array.isArray(value) ? value[0]! : value)
                 }
               />
-              <PanelLabel className="w-8 shrink-0 text-right tabular-nums">
+              <span className="w-10 shrink-0 text-right font-mono text-xs font-semibold tabular-nums text-primary">
                 {Math.round(opacity * 100)}%
-              </PanelLabel>
+              </span>
             </TooltipTrigger>
             <TooltipContent side="left">Opacity</TooltipContent>
           </Tooltip>

@@ -102,8 +102,8 @@ export const imageUtil: ShapeUtil<'image'> = {
           ry={radius}
           fill="none"
           stroke="var(--color-border)"
-          strokeOpacity={0.75}
-          strokeWidth={1}
+          strokeOpacity={1}
+          strokeWidth={1.5}
           vectorEffect="non-scaling-stroke"
           pointerEvents="none"
         />

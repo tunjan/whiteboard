@@ -1,8 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { MathfieldElement } from 'mathlive';
-import { Keyboard, Maximize2 } from 'lucide-react';
+import { Check, Copy, Keyboard, Maximize2 } from 'lucide-react';
 import type { EquationShape } from '@whiteboard/shared';
-import { useAnimationStore } from '@/animation/use-animation-store';
 import { requestCanvasZoomToBounds } from '@/canvas/camera-requests';
 import {
   consumeEquationFocus,
@@ -15,7 +14,17 @@ import {
   useEquationRenderStore,
   type EquationRender,
 } from '@/canvas/equation-render';
-import { EQUATION_DEFAULT_SIZE } from '@/canvas/shapes/equation';
+import {
+  locateLatexError,
+  normalizePastedLatex,
+  readableError,
+  sourcePosition,
+  type SourceSpan,
+} from '@/canvas/equation-source';
+import {
+  EQUATION_DEFAULT_SIZE,
+  EQUATION_SETTLE_MS,
+} from '@/canvas/shapes/equation';
 import { shapeRotatedBounds } from '@/canvas/shape-bounds';
 import { editor, useDocumentStore } from '@/canvas/use-document-store';
 import { useSelectionStore } from '@/canvas/use-selection-store';
@@ -38,7 +47,7 @@ import { cn } from '@/lib/utils';
 
 // Every heading below the panel title sits at one weight, so the eye ranks
 // title → tabs → sections instead of treating field labels as a second title.
-const SECTION_LABEL = 'text-xs font-medium text-muted-foreground';
+const SECTION_LABEL = 'text-xs font-medium text-secondary';
 
 type EquationInputMode = 'visual' | 'source';
 
@@ -58,22 +67,6 @@ function useDebouncedValue<T>(value: T, delay: number): T {
 /** A touch/pen-primary device, where a math keyboard is the only way to type. */
 function prefersVirtualKeyboard(): boolean {
   return window.matchMedia('(pointer: coarse)').matches;
-}
-
-/**
- * MathJax's messages are written for TeX authors. Rewrite the few that a
- * whiteboard user actually hits; pass anything else through.
- */
-function readableError(message: string): string {
-  const unknown = /undefined control sequence:?\s*(\\[a-zA-Z@]+)/i.exec(message);
-  if (unknown) return `Unknown command ${unknown[1]} — check the spelling.`;
-  if (/(missing|extra).*(brace|\{|\})/i.test(message)) {
-    return 'Unbalanced braces — every { needs a matching }.';
-  }
-  if (/missing.*\\(right|left)|extra.*\\(right|left)/i.test(message)) {
-    return 'Unbalanced \\left and \\right.';
-  }
-  return message;
 }
 
 /**
@@ -117,11 +110,56 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
   const sourceRef = useRef<HTMLTextAreaElement | null>(null);
   const inputVersion = useRef(0);
   const longRenderTimer = useRef<number | null>(null);
+  const focusFrame = useRef(0);
+  const copiedTimer = useRef<number | null>(null);
   const [ready, setReady] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [keyboardOpen, setKeyboardOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [inputMode, setInputMode] = useState<EquationInputMode>('visual');
   useEquationRenderStore((state) => state.version);
+
+  /**
+   * Focus the input for `mode`, retrying while its tab panel mounts.
+   *
+   * Without a `select` range the caret lands at the end of the expression, so
+   * switching between visual and source picks up where the last one left off
+   * rather than dropping the user at character zero.
+   */
+  const focusInput = useCallback(
+    (mode: EquationInputMode, select?: SourceSpan) => {
+      function attempt(tries: number): void {
+        if (mode === 'source') {
+          const target = sourceRef.current;
+          if (!target) return retry(tries);
+          target.focus();
+          const end = target.value.length;
+          const from = select ? Math.min(select.index, end) : end;
+          const to = select
+            ? Math.min(select.index + select.length, end)
+            : end;
+          target.setSelectionRange(from, to);
+          return;
+        }
+        const field = fieldRef.current;
+        if (!field) return retry(tries);
+        field.focus();
+        field.position = field.lastOffset;
+        // Only touch-primary devices, where the math keyboard is the only way
+        // to type.
+        if (prefersVirtualKeyboard()) {
+          window.mathVirtualKeyboard.show({ animate: true });
+        }
+      }
+      function retry(tries: number): void {
+        if (tries <= 0) return;
+        focusFrame.current = requestAnimationFrame(() => attempt(tries - 1));
+      }
+      cancelAnimationFrame(focusFrame.current);
+      focusFrame.current = requestAnimationFrame(() => attempt(5));
+    },
+    [],
+  );
 
   useEffect(() => {
     let active = true;
@@ -144,42 +182,29 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
     };
   }, []);
 
-  // Focus both freshly placed and already-selected equations on request. Only
-  // touch-primary devices open the virtual keyboard automatically.
+  // Focus both freshly placed and already-selected equations on request.
   useEffect(() => {
-    let frame = 0;
-    const focusField = (tries: number) => {
-      const target =
-        inputMode === 'source' ? sourceRef.current : fieldRef.current;
-      if (target) {
-        target.focus();
-        if (inputMode === 'visual' && prefersVirtualKeyboard()) {
-          window.mathVirtualKeyboard.show({ animate: true });
-        }
-      } else if (tries > 0) {
-        frame = requestAnimationFrame(() => focusField(tries - 1));
-      }
-    };
     const handleFocusRequest = (id: string) => {
       if (id !== shape.id || !consumeEquationFocus(id)) return;
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => focusField(5));
+      focusInput(inputMode);
     };
     const unsubscribe = subscribeEquationFocus(handleFocusRequest);
-    if (consumeEquationFocus(shape.id)) {
-      frame = requestAnimationFrame(() => focusField(5));
-    }
-    return () => {
-      unsubscribe();
-      cancelAnimationFrame(frame);
-    };
-  }, [inputMode, shape.id]);
+    if (consumeEquationFocus(shape.id)) focusInput(inputMode);
+    return unsubscribe;
+    // A pending focus frame deliberately outlives this effect: switching input
+    // mode re-runs it, and cancelling here would kill the focus that the switch
+    // itself just scheduled. Unmount cleanup below cancels it instead.
+  }, [focusInput, inputMode, shape.id]);
 
   useEffect(
     () => () => {
       if (longRenderTimer.current !== null) {
         window.clearTimeout(longRenderTimer.current);
       }
+      if (copiedTimer.current !== null) {
+        window.clearTimeout(copiedTimer.current);
+      }
+      cancelAnimationFrame(focusFrame.current);
     },
     [],
   );
@@ -205,7 +230,7 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
     setKeyboardOpen(false);
   }, [inputMode]);
 
-  const settledLatex = useDebouncedValue(shape.props.latex, 500);
+  const settledLatex = useDebouncedValue(shape.props.latex, EQUATION_SETTLE_MS);
   const settledKey = settledLatex.trim();
   const settledRender = settledKey
     ? getEquationRender(settledKey)
@@ -214,6 +239,14 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
     settledLatex === shape.props.latex ? settledRender?.error : undefined;
   const rawError = loadError ?? renderError ?? null;
   const error = rawError ? readableError(rawError) : null;
+  // Only a typeset failure has a place in the source; a renderer that failed to
+  // load says nothing about what the user typed.
+  const errorSpan = renderError
+    ? locateLatexError(shape.props.latex, renderError)
+    : null;
+  const errorAt = errorSpan
+    ? sourcePosition(shape.props.latex, errorSpan.index)
+    : null;
   const errorId = `equation-error-${shape.id}`;
   const visualHelpId = `equation-visual-help-${shape.id}`;
   const sourceHelpId = `equation-source-help-${shape.id}`;
@@ -277,6 +310,39 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
     });
   };
 
+  /** Replace the textarea's selection with `text`, leaving the caret after it. */
+  const replaceSourceSelection = (
+    target: HTMLTextAreaElement,
+    text: string,
+  ) => {
+    const start = target.selectionStart ?? target.value.length;
+    const end = target.selectionEnd ?? start;
+    updateLatex(target.value.slice(0, start) + text + target.value.slice(end));
+    const caret = start + text.length;
+    // The textarea is controlled, so the new value only reaches the DOM on the
+    // next commit; moving the caret before then would put it in the old text.
+    requestAnimationFrame(() => target.setSelectionRange(caret, caret));
+  };
+
+  const copyLatex = async () => {
+    try {
+      await navigator.clipboard.writeText(shape.props.latex);
+    } catch {
+      // Clipboard API unavailable (e.g. an insecure context): the source tab
+      // still offers the text for a manual copy.
+      return;
+    }
+    setCopied(true);
+    if (copiedTimer.current !== null) window.clearTimeout(copiedTimer.current);
+    copiedTimer.current = window.setTimeout(() => setCopied(false), 1500);
+  };
+
+  const showErrorInSource = () => {
+    if (!errorSpan) return;
+    setInputMode('source');
+    focusInput('source', errorSpan);
+  };
+
   const toggleKeyboard = () => {
     const keyboard = window.mathVirtualKeyboard;
     const next = !keyboard.visible;
@@ -295,6 +361,13 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
     fieldRef.current?.blur();
     sourceRef.current?.blur();
     window.mathVirtualKeyboard.hide({ animate: true });
+    // Leaving an equation empty discards it, the same rule the panel applies
+    // when the selection moves on — otherwise Escape strands a placeholder box
+    // on the board with nothing in it.
+    if (!shape.props.latex.trim()) {
+      editor.deleteShapes([shape.id]);
+      useSelectionStore.getState().clear();
+    }
     requestAnimationFrame(() => {
       document
         .querySelector<HTMLElement>('[data-canvas-surface]')
@@ -310,14 +383,14 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
     <Surface
       role="region"
       aria-label="Equation controls"
-      className="equation-panel touch-targets flex max-h-[calc(100dvh-9rem-env(safe-area-inset-top))] w-[min(20rem,calc(100vw-2rem))] flex-col gap-3 overflow-y-auto p-4 sm:max-h-[calc(100dvh-6.25rem-env(safe-area-inset-top))]"
+      className="equation-panel touch-targets flex max-h-[calc(100dvh-9rem-env(safe-area-inset-top))] w-[min(22rem,calc(100vw-2rem))] flex-col gap-4 overflow-y-auto p-5 sm:max-h-[calc(100dvh-6.25rem-env(safe-area-inset-top))]"
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <div className="text-sm font-semibold text-content-emphasis">
+          <div className="text-sm font-semibold tracking-tight text-primary">
             Equation
           </div>
-          <div className="text-xs text-content-subtle">
+          <div className="text-xs text-secondary">
             {loadError
               ? 'Renderer unavailable'
               : ready
@@ -325,27 +398,56 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
                 : 'Preparing renderer…'}
           </div>
         </div>
-        {inputMode === 'visual' ? (
+        {/* Copy sits last so it stays put against the panel edge when the
+            keyboard toggle comes and goes with the input mode. */}
+        <div className="flex shrink-0 items-center gap-1">
+          {inputMode === 'visual' ? (
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Math keyboard"
+              aria-pressed={keyboardOpen}
+              title="Math keyboard"
+              onClick={toggleKeyboard}
+              className={cn(keyboardOpen && 'bg-subtle')}
+            >
+              <Keyboard aria-hidden="true" />
+            </Button>
+          ) : null}
           <Button
             variant="ghost"
             size="icon-sm"
-            aria-label="Math keyboard"
-            aria-pressed={keyboardOpen}
-            title="Math keyboard"
-            onClick={toggleKeyboard}
-            className={cn('shrink-0', keyboardOpen && 'bg-bg-muted')}
+            aria-label={copied ? 'LaTeX copied' : 'Copy LaTeX'}
+            title="Copy LaTeX"
+            disabled={!currentKey}
+            onClick={() => void copyLatex()}
           >
-            <Keyboard aria-hidden="true" />
+            {copied ? (
+              <Check aria-hidden="true" />
+            ) : (
+              <Copy aria-hidden="true" />
+            )}
           </Button>
-        ) : null}
+        </div>
       </div>
 
       <Tabs
         value={inputMode}
-        onValueChange={(value) => setInputMode(value as EquationInputMode)}
+        onValueChange={(value) => {
+          const next = value as EquationInputMode;
+          setInputMode(next);
+          focusInput(next);
+        }}
         className="gap-2"
       >
-        <TabsList aria-label="Equation input mode" className="w-full">
+        {/* Activating a tab moves focus into its field, so the tabs activate on
+            Enter rather than on arrow keys — otherwise arrowing between the two
+            would drop the user into the editor mid-navigation. */}
+        <TabsList
+          aria-label="Equation input mode"
+          activateOnFocus={false}
+          className="w-full"
+        >
           <TabsTrigger value="visual">Visual</TabsTrigger>
           <TabsTrigger value="source">LaTeX source</TabsTrigger>
         </TabsList>
@@ -362,9 +464,9 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
               <div
                 data-overflow={isLongEquation ? true : undefined}
                 className={cn(
-                  'equation-field-shell rounded-md border border-border-subtle bg-bg-muted px-0.5 py-1.5 transition-[background-color,border-color,box-shadow] duration-150',
-                  'focus-within:border-border-emphasis focus-within:ring-2 focus-within:ring-border-emphasis',
-                  'group-data-[invalid]/field:border-content-error group-data-[invalid]/field:ring-2 group-data-[invalid]/field:ring-content-error/20',
+                  'equation-field-shell rounded-md border border-control-border bg-surface px-0.5 py-1.5 transition-all duration-150 ease-out',
+                  'focus-within:border-focus focus-within:ring-2 focus-within:ring-focus/20',
+                  'group-data-[invalid]/field:border-danger group-data-[invalid]/field:ring-2 group-data-[invalid]/field:ring-danger/20',
                 )}
               >
                 <MathField
@@ -424,68 +526,113 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
                 }
                 value={shape.props.latex}
                 onChange={(event) => updateLatex(event.target.value)}
+                onPaste={(event) => {
+                  const pasted = event.clipboardData.getData('text/plain');
+                  const unwrapped = normalizePastedLatex(pasted);
+                  // Nothing to strip: let the browser paste it, so the native
+                  // undo entry the default action creates is preserved.
+                  if (unwrapped === pasted) return;
+                  event.preventDefault();
+                  replaceSourceSelection(event.currentTarget, unwrapped);
+                }}
                 onKeyDown={(event) => {
                   if (event.key !== 'Escape') return;
                   event.preventDefault();
                   releaseFocus();
                 }}
-                placeholder="\\frac{a}{b}"
+                // A JSX attribute string is taken literally, so an escaped
+                // backslash here would show the user a command they can't type.
+                placeholder={String.raw`\frac{a}{b}`}
                 spellCheck={false}
                 className="min-h-24 resize-y font-mono text-sm"
               />
-              <FieldDescription id={sourceHelpId} className="text-xs">
-                Edit raw LaTeX. The preview below uses the same renderer as the
-                canvas.
+              <FieldDescription
+                id={sourceHelpId}
+                className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs"
+              >
+                <span>Edit raw LaTeX</span>
+                <span aria-hidden="true">·</span>
+                <span>
+                  <Kbd>Esc</Kbd> returns to the canvas
+                </span>
               </FieldDescription>
             </Field>
           </FieldGroup>
-
-          <div className="flex flex-col gap-1.5">
-            <PanelLabel>Canvas preview</PanelLabel>
-            <div
-              role="img"
-              aria-label={
-                currentKey
-                  ? `Preview of equation: ${currentKey}`
-                  : 'Empty equation preview'
-              }
-              className="flex min-h-16 items-center overflow-x-auto rounded-md border border-border-subtle bg-bg-muted p-3"
-            >
-              {!currentKey ? (
-                <span className="text-xs text-content-subtle">
-                  Start typing to preview the equation.
-                </span>
-              ) : currentRender && !('error' in currentRender) ? (
-                <div
-                  aria-hidden="true"
-                  className="equation-output-preview"
-                  style={{ color: shape.props.color }}
-                  dangerouslySetInnerHTML={{ __html: currentRender.svg }}
-                />
-              ) : error ? (
-                <span className="text-xs text-content-error">
-                  Preview unavailable until the equation is fixed.
-                </span>
-              ) : (
-                <span className="text-xs text-content-subtle">Rendering…</span>
-              )}
-            </div>
-          </div>
         </TabsContent>
       </Tabs>
 
+      {/* Outside the tabs: the canvas rendering is what both modes are aiming
+          at, and in visual mode it is the only view of the equation when the
+          shape itself is off-screen or sitting behind this panel. */}
+      <div className="flex flex-col gap-1.5">
+        <PanelLabel>Canvas preview</PanelLabel>
+        <div
+          role="img"
+          aria-label={
+            currentKey
+              ? `Preview of equation: ${currentKey}`
+              : 'Empty equation preview'
+          }
+          className="flex min-h-16 items-center overflow-x-auto rounded-md border border-border bg-muted p-3"
+        >
+          {!ready && !loadError ? (
+            // Says what the header's "Preparing renderer…" means where the
+            // typing is happening: the field works, only the picture is late.
+            <span className="text-xs text-secondary">
+              Preparing the renderer — what you type is saved.
+            </span>
+          ) : !currentKey ? (
+            <span className="text-xs text-secondary">
+              Start typing to preview the equation.
+            </span>
+          ) : currentRender && !('error' in currentRender) ? (
+            <div
+              aria-hidden="true"
+              className="equation-output-preview"
+              style={{ color: shape.props.color }}
+              dangerouslySetInnerHTML={{ __html: currentRender.svg }}
+            />
+          ) : error ? (
+            <span className="text-xs text-danger">
+              Preview unavailable until the equation is fixed.
+            </span>
+          ) : (
+            <span className="text-xs text-secondary">Rendering…</span>
+          )}
+        </div>
+      </div>
+
       {error ? (
         <FieldError id={errorId}>
-          <div className="flex flex-col gap-0.5">
-            <span>{error}</span>
-            <span>This equation won’t be included in exports until fixed.</span>
+          <div className="flex flex-col gap-1.5">
+            <div className="flex flex-col gap-0.5">
+              <span>{error}</span>
+              <span>
+                This equation won’t be included in exports until fixed.
+              </span>
+            </div>
+            {errorAt ? (
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="min-w-0">
+                  Line {errorAt.line}, column {errorAt.column}
+                </span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="xs"
+                  onClick={showErrorInSource}
+                >
+                  {inputMode === 'source' ? 'Highlight' : 'Show in source'}
+                </Button>
+              </div>
+            ) : null}
           </div>
         </FieldError>
       ) : null}
 
       {isLongEquation && !error ? (
         <div className="flex items-center justify-between gap-2">
-          <p className="min-w-0 text-xs text-content-subtle">
+          <p className="min-w-0 text-xs text-secondary">
             Long equations stay on one line. Use a structure template for
             explicit breaks.
           </p>
@@ -515,17 +662,15 @@ export function EquationPanel() {
       ? state.doc.pages[state.currentPageId]?.shapes[selectedId]
       : undefined,
   );
-  const playbackActive = useAnimationStore((state) => state.playbackActive);
   const equationShape =
     selectedShape?.type === 'equation' ? selectedShape : undefined;
-  const panelVisible = !playbackActive && Boolean(equationShape);
+  const panelVisible = Boolean(equationShape);
 
   // An equation left empty is editing scaffolding, not content: drop it when
   // the selection moves on, rather than stranding a placeholder box on the
   // board (and in exports).
   const lastEditedId = useRef<string | null>(null);
   useEffect(() => {
-    if (playbackActive) return;
     const previous = lastEditedId.current;
     lastEditedId.current = equationShape?.id ?? null;
     if (!previous || previous === equationShape?.id) return;
@@ -533,7 +678,7 @@ export function EquationPanel() {
     if (stale?.type === 'equation' && !stale.props.latex.trim()) {
       editor.deleteShapes([previous]);
     }
-  }, [equationShape?.id, playbackActive]);
+  }, [equationShape?.id]);
 
   return (
     <ToolPanelPresence visible={panelVisible}>

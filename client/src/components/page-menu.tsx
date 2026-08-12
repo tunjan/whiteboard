@@ -8,7 +8,6 @@ import {
   Plus,
   Trash2,
 } from 'lucide-react';
-import { useAnimationStore } from '@/animation/use-animation-store';
 import {
   createPage,
   deletePage,
@@ -54,10 +53,11 @@ import {
   PopoverTitle,
   PopoverTrigger,
 } from '@/components/ui/popover';
+import { CHROME_CONTROLS } from '@/components/ui/surface';
 import { cn } from '@/lib/utils';
 
 const PAGE_ROW_HEIGHT = 40;
-/** Coarse pointers grow controls to 40px, so rows need extra room to not touch. */
+/** Coarse pointers grow controls to 44px, so rows need extra room to not touch. */
 const PAGE_ROW_HEIGHT_COARSE = 48;
 const PAGE_LIST_HEIGHT_KEY = 'whiteboard:page-menu-height:v2';
 const PAGE_LIST_MAX_HEIGHT = 800;
@@ -67,6 +67,9 @@ const HEADER_HEIGHT = 34;
 const FOOTER_HEIGHT = 48;
 const RESIZE_HINT =
   'Drag to resize. Press Enter or double-click to fit the list to its pages.';
+/** Holds the drag-handle / actions slots open while a row is renaming, so the
+ *  name stays exactly where it was instead of sliding across the row. */
+const ROW_SLOT_SPACER = 'size-6 shrink-0 [@media(pointer:coarse)]:size-11';
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
@@ -90,13 +93,29 @@ function storedPageListHeight(boardId: string): number | null {
   }
 }
 
-/** First unused `Page N`, so deleting a middle page cannot make the next
- *  default name collide with one that already exists. */
-function nextPageName(names: string[]): string {
-  const used = new Set(names);
-  let n = names.length + 1;
-  while (used.has(`Page ${n}`)) n += 1;
-  return `Page ${n}`;
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MONTHS = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+];
+
+/** Default name for a new page: when it was made, as `Mon 10 Aug 11:50`.
+ *  Spelled out rather than formatted by locale so the shape stays the same
+ *  for everyone on the board. */
+function nextPageName(now = new Date()): string {
+  const hours = String(now.getHours()).padStart(2, '0');
+  const minutes = String(now.getMinutes()).padStart(2, '0');
+  return `${WEEKDAYS[now.getDay()]} ${now.getDate()} ${MONTHS[now.getMonth()]} ${hours}:${minutes}`;
 }
 
 function useCoarsePointer(): boolean {
@@ -121,9 +140,6 @@ export function PageMenu() {
   const pages = useDocumentStore((state) => state.doc.pages);
   const pageOrder = useDocumentStore((state) => state.doc.pageOrder);
   const currentPageId = useDocumentStore((state) => state.currentPageId);
-  const pageLocked = useAnimationStore(
-    (state) => state.playbackActive || state.recordingPageId !== null,
-  );
   const coarsePointer = useCoarsePointer();
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -176,12 +192,6 @@ export function PageMenu() {
   };
 
   useEffect(() => {
-    if (!pageLocked) return;
-    setOpen(false);
-    resetDraft();
-  }, [pageLocked]);
-
-  useEffect(() => {
     const onResize = () => setViewportHeight(window.innerHeight);
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
@@ -212,8 +222,7 @@ export function PageMenu() {
               variant="ghost"
               size="sm"
               aria-label={`Pages, current page: ${current?.name ?? 'Page 1'}`}
-              disabled={pageLocked}
-              className="max-w-[clamp(4.5rem,18vw,11.25rem)] px-2"
+              className="max-w-[clamp(4.5rem,18vw,11.25rem)] px-2 font-medium text-primary rounded-md"
             />
           }
         >
@@ -223,13 +232,13 @@ export function PageMenu() {
         <PopoverContent
           align="start"
           sideOffset={10}
-          className="touch-targets w-[min(16rem,calc(100vw-2rem))] gap-0 p-0"
+          className={cn(CHROME_CONTROLS, 'w-[min(16rem,calc(100vw-2rem))] gap-0 p-0')}
         >
           <div className="flex items-center justify-between gap-2 px-3 pt-2.5 pb-1.5">
-            <PopoverTitle className="text-xs font-medium tracking-wide text-content-muted uppercase">
+            <PopoverTitle className="text-xs font-medium tracking-wide text-tertiary uppercase">
               Pages
             </PopoverTitle>
-            <span className="text-xs text-content-muted tabular-nums">
+            <span className="text-xs text-tertiary tabular-nums">
               {ordered.length}
             </span>
           </div>
@@ -241,7 +250,7 @@ export function PageMenu() {
             label="Board pages"
             revealId={currentPageId}
             getItemLabel={(page) => page.name}
-            disabled={pageLocked || formOpen}
+            disabled={formOpen}
             onReorder={movePageToIndex}
           >
             {(page, index, dragHandleProps, dragging) => {
@@ -252,7 +261,7 @@ export function PageMenu() {
                 <div
                   className={cn(
                     'flex w-full items-center gap-1 rounded-md pr-0.5',
-                    dragging && 'bg-bg-default shadow-hover',
+                    dragging && 'bg-surface shadow-hover',
                   )}
                 >
                   {/* Selection gets its own channel so it never reads as focus. */}
@@ -260,18 +269,22 @@ export function PageMenu() {
                     aria-hidden="true"
                     className={cn(
                       'h-5 w-[3px] shrink-0 rounded-full transition-colors',
-                      active ? 'bg-accent-brand' : 'bg-transparent',
+                      active ? 'bg-fg' : 'bg-transparent',
                     )}
                   />
                   {renaming ? (
-                    <PageInlineRename
-                      initialValue={page.name}
-                      onSubmit={(name) => {
-                        renamePage(page.id, name);
-                        setEditingId(null);
-                      }}
-                      onCancel={() => setEditingId(null)}
-                    />
+                    <>
+                      <span aria-hidden="true" className={ROW_SLOT_SPACER} />
+                      <PageInlineRename
+                        initialValue={page.name}
+                        onSubmit={(name) => {
+                          renamePage(page.id, name);
+                          setEditingId(null);
+                        }}
+                        onCancel={() => setEditingId(null)}
+                      />
+                      <span aria-hidden="true" className={ROW_SLOT_SPACER} />
+                    </>
                   ) : (
                     <>
                       <PageDragHandle
@@ -283,9 +296,13 @@ export function PageMenu() {
                         size="sm"
                         aria-current={active ? 'page' : undefined}
                         onClick={() => setCurrentPage(page.id)}
+                        onDoubleClick={() => {
+                          setCreating(false);
+                          setEditingId(page.id);
+                        }}
                         className={cn(
                           'min-w-0 flex-1 justify-start',
-                          active && 'font-medium text-content-emphasis',
+                          active && 'font-medium text-primary',
                         )}
                       >
                         <span className="truncate">{page.name}</span>
@@ -300,11 +317,7 @@ export function PageMenu() {
                           // Let the menu finish closing first. It restores
                           // focus on the way out, which would otherwise blur
                           // the editor the moment the row swaps it in.
-                          console.log('RENAME CLICK', page.id);
-                          window.setTimeout(() => {
-                            console.log('RENAME APPLY', page.id);
-                            setEditingId(page.id);
-                          }, 0);
+                          window.setTimeout(() => setEditingId(page.id), 0);
                         }}
                         onMoveUp={() => movePage(page.id, 'up')}
                         onMoveDown={() => movePage(page.id, 'down')}
@@ -333,7 +346,7 @@ export function PageMenu() {
             {creating ? (
               <PageNameForm
                 key={`create-${ordered.length}`}
-                initialValue={nextPageName(ordered.map((page) => page.name))}
+                initialValue={nextPageName()}
                 label="New Page"
                 error={createError}
                 onSubmit={(name) => {
@@ -518,7 +531,7 @@ function PageListResizeHandle({
       aria-valuetext={`${height} pixels`}
       tabIndex={0}
       title={RESIZE_HINT}
-      className="group/resize flex h-3.5 touch-none cursor-row-resize items-center justify-center rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-border-emphasis"
+      className="group/resize flex h-3.5 touch-none cursor-row-resize items-center justify-center rounded-sm"
       onDoubleClick={onReset}
       onKeyDown={(event) => {
         if (event.key === 'ArrowUp') {
@@ -570,7 +583,7 @@ function PageListResizeHandle({
     >
       <span
         aria-hidden="true"
-        className="h-1 w-8 rounded-full bg-border-default transition-colors group-hover/resize:bg-border-emphasis group-focus-visible/resize:bg-border-emphasis motion-reduce:transition-none"
+        className="h-1 w-8 rounded-full bg-border transition-colors group-hover/resize:bg-strong group-focus-visible/resize:bg-strong motion-reduce:transition-none"
       />
       <span id={hintId} className="sr-only">
         {RESIZE_HINT}
@@ -623,7 +636,17 @@ function PageInlineRename({
       value={value}
       aria-label="Page name"
       autoComplete="off"
-      className="h-8 min-w-0 flex-1"
+      // Sized and padded like the row's name button so the label is edited in
+      // place. The app-wide focus outline is traded for a border and a soft
+      // halo: a caret in a field this small needs no 2px ring around it. Both
+      // resolve through the neutral ring token, so the field focuses the same
+      // colour as everything else rather than introducing a lone blue.
+      className={cn(
+        'h-8 min-w-0 flex-1 rounded-md border-transparent bg-panel px-3 font-medium text-primary',
+        'text-base sm:text-sm [@media(pointer:coarse)]:h-11',
+        'focus:border-strong focus:bg-surface focus:ring-2 focus:ring-ring/15',
+        'focus-visible:outline-none',
+      )}
       onChange={(event) => setValue(event.target.value)}
       onBlur={(event) => {
         if (!armedRef.current) {
@@ -683,7 +706,7 @@ function PageNameForm({
 
   return (
     <form
-      className="flex flex-col gap-2 rounded-md bg-bg-muted p-2"
+      className="flex flex-col gap-2.5 rounded-lg border border-border bg-subtle p-2.5"
       onSubmit={(event) => {
         event.preventDefault();
         submit();

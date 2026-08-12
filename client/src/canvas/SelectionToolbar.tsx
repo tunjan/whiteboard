@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import type { Shape } from '@whiteboard/shared';
 import {
+  ClipboardCopy,
   Copy,
   CopyPlus,
   Crop,
@@ -20,7 +21,10 @@ import { worldToScreen } from './camera';
 import { alignShapes, distributeShapes } from './align';
 import { copyShapes } from './clipboard';
 import { duplicateShapes, groupShapes, ungroupShapes } from './commands';
-import { exportSelectionToPng } from './export-png';
+import {
+  copySelectionToPngClipboard,
+  exportSelectionToPng,
+} from './export-png';
 import { deleteTargetIds } from './hierarchy';
 import { getSelectionInfo } from './selection-geometry';
 
@@ -348,6 +352,23 @@ export function SelectionToolbar({ camera }: SelectionToolbarProps) {
 
                 <DropdownMenuGroup>
                   <DropdownMenuItem
+                    // Not awaited: the clipboard write has to be issued while
+                    // this click is still the current task (see
+                    // `writePngToClipboard`).
+                    onClick={() => {
+                      copySelectionToPngClipboard(selectedIds).catch(
+                        (err: unknown) =>
+                          console.error(
+                            '[clipboard] copy as PNG failed',
+                            err,
+                          ),
+                      );
+                    }}
+                  >
+                    <ClipboardCopy />
+                    Copy as PNG
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
                     onClick={() =>
                       void exportSelectionToPng(selectedIds, 'selection')
                     }
@@ -410,11 +431,11 @@ function IconButton({
         aria-pressed={active || undefined}
         className={cn(
           buttonVariants({ variant: 'ghost', size: 'icon-sm' }),
-          'disabled:border-transparent disabled:bg-transparent disabled:text-content-muted',
+          'disabled:border-transparent disabled:bg-transparent disabled:text-tertiary',
           active &&
-            'bg-bg-muted text-content-emphasis hover:bg-bg-muted hover:text-content-emphasis',
+            'bg-muted text-primary hover:bg-muted hover:text-primary',
           destructive &&
-            'hover:bg-bg-error hover:text-content-error',
+            'hover:bg-danger-bg hover:text-danger',
         )}
       >
         {children}

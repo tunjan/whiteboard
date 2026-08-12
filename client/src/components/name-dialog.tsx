@@ -11,9 +11,7 @@ import {
 } from '@/components/ui/dialog';
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
-import { cn } from '@/lib/utils';
-
-const swatchBorder = (color: string) => `color-mix(in srgb, ${color} 75%, #000)`;
+import { cn, swatchBorder } from '@/lib/utils';
 
 /**
  * Prompt for a student's display name and cursor color. Used both on first
@@ -89,12 +87,12 @@ export function NameDialog({
                       aria-checked={active}
                       aria-label={swatch}
                       onClick={() => setColor(swatch)}
-                      className="flex size-8 items-center justify-center rounded-full transition-transform duration-150 ease-out active:scale-95"
+                      className="flex size-8 items-center justify-center rounded-full transition-transform duration-150 ease-out active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2"
                     >
                       <span
                         className={cn(
                           'size-6 rounded-full border',
-                          active && 'ring-2 ring-ring ring-offset-2 ring-offset-background',
+                          active && 'ring-2 ring-focus ring-offset-2 ring-offset-surface',
                         )}
                         style={{
                           backgroundColor: swatch,

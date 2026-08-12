@@ -9,7 +9,24 @@ import {
   type LaserStroke,
 } from './use-laser-store';
 
-const LASER_COLOR = 'var(--color-destructive)';
+// A fixed, saturated red rather than the theme's destructive token: the laser
+// should read as a bright physical pointer in both light and dark mode, not
+// shift with the theme (light mode's destructive red is too muted/dark).
+const LASER_COLOR = '#FF3B30';
+const LASER_CORE_COLOR = '#FFFFFF';
+
+// Neon bloom: stacked translucent strokes fake a gaussian falloff. A real
+// feGaussianBlur would blur in user space — scaling with zoom, unlike the
+// non-scaling strokes it wraps — and is skipped outright when a straight
+// stroke gives the path a zero-height bounding box.
+const GLOW_LAYERS = [
+  { width: 46, opacity: 0.05 },
+  { width: 34, opacity: 0.07 },
+  { width: 25, opacity: 0.1 },
+  { width: 18, opacity: 0.16 },
+];
+const LASER_BODY_WIDTH = 12;
+const LASER_CORE_WIDTH = 4;
 
 function pathFor(points: Point[]): string {
   const first = points[0];
@@ -91,32 +108,42 @@ export function LaserLayer({ camera }: { camera: Camera }) {
         {strokes.map((stroke) => {
           let opacity = 1;
           if (stroke.done) {
-            // Not yet stamped = this is the first render since it finished, so
-            // the fade has not started: full opacity, same as stamping `now`.
+            // The hold happens upstream — the store only marks a stroke done
+            // once drawing has been idle for LASER_HOLD_MS — so a done stroke
+            // fades from the moment it is first seen here. Not yet stamped =
+            // first render since it finished: full opacity, as if stamped now.
             const start = fadeStart.current.get(stroke.id);
             opacity = start === undefined ? 1 : 1 - (now - start) / LASER_FADE_MS;
             if (opacity <= 0) return null;
           }
           const d = pathFor(stroke.points);
           return (
-            <g key={stroke.id} opacity={opacity}>
+            <g
+              key={stroke.id}
+              opacity={opacity}
+              fill="none"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              stroke={LASER_COLOR}
+            >
+              {GLOW_LAYERS.map((layer) => (
+                <path
+                  key={layer.width}
+                  d={d}
+                  strokeWidth={layer.width}
+                  strokeOpacity={layer.opacity}
+                  vectorEffect="non-scaling-stroke"
+                />
+              ))}
               <path
                 d={d}
-                fill="none"
-                stroke={LASER_COLOR}
-                strokeWidth={9}
-                strokeOpacity={0.35}
-                strokeLinecap="round"
-                strokeLinejoin="round"
+                strokeWidth={LASER_BODY_WIDTH}
                 vectorEffect="non-scaling-stroke"
               />
               <path
                 d={d}
-                fill="none"
-                stroke={LASER_COLOR}
-                strokeWidth={3.5}
-                strokeLinecap="round"
-                strokeLinejoin="round"
+                stroke={LASER_CORE_COLOR}
+                strokeWidth={LASER_CORE_WIDTH}
                 vectorEffect="non-scaling-stroke"
               />
             </g>

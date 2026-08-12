@@ -5,6 +5,7 @@ import {
   Pause,
   Play,
   RefreshCw,
+  RotateCcw,
   Volume1,
   Volume2,
   VolumeX,
@@ -16,20 +17,18 @@ import { Button } from '@/components/ui/button';
 import {
   Popover,
   PopoverContent,
-  PopoverDescription,
-  PopoverHeader,
-  PopoverTitle,
   PopoverTrigger,
 } from '@/components/ui/popover';
-import { Progress } from '@/components/ui/progress';
-import { Separator } from '@/components/ui/separator';
+import { Skeleton } from '@/components/ui/skeleton';
 import { Slider } from '@/components/ui/slider';
-import { Toggle } from '@/components/ui/toggle';
+import { CHROME_CONTROLS } from '@/components/ui/surface';
 import { cn } from '@/lib/utils';
 import { useMusicPlaybackStore } from './use-music-playback-store';
 
 interface MusicPlayerProps {
   identity: Identity | null;
+  showLabel?: boolean;
+  toolbarItem?: boolean;
 }
 
 // Volume is a per-user, device-local preference — it must not be synced with
@@ -43,15 +42,21 @@ function readStoredVolume(): number {
   return Number.isFinite(parsed) ? Math.min(1, Math.max(0, parsed)) : 1;
 }
 
-export function MusicPlayer({ identity }: MusicPlayerProps) {
+export function MusicPlayer({
+  identity,
+  showLabel = false,
+  toolbarItem = false,
+}: MusicPlayerProps) {
   const playback = useMusicPlaybackStore((s) => s.playback);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [library, setLibrary] = useState<MusicLibraryResponse | null>(null);
   const [libraryError, setLibraryError] = useState(false);
+  const [libraryRequest, setLibraryRequest] = useState(0);
   const [activePlaylist, setActivePlaylist] = useState<string | null>(null);
   const [audioBlocked, setAudioBlocked] = useState(false);
   const [duration, setDuration] = useState(0);
   const [localTime, setLocalTime] = useState(0);
+  const [seekPreview, setSeekPreview] = useState<number | null>(null);
   const [volume, setVolume] = useState(readStoredVolume);
   const lastNonZeroVolume = useRef(volume > 0 ? volume : 1);
 
@@ -79,7 +84,7 @@ export function MusicPlayer({ identity }: MusicPlayerProps) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [libraryRequest]);
 
   const playlists = library?.playlists ?? [];
   const activeTracks =
@@ -96,8 +101,10 @@ export function MusicPlayer({ identity }: MusicPlayerProps) {
     : null;
   const isPlaying = playback.status === 'playing' && currentTrack !== null;
   const displayTime = isPlaying ? localTime : playback.position;
-  const progress =
-    duration > 0 ? Math.min(100, Math.max(0, (displayTime / duration) * 100)) : 0;
+  const timelineTime = Math.min(
+    duration || Number.POSITIVE_INFINITY,
+    Math.max(0, seekPreview ?? displayTime),
+  );
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -174,6 +181,7 @@ export function MusicPlayer({ identity }: MusicPlayerProps) {
   function playTrack(track: MusicTrack) {
     setAudioBlocked(false);
     setDuration(0);
+    setSeekPreview(null);
     setMusicPlayback({
       trackId: track.id,
       status: 'playing',
@@ -198,9 +206,18 @@ export function MusicPlayer({ identity }: MusicPlayerProps) {
     if (firstTrack) playTrack(firstTrack);
   }
 
+  function selectTrack(track: MusicTrack) {
+    if (track.id === currentTrack?.id) {
+      togglePlayback();
+      return;
+    }
+    playTrack(track);
+  }
+
   function restartTrack() {
     if (!currentTrack) return;
     setAudioBlocked(false);
+    setSeekPreview(null);
     setMusicPlayback({
       trackId: currentTrack.id,
       status: 'playing',
@@ -219,81 +236,155 @@ export function MusicPlayer({ identity }: MusicPlayerProps) {
       .catch(() => setAudioBlocked(true));
   }
 
+  function seekTrack(next: number | readonly number[]) {
+    if (!currentTrack || duration <= 0) return;
+    const rawPosition = Array.isArray(next) ? next[0] : next;
+    const position = Math.min(duration, Math.max(0, rawPosition ?? 0));
+    const audio = audioRef.current;
+    if (audio) audio.currentTime = position;
+    setLocalTime(position);
+    setSeekPreview(null);
+    setMusicPlayback({ position });
+  }
+
+  function reloadLibrary() {
+    setLibrary(null);
+    setLibraryError(false);
+    setLibraryRequest((request) => request + 1);
+  }
+
   return (
     <>
+      {/* ── Trigger ─────────────────────────────────────────────────────────
+          Playing takes the chrome's pressed idiom (hairline + recessed fill)
+          rather than a coloured one — colour is reserved for status (P1), and
+          "currently playing" is an on/off state, not semantic status (§3.2 R4).
+          No shadow: this chip sits inside a flat docked panel that casts none
+          itself, so a raised control there implied a depth that isn't real. */}
       <Popover>
         <PopoverTrigger
           render={
-            <Toggle
-              pressed={isPlaying}
-              aria-label="Music player"
-              size="sm"
-              className="size-8 p-0"
+            <Button
+              type="button"
+              variant="ghost"
+              size={showLabel ? 'sm' : 'icon-sm'}
+              data-toolbar-item={toolbarItem || undefined}
+              tabIndex={toolbarItem ? -1 : undefined}
+              aria-label="Open music player"
+              className={cn(
+                'rounded-md border',
+                isPlaying && 'border-border bg-panel text-primary',
+              )}
             />
           }
         >
           {isPlaying ? <Volume2 /> : <Music2 />}
+          {showLabel ? <span>Music</span> : null}
         </PopoverTrigger>
+
+        {/* ── Popover: compound-card layout (§12.6) ────────────────────────
+            p-0 wrapper owns the border and radius; internal strips own their
+            padding. Strips share the same padding-x so content stays on one
+            vertical rule. */}
         <PopoverContent
           side="bottom"
           align="end"
           sideOffset={10}
-          className="w-[min(22rem,calc(100vw-2rem))] gap-3 p-3"
+          className={cn(CHROME_CONTROLS, 'w-80 max-w-[calc(100vw-1.5rem)] gap-0 overflow-hidden p-0')}
         >
-          <PopoverHeader>
-            <PopoverTitle>Now playing</PopoverTitle>
-            <PopoverDescription>
-              {currentTrack
-                ? trackSubtitle(currentTrack)
-                : 'No song selected'}
-            </PopoverDescription>
-          </PopoverHeader>
+          {/* ── Header strip ──────────────────────────────────────────────── */}
+          <div className="flex items-start justify-between border-b border-border bg-subtle px-4 py-3">
+            <div>
+              {/* Eyebrow label — the system's signature section marker (§5.3) */}
+              <span className="font-mono text-2xs font-medium uppercase tracking-[0.08em] text-tertiary">
+                Music
+              </span>
+              <p className="mt-0.5 text-xs text-tertiary">
+                Playback is shared with everyone on this board
+              </p>
+            </div>
+          </div>
 
-          <div className="flex flex-col gap-2 rounded-lg bg-bg-muted p-3">
-            <div className="flex min-w-0 items-center gap-2">
-              <div className="flex size-9 shrink-0 items-center justify-center rounded-md border border-border-subtle bg-bg-default text-content-subtle">
-                {isPlaying ? <Volume2 className="size-4" /> : <Music2 className="size-4" />}
+          {/* ── Now playing strip ─────────────────────────────────────────── */}
+          <div
+            aria-label="Now playing"
+            className="flex flex-col gap-3 border-b border-border bg-subtle px-4 pt-3 pb-4"
+          >
+            {/* Track identity + controls */}
+            <div className="flex items-center gap-3">
+              {/* Thumbnail: small square with current state glyph */}
+              <div className="flex size-10 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-tertiary shadow-xs">
+                <Music2 size={16} strokeWidth={1.5} aria-hidden="true" />
               </div>
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-semibold text-content-emphasis">
+
+              {/* Title + subtitle */}
+              <div className="min-w-0 flex-1" aria-live="polite">
+                <p className="truncate text-sm font-medium text-primary">
                   {currentTrack?.title ?? 'Ready when you are'}
-                </div>
-                <div className="truncate text-xs text-content-subtle">
-                  {currentTrack?.artist ?? currentTrack?.playlist ?? 'Choose a song'}
-                </div>
+                </p>
+                <p className="truncate text-xs text-secondary">
+                  {currentTrack
+                    ? trackSubtitle(currentTrack)
+                    : 'Choose a track below'}
+                </p>
+              </div>
+
+              {/* Compact controls: restart + play/pause */}
+              <div className="flex shrink-0 items-center gap-1">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Restart track"
+                  disabled={!currentTrack}
+                  onClick={restartTrack}
+                  className="rounded-md"
+                >
+                  <RotateCcw size={14} strokeWidth={1.5} />
+                </Button>
+                <Button
+                  type="button"
+                  size="icon-sm"
+                  aria-label={isPlaying ? 'Pause' : 'Play'}
+                  disabled={!currentTrack && playlists.length === 0}
+                  onClick={togglePlayback}
+                  className="rounded-md"
+                >
+                  {isPlaying ? (
+                    <Pause size={14} strokeWidth={1.5} />
+                  ) : (
+                    <Play size={14} strokeWidth={1.5} />
+                  )}
+                </Button>
               </div>
             </div>
-            <Progress value={progress} aria-hidden="true" />
-            <div className="flex items-center justify-between text-[11px] tabular-nums text-content-subtle">
-              <span>{formatTime(displayTime)}</span>
-              <span>{duration > 0 ? formatTime(duration) : '--:--'}</span>
+
+            {/* Timeline */}
+            <div>
+              <Slider
+                aria-label="Track position"
+                aria-valuetext={`${formatTime(timelineTime)} of ${
+                  duration > 0 ? formatTime(duration) : 'unknown'
+                }`}
+                min={0}
+                max={duration > 0 ? duration : 1}
+                step={1}
+                value={duration > 0 ? timelineTime : 0}
+                disabled={!currentTrack || duration <= 0}
+                onValueChange={(next) =>
+                  setSeekPreview(Array.isArray(next) ? next[0]! : next)
+                }
+                onValueCommitted={seekTrack}
+                className="-my-1.5 py-1.5 [&_[data-slot=slider-thumb]]:size-3"
+              />
+              {/* Mono tabular time readout (§5.4 numerals: always tabular) */}
+              <div className="mt-1.5 flex items-center justify-between font-mono text-xs tabular-nums text-tertiary">
+                <span>{formatTime(timelineTime)}</span>
+                <span>{duration > 0 ? formatTime(duration) : '--:--'}</span>
+              </div>
             </div>
-            <div className="flex items-center gap-1.5">
-              <Button
-                type="button"
-                size="sm"
-                onClick={togglePlayback}
-                disabled={!currentTrack && playlists.length === 0}
-              >
-                {isPlaying ? <Pause data-icon="inline-start" /> : <Play data-icon="inline-start" />}
-                {isPlaying ? 'Pause' : 'Play'}
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                aria-label="Restart song"
-                disabled={!currentTrack}
-                onClick={restartTrack}
-              >
-                <RefreshCw />
-              </Button>
-              {playback.requestedBy ? (
-                <span className="min-w-0 flex-1 truncate text-right text-[11px] text-content-subtle">
-                  by {playback.requestedBy}
-                </span>
-              ) : null}
-            </div>
+
+            {/* Volume row */}
             <div className="flex items-center gap-2">
               <Button
                 type="button"
@@ -301,8 +392,9 @@ export function MusicPlayer({ identity }: MusicPlayerProps) {
                 size="icon-sm"
                 aria-label={muted ? 'Unmute' : 'Mute'}
                 onClick={toggleMute}
+                className="shrink-0 rounded-md"
               >
-                <VolumeIcon />
+                <VolumeIcon size={14} strokeWidth={1.5} />
               </Button>
               <Slider
                 aria-label="Volume"
@@ -313,89 +405,218 @@ export function MusicPlayer({ identity }: MusicPlayerProps) {
                 onValueChange={(next) =>
                   setVolume(Array.isArray(next) ? next[0]! : next)
                 }
+                className="py-1.5"
               />
+              <span className="w-8 shrink-0 text-right font-mono text-xs tabular-nums text-tertiary">
+                {Math.round(volume * 100)}%
+              </span>
             </div>
-            {audioBlocked ? (
-              <Button type="button" variant="outline" size="sm" onClick={enableAudio}>
-                <Volume2 data-icon="inline-start" />
+
+            {/* Audio blocked — unblocking is a primary action here */}
+            {audioBlocked && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={enableAudio}
+                className="w-full rounded-lg"
+              >
+                <Volume2 data-icon="inline-start" size={14} strokeWidth={1.5} />
                 Enable audio
               </Button>
-            ) : null}
+            )}
+
+            {/* Attribution — caption below the controls (§5.4 caption role) */}
+            {playback.requestedBy && !audioBlocked && (
+              <p className="text-xs text-tertiary">
+                Started by {playback.requestedBy}
+              </p>
+            )}
           </div>
 
-          <Separator />
+          {/* ── Library section ───────────────────────────────────────────── */}
+          <div className="flex flex-col gap-3 px-4 pt-3 pb-4">
+            {/* Library eyebrow + track count */}
+            <div className="flex items-center justify-between">
+              <span className="font-mono text-2xs font-medium uppercase tracking-[0.08em] text-tertiary">
+                Library
+              </span>
+              {library !== null && !libraryError && (
+                <span className="font-mono text-xs tabular-nums text-tertiary">
+                  {activeTracks.length}{' '}
+                  {activeTracks.length === 1 ? 'track' : 'tracks'}
+                </span>
+              )}
+            </div>
 
-          {libraryError ? (
-            <div className="rounded-lg bg-bg-muted p-3 text-sm text-content-subtle">
-              Music library unavailable.
-            </div>
-          ) : playlists.length === 0 ? (
-            <div className="rounded-lg bg-bg-muted p-3 text-sm text-content-subtle">
-              No tracks found in the local music folder.
-            </div>
-          ) : (
-            <>
-              <div className="scrollbar-none flex gap-1 overflow-x-auto pb-1">
-                {playlists.map((playlist) => {
-                  const active = playlist.name === activePlaylist;
-                  return (
-                    <Button
-                      key={playlist.name}
-                      type="button"
-                      variant={active ? 'secondary' : 'ghost'}
-                      size="sm"
-                      aria-pressed={active}
-                      onClick={() => setActivePlaylist(playlist.name)}
-                      className="max-w-32"
-                    >
-                      <ListMusic data-icon="inline-start" />
-                      <span className="truncate">{playlist.name}</span>
-                    </Button>
-                  );
-                })}
+            {/* Loading skeleton */}
+            {library === null && !libraryError && (
+              <div
+                role="status"
+                aria-label="Loading music library"
+                className="flex flex-col gap-2"
+              >
+                <Skeleton className="h-8 w-full rounded-lg" />
+                <Skeleton className="h-12 w-full rounded-lg" />
+                <Skeleton className="h-12 w-full rounded-lg" />
               </div>
-              <div className="flex max-h-56 flex-col gap-1 overflow-y-auto pr-1">
-                {activeTracks.map((track) => {
-                  const active = track.id === currentTrack?.id;
-                  return (
-                    <Toggle
-                      key={track.id}
-                      pressed={active}
-                      onPressedChange={() => playTrack(track)}
-                      className={cn(
-                        'h-auto min-h-10 w-full justify-start gap-2 rounded-md px-2 text-left transition-colors',
-                        'aria-pressed:bg-bg-info aria-pressed:text-content-info',
-                        !active && 'hover:bg-bg-muted',
-                      )}
-                    >
-                      <Music2
-                        className={cn(
-                          'size-4 shrink-0',
-                          active ? 'text-content-info' : 'text-content-subtle',
-                        )}
-                      />
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-medium">
-                          {track.title}
-                        </span>
-                        <span
+            )}
+
+            {/* Error state */}
+            {libraryError && (
+              <div className="flex flex-col gap-2.5 rounded-xl border border-border bg-subtle p-3">
+                <div>
+                  <p className="text-sm font-medium text-primary">
+                    Couldn&apos;t load your music
+                  </p>
+                  <p className="mt-0.5 text-xs text-secondary">
+                    Check your connection and try again.
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={reloadLibrary}
+                  className="self-start rounded-lg"
+                >
+                  <RefreshCw data-icon="inline-start" size={14} strokeWidth={1.5} />
+                  Try again
+                </Button>
+              </div>
+            )}
+
+            {/* Empty library state */}
+            {library !== null && !libraryError && playlists.length === 0 && (
+              <div className="flex flex-col gap-2.5 rounded-xl border border-border bg-subtle p-3">
+                <div>
+                  <p className="text-sm font-medium text-primary">
+                    Your library is empty
+                  </p>
+                  <p className="mt-0.5 text-xs text-secondary">
+                    Add audio files to the local music folder, then refresh.
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={reloadLibrary}
+                  className="self-start rounded-lg"
+                >
+                  <RefreshCw data-icon="inline-start" size={14} strokeWidth={1.5} />
+                  Refresh library
+                </Button>
+              </div>
+            )}
+
+            {/* Populated library */}
+            {library !== null && !libraryError && playlists.length > 0 && (
+              <div className="flex flex-col gap-2">
+                {/* Playlist segmented control (§12.3) — only when multiple playlists.
+                    Container rounded-lg (12 px) + p-1 (4 px) → inner rounded-md (8 px).
+                    r_inner = 12 − 4 = 8 ✓ */}
+                {playlists.length > 1 && (
+                  <div
+                    role="tablist"
+                    aria-label="Playlists"
+                    className="scrollbar-none flex gap-1 overflow-x-auto rounded-lg bg-muted p-1"
+                  >
+                    {playlists.map((playlist) => {
+                      const active = playlist.name === activePlaylist;
+                      return (
+                        <button
+                          key={playlist.name}
+                          type="button"
+                          role="tab"
+                          aria-selected={active}
+                          onClick={() => setActivePlaylist(playlist.name)}
                           className={cn(
-                            'block truncate text-xs',
-                            active ? 'text-content-info' : 'text-content-subtle',
+                            'flex shrink-0 items-center gap-1.5 rounded-md px-3 text-sm font-medium',
+                            'h-7 transition-[background-color,color,box-shadow] duration-[120ms] ease-[cubic-bezier(0.65,0,0.35,1)]',
+                            active
+                              ? 'bg-surface text-primary shadow-xs'
+                              : 'text-tertiary hover:text-secondary',
                           )}
                         >
-                          {track.artist ?? track.playlist}
+                          <ListMusic size={13} strokeWidth={1.5} aria-hidden="true" />
+                          <span className="max-w-24 truncate">{playlist.name}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Track list — scrollable, max ~4 rows visible */}
+                <div
+                  role="listbox"
+                  aria-label={`Tracks in ${activePlaylist ?? 'library'}`}
+                  className="scrollbar-none flex max-h-52 flex-col gap-0.5 overflow-y-auto"
+                >
+                  {activeTracks.map((track) => {
+                    const active = track.id === currentTrack?.id;
+                    return (
+                      <button
+                        key={track.id}
+                        type="button"
+                        role="option"
+                        aria-selected={active}
+                        aria-label={
+                          active
+                            ? `${isPlaying ? 'Pause' : 'Play'} ${track.title}`
+                            : `Play ${track.title}`
+                        }
+                        onClick={() => selectTrack(track)}
+                        className={cn(
+                          // Layout
+                          'group flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left',
+                          // Colour-only transition at 80 ms (§11.1 instant)
+                          'transition-[background-color,box-shadow] duration-[80ms] ease-[cubic-bezier(0.2,0,0,1)]',
+                          // Active = lifted chip; inactive = ghost
+                          active
+                            ? 'bg-surface shadow-xs'
+                            : 'hover:bg-subtle',
+                        )}
+                      >
+                        {/* State glyph in thumbnail slot — shows play/pause when active */}
+                        <span
+                          className={cn(
+                            'flex size-8 shrink-0 items-center justify-center rounded-md',
+                            'transition-colors duration-[80ms]',
+                            active ? 'bg-subtle text-primary' : 'bg-subtle text-tertiary',
+                          )}
+                          aria-hidden="true"
+                        >
+                          {active && isPlaying ? (
+                            <Pause size={13} strokeWidth={1.5} />
+                          ) : active ? (
+                            <Play size={13} strokeWidth={1.5} />
+                          ) : (
+                            <Music2 size={13} strokeWidth={1.5} />
+                          )}
                         </span>
-                      </span>
-                      {active ? (
-                        <Volume2 className="size-4 shrink-0 text-content-info" />
-                      ) : null}
-                    </Toggle>
-                  );
-                })}
+
+                        {/* Track metadata */}
+                        <span className="min-w-0 flex-1">
+                          <span
+                            className={cn(
+                              'block truncate text-sm',
+                              active ? 'font-medium text-primary' : 'text-primary',
+                            )}
+                          >
+                            {track.title}
+                          </span>
+                          <span className="block truncate text-xs text-secondary">
+                            {track.artist ?? track.playlist}
+                          </span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
-            </>
-          )}
+            )}
+          </div>
         </PopoverContent>
       </Popover>
 

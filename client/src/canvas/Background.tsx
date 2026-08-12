@@ -22,7 +22,7 @@ const MINOR = 'var(--grid-minor)';
 const MAJOR = 'var(--grid-major)';
 const DOT = 'var(--grid-dot)';
 const AXIS = 'var(--grid-axis)';
-const LABEL = 'var(--content-subtle)';
+const LABEL = 'var(--color-secondary)';
 
 /**
  * Infinite background rendered in **screen space** (no camera transform) so
@@ -51,9 +51,10 @@ export const Background = memo(function Background({
 
   return (
     <svg
-      className="absolute inset-0 h-full w-full"
+      className="pointer-events-none absolute inset-0 h-full w-full [contain:strict]"
       aria-hidden="true"
-      shapeRendering="crispEdges"
+      // Dots are round, so let them antialias; rules stay on crisp pixels.
+      shapeRendering={type === 'dot' ? 'auto' : 'crispEdges'}
     >
       <defs>
         {type === 'dot' ? (
@@ -64,9 +65,13 @@ export const Background = memo(function Background({
               width={layer.screenStep}
               height={layer.screenStep}
               patternUnits="userSpaceOnUse"
-              patternTransform={`translate(${layer.offsetX} ${layer.offsetY})`}
             >
-              <circle cx={0} cy={0} r={layer.radius} fill={DOT} />
+              <circle
+                cx={layer.offsetX}
+                cy={layer.offsetY}
+                r={layer.radius}
+                fill={DOT}
+              />
             </pattern>
           ))
         ) : (

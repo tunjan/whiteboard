@@ -1,4 +1,4 @@
-import type { ComponentType } from 'react';
+import type { ComponentProps, ComponentType, ReactNode } from 'react';
 import {
   CircleDot,
   Crosshair,
@@ -20,7 +20,15 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Kbd } from '@/components/ui/kbd';
 import { Surface } from '@/components/ui/surface';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
+import { useRovingToolbar } from '@/hooks/use-roving-toolbar';
 import {
   type BackgroundType,
   BACKGROUND_LABELS,
@@ -40,6 +48,39 @@ interface CanvasControlsProps {
   disabled?: boolean;
 }
 
+function ControlButton({
+  label,
+  shortcut,
+  children,
+  ...props
+}: Omit<ComponentProps<typeof Button>, 'aria-label'> & {
+  label: string;
+  shortcut?: string;
+  children: ReactNode;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            {...props}
+            data-toolbar-item
+            tabIndex={-1}
+            aria-label={label}
+            aria-keyshortcuts={shortcut}
+          />
+        }
+      >
+        {children}
+      </TooltipTrigger>
+      <TooltipContent side="top">
+        <span>{label}</span>
+        {shortcut ? <Kbd>{shortcut.replace('Control', 'Ctrl')}</Kbd> : null}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
 export function CanvasControls({
   zoom,
   background,
@@ -53,69 +94,91 @@ export function CanvasControls({
   disabled = false,
 }: CanvasControlsProps) {
   const BackgroundIcon = BACKGROUND_ICONS[background];
+  const toolbar = useRovingToolbar<HTMLDivElement>();
 
   return (
     <div
       data-ui-layer
-      className="touch-targets absolute right-[env(safe-area-inset-right)] bottom-[env(safe-area-inset-bottom)] [@media(pointer:coarse)]:bottom-[calc(7rem+env(safe-area-inset-bottom))] select-none"
+      className="absolute right-[env(safe-area-inset-right)] bottom-[env(safe-area-inset-bottom)] max-sm:bottom-[calc(4rem+env(safe-area-inset-bottom))] [@media(pointer:coarse)]:bottom-[calc(7rem+env(safe-area-inset-bottom))] select-none"
     >
-      <Surface className="flex h-10 items-center gap-1 rounded-none rounded-tl-md border-b-0 border-r-0 p-1 shadow-none">
-        <div className="flex items-center gap-0.5">
-          <Button
+      <TooltipProvider delay={300}>
+        <Surface
+          ref={toolbar.ref}
+          role="toolbar"
+          aria-label="Canvas view controls"
+          aria-orientation="horizontal"
+          mode="docked"
+          chrome
+          onFocusCapture={toolbar.onFocusCapture}
+          onKeyDown={toolbar.onKeyDown}
+          className="flex items-center gap-0.5 rounded-none rounded-tl-xl border-0 p-1"
+        >
+          <ControlButton
             variant="ghost"
             size="icon-sm"
-            aria-label="Zoom out"
+            label="Zoom out"
+            shortcut="Control+-"
             disabled={disabled}
             onClick={onZoomOut}
           >
             <Minus />
-          </Button>
-          <Button
+          </ControlButton>
+          <ControlButton
             type="button"
             variant="ghost"
             size="sm"
+            label="Reset zoom to 100%"
+            shortcut="Control+0"
             onClick={onZoomReset}
-            className="min-w-12 px-1.5 font-mono text-content-subtle tabular-nums"
-            aria-label="Reset zoom to 100%"
+            className="min-w-12 px-1.5 font-mono text-primary tabular-nums"
             disabled={disabled}
           >
             {Math.round(zoom * 100)}%
-          </Button>
-          <Button
+          </ControlButton>
+          <ControlButton
             variant="ghost"
             size="icon-sm"
-            aria-label="Zoom in"
+            label="Zoom in"
+            shortcut="Control++"
             disabled={disabled}
             onClick={onZoomIn}
           >
             <Plus />
-          </Button>
-        </div>
+          </ControlButton>
 
-        <div className="flex items-center gap-0.5">
-          <Button
+          <ControlButton
             variant="ghost"
             size="icon-sm"
-            aria-label="Zoom to fit"
+            label="Zoom to fit"
             disabled={disabled}
             onClick={onZoomToFit}
           >
             <Maximize2 />
-          </Button>
+          </ControlButton>
+
           {equations.length ? (
             <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label="Find an equation"
-                    disabled={disabled}
-                  />
-                }
-              >
-                <Sigma />
-              </DropdownMenuTrigger>
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <DropdownMenuTrigger
+                      render={
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          data-toolbar-item
+                          tabIndex={-1}
+                          aria-label="Find an equation"
+                          disabled={disabled}
+                        />
+                      }
+                    />
+                  }
+                >
+                  <Sigma />
+                </TooltipTrigger>
+                <TooltipContent side="top">Find an equation</TooltipContent>
+              </Tooltip>
               <DropdownMenuContent
                 side="top"
                 align="end"
@@ -134,9 +197,7 @@ export function CanvasControls({
                         {index + 1}. {equation.label}
                       </span>
                       {equation.locked ? (
-                        <span className="text-xs text-content-subtle">
-                          Locked
-                        </span>
+                        <span className="text-xs text-tertiary">Locked</span>
                       ) : null}
                     </DropdownMenuItem>
                   ))}
@@ -144,19 +205,31 @@ export function CanvasControls({
               </DropdownMenuContent>
             </DropdownMenu>
           ) : null}
+
           <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label={`Background: ${BACKGROUND_LABELS[background]}`}
-                  disabled={disabled}
-                />
-              }
-            >
-              <BackgroundIcon />
-            </DropdownMenuTrigger>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <DropdownMenuTrigger
+                    render={
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        data-toolbar-item
+                        tabIndex={-1}
+                        aria-label={`Background: ${BACKGROUND_LABELS[background]}`}
+                        disabled={disabled}
+                      />
+                    }
+                  />
+                }
+              >
+                <BackgroundIcon />
+              </TooltipTrigger>
+              <TooltipContent side="top">
+                Background: {BACKGROUND_LABELS[background]}
+              </TooltipContent>
+            </Tooltip>
             <DropdownMenuContent
               side="top"
               align="end"
@@ -182,13 +255,16 @@ export function CanvasControls({
               </DropdownMenuRadioGroup>
             </DropdownMenuContent>
           </DropdownMenu>
-        </div>
-      </Surface>
+        </Surface>
+      </TooltipProvider>
     </div>
   );
 }
 
-const BACKGROUND_ICONS: Record<BackgroundType, ComponentType<{ className?: string }>> = {
+const BACKGROUND_ICONS: Record<
+  BackgroundType,
+  ComponentType<{ className?: string }>
+> = {
   blank: Square,
   dot: CircleDot,
   graph: Grid2x2,

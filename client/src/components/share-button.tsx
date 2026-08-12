@@ -3,6 +3,8 @@ import { Check, Copy, Share2 } from 'lucide-react';
 import { useDocumentStore } from '@/canvas/use-document-store';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { CHROME_CONTROLS } from '@/components/ui/surface';
+import { cn } from '@/lib/utils';
 import {
   Popover,
   PopoverContent,
@@ -57,15 +59,22 @@ export function ShareButton() {
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
         render={
-          <Button variant="ghost" size="sm" aria-label="Share Board" />
+          <Button
+            variant="outline"
+            size="sm"
+            data-toolbar-item
+            tabIndex={-1}
+            aria-label="Share board"
+            className="rounded-md"
+          />
         }
       >
         <Share2 data-icon="inline-start" />
-        <span className="hidden sm:inline">Share</span>
+        <span className="hidden md:inline">Share</span>
       </PopoverTrigger>
-      <PopoverContent side="bottom" align="end" sideOffset={8} className="w-80">
+      <PopoverContent side="bottom" align="end" sideOffset={8} className={cn(CHROME_CONTROLS, 'w-80')}>
         <PopoverHeader>
-          <PopoverTitle>Share This Board</PopoverTitle>
+          <PopoverTitle>Share board</PopoverTitle>
           <PopoverDescription className="text-pretty text-xs leading-5">
             Anyone with the link can view and edit. It opens to the page you're
             on now.
@@ -79,7 +88,7 @@ export function ShareButton() {
             title={link}
             aria-label="Share link"
             onFocus={(e) => e.currentTarget.select()}
-            className="w-full font-mono text-sm text-content-emphasis"
+            className="w-full font-mono text-sm text-primary"
           />
           <Button
             variant={copied ? 'outline' : 'default'}
@@ -91,7 +100,7 @@ export function ShareButton() {
             ) : (
               <Copy data-icon="inline-start" />
             )}
-            {copied ? 'Copied' : 'Copy Link'}
+            {copied ? 'Copied' : 'Copy link'}
           </Button>
         </div>
         <span className="sr-only" aria-live="polite">

@@ -1,4 +1,9 @@
-import { parse, type MathNode } from 'mathjs';
+// Number-only build: it carries the same parser and the same real-valued
+// functions, without the BigNumber/Complex/Fraction/matrix types this file has
+// no use for. The one behavioural difference is that complex results
+// (`sqrt(-1)`, `log(-1)`) arrive as NaN rather than a Complex — which is what
+// `evaluate` below already coerced them to, so plots are unchanged.
+import { parse, type MathNode } from 'mathjs/number';
 import type {
   GraphExpression,
   GraphParameter,
@@ -99,15 +104,20 @@ const ALLOWED_OPERATOR_NAMES = new Set([
   'mod',
 ]);
 
+// Curve colors, assigned round-robin as expressions are added. Built like the
+// drawing palettes in use-style-store.ts — eight evenly spaced OKLCH hues at one
+// shared lightness — so no curve reads as more prominent than another. Unlike
+// those palettes this set has no theme variant, so it sits at a mid lightness
+// (L 0.58, C 0.17 clamped to sRGB) that clears both canvases.
 export const GRAPH_COLORS = [
-  '#274001',
-  '#828a00',
-  '#f29f05',
-  '#f25c05',
-  '#d6568c',
-  '#4d8584',
-  '#a62f03',
-  '#400d01',
+  '#cb454f',
+  '#ae6700',
+  '#808000',
+  '#009253',
+  '#008b91',
+  '#0080ca',
+  '#7c63d6',
+  '#b44ba1',
 ];
 
 export const DEFAULT_GRAPH_VIEWPORT: GraphViewport = {

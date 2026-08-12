@@ -63,7 +63,7 @@ export function VideoPlayerOverlay({
         aria-label="Stop video"
         onPointerDown={(e) => e.stopPropagation()}
         onClick={stop}
-        className="absolute right-1.5 top-1.5 grid size-7 place-items-center rounded-full bg-black/60 text-white hover:bg-black/80"
+        className="absolute right-1.5 top-1.5 grid size-7 place-items-center rounded-full bg-black/60 text-white hover:bg-black/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2"
       >
         <X className="size-4" />
       </button>

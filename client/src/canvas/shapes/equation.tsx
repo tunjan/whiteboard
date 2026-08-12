@@ -1,8 +1,10 @@
+import { useEffect, useRef, useState } from 'react';
 import type { EquationShape } from '@whiteboard/shared';
 import {
   getEquationRender,
   requestEquationTypeset,
   useEquationRenderStore,
+  type EquationRender,
 } from '../equation-render';
 import { boxBounds, boxHitTest, rotationTransform } from './box-geometry';
 import { DEFAULT_SHAPE_STYLE } from './style';
@@ -10,6 +12,62 @@ import type { ShapeUtil } from './types';
 
 export const EQUATION_DEFAULT_FONT_SIZE = 28;
 export const EQUATION_DEFAULT_SIZE = { w: 120, h: 48 } as const;
+
+/**
+ * How long the source must hold still before a typeset failure counts as a
+ * mistake rather than a half-typed expression. The equation panel debounces its
+ * error message by the same amount, so the shape and the panel change state
+ * together.
+ */
+export const EQUATION_SETTLE_MS = 500;
+
+type TypesetRender = Extract<EquationRender, { svg: string }>;
+
+export type EquationDisplay =
+  | { kind: 'typeset'; render: TypesetRender }
+  | { kind: 'empty' }
+  | { kind: 'loading' }
+  | { kind: 'error' };
+
+/**
+ * What to draw for an equation, given its cache entry and whether the source
+ * has stopped changing.
+ *
+ * A failure is only drawn as an error once the source settles. Every prefix of
+ * an expression being typed fails to typeset too — `\f`, `\fra`, `\frac{`,
+ * `\frac{a}` — so reacting to each one turns the entire time a user spends
+ * typing into a flickering error box. Until the source settles the shape keeps
+ * showing the last expression that did typeset, whose geometry is what the
+ * shape box is still sized to, or a neutral loading box if there isn't one yet.
+ */
+export function equationDisplay(
+  latex: string,
+  entry: EquationRender | undefined,
+  fallback: TypesetRender | null,
+  settled: boolean,
+): EquationDisplay {
+  if (!latex) return { kind: 'empty' };
+  if (!entry) return { kind: 'loading' };
+  if (!('error' in entry)) return { kind: 'typeset', render: entry };
+  if (settled) return { kind: 'error' };
+  return fallback ? { kind: 'typeset', render: fallback } : { kind: 'loading' };
+}
+
+/** False while `latex` is still changing, true once it has held for a beat. */
+function useSettledSource(latex: string): boolean {
+  const [settled, setSettled] = useState(true);
+  const previous = useRef(latex);
+  useEffect(() => {
+    // Skip the mount pass: an equation that arrives already broken (board load,
+    // a collaborator's edit) should show its error straight away.
+    if (previous.current === latex) return;
+    previous.current = latex;
+    setSettled(false);
+    const timer = window.setTimeout(() => setSettled(true), EQUATION_SETTLE_MS);
+    return () => window.clearTimeout(timer);
+  }, [latex]);
+  return settled;
+}
 
 /** Warning triangle drawn as geometry, so it survives PNG export unchanged. */
 function ErrorGlyph({
@@ -162,11 +220,20 @@ export const equationUtil: ShapeUtil<'equation'> = {
     useEquationRenderStore((state) => state.version);
     const latex = shape.props.latex.trim();
     const entry = latex ? getEquationRender(latex) : undefined;
+    const lastTypeset = useRef<TypesetRender | null>(null);
+    const settled = useSettledSource(latex);
 
     if (latex && !entry) requestEquationTypeset(latex);
-    if (!latex) return <EquationPlaceholder shape={shape} />;
-    if (!entry) return <EquationPlaceholder shape={shape} loading />;
-    if ('error' in entry) return <EquationPlaceholder shape={shape} error />;
+
+    const display = equationDisplay(latex, entry, lastTypeset.current, settled);
+    if (display.kind === 'typeset') lastTypeset.current = display.render;
+    if (display.kind === 'empty') return <EquationPlaceholder shape={shape} />;
+    if (display.kind === 'loading') {
+      return <EquationPlaceholder shape={shape} loading />;
+    }
+    if (display.kind === 'error') {
+      return <EquationPlaceholder shape={shape} error />;
+    }
 
     const { w, h, fontSize, color } = shape.props;
     const transform = rotationTransform(
@@ -200,10 +267,10 @@ export const equationUtil: ShapeUtil<'equation'> = {
           {/* The cached MathJax SVG has no intrinsic dimensions. This numeric
               viewport gives its viewBox a stable 1:1 world-space box. */}
           <svg
-            width={entry.width}
-            height={entry.height}
+            width={display.render.width}
+            height={display.render.height}
             overflow="visible"
-            dangerouslySetInnerHTML={{ __html: entry.svg }}
+            dangerouslySetInnerHTML={{ __html: display.render.svg }}
           />
         </g>
       </g>

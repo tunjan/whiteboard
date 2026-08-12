@@ -15,7 +15,7 @@ import { buttonVariants } from '@/components/ui/button';
 import { Surface } from '@/components/ui/surface';
 import { cn } from '@/lib/utils';
 
-const FALLBACK_AUTHOR = { name: 'Anonymous', color: '#2f6df6' };
+const FALLBACK_AUTHOR = { name: 'Anonymous', color: '#2563EB' };
 const POPUP_WIDTH = 288;
 
 function localAuthor(): { name: string; color: string } {
@@ -41,7 +41,7 @@ const iconButtonClass = cn(
   buttonVariants({ variant: 'ghost', size: 'icon-xs' }),
 );
 const textareaClass =
-  'w-full resize-none rounded-md border border-border-subtle bg-bg-muted px-2 py-1.5 text-sm text-content-emphasis outline-none placeholder:text-faint-foreground focus-visible:border-border-emphasis focus-visible:ring-2 focus-visible:ring-border-emphasis';
+  'w-full resize-none rounded-md border border-border bg-muted px-2 py-1.5 text-sm text-primary placeholder:text-faint-foreground focus-visible:border-strong';
 
 function CommentPin({
   message,
@@ -67,8 +67,8 @@ function CommentPin({
         // pop-in zoom composes with (never overrides) the centering. The pin
         // stays mounted across camera pans (keyed by message id; only left/top
         // change), so the entrance plays once on mount, not per frame.
-        'pointer-events-auto absolute flex size-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-bg-default text-[11px] font-semibold text-content-inverted shadow-hover transition-transform duration-200 ease-[var(--ease-out-expo)] hover:scale-110 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-50 motion-reduce:transition-none',
-        open && 'scale-110 ring-2 ring-border-emphasis',
+        'pointer-events-auto absolute flex size-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-surface text-2xs font-semibold text-inverse shadow-hover transition-transform duration-200 ease-[var(--ease-out-expo)] hover:scale-110 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-50 motion-reduce:transition-none',
+        open && 'scale-110 ring-2 ring-strong',
       )}
       style={{
         left: screen.x,
@@ -188,7 +188,7 @@ function ThreadPopup({
   return (
     <div
       data-ui-layer
-      className="pointer-events-auto absolute z-20 flex origin-top-left flex-col overflow-hidden rounded-md border border-border-subtle bg-bg-default shadow-hover ease-[var(--ease-out-expo)] motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95 motion-safe:duration-200"
+      className="pointer-events-auto absolute z-20 flex origin-top-left flex-col overflow-hidden rounded-md border border-border bg-surface shadow-hover ease-[var(--ease-out-expo)] motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95 motion-safe:duration-200"
       style={{ left, top, width: POPUP_WIDTH }}
       onPointerDown={(e) => e.stopPropagation()}
       onKeyDown={(e) => {
@@ -199,8 +199,8 @@ function ThreadPopup({
         }
       }}
     >
-      <div className="flex items-center justify-between gap-1 border-b border-border-subtle px-3 py-2">
-        <span className="text-xs font-medium text-content-muted">Thread</span>
+      <div className="flex items-center justify-between gap-1 border-b border-border px-3 py-2">
+        <span className="text-xs font-medium text-tertiary">Thread</span>
         <div className="flex items-center gap-1">
           <button
             type="button"
@@ -240,26 +240,26 @@ function ThreadPopup({
           <div key={m.id} className="flex flex-col gap-0.5">
             <div className="flex items-center gap-1.5">
               <span
-                className="flex size-4 shrink-0 items-center justify-center rounded-full text-[9px] font-semibold text-content-inverted"
+                className="flex size-4 shrink-0 items-center justify-center rounded-full text-2xs font-semibold text-inverse"
                 style={{ backgroundColor: m.authorColor }}
               >
                 {initial(m.authorName)}
               </span>
-              <span className="text-xs font-medium text-content-emphasis">
+              <span className="text-xs font-medium text-primary">
                 {m.authorName}
               </span>
-              <span className="text-[10px] text-content-muted">
+              <span className="text-2xs text-tertiary">
                 {relativeTime(m.createdAt)}
               </span>
             </div>
-            <p className="whitespace-pre-wrap break-words text-sm text-content-default">
+            <p className="whitespace-pre-wrap break-words text-sm text-primary">
               {m.text}
             </p>
           </div>
         ))}
       </div>
 
-      <div className="flex items-end gap-1.5 border-t border-border-subtle p-2">
+      <div className="flex items-end gap-1.5 border-t border-border p-2">
         <textarea
           value={reply}
           onChange={(e) => setReply(e.target.value)}

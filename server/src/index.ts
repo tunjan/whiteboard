@@ -11,7 +11,6 @@ import { boardRoutes } from './boards/routes';
 import { documentRoutes } from './documents/routes';
 import { hocuspocus } from './collab/hocuspocus';
 import { musicRoutes } from './music/routes';
-import { recordingRoutes } from './recordings/routes';
 
 const app = new Hono();
 
@@ -21,7 +20,6 @@ app.route('/api/boards', boardRoutes);
 app.route('/api/blobs', blobRoutes);
 app.route('/api/docs', documentRoutes);
 app.route('/api/music', musicRoutes);
-app.route('/api/recordings', recordingRoutes);
 
 const clientDist = fileURLToPath(new URL('../../client/dist', import.meta.url));
 const clientIndex = fileURLToPath(
@@ -44,12 +42,19 @@ const server = serve({ fetch: app.fetch, port: env.port }, (info) => {
 // explicitly.
 const wss = new WebSocketServer({
   noServer: true,
-  // Collaboration updates are compact and binary assets use HTTP endpoints.
-  // Bound raw frames before Hocuspocus decodes stateless payloads into strings.
-  maxPayload: 5 * 1024 * 1024,
+  // Full Yjs sync updates include retained CRDT history and can exceed the
+  // current live document size. Binary assets still use HTTP endpoints, so
+  // keep a bounded ceiling while leaving room for established boards to sync.
+  maxPayload: 32 * 1024 * 1024,
 });
 server.on('upgrade', (request, socket, head) => {
   wss.handleUpgrade(request, socket, head, (ws) => {
+    // `ws` emits receiver errors (including payload-limit violations) on the
+    // individual socket. Always handle them so one bad peer cannot terminate
+    // the HTTP and collaboration server.
+    ws.on('error', (error) => {
+      console.warn(`[server] Collaboration WebSocket closed: ${error.message}`);
+    });
     const connection = hocuspocus.handleConnection(ws, request);
     ws.on('message', (data: Buffer | ArrayBuffer | Buffer[]) => {
       const buf = Array.isArray(data)

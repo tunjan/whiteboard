@@ -29,13 +29,19 @@ export function resolveOpacity(
 ): number {
   let alpha = localOpacity(shape);
   let marked = isMarked(shape.id);
-  const seen = new Set<string>([shape.id]);
-  let cur = shape.parentId ? getShape(shape.parentId) : undefined;
-  while (cur && !seen.has(cur.id)) {
-    alpha *= localOpacity(cur);
-    if (isMarked(cur.id)) marked = true;
-    seen.add(cur.id);
-    cur = cur.parentId ? getShape(cur.parentId) : undefined;
+  // Most shapes have no parent, and the canvas resolves this for every rendered
+  // shape on every document mutation — including once per frame while a stroke
+  // is being drawn. Entering the walk only when there is an ancestor to visit
+  // keeps the cycle-guard Set off that per-frame allocation path.
+  if (shape.parentId) {
+    const seen = new Set<string>([shape.id]);
+    let cur = getShape(shape.parentId);
+    while (cur && !seen.has(cur.id)) {
+      alpha *= localOpacity(cur);
+      if (isMarked(cur.id)) marked = true;
+      seen.add(cur.id);
+      cur = cur.parentId ? getShape(cur.parentId) : undefined;
+    }
   }
   return marked ? alpha * ERASE_DIM : alpha;
 }

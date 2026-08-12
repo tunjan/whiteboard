@@ -112,6 +112,44 @@ function connectorTarget(
   return { outline, points, closed: false };
 }
 
+/**
+ * The dragged shape's own vertices, minus the one being dragged, so a handle
+ * can meet its shape's other ends (closing a curve on its origin). Points only
+ * and taken from a pointer-down snapshot: including the outline would snap the
+ * handle to the segment it already sits on, and a live snapshot would let the
+ * target chase the handle.
+ */
+export function selfSnapTarget(shape: Shape, handleId: string): PointSnapTarget | null {
+  if (shape.type !== 'line' && shape.type !== 'arrow') return null;
+  const points = shape.props.points;
+  if (points.length < 2) return null;
+  const dragged =
+    handleId === 'start'
+      ? 0
+      : handleId === 'end'
+        ? points.length - 1
+        : handleId.startsWith('vertex:')
+          ? Number(handleId.slice('vertex:'.length))
+          : -1;
+  if (!Number.isInteger(dragged) || dragged < 0) return null;
+
+  const bounds = pointsBounds(points);
+  const center = {
+    x: shape.x + (bounds.minX + bounds.maxX) / 2,
+    y: shape.y + (bounds.minY + bounds.maxY) / 2,
+  };
+  const kept = points.flatMap((point, index) =>
+    index === dragged ? [] : [{ x: shape.x + point.x, y: shape.y + point.y }],
+  );
+  if (!kept.length) return null;
+  return {
+    shapeId: shape.id,
+    points: rotate(kept, center, shape.rotation),
+    outline: [],
+    closed: false,
+  };
+}
+
 /** Geometry exposed by a shape when it can be a snap target. */
 export function shapeSnapGeometry(shape: Shape): PointSnapTarget | null {
   const util = shapeRegistry.getFor(shape);
@@ -129,6 +167,7 @@ export function shapeSnapGeometry(shape: Shape): PointSnapTarget | null {
     case 'rectangle':
     case 'text':
     case 'image':
+    case 'sticker':
     case 'video':
     case 'graph':
     case 'equation':

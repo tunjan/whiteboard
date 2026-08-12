@@ -38,10 +38,10 @@ export interface DotGridLayer {
   step: number;
   /** Grid step projected to screen px. */
   screenStep: number;
-  /** Screen-space modulo phase for this layer, corrected for crisp dots. */
+  /** Dot centre within the pattern tile, phased to world space. */
   offsetX: number;
   offsetY: number;
-  /** Visibility after density-based level-of-detail fading. */
+  /** Visibility after zoom-based level-of-detail fading. */
   opacity: number;
   /** Screen-space dot radius. */
   radius: number;
@@ -52,9 +52,22 @@ export interface DotGridLayer {
 const TARGET_MINOR_PX = 28;
 
 export const DOT_GRID_BASE_STEP = 8;
-const DOT_GRID_STEPS = [1, 4, 16, 64].map((n) => n * DOT_GRID_BASE_STEP);
-const DOT_GRID_FADE_START_PX = 4;
-const DOT_GRID_FADE_END_PX = 16;
+
+/**
+ * Dot-grid levels of detail, coarsest first. `step` is a multiple of the base
+ * grid unit; a level fades in linearly from zoom `min` to `mid` and stays fully
+ * opaque above `mid`, so coarse dots carry the grid when zoomed out and finer
+ * ones appear as you zoom in.
+ */
+const DOT_GRID_LEVELS = [
+  { step: 64, min: -1, mid: 0.15 },
+  { step: 16, min: 0.05, mid: 0.375 },
+  { step: 4, min: 0.15, mid: 1 },
+  { step: 1, min: 0.7, mid: 2.5 },
+] as const;
+
+/** Screen-space dot radius, in px. */
+const DOT_GRID_RADIUS = 1;
 const DOT_GRID_CRISP_OFFSET = 0.5;
 
 /** Snap a raw world distance to the nearest 1-2-5 x 10^n value. */
@@ -82,38 +95,32 @@ export function getGridLevels(camera: Camera): GridLevels {
   };
 }
 
-function dotLayerOpacity(screenStep: number): number {
-  if (screenStep <= DOT_GRID_FADE_START_PX) return 0;
-  if (screenStep >= DOT_GRID_FADE_END_PX) return 1;
-  return (
-    (screenStep - DOT_GRID_FADE_START_PX) /
-    (DOT_GRID_FADE_END_PX - DOT_GRID_FADE_START_PX)
-  );
-}
-
-function crispModuloOffset(originScreen: number, screenStep: number): number {
-  return pmod(originScreen + DOT_GRID_CRISP_OFFSET, screenStep);
+function dotLevelOpacity(z: number, min: number, mid: number): number {
+  if (z >= mid) return 1;
+  if (z <= min) return 0;
+  return (z - min) / (mid - min);
 }
 
 /**
- * Fixed-world dot-grid layers. The layer steps are 8/32/128/512 world units,
- * so at 100% zoom they land on the requested pixel spacings. Each layer is
- * phased with a positive modulo of the camera offset, keeping the wallpaper
- * pinned to world coordinates while only rendering viewport-sized patterns.
+ * Fixed-world dot-grid layers, 8/32/128/512 world units apart. Each layer is
+ * phased with a positive modulo of the camera offset (plus a half-pixel nudge
+ * so dots sit on pixel centres), keeping the wallpaper pinned to world
+ * coordinates while only rendering viewport-sized patterns.
  */
 export function getDotGridLayers(camera: Camera): DotGridLayer[] {
-  const originX = -camera.x * camera.z;
-  const originY = -camera.y * camera.z;
-  return DOT_GRID_STEPS.map((step, index) => {
-    const screenStep = step * camera.z;
+  const originX = DOT_GRID_CRISP_OFFSET - camera.x * camera.z;
+  const originY = DOT_GRID_CRISP_OFFSET - camera.y * camera.z;
+  return DOT_GRID_LEVELS.map(({ step, min, mid }) => {
+    const worldStep = step * DOT_GRID_BASE_STEP;
+    const screenStep = worldStep * camera.z;
     return {
       id: `dot-${step}`,
-      step,
+      step: worldStep,
       screenStep,
-      offsetX: crispModuloOffset(originX, screenStep),
-      offsetY: crispModuloOffset(originY, screenStep),
-      opacity: dotLayerOpacity(screenStep),
-      radius: 0.85 + index * 0.12,
+      offsetX: pmod(originX, screenStep),
+      offsetY: pmod(originY, screenStep),
+      opacity: dotLevelOpacity(camera.z, min, mid),
+      radius: DOT_GRID_RADIUS,
     };
   });
 }

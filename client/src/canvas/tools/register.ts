@@ -11,11 +11,13 @@ import { createSelectTool } from './select-tool';
 import { createHandTool } from './hand-tool';
 import { createBoxTool } from './box-tool';
 import { createDrawTool } from './draw-tool';
+import { createWandTool } from './wand-tool';
 import { createLineTool } from './line-tool';
 import { createEraserTool } from './eraser-tool';
 import { createLaserTool } from './laser-tool';
 import { createTextTool } from './text-tool';
 import { createPolygonTool } from './polygon-tool';
+import { createStickerTool } from './sticker-tool';
 import { createFrameTool } from './frame-tool';
 import { createGraphTool } from './graph-tool';
 import { createEquationTool } from './equation-tool';
@@ -24,11 +26,13 @@ import { createCommentTool } from './comment-tool';
 toolRegistry.register(createSelectTool());
 toolRegistry.register(createHandTool());
 toolRegistry.register(createDrawTool());
+toolRegistry.register(createWandTool());
 toolRegistry.register(createTextTool());
 toolRegistry.register(createGraphTool());
 toolRegistry.register(createEquationTool());
 toolRegistry.register(createCommentTool());
 toolRegistry.register(createPolygonTool());
+toolRegistry.register(createStickerTool());
 toolRegistry.register(createFrameTool());
 toolRegistry.register(
   createBoxTool({

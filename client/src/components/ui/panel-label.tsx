@@ -11,7 +11,7 @@ function PanelLabel({
   return (
     <Comp
       data-slot="panel-label"
-      className={cn("block text-xs font-medium text-muted-foreground select-none", className)}
+      className={cn("block text-2xs font-semibold uppercase tracking-wider text-fg-secondary select-none", className)}
       {...props}
     />
   )

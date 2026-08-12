@@ -7,6 +7,9 @@ import {
   orthogonalRoute,
 } from '../shapes/connector-routing';
 import { shapeRegistry } from '../shapes/shape-registry';
+import { shapeSnapGeometry } from '../snap-geometry';
+import { SNAP_SCREEN, snapRegion, snapTargetShapes } from '../snap-targets';
+import { type PointSnapTarget, snapPoint } from '../snapping';
 import { useCameraStore } from '../use-camera-store';
 import { useSelectionStore } from '../use-selection-store';
 import { useStyleStore } from '../use-style-store';
@@ -27,6 +30,30 @@ export function createLineTool(opts: LineToolOptions): Tool {
   let creatingId: string | null = null;
   let startTargetId: string | null = null;
   let start = { x: 0, y: 0 };
+  /**
+   * Snap candidates for this create gesture, collected at pointer-down so the
+   * shape being drawn can never become its own target and the set stays stable
+   * for the whole drag.
+   */
+  let snapTargets: PointSnapTarget[] = [];
+
+  /**
+   * Snap an endpoint to nearby shape geometry, publishing the guides. Alt
+   * bypasses snapping; Shift already constrains the drag to an axis, so it
+   * takes precedence rather than fighting the snap.
+   */
+  function snapEndpoint(
+    point: { x: number; y: number },
+    info: ToolPointerInfo,
+  ): { x: number; y: number } {
+    if (info.altKey || info.shiftKey || !snapTargets.length) {
+      useSelectionStore.getState().setSnapGuides([]);
+      return point;
+    }
+    const snapped = snapPoint(point, snapTargets, SNAP_SCREEN / info.zoom);
+    useSelectionStore.getState().setSnapGuides(snapped.guides);
+    return snapped.point;
+  }
 
   // Finish the in-flight line/arrow. Shared by pointer-up (normal finish) and
   // commit (OS reclaimed the pointer mid-create — keep what was drawn). Length is
@@ -35,6 +62,8 @@ export function createLineTool(opts: LineToolOptions): Tool {
     const id = creatingId;
     creatingId = null;
     startTargetId = null;
+    snapTargets = [];
+    useSelectionStore.getState().setSnapGuides([]);
     if (!id) return;
     const shape = ctx.editor.getShape(id);
     const z = useCameraStore.getState().camera.z;
@@ -62,7 +91,20 @@ export function createLineTool(opts: LineToolOptions): Tool {
       if (info.button !== 0) return;
       const util = shapeRegistry.get(opts.type);
       if (!util) return;
-      start = info.point;
+      snapTargets = snapTargetShapes(
+        ctx.editor,
+        new Set(),
+        snapRegion(ctx, {
+          minX: info.point.x,
+          minY: info.point.y,
+          maxX: info.point.x,
+          maxY: info.point.y,
+        }),
+      ).flatMap((target) => {
+        const geometry = shapeSnapGeometry(target);
+        return geometry ? [{ ...geometry, shapeId: target.id }] : [];
+      });
+      start = snapEndpoint(info.point, info);
       const id = genId();
       creatingId = id;
       const base = util.getDefaultProps() as LineProps | ArrowProps;
@@ -120,14 +162,20 @@ export function createLineTool(opts: LineToolOptions): Tool {
       }
       const shape = ctx.editor.getShape(creatingId);
       if (!shape || (shape.type !== 'line' && shape.type !== 'arrow')) return;
+      const end = snapEndpoint({ x: start.x + dx, y: start.y + dy }, info);
       if (shape.type === 'line') {
         ctx.editor.updateShape(creatingId, {
-          props: { points: [{ x: 0, y: 0 }, { x: dx, y: dy }] },
+          props: {
+            points: [
+              { x: 0, y: 0 },
+              { x: end.x - shape.x, y: end.y - shape.y },
+            ],
+          },
         });
         return;
       }
 
-      const rawEnd = { x: start.x + dx, y: start.y + dy };
+      const rawEnd = end;
       const startTarget = startTargetId
         ? ctx.editor.getShape(startTargetId)
         : undefined;
@@ -187,6 +235,8 @@ export function createLineTool(opts: LineToolOptions): Tool {
       const id = creatingId;
       creatingId = null;
       startTargetId = null;
+      snapTargets = [];
+      useSelectionStore.getState().setSnapGuides([]);
       if (id) ctx.editor.deleteShapes([id]);
     },
   };

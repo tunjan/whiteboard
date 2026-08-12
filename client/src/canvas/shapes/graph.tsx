@@ -188,7 +188,7 @@ export const graphUtil: ShapeUtil<'graph'> = {
     const axisLabelStyle = {
       fontSize: 10,
       fill: 'var(--color-muted-foreground)',
-      stroke: 'var(--color-background)',
+      stroke: 'var(--color-panel)',
       strokeWidth: 3,
       paintOrder: 'stroke' as const,
     };
@@ -196,7 +196,7 @@ export const graphUtil: ShapeUtil<'graph'> = {
       fontSize: 13,
       fontWeight: 600,
       fill: 'var(--color-foreground)',
-      stroke: 'var(--color-background)',
+      stroke: 'var(--color-panel)',
       strokeWidth: 3.5,
       paintOrder: 'stroke' as const,
     };
@@ -250,7 +250,7 @@ export const graphUtil: ShapeUtil<'graph'> = {
           width={area.w}
           height={area.h}
           rx={4}
-          fill="var(--color-background)"
+          fill="var(--color-panel)"
           stroke="var(--color-border)"
           strokeWidth={1}
           vectorEffect="non-scaling-stroke"
@@ -338,7 +338,7 @@ export const graphUtil: ShapeUtil<'graph'> = {
                 cy={screen.y}
                 r={5}
                 fill={point.color}
-                stroke="var(--color-background)"
+                stroke="var(--color-panel)"
                 strokeWidth={1.75}
               />
             );
@@ -354,7 +354,7 @@ export const graphUtil: ShapeUtil<'graph'> = {
                   cy={screen.y}
                   r={5}
                   fill="var(--color-foreground)"
-                  stroke="var(--color-background)"
+                  stroke="var(--color-panel)"
                   strokeWidth={1.75}
                 />
                 <text

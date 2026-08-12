@@ -53,11 +53,14 @@ export interface DrawPoint {
 export interface DrawProps {
   /** Ink points in shape-local coordinates (append-only under the CRDT). */
   points: DrawPoint[];
+  /** Whether the stroke ended near enough to its start to enclose a region. */
   isClosed: boolean;
   color: string;
   size: number;
   /** Stroke dash style. Undefined preserves legacy solid ink. */
   dash?: StrokeDash;
+  /** Interior fill, applied only when `isClosed`. Undefined reads as 'none'. */
+  fillStyle?: FillStyle;
   /** Whether to derive pressure from pointer velocity instead of hardware pressure. */
   simulatePressure?: boolean;
   /** Pressure-to-width multiplier. Undefined preserves legacy uniform strokes. */
@@ -169,6 +172,27 @@ export interface ImageProps {
   crop?: { x: number; y: number; w: number; h: number };
 }
 
+export interface StickerProps {
+  /**
+   * Catalog id of the stamp artwork (e.g. "thumbs-up"). Deliberately a plain
+   * string, not a union: the catalog lives client-side, so it can grow without
+   * a shared-types change, and a peer on an older build renders a fallback
+   * glyph instead of failing on an id it doesn't know.
+   */
+  sticker: string;
+  /**
+   * Blob id of a user-uploaded sticker's artwork (`/api/blobs/<blobId>`).
+   * Absent on the built-in stamps, which draw vector art keyed by `sticker`.
+   *
+   * Copied onto the shape rather than looked up from the board's sticker
+   * library, so a stamp keeps rendering after its library entry is removed.
+   */
+  blobId?: string;
+  /** Rendered size in world units. */
+  w: number;
+  h: number;
+}
+
 export interface VideoProps {
   /** YouTube video id (e.g. "dQw4w9WgXcQ"). */
   videoId: string;
@@ -254,6 +278,7 @@ export type LineShape = BaseShape<'line', LineProps>;
 export type ArrowShape = BaseShape<'arrow', ArrowProps>;
 export type TextShape = BaseShape<'text', TextProps>;
 export type ImageShape = BaseShape<'image', ImageProps>;
+export type StickerShape = BaseShape<'sticker', StickerProps>;
 export type VideoShape = BaseShape<'video', VideoProps>;
 export type GraphShape = BaseShape<'graph', GraphProps>;
 export type EquationShape = BaseShape<'equation', EquationProps>;
@@ -274,6 +299,7 @@ export type Shape =
   | ArrowShape
   | TextShape
   | ImageShape
+  | StickerShape
   | VideoShape
   | GraphShape
   | EquationShape
@@ -292,6 +318,7 @@ export interface ShapeMap {
   arrow: ArrowShape;
   text: TextShape;
   image: ImageShape;
+  sticker: StickerShape;
   video: VideoShape;
   graph: GraphShape;
   equation: EquationShape;

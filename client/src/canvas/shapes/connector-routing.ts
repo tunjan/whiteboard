@@ -419,6 +419,19 @@ function pointsEqual(a: readonly Vec[], b: readonly Vec[]): boolean {
 
 /** Keep bound endpoints and elbow routes synchronized with their target shapes. */
 export function syncBoundArrows(shapes: readonly Shape[], editor: Editor): void {
+  // Runs on every document mutation, which means once per frame for the whole
+  // of a stroke or drag. Building the lookup up front paid for an N-entry Map
+  // plus its N-tuple source array on all of those frames even on a page holding
+  // no bound arrows at all, so probe for the work before indexing for it.
+  let hasBoundArrow = false;
+  for (const shape of shapes) {
+    if (shape.type === 'arrow' && shape.props.bindings) {
+      hasBoundArrow = true;
+      break;
+    }
+  }
+  if (!hasBoundArrow) return;
+
   const byId = new Map(shapes.map((shape) => [shape.id, shape]));
   const updates: Array<{
     id: string;

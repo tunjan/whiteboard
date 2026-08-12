@@ -1,5 +1,4 @@
 import { Crosshair, Users } from 'lucide-react';
-import type { CSSProperties } from 'react';
 import type { Identity } from '@/collab/identity';
 import { TUTOR_COLOR } from '@/collab/identity';
 import { summonAll } from '@/collab/presence';
@@ -18,9 +17,15 @@ import { cn } from '@/lib/utils';
 
 interface FollowControlsProps {
   identity: Identity | null;
+  showLabel?: boolean;
+  toolbarItem?: boolean;
 }
 
-export function FollowControls({ identity }: FollowControlsProps) {
+export function FollowControls({
+  identity,
+  showLabel = false,
+  toolbarItem = false,
+}: FollowControlsProps) {
   const peers = usePresenceStore((s) => s.peers);
   const following = useFollowStore((s) => s.following);
   const toggle = useFollowStore((s) => s.toggle);
@@ -39,7 +44,7 @@ export function FollowControls({ identity }: FollowControlsProps) {
           <Tooltip>
             <TooltipTrigger
               render={
-                <span className="flex items-center gap-2 rounded-[var(--surface-control-radius,var(--radius-lg))] px-2 text-xs font-medium text-content-emphasis" />
+                <span className="flex items-center gap-2 rounded-md px-2 text-xs font-medium text-primary" />
               }
             >
               <span
@@ -59,13 +64,16 @@ export function FollowControls({ identity }: FollowControlsProps) {
             render={
               <Button
                 variant="ghost"
-                size="icon-sm"
+                size={showLabel ? 'sm' : 'icon-sm'}
+                data-toolbar-item={toolbarItem || undefined}
+                tabIndex={toolbarItem ? -1 : undefined}
                 aria-label="Bring everyone to my view"
                 onClick={summonAll}
               />
             }
           >
             <Users />
+            {showLabel ? <span>Bring everyone</span> : null}
           </TooltipTrigger>
           <TooltipContent side="bottom">
             Bring everyone to my view
@@ -78,9 +86,6 @@ export function FollowControls({ identity }: FollowControlsProps) {
   if (!tutorPeer) return null;
 
   const tutorColor = tutorPeer.color || TUTOR_COLOR;
-  const activeStyle = {
-    '--follow-color': tutorColor,
-  } as CSSProperties;
 
   return (
     <>
@@ -92,20 +97,25 @@ export function FollowControls({ identity }: FollowControlsProps) {
                 pressed={following}
                 onPressedChange={toggle}
                 size="sm"
+                data-toolbar-item={toolbarItem || undefined}
+                tabIndex={toolbarItem ? -1 : undefined}
                 aria-label={following ? 'Stop following tutor' : 'Follow tutor'}
+                // Following is an on/off state, so it takes the same pressed
+                // idiom as every other toggle in the chrome. The tutor's colour
+                // stays where it identifies a person — the dot in the banner
+                // below — rather than tinting a control.
                 className={cn(
-                  'gap-1.5 border border-transparent text-sm font-medium',
-                  following &&
-                    'border-[var(--follow-color)] bg-[color-mix(in_oklch,var(--follow-color),transparent_84%)] text-content-emphasis hover:bg-[color-mix(in_oklch,var(--follow-color),transparent_78%)]',
+                  'h-8 min-w-8 border border-transparent',
+                  showLabel ? 'px-2.5' : 'w-8 px-0',
+                  following && 'border-border bg-panel text-primary',
                 )}
-                style={following ? activeStyle : undefined}
               />
             }
           >
-            <Crosshair data-icon="inline-start" />
-            <span className="hidden sm:inline">
-              {following ? 'Following' : 'Follow tutor'}
-            </span>
+            <Crosshair />
+            {showLabel ? (
+              <span>{following ? 'Following' : 'Follow tutor'}</span>
+            ) : null}
           </TooltipTrigger>
           <TooltipContent side="bottom">
             {following ? 'Stop following tutor' : 'Follow tutor'}
@@ -120,7 +130,7 @@ export function FollowControls({ identity }: FollowControlsProps) {
             style={{ background: tutorColor }}
             aria-hidden="true"
           />
-          <span className="text-xs font-medium text-content-emphasis">
+          <span className="text-xs font-medium text-primary">
             Following tutor. Move to exit.
           </span>
         </Surface>

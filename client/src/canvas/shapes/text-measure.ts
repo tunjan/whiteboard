@@ -21,7 +21,7 @@ export const MIN_TEXT_WIDTH = 8;
 export const FONT_STACKS: Record<FontFamily, string> = {
   sans: TEXT_FONT_FAMILY,
   serif: "'Georgia', 'Times New Roman', serif",
-  mono: "'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace",
+  mono: "'Geist Mono Variable', ui-monospace, 'SF Mono', Menlo, monospace",
   hand: "'Caveat Variable', cursive",
 };
 

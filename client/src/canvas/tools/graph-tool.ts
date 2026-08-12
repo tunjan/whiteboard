@@ -16,7 +16,7 @@ export function createGraphTool(): Tool {
   return {
     id: 'graph',
     label: 'Function',
-    hotkey: 'f',
+    hotkey: 'g',
     cursor: 'crosshair',
     icon: ChartLine,
 
@@ -82,4 +82,3 @@ export function createGraphTool(): Tool {
     },
   };
 }
-

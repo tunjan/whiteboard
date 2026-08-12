@@ -24,28 +24,30 @@ export function Login({ onSuccess }: { onSuccess: () => void }) {
   };
 
   return (
-    <div className="grid min-h-dvh place-items-center px-4 py-10 sm:px-6">
-      <Card className="w-full max-w-sm">
-        <CardContent>
+    <div className="grid min-h-dvh place-items-center bg-canvas px-4 py-10 sm:px-6 text-primary">
+      <Card className="w-full max-w-sm shadow-md p-6">
+        <CardContent className="p-0">
           <form onSubmit={submit} className="flex flex-col gap-6">
-            <div className="flex flex-col items-start gap-6">
+            <div className="flex flex-col items-start gap-5">
               <div className="flex items-center gap-2.5">
-                <BrandMark className="size-7" />
-                <p className="text-sm font-semibold">Best Whiteboard</p>
+                <BrandMark className="size-6 text-primary" />
+                <p className="text-sm font-semibold tracking-tight text-primary">Whiteboard</p>
               </div>
-              <div className="grid gap-2">
-                <h1 className="text-balance text-2xl font-semibold tracking-tight">
-                  Tutor Sign In
+              <div className="grid gap-1">
+                <h1 className="text-2xl font-semibold tracking-tight text-primary">
+                  Tutor Access
                 </h1>
-                <p className="text-pretty text-sm text-muted-foreground">
-                  Enter the tutor password to create and manage whiteboards.
+                <p className="text-sm text-secondary leading-relaxed">
+                  Enter the tutor password to access dashboard and manage canvases.
                 </p>
               </div>
             </div>
 
             <FieldGroup>
               <Field data-invalid={error ? true : undefined}>
-                <FieldLabel htmlFor={passwordId}>Password</FieldLabel>
+                <FieldLabel htmlFor={passwordId} className="text-xs font-medium text-secondary">
+                  Password
+                </FieldLabel>
                 <Input
                   id={passwordId}
                   type="password"
@@ -56,11 +58,11 @@ export function Login({ onSuccess }: { onSuccess: () => void }) {
                   autoComplete="current-password"
                   aria-invalid={error ? true : undefined}
                 />
-                {error ? <FieldError>{error}</FieldError> : null}
+                {error ? <FieldError className="text-xs text-danger mt-1">{error}</FieldError> : null}
               </Field>
             </FieldGroup>
 
-            <Button type="submit" className="w-full" disabled={busy}>
+            <Button type="submit" variant="default" className="w-full h-10 text-sm font-medium" disabled={busy}>
               {busy ? 'Signing in…' : 'Sign In'}
             </Button>
           </form>

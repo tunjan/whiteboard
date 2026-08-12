@@ -41,7 +41,7 @@ export function BoardView({ boardId }: { boardId: string }) {
   const [name, setName] = useState('Whiteboard');
   const [identity, setIdentity] = useState<Identity | null>(null);
   const [needsName, setNeedsName] = useState(false);
-  const [assignedColor, setAssignedColor] = useState('#2f6df6');
+  const [assignedColor, setAssignedColor] = useState('#2563EB');
   const [editingIdentity, setEditingIdentity] = useState(false);
   const [renamingBoard, setRenamingBoard] = useState(false);
 
@@ -100,7 +100,7 @@ export function BoardView({ boardId }: { boardId: string }) {
   }, [identity]);
 
   return (
-    <div className="relative h-dvh w-screen overflow-hidden overscroll-none bg-bg-muted text-content-emphasis">
+    <div className="relative h-dvh w-screen overflow-hidden overscroll-none bg-muted text-primary">
       <CanvasContextMenu>
         <Canvas />
       </CanvasContextMenu>

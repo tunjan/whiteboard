@@ -1,6 +1,6 @@
 import { Fragment } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { MousePointer2, Navigation2 } from 'lucide-react';
+import { MousePointer2 } from 'lucide-react';
 import { rotatePoint, type Shape, type TextShape } from '@whiteboard/shared';
 import type { Camera } from '@/canvas/camera';
 import { worldToScreen } from '@/canvas/camera';
@@ -12,7 +12,7 @@ import {
 } from '@/canvas/shapes/text-measure';
 import { useDocumentStore } from '@/canvas/use-document-store';
 import { cursorEdgeIndicator } from '@/collab/cursor-edge';
-import { outlineColor, textOnColor } from '@/collab/identity';
+import { outlineColor } from '@/collab/identity';
 import { jumpToPeerViewport } from '@/collab/presence';
 import {
   type PeerPresence,
@@ -21,12 +21,13 @@ import {
 import { cn } from '@/lib/utils';
 
 // Far enough from the edge that the whole marker clears the layer's clip: the
-// 32px bubble is centred here and its arrow reaches ~36px beyond that centre.
-const EDGE_INDICATOR_INSET = 40;
+// 24px disc is centred here and its wedge reaches 18px beyond that centre.
+const EDGE_INDICATOR_INSET = 22;
 
 function CursorIcon({ color }: { color: string }) {
-  // The wide round-joined outer stroke doubles as the darker border and as the
-  // thing that rounds off the pointer's sharp corners.
+  // The wide round-joined outer stroke doubles as the darker border and rounds
+  // off the pointer's sharp corners. The slim inner stroke keeps roughly a
+  // one-pixel outline visible after the fill is layered on top.
   return (
     <span
       aria-hidden="true"
@@ -36,13 +37,17 @@ function CursorIcon({ color }: { color: string }) {
         className="absolute inset-0 size-5"
         fill={outlineColor(color)}
         stroke={outlineColor(color)}
-        strokeWidth={1.75}
+        strokeWidth={2.5}
+        strokeLinecap="round"
+        strokeLinejoin="round"
       />
       <MousePointer2
         className="absolute inset-0 size-5"
         fill={color}
         stroke={color}
-        strokeWidth={1}
+        strokeWidth={0.5}
+        strokeLinecap="round"
+        strokeLinejoin="round"
       />
     </span>
   );
@@ -64,36 +69,39 @@ function OffscreenCursorIndicator({
       // `data-ui-layer` keeps the canvas from claiming the pointerdown as a
       // tool gesture — that captures the pointer, and the click never lands.
       data-ui-layer
-      className="pointer-events-auto relative size-8 -translate-x-1/2 -translate-y-1/2 cursor-pointer rounded-full outline-none transition-opacity hover:opacity-80 disabled:cursor-default"
+      className="group pointer-events-auto relative size-6 -translate-x-1/2 -translate-y-1/2 cursor-pointer rounded-full outline-none disabled:cursor-default focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2"
       title={name}
       aria-label={`Jump to ${name}'s view`}
       disabled={!peer.viewport}
       onClick={() => jumpToPeerViewport(peer)}
     >
+      {/* The wedge sits flush against the disc so the two read as a single
+          object rather than a floating arrow. */}
       <span
         className="absolute inset-0"
         style={{ transform: `rotate(${rotation}deg)` }}
       >
-        <Navigation2
-          className="absolute -top-4 left-1/2 size-4 -translate-x-1/2"
-          fill={outlineColor(color)}
-          stroke={outlineColor(color)}
-          strokeWidth={3}
-        />
-        <Navigation2
-          className="absolute -top-4 left-1/2 size-4 -translate-x-1/2"
-          fill={color}
-          stroke={color}
-          strokeWidth={1.5}
-        />
+        <svg
+          aria-hidden="true"
+          viewBox="0 0 8 6"
+          className="absolute -top-1.5 left-1/2 h-1.5 w-2 -translate-x-1/2 overflow-visible"
+        >
+          <path
+            d="M4 0 8 6H0Z"
+            fill={color}
+            stroke={outlineColor(color)}
+            strokeWidth={1}
+            strokeLinejoin="round"
+          />
+        </svg>
       </span>
       <span
-        className="absolute inset-0 flex items-center justify-center rounded-full border text-xs font-semibold shadow-hover"
-        style={{
-          backgroundColor: color,
-          borderColor: outlineColor(color),
-          color: textOnColor(color),
-        }}
+        // Same chrome as the on-canvas name tag below, so the two ways a peer
+        // can appear belong to one system — except for the hairline, which
+        // carries the identity colour at full strength so the marker stays
+        // scannable from across the board without flooding the disc.
+        className="absolute inset-0 flex items-center justify-center rounded-full border bg-surface/95 text-2xs font-medium leading-none text-primary shadow-e2 transition-colors duration-instant group-hover:bg-surface-hover"
+        style={{ borderColor: color }}
       >
         {name.trim().charAt(0).toUpperCase() || '?'}
       </span>
@@ -241,15 +249,15 @@ export function CursorsLayer({
                 <CursorIcon color={p.color} />
                 <span
                   className={cn(
-                    'absolute left-3 flex h-6 max-w-40 items-center rounded-md border px-2 text-[11px] font-medium leading-none shadow-hover',
+                    'absolute left-3 flex h-6 max-w-40 items-center gap-1.5 rounded-lg border border-border bg-surface/95 px-2 text-2xs font-medium leading-none text-primary shadow-e2',
                     placeLabelAbove ? 'bottom-3' : 'top-3',
                   )}
-                  style={{
-                    backgroundColor: p.color,
-                    borderColor: outlineColor(p.color),
-                    color: textOnColor(p.color),
-                  }}
                 >
+                  <span
+                    aria-hidden="true"
+                    className="size-1.5 shrink-0 rounded-full"
+                    style={{ backgroundColor: p.color }}
+                  />
                   <span className="truncate">{p.name}</span>
                 </span>
               </div>

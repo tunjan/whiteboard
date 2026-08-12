@@ -1,6 +1,7 @@
 import { toolRegistry } from '@/canvas/tools/tool-registry';
 import { useCanvasUiStore } from '@/canvas/use-canvas-ui-store';
 import { ConnectionIndicator } from '@/components/connection-indicator';
+import { useVoiceStore } from '@/collab/voice/use-voice-store';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -143,7 +144,7 @@ function SliderField({
             onChange(Array.isArray(nextValue) ? nextValue[0]! : nextValue)
           }
         />
-        <span className="w-10 shrink-0 text-right font-mono text-xs tabular-nums text-muted-foreground">
+        <span className="w-10 shrink-0 text-right font-mono text-xs font-semibold tabular-nums text-primary">
           {display}
         </span>
       </div>
@@ -161,19 +162,19 @@ function SettingsNavigation({
   return (
     <TabsList
       aria-label="Settings sections"
-      className={cn('h-auto justify-start gap-1', listClassName)}
+      className={cn('h-auto justify-start gap-1 p-1 border border-border', listClassName)}
     >
       {SETTINGS_NAV.map(({ id, label, icon: Icon }) => (
         <TabsTrigger
           key={id}
           value={id}
           className={cn(
-            'h-auto shrink-0 justify-start gap-2.5 px-2.5 py-2',
+            'h-9 shrink-0 justify-start gap-2.5 px-3 py-2 hover:bg-subtle cursor-pointer',
             triggerClassName,
           )}
         >
-          <Icon aria-hidden="true" data-icon="inline-start" />
-          {label}
+          <Icon aria-hidden="true" data-icon="inline-start" className="size-4 shrink-0 text-tertiary" />
+          <span className="font-medium">{label}</span>
         </TabsTrigger>
       ))}
     </TabsList>
@@ -183,11 +184,24 @@ function SettingsNavigation({
 function GeneralSettings() {
   const themeLabelId = useId();
   const snappingId = useId();
+  const voiceSoundsId = useId();
   const theme = useThemeStore((state) => state.theme);
   const setTheme = useThemeStore((state) => state.setTheme);
   const snappingEnabled = useCanvasUiStore((state) => state.snappingEnabled);
   const setSnappingEnabled = useCanvasUiStore(
     (state) => state.setSnappingEnabled,
+  );
+  const soundEffectsEnabled = useVoiceStore(
+    (state) => state.soundEffectsEnabled,
+  );
+  const setSoundEffectsEnabled = useVoiceStore(
+    (state) => state.setSoundEffectsEnabled,
+  );
+  const soundEffectsVolume = useVoiceStore(
+    (state) => state.soundEffectsVolume,
+  );
+  const setSoundEffectsVolume = useVoiceStore(
+    (state) => state.setSoundEffectsVolume,
   );
 
   return (
@@ -215,6 +229,41 @@ function GeneralSettings() {
           checked={snappingEnabled}
           onCheckedChange={setSnappingEnabled}
         />
+      </PreferenceRow>
+
+      <PreferenceRow
+        label="Voice Chat Sounds"
+        description="Play subtle cues when joining, leaving, or changing microphone state. Reduced-motion preferences keep them silent."
+        htmlFor={voiceSoundsId}
+      >
+        <Switch
+          id={voiceSoundsId}
+          aria-label="Voice chat sounds"
+          checked={soundEffectsEnabled}
+          onCheckedChange={setSoundEffectsEnabled}
+        />
+      </PreferenceRow>
+
+      <PreferenceRow label="Voice Sound Volume">
+        <div className="flex w-full max-w-80 items-center gap-3">
+          <Slider
+            className="flex-1"
+            aria-label="Voice sound volume"
+            min={0}
+            max={1}
+            step={0.05}
+            value={soundEffectsVolume}
+            disabled={!soundEffectsEnabled}
+            onValueChange={(nextValue) =>
+              setSoundEffectsVolume(
+                Array.isArray(nextValue) ? nextValue[0]! : nextValue,
+              )
+            }
+          />
+          <span className="w-10 shrink-0 text-right font-mono text-xs tabular-nums text-muted-foreground">
+            {Math.round(soundEffectsVolume * 100)}%
+          </span>
+        </div>
       </PreferenceRow>
     </FieldGroup>
   );

@@ -1,18 +1,21 @@
-import { useState } from 'react';
+import { type CSSProperties, useState } from 'react';
 import {
-  AudioLines,
   ArrowLeft,
+  ClipboardCopy,
   Download,
   EllipsisVertical,
-  Mic,
-  MicOff,
+  Keyboard,
   Moon,
   NotebookPen,
   Settings,
+  SlidersHorizontal,
   Sun,
 } from 'lucide-react';
-import { exportBoardToPng } from '@/canvas/export-png';
-import { outlineColor, textOnColor, type Identity } from '@/collab/identity';
+import {
+  copyBoardToPngClipboard,
+  exportBoardToPng,
+} from '@/canvas/export-png';
+import { type Identity } from '@/collab/identity';
 import { jumpToPeerViewport } from '@/collab/presence';
 import {
   type PeerPresence,
@@ -21,10 +24,10 @@ import {
 } from '@/collab/use-presence-store';
 import { useVoiceStore } from '@/collab/voice/use-voice-store';
 import { BoardNotesDialog } from '@/components/board-notes-dialog';
-import { AnimationControls } from '@/components/animation-controls';
 import { ConnectionIndicator } from '@/components/connection-indicator';
 import { DocumentsPanel } from '@/components/documents-panel';
 import { FollowControls } from '@/components/follow-controls';
+import { KeyboardShortcutsDialog } from '@/components/keyboard-shortcuts-dialog';
 import { MusicPlayer } from '@/music/music-player';
 import { PageMenu } from '@/components/page-menu';
 import { SettingsDialog } from '@/components/settings-dialog';
@@ -46,16 +49,42 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Surface } from '@/components/ui/surface';
+import {
+  Popover,
+  PopoverContent,
+  PopoverDescription,
+  PopoverHeader,
+  PopoverTitle,
+  PopoverTrigger,
+} from '@/components/ui/popover';
+import { CHROME_CONTROLS, Surface } from '@/components/ui/surface';
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
+import { useIsMobile } from '@/hooks/use-mobile';
+import { useRovingToolbar } from '@/hooks/use-roving-toolbar';
+import { cn } from '@/lib/utils';
 import { useThemeStore } from '@/use-theme-store';
 
 const MAX_VISIBLE_PARTICIPANTS = 4;
+
+// Shared hit-area for the two clickable avatar triggers below (edit-identity,
+// jump-to-peer) — same shape as the avatar itself, no visible chrome of its own.
+//
+// Hover brings the disc to the front and firms up its ring. It deliberately
+// does not fade: floating on the canvas, a translucent avatar shows whatever
+// ink is underneath, so the hovered one looks *less* solid than its neighbours
+// — the opposite of the "this one is live" read hover is meant to give.
+//
+// It also no longer lifts. A disc that jumps on hover is the one piece of the
+// chrome that moves under the cursor, and the ring already answers "which one
+// am I on" without shifting anything off its row. The ring is always 2px and
+// only changes colour, so nothing reflows either.
+const AVATAR_TRIGGER_CLASS =
+  'relative z-[var(--avatar-stack-index)] rounded-full hover:z-10 focus-visible:z-10 [&_[data-slot=avatar]]:transition-[box-shadow] [&_[data-slot=avatar]]:duration-fast hover:[&_[data-slot=avatar]]:ring-border-strong motion-reduce:[&_[data-slot=avatar]]:transition-none';
 
 interface Participant {
   id: string;
@@ -76,41 +105,70 @@ function ParticipantAvatar({
   color,
   name,
   voice,
+  overlapping = false,
 }: {
   color: string;
   name: string;
   voice: VoiceDisplayState | null;
+  overlapping?: boolean;
 }) {
   return (
     <Avatar
-      className="size-7 shrink-0 border-2 after:hidden"
-      style={{ borderColor: outlineColor(color) }}
+      // 24px. The discs no longer fill a control square themselves — the row
+      // around them is 32px tall and centres them, so the cluster still sits
+      // on the control grid without the avatar having to be that big.
+      size="sm"
+      className={cn(
+        'shrink-0 border-0 after:hidden',
+        // Overlapping discs need to be cut away from the one behind them, or
+        // the fills blend into an unreadable smear. The cutaway has to be
+        // whatever the board paints behind it to read as negative space rather
+        // than as a border — and that is `bg-surface` (see Canvas.tsx), not the
+        // `canvas` token, which is a different, greyer colour the board never
+        // actually draws. Ringing in `canvas` is what put a grey halo around
+        // every disc.
+        //
+        // The ring is always 2px — transparent when solo — so the hover state
+        // only has to recolour it and nothing changes size under the cursor.
+        'ring-2',
+        overlapping ? 'ring-surface' : 'ring-transparent',
+      )}
     >
-      <AvatarFallback
-        className="text-[10px] font-semibold"
-        style={{ backgroundColor: color, color: textOnColor(color) }}
-      >
+      {/* The identity colour at full strength, with the initial reversed out
+          of it. A disc this small has very little area to carry a hue, and the
+          old wash (28% of the colour mixed into the surface) spent most of that
+          area on the surface instead — the discs read as grey chips.
+
+          White is safe on every entry rather than by luck: STUDENT_COLORS is
+          luminance-matched, so the whole palette lands within 4.98:1–5.04:1
+          against white, clearing AA for the 11px initial. Literal white rather
+          than `fg-inverse` because the fill is now the raw identity colour and
+          no longer follows the theme — a token that flips would put dark ink on
+          a mid-tone fill in dark mode. */}
+      <AvatarFallback style={{ backgroundColor: color, color: '#FFFFFF' }}>
         {name.trim().charAt(0).toUpperCase() || '?'}
       </AvatarFallback>
+      {/* Being in the call is ordinary, so it is neutral ink: subtle when
+          idle, full-strength while speaking. Muted keeps its colour — it is
+          the one voice state you need to notice, because you can be talking
+          into a dead mic without knowing.
+
+          Precedence matches the tooltip below (muted before speaking); the
+          badge used to test speaking first and could report a muted
+          participant as live. */}
       {voice?.inCall ? (
         <AvatarBadge
           aria-hidden="true"
-          className={
+          className={cn(
+            // Same cutaway as the disc's own ring, for the same reason.
+            'ring-surface',
             voice.muted
-              ? 'bg-bg-default text-content-muted'
+              ? 'bg-danger-fg bg-blend-normal'
               : voice.speaking
-                ? 'bg-bg-success text-content-success ring-content-success/30'
-                : 'bg-bg-default text-content-subtle'
-          }
-        >
-          {voice.muted ? (
-            <MicOff />
-          ) : voice.speaking ? (
-            <AudioLines />
-          ) : (
-            <Mic />
+                ? 'bg-fg bg-blend-normal'
+                : 'bg-fg-subtle bg-blend-normal',
           )}
-        </AvatarBadge>
+        />
       ) : null}
     </Avatar>
   );
@@ -126,7 +184,9 @@ function OverflowParticipants({
   const label = `${participants.length} more present`;
   const badge = (
     <AvatarGroupCount
-      className="size-7 border-2 border-bg-default bg-bg-subtle text-[10px] font-semibold text-content-subtle"
+      className="z-0 size-6 border-0 ring-2 ring-surface hover:z-10"
+      // Tail of the stack: it only ever renders alongside others, and nothing
+      // sits to its right to overlap it.
       title={showPeerLatency ? undefined : label}
     >
       +{participants.length}
@@ -140,9 +200,10 @@ function OverflowParticipants({
         render={
           <div
             aria-label={label}
-            className="rounded-full"
+            data-toolbar-item
+            className="relative z-0 rounded-full hover:z-10 focus-visible:z-10"
             role="status"
-            tabIndex={0}
+            tabIndex={-1}
           />
         }
       >
@@ -170,8 +231,98 @@ function OverflowParticipants({
   );
 }
 
+function SessionUtilities({
+  identity,
+  compact,
+}: {
+  identity: Identity | null;
+  compact: boolean;
+}) {
+  if (!compact) {
+    return (
+      <>
+        <MusicPlayer identity={identity} toolbarItem />
+        <FollowControls identity={identity} toolbarItem />
+        <DocumentsPanel identity={identity} toolbarItem />
+        <VoiceControls identity={identity} toolbarItem />
+      </>
+    );
+  }
+
+  return (
+    <Popover>
+      <TooltipProvider delay={300}>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <PopoverTrigger
+                render={
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    data-toolbar-item
+                    tabIndex={-1}
+                    aria-label="Open session tools"
+                  />
+                }
+              />
+            }
+          >
+            <SlidersHorizontal aria-hidden="true" />
+          </TooltipTrigger>
+          <TooltipContent side="bottom">Session tools</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+      {/* Same four controls as the docked panel, just relocated — so they carry
+          the same chrome conventions (hairline icons, coarse-pointer targets)
+          rather than reverting to stock weights outside a chrome Surface. */}
+      <PopoverContent
+        side="bottom"
+        align="end"
+        sideOffset={8}
+        className={cn(
+          CHROME_CONTROLS,
+          'w-[min(19rem,calc(100vw-1rem))]',
+        )}
+      >
+        <PopoverHeader>
+          <PopoverTitle>Session tools</PopoverTitle>
+          <PopoverDescription>
+            Shared media and collaboration controls.
+          </PopoverDescription>
+        </PopoverHeader>
+        <div className="grid grid-cols-2 gap-0.5 [&_[data-slot=button]]:w-full [&_[data-slot=button]]:justify-start [&_[data-slot=popover-trigger]]:w-full [&_[data-slot=popover-trigger]]:justify-start [&_[data-slot=toggle]]:w-full [&_[data-slot=toggle]]:justify-start">
+          <MusicPlayer identity={identity} showLabel />
+          <FollowControls identity={identity} showLabel />
+          <DocumentsPanel identity={identity} showLabel />
+          <VoiceControls identity={identity} showLabel />
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 /**
- * Docked top chrome header for a board. A single, full-width top header docked at the top edge.
+ * Docked top chrome header for a board. Two panels attached to the viewport
+ * corners, plus a free-floating presence cluster:
+ *
+ * Left  — board navigation: back → board title → page (breadcrumb pattern, §12.8)
+ * Right — session controls: connection, collaboration tools, share
+ * Beside the right panel — participant avatars, floating free of any panel
+ *
+ * Both docked panels use the `docked` Surface mode (§2.2 panel surface), but
+ * override its fill to `bg-surface` so they match the canvas rather than
+ * stepping above it. Because they're flush to the screen edge they carry no
+ * shadow and no border either — the chrome reads as part of the window frame
+ * rather than as a card hovering over it. Their ghost controls hover to `panel`
+ * instead, since the hover fill has to stay one step off the surface it sits on.
+ *
+ * The presence cluster is deliberately *not* panelled: who is on the board is
+ * live state rather than a control, so the discs sit directly on the canvas.
+ * Their overlap rings are `ring-surface` — the colour the canvas actually
+ * paints — so the cutaway between stacked avatars reads as negative space, not
+ * as a border.
  */
 export function BoardChrome({
   boardId,
@@ -190,6 +341,9 @@ export function BoardChrome({
 }) {
   const theme = useThemeStore((s) => s.theme);
   const toggle = useThemeStore((s) => s.toggle);
+  const isMobile = useIsMobile();
+  const sessionToolbar = useRovingToolbar<HTMLDivElement>();
+  const presenceToolbar = useRovingToolbar<HTMLDivElement>();
   const peers = usePresenceStore((s) => s.peers);
   const voiceStatus = useVoiceStore((s) => s.status);
   const voiceMuted = useVoiceStore((s) => s.muted);
@@ -226,8 +380,15 @@ export function BoardChrome({
   ];
   const visibleParticipants = participants.slice(0, MAX_VISIBLE_PARTICIPANTS);
   const overflowParticipants = participants.slice(MAX_VISIBLE_PARTICIPANTS);
+  // A lone avatar has nothing to overlap, so it stays flat and evenly spaced;
+  // the stack only forms once there is a second person on the board.
+  const avatarsOverlap = participants.length > 1;
+  // Highest z-index goes to the leftmost avatar and descends rightward, so the
+  // overflow count (rendered last) ends up underneath everything at 0.
+  const stackDepth = visibleParticipants.length;
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [notesOpen, setNotesOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
   const renameTitle = identity?.isTutor ? onRenameTitle : undefined;
 
@@ -242,11 +403,19 @@ export function BoardChrome({
 
   return (
     <>
-      {/* Top-left panel: board navigation and the current page. */}
-      <Surface role="navigation" aria-label="Board navigation" className="touch-targets absolute top-[env(safe-area-inset-top)] left-[env(safe-area-inset-left)] z-20 flex h-10 max-w-[calc(100vw-1rem)] items-center gap-0.5 rounded-none rounded-br-md border-t-0 border-l-0 p-1 shadow-none sm:max-w-[calc(50vw-1.5rem)]">
-        {/* Back navigates to the boards list, which is tutor-only. Students join
-            via a shared link and aren't authenticated, so following it would
-            bounce them to the login page — hide it for them. */}
+      {/* ── Top-left: board navigation ──────────────────────────────────────
+          Breadcrumb layout (§12.8): Back → Board title → / → Current page → ⋯
+          Board title is the "ancestor" (text-secondary, muted).
+          Current page name is handled by PageMenu (text-primary, full weight).
+          Separator is a slash. */}
+      <Surface
+        role="navigation"
+        aria-label="Board navigation"
+        mode="docked"
+        chrome
+        className="absolute top-0 left-0 z-20 flex max-w-[calc(100vw-0.5rem)] items-center gap-0.5 rounded-none rounded-br-xl border-0 bg-surface p-1 pt-[calc(0.25rem+env(safe-area-inset-top))] pl-[calc(0.25rem+env(safe-area-inset-left))] [--chrome-hover:var(--color-panel)] md:max-w-[50vw]"
+      >
+        {/* Back — tutor-only: students join via shared link and aren't authenticated */}
         {identity?.isTutor && (
           <TooltipProvider delay={300}>
             <Tooltip>
@@ -266,6 +435,10 @@ export function BoardChrome({
             </Tooltip>
           </TooltipProvider>
         )}
+
+        {/* Board title — ancestor node of the breadcrumb.
+            Muted (text-secondary) because it is context, not the current location.
+            Tutors can click to rename; students see a read-only label. */}
         {renameTitle ? (
           <TooltipProvider delay={300}>
             <Tooltip>
@@ -282,33 +455,41 @@ export function BoardChrome({
                         renameTitle();
                       }
                     }}
-                    className="max-w-[clamp(5rem,20vw,12.5rem)] cursor-text px-2 font-semibold"
+                    // No `cursor-text`: this opens a rename dialog rather than
+                    // editing in place, and a caret cursor promised an inline
+                    // field that never appears.
+                    className="max-w-[clamp(5rem,20vw,12.5rem)] px-2 font-medium text-secondary"
                   />
                 }
               >
                 <span className="truncate">{title}</span>
               </TooltipTrigger>
-              <TooltipContent side="bottom">
-                Rename Board
-              </TooltipContent>
+              <TooltipContent side="bottom">Rename board</TooltipContent>
             </Tooltip>
           </TooltipProvider>
         ) : (
-          <span className="flex h-8 max-w-[clamp(5rem,20vw,12.5rem)] items-center truncate px-2 text-sm font-semibold text-content-emphasis">
+          <span className="flex h-8 max-w-[clamp(5rem,20vw,12.5rem)] items-center truncate px-2 text-sm font-medium text-secondary">
             {title}
           </span>
         )}
-        <span aria-hidden="true" className="px-0.5 text-xs text-content-muted">
+
+        {/* Breadcrumb separator — a typed slash rather than a chevron, so the
+            only arrow-like glyph left in this panel is the back button. */}
+        <span aria-hidden="true" className="shrink-0 text-sm text-fg-subtle">
           /
         </span>
+
+        {/* Current page — full-weight, text-primary; opens the page picker */}
         <PageMenu />
+
+        {/* Overflow — settings, notes, theme toggle, export */}
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
               <Button
                 variant="ghost"
                 size="icon-sm"
-                aria-label="More actions"
+                aria-label="Board actions"
               />
             }
           >
@@ -324,10 +505,14 @@ export function BoardChrome({
                 <Settings />
                 Settings
               </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setShortcutsOpen(true)}>
+                <Keyboard />
+                Keyboard shortcuts
+              </DropdownMenuItem>
               {identity?.isTutor && (
                 <DropdownMenuItem onClick={() => setNotesOpen(true)}>
                   <NotebookPen />
-                  Student Notes
+                  Student notes
                 </DropdownMenuItem>
               )}
             </DropdownMenuGroup>
@@ -335,7 +520,19 @@ export function BoardChrome({
             <DropdownMenuGroup>
               <DropdownMenuItem onClick={toggle}>
                 {theme === 'dark' ? <Sun /> : <Moon />}
-                {theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
+                {theme === 'dark' ? 'Light mode' : 'Dark mode'}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                // Not awaited: the clipboard write has to be issued while this
+                // click is still the current task (see `writePngToClipboard`).
+                onClick={() => {
+                  copyBoardToPngClipboard().catch((err: unknown) =>
+                    console.error('[clipboard] copy as PNG failed', err),
+                  );
+                }}
+              >
+                <ClipboardCopy />
+                Copy PNG
               </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={() => void onExport()}
@@ -349,114 +546,170 @@ export function BoardChrome({
         </DropdownMenu>
       </Surface>
 
-      {/* Top-right panel (presence, session controls, and sharing). */}
-      <Surface role="toolbar" aria-label="Session controls" className="touch-targets scrollbar-none absolute top-[calc(2.75rem+env(safe-area-inset-top))] right-[env(safe-area-inset-right)] z-20 flex h-10 max-w-[calc(100vw-1rem)] items-center gap-0.5 overflow-x-auto rounded-none rounded-bl-md border-t-0 border-r-0 p-1 shadow-none sm:top-[env(safe-area-inset-top)] sm:max-w-[calc(50vw-1.5rem)]">
-        <ConnectionIndicator />
-        <div className="flex items-center px-1">
-          <TooltipProvider delay={300}>
-            <AvatarGroup className="-space-x-1.5">
-              {visibleParticipants.map((participant) => {
-                const label = participant.isLocal
-                  ? `${participant.name} (you)`
-                  : participant.name;
-                const latencyLabel =
-                  identity?.isTutor && participant.peer
-                    ? peerLatencyLabel(participant.peer)
-                    : null;
-                let trigger;
-                if (participant.isLocal && onEditIdentity) {
-                  trigger = (
-                    <TooltipTrigger
-                      render={
-                        <button
-                          type="button"
-                          onClick={onEditIdentity}
-                          className="rounded-full outline-none transition-opacity hover:opacity-80"
-                          aria-label="Edit your name"
+      {/* ── Top-right: floating presence cluster + docked session panel ──── */}
+      <div className="absolute top-[calc(2.5rem+env(safe-area-inset-top))] right-0 z-20 flex max-w-[calc(100vw-0.5rem)] items-start gap-2 [@media(pointer:coarse)]:top-[calc(3.25rem+env(safe-area-inset-top))] md:top-0 md:[@media(pointer:coarse)]:top-0">
+        {participants.length > 0 ? (
+          <div
+            ref={presenceToolbar.ref}
+            role="toolbar"
+            aria-label="People on this board"
+            aria-orientation="horizontal"
+            onFocusCapture={presenceToolbar.onFocusCapture}
+            onKeyDown={presenceToolbar.onKeyDown}
+            // No surface of its own: the discs sit straight on the canvas.
+            // `touch-targets` is what the session panel's `chrome` used to give
+            // these buttons — kept so coarse pointers still get 44px hit areas.
+            //
+            // The top margin is now just the session panel's own `p-1`, and the
+            // row is a full 32px control square that centres the 24px discs, so
+            // the avatars line up with the controls beside them by construction
+            // rather than by a hand-tuned margin.
+            className="touch-targets mt-1 flex h-8 shrink-0 items-center md:mt-[calc(0.25rem+env(safe-area-inset-top))]"
+          >
+            <TooltipProvider delay={300}>
+              <AvatarGroup
+                // 6px on a 24px disc is the same quarter-overlap `-space-x-2`
+                // gave the old 32px one.
+                className={avatarsOverlap ? '-space-x-1.5' : 'gap-0 space-x-0'}
+              >
+                {visibleParticipants.map((participant, index) => {
+                  const label = participant.isLocal
+                    ? `${participant.name} (you)`
+                    : participant.name;
+                  const latencyLabel =
+                    identity?.isTutor && participant.peer
+                      ? peerLatencyLabel(participant.peer)
+                      : null;
+                  const triggerStyle = {
+                    '--avatar-stack-index': stackDepth - index,
+                  } as CSSProperties;
+                  let trigger;
+                  if (participant.isLocal && onEditIdentity) {
+                    trigger = (
+                      <TooltipTrigger
+                        render={
+                          <button
+                            type="button"
+                            data-toolbar-item
+                            tabIndex={-1}
+                            onClick={onEditIdentity}
+                            className={AVATAR_TRIGGER_CLASS}
+                            aria-label="Edit your name"
+                            style={triggerStyle}
+                          />
+                        }
+                      >
+                        <ParticipantAvatar
+                          color={participant.color}
+                          name={participant.name}
+                          voice={participant.voice}
+                          overlapping={avatarsOverlap}
                         />
-                      }
-                    >
-                      <ParticipantAvatar
-                        color={participant.color}
-                        name={participant.name}
-                        voice={participant.voice}
-                      />
-                    </TooltipTrigger>
-                  );
-                } else if (participant.peer) {
-                  const peer = participant.peer;
-                  trigger = (
-                    <TooltipTrigger
-                      render={
-                        <button
-                          type="button"
-                          onClick={() => jumpToPeerViewport(peer)}
-                          className="rounded-full outline-none transition-opacity hover:opacity-80"
-                          aria-label={`Jump to ${participant.name}'s view`}
+                      </TooltipTrigger>
+                    );
+                  } else if (participant.peer) {
+                    const peer = participant.peer;
+                    trigger = (
+                      <TooltipTrigger
+                        render={
+                          <button
+                            type="button"
+                            data-toolbar-item
+                            tabIndex={-1}
+                            onClick={() => jumpToPeerViewport(peer)}
+                            className={AVATAR_TRIGGER_CLASS}
+                            aria-label={`Jump to ${participant.name}'s view`}
+                            style={triggerStyle}
+                          />
+                        }
+                      >
+                        <ParticipantAvatar
+                          color={participant.color}
+                          name={participant.name}
+                          voice={participant.voice}
+                          overlapping={avatarsOverlap}
                         />
-                      }
-                    >
-                      <ParticipantAvatar
-                        color={participant.color}
-                        name={participant.name}
-                        voice={participant.voice}
-                      />
-                    </TooltipTrigger>
+                      </TooltipTrigger>
+                    );
+                  } else {
+                    trigger = (
+                      <TooltipTrigger
+                        render={
+                          <span
+                            role="img"
+                            aria-label={label}
+                            className={AVATAR_TRIGGER_CLASS}
+                            style={triggerStyle}
+                          />
+                        }
+                      >
+                        <ParticipantAvatar
+                          color={participant.color}
+                          name={participant.name}
+                          voice={participant.voice}
+                          overlapping={avatarsOverlap}
+                        />
+                      </TooltipTrigger>
+                    );
+                  }
+                  return (
+                    <Tooltip key={participant.id}>
+                      {trigger}
+                      <TooltipContent side="bottom">
+                        <span>{label}</span>
+                        {latencyLabel ? (
+                          <span className="font-mono tabular-nums">
+                            · {latencyLabel}
+                          </span>
+                        ) : null}
+                        {participant.voice?.inCall ? (
+                          <span>
+                            {' '}
+                            ·{' '}
+                            {participant.voice.muted
+                              ? 'Voice muted'
+                              : participant.voice.speaking
+                                ? 'Speaking'
+                                : 'Mic listening'}
+                          </span>
+                        ) : null}
+                      </TooltipContent>
+                    </Tooltip>
                   );
-                } else {
-                  trigger = (
-                    <TooltipTrigger render={<span />}>
-                      <ParticipantAvatar
-                        color={participant.color}
-                        name={participant.name}
-                        voice={participant.voice}
-                      />
-                    </TooltipTrigger>
-                  );
-                }
-                return (
-                  <Tooltip key={participant.id}>
-                    {trigger}
-                    <TooltipContent side="bottom">
-                      <span>{label}</span>
-                      {latencyLabel ? (
-                        <span className="font-mono tabular-nums">
-                          · {latencyLabel}
-                        </span>
-                      ) : null}
-                      {participant.voice?.inCall ? (
-                        <span>
-                          {' '}
-                          ·{' '}
-                          {participant.voice.muted
-                            ? 'Voice muted'
-                            : participant.voice.speaking
-                              ? 'Speaking'
-                              : 'Mic listening'}
-                        </span>
-                      ) : null}
-                    </TooltipContent>
-                  </Tooltip>
-                );
-              })}
-              {overflowParticipants.length > 0 ? (
-                <OverflowParticipants
-                  participants={overflowParticipants}
-                  showPeerLatency={identity?.isTutor === true}
-                />
-              ) : null}
-            </AvatarGroup>
-          </TooltipProvider>
-        </div>
-        <MusicPlayer identity={identity} />
-        <FollowControls identity={identity} />
-        <AnimationControls identity={identity} />
-        <DocumentsPanel identity={identity} />
-        <VoiceControls identity={identity} />
-        <ShareButton />
-      </Surface>
+                })}
+                {overflowParticipants.length > 0 ? (
+                  <OverflowParticipants
+                    participants={overflowParticipants}
+                    showPeerLatency={identity?.isTutor === true}
+                  />
+                ) : null}
+              </AvatarGroup>
+            </TooltipProvider>
+          </div>
+        ) : null}
+
+        <Surface
+          ref={sessionToolbar.ref}
+          role="toolbar"
+          aria-label="Session controls"
+          aria-orientation="horizontal"
+          mode="docked"
+          chrome
+          onFocusCapture={sessionToolbar.onFocusCapture}
+          onKeyDown={sessionToolbar.onKeyDown}
+          className="flex shrink-0 items-center gap-0.5 rounded-none rounded-bl-xl border-0 bg-surface p-1 pr-[calc(0.25rem+env(safe-area-inset-right))] [--chrome-hover:var(--color-panel)] md:pt-[calc(0.25rem+env(safe-area-inset-top))]"
+        >
+          <ConnectionIndicator />
+          <SessionUtilities identity={identity} compact={isMobile} />
+          <ShareButton />
+        </Surface>
+      </div>
 
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+      <KeyboardShortcutsDialog
+        open={shortcutsOpen}
+        onOpenChange={setShortcutsOpen}
+      />
       {identity?.isTutor && (
         <BoardNotesDialog
           boardId={boardId}

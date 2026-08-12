@@ -53,8 +53,8 @@ function useFrameStats(): FrameStats {
 function StatRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between gap-4">
-      <span className="text-content-subtle">{label}</span>
-      <span className="tabular-nums text-content-default">{value}</span>
+      <span className="text-secondary">{label}</span>
+      <span className="tabular-nums text-primary">{value}</span>
     </div>
   );
 }
@@ -68,7 +68,7 @@ export function PerformanceOverlay() {
   return (
     <div
       data-ui-layer
-      className="pointer-events-none absolute top-3 left-3 z-20 flex min-w-40 flex-col gap-1 rounded-md border border-border-subtle bg-bg-default px-3 py-2 font-mono text-xs shadow-hover"
+      className="pointer-events-none absolute top-3 left-3 z-20 flex min-w-40 flex-col gap-1 rounded-md border border-border bg-surface px-3 py-2 font-mono text-xs shadow-hover"
     >
       <StatRow label="FPS" value={String(fps)} />
       <StatRow label="Frame" value={`${frameMs.toFixed(1)} ms`} />

@@ -128,4 +128,51 @@ describe('selection controls', () => {
       { id: 'rotate-sw', point: { x: -9, y: 69 } },
     ]);
   });
+
+  it('preserves a shared multi-selection rotation with an oriented box', () => {
+    const first = rectangle({ id: 'first', rotation: Math.PI / 2 });
+    const second = rectangle({
+      id: 'second',
+      x: 120,
+      rotation: Math.PI / 2,
+    });
+    const info = getSelectionInfo(
+      [first, second],
+      [first.id, second.id],
+      1,
+    )!;
+
+    expect(info.rotation).toBeCloseTo(Math.PI / 2);
+    expect(info.center).toEqual({ x: 110, y: 30 });
+    expect(info.corners.nw.x).toBeCloseTo(200);
+    expect(info.corners.nw.y).toBeCloseTo(-20);
+    expect(info.corners.se.x).toBeCloseTo(20);
+    expect(info.corners.se.y).toBeCloseTo(80);
+    expect(info.handles).toEqual([]);
+    expect(info.rotationHandles).toHaveLength(4);
+  });
+
+  it('falls back to an axis-aligned controller for mixed rotations', () => {
+    const first = rectangle({ id: 'first' });
+    const second = rectangle({
+      id: 'second',
+      x: 120,
+      rotation: Math.PI / 2,
+    });
+    const info = getSelectionInfo(
+      [first, second],
+      [first.id, second.id],
+      1,
+    )!;
+
+    expect(info.rotation).toBe(0);
+    expect(info.center.x).toBeCloseTo(100);
+    expect(info.center.y).toBeCloseTo(30);
+    expect(info.corners.nw.x).toBeCloseTo(0);
+    expect(info.corners.nw.y).toBeCloseTo(-20);
+    expect(info.corners.se.x).toBeCloseTo(200);
+    expect(info.corners.se.y).toBeCloseTo(80);
+    expect(info.handles).toHaveLength(8);
+    expect(info.rotationHandles).toHaveLength(4);
+  });
 });

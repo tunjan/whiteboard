@@ -99,6 +99,14 @@ export function ToolPanelPresence({
 
   if (!mounted || !lastVisibleChild.current) return null;
 
+  // Sits one 1rem gutter below the docked top-right chrome, and the same 1rem
+  // in from the right edge, so the float reads as deliberate rather than as a
+  // panel that failed to dock.
+  //
+  // The chrome cluster is 2.75rem tall (p-1.5 + a 2rem control row) and hangs
+  // off the safe-area inset. On >=sm it starts at the very top, so it ends at
+  // 2.75rem → panel top 3.75rem. Below sm it is pushed down to 2.75rem to clear
+  // the board-nav panel, so it ends at 5.5rem → panel top 6.5rem.
   return (
     <div
       ref={panelRef}
@@ -106,7 +114,7 @@ export function ToolPanelPresence({
       data-phase={phase}
       aria-hidden={!visible}
       inert={!visible}
-      className="t-panel-slide tool-panel-presence absolute top-[calc(6.5rem+env(safe-area-inset-top))] right-[calc(1rem+env(safe-area-inset-right))] z-20 sm:top-[calc(3.75rem+env(safe-area-inset-top))]"
+      className="t-panel-slide tool-panel-presence absolute top-[calc(6.5rem+env(safe-area-inset-top))] right-[calc(1rem+env(safe-area-inset-right))] z-20 sm:top-[calc(3.75rem+env(safe-area-inset-top))] [&_[data-slot=surface]]:border-strong [&_[data-slot=surface]]:shadow-md"
     >
       {lastVisibleChild.current}
     </div>

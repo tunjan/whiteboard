@@ -22,6 +22,14 @@ export interface ToolPointerInfo {
   metaKey: boolean;
   /** PointerEvent.button (0 = primary). */
   button: number;
+  /**
+   * Browser-predicted future samples in world coordinates, ordered by `t`
+   * (their event timestamp, comparable with `timestamp`), populated only for
+   * tools that set `wantsPredictedSamples`. Render-time affordance ONLY: they
+   * are the browser's extrapolation of where the pointer is heading and must
+   * never be persisted to the document.
+   */
+  predicted?: { x: number; y: number; pressure: number; t: number }[];
 }
 
 /** Ambient context every tool handler receives. */
@@ -54,8 +62,9 @@ export interface Tool {
    * Deliver every coalesced hardware sample to `onPointerMove`, not just the
    * one position the browser dispatched.
    *
-   * Only tools that *accumulate a point sequence* need this — ink smoothing is
-   * an EMA over the samples, so their density shapes the curve. Tools that
+   * Only tools that *accumulate a point sequence* need this — each sample is a
+   * reading of where the pointer was and when, which is what fine path detail
+   * and velocity-derived stroke width are recovered from. Tools that
    * merely track a current position (select, and the drag-to-create tools) must
    * leave this off: each sample there overwrites the previous one at the same
    * shape ids within a single frame, so processing 2-8 samples per event ran
@@ -63,6 +72,12 @@ export interface Tool {
    * a result only the last sample could be seen to have set.
    */
   wantsCoalescedSamples?: boolean;
+  /**
+   * Also deliver `getPredictedEvents()` on the dispatched move (as
+   * `ToolPointerInfo.predicted`). Only for tools that render a local preview
+   * ahead of the pointer; predicted samples must never enter the document.
+   */
+  wantsPredictedSamples?: boolean;
 
   onEnter?(ctx: ToolContext): void;
   onExit?(ctx: ToolContext): void;

@@ -336,4 +336,16 @@ describe('ink points storage', () => {
     editor.updateShape('empty', { props: { points: stroke(1) } });
     expect(drawnPoints('empty')).toEqual(stroke(1));
   });
+
+  it('stores points as flat triples, not keyed objects', () => {
+    // Yjs encodes a bare number far more compactly than a three-key map entry,
+    // and the decode restores the same values, so rendering is unchanged.
+    const before = documentByteSize();
+    editor.createShape(draw('s', stroke(300)));
+    const bytes = documentByteSize() - before;
+
+    expect(drawnPoints('s')).toEqual(stroke(300));
+    // The object form measured ~12.6KB for this stroke.
+    expect(bytes).toBeLessThan(9_000);
+  });
 });

@@ -83,13 +83,13 @@ export function BoardTitleDialog({
         </FieldGroup>
         <DialogFooter>
           <Button
-            variant="outline"
+            variant="secondary"
             onClick={() => onOpenChange(false)}
             disabled={submitting}
           >
             Cancel
           </Button>
-          <Button onClick={submit} disabled={!trimmed || submitting}>
+          <Button variant="primary" onClick={submit} disabled={!trimmed || submitting}>
             {submitLabel}
           </Button>
         </DialogFooter>

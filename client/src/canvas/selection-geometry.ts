@@ -8,7 +8,6 @@ import {
   pointInPolygon,
   pointsBounds,
   rotatePoint,
-  unionBounds,
 } from '@whiteboard/shared';
 import { containerBounds } from './hierarchy';
 import { shapeRotatedBounds } from './shape-bounds';
@@ -68,12 +67,12 @@ export const ROTATION_HANDLE_HIT_SCREEN = 14;
 
 export interface SelectionInfo {
   ids: string[];
-  /** Unrotated world AABB (single: the shape's bounds; multi: union of rotated AABBs). */
+  /** World AABB enclosing the displayed selection box. */
   bounds: Bounds;
-  /** Single-shape rotation; 0 for multi-selection. */
+  /** Shared page rotation, or 0 when selected elements have mixed rotations. */
   rotation: number;
   center: Point;
-  /** Oriented corners (rotated for single), world. */
+  /** Oriented corners of the selection box in world space. */
   corners: { nw: Point; ne: Point; se: Point; sw: Point };
   /** Generic resize handles; empty when the shape exposes custom handles. */
   handles: { id: ResizeHandleId; point: Point }[];
@@ -82,6 +81,45 @@ export interface SelectionInfo {
   /** Shape-specific handles (e.g. connector endpoints/bend); null otherwise. */
   customHandles: ShapeHandle[] | null;
   isSingle: boolean;
+}
+
+function pageRotation(shape: Shape): number {
+  if (shape.type === 'group' || shape.type === 'frame') return 0;
+  return Math.atan2(Math.sin(shape.rotation), Math.cos(shape.rotation));
+}
+
+function sharedSelectionRotation(shapes: Shape[]): number {
+  const first = shapes[0];
+  if (!first) return 0;
+  const shared = pageRotation(first);
+  for (let i = 1; i < shapes.length; i++) {
+    if (pageRotation(shapes[i]!) !== shared) return 0;
+  }
+  return shared;
+}
+
+function shapeControlBounds(shape: Shape, allShapes: Shape[]): Bounds | null {
+  if (shape.type === 'group') return containerBounds(allShapes, shape.id);
+  return shapeRegistry.getFor(shape)?.getBounds(shape as never) ?? null;
+}
+
+function boundsCorners(bounds: Bounds): Point[] {
+  return [
+    { x: bounds.minX, y: bounds.minY },
+    { x: bounds.maxX, y: bounds.minY },
+    { x: bounds.maxX, y: bounds.maxY },
+    { x: bounds.minX, y: bounds.maxY },
+  ];
+}
+
+function rotateFromOrigin(point: Point, angle: number): Point {
+  if (!angle) return point;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  return {
+    x: point.x * cos - point.y * sin,
+    y: point.x * sin + point.y * cos,
+  };
 }
 
 export function getSelectionInfo(
@@ -189,42 +227,73 @@ export function getSelectionInfo(
     };
   }
 
-  // Multi-selection: axis-aligned union of each shape's rotated AABB.
-  let bounds = shapeRotatedBounds(selected[0]!);
-  for (let i = 1; i < selected.length; i++) {
-    bounds = unionBounds(bounds, shapeRotatedBounds(selected[i]!));
+  // Multi-selection: preserve a shared element orientation. Project every
+  // rotated element corner into that aligned frame, find the tight AABB there,
+  // then rotate the resulting controller back into page space.
+  const rotation = sharedSelectionRotation(selected);
+  const alignedPoints: Point[] = [];
+  for (const shape of selected) {
+    const shapeBounds = shapeControlBounds(shape, shapes);
+    if (!shapeBounds) continue;
+    const shapeCenter = boundsCenter(shapeBounds);
+    for (const corner of boundsCorners(shapeBounds)) {
+      const world =
+        pageRotation(shape) !== 0
+          ? rotatePoint(corner, shapeCenter, pageRotation(shape))
+          : corner;
+      alignedPoints.push(rotateFromOrigin(world, -rotation));
+    }
   }
-  const { minX, minY, maxX, maxY } = bounds;
+  if (alignedPoints.length === 0) return null;
+  const alignedBounds = pointsBounds(alignedPoints);
+  const { minX, minY, maxX, maxY } = alignedBounds;
   const midX = (minX + maxX) / 2;
   const midY = (minY + maxY) / 2;
-  // Group bounding-box controller: 8 axis-aligned resize handles, no rotation.
-  // Suppressed entirely if every selected shape is locked.
-  const anyUnlocked = selected.some((s) => !s.locked);
+  const fromAligned = (x: number, y: number) =>
+    rotateFromOrigin({ x, y }, rotation);
   const groupPts: Record<ResizeHandleId, Point> = {
-    nw: { x: minX, y: minY },
-    n: { x: midX, y: minY },
-    ne: { x: maxX, y: minY },
-    e: { x: maxX, y: midY },
-    se: { x: maxX, y: maxY },
-    s: { x: midX, y: maxY },
-    sw: { x: minX, y: maxY },
-    w: { x: minX, y: midY },
+    nw: fromAligned(minX, minY),
+    n: fromAligned(midX, minY),
+    ne: fromAligned(maxX, minY),
+    e: fromAligned(maxX, midY),
+    se: fromAligned(maxX, maxY),
+    s: fromAligned(midX, maxY),
+    sw: fromAligned(minX, maxY),
+    w: fromAligned(minX, midY),
   };
+  const corners = {
+    nw: groupPts.nw,
+    ne: groupPts.ne,
+    se: groupPts.se,
+    sw: groupPts.sw,
+  };
+  const bounds = pointsBounds(Object.values(corners));
+  const center = fromAligned(midX, midY);
+  const canRotateAll = selected.every(
+    (shape) =>
+      !shape.locked && shape.type !== 'group' && shape.type !== 'frame',
+  );
+  const d = ROTATE_CORNER_OFFSET / zoom;
   return {
     ids: selected.map((s) => s.id),
     bounds,
-    rotation: 0,
-    center: boundsCenter(bounds),
-    corners: {
-      nw: { x: minX, y: minY },
-      ne: { x: maxX, y: minY },
-      se: { x: maxX, y: maxY },
-      sw: { x: minX, y: maxY },
-    },
-    handles: anyUnlocked
+    rotation,
+    center,
+    corners,
+    // The existing group resize math is page-axis-aligned. Keep those handles
+    // off an oriented controller until that separate gesture can preserve the
+    // shared axis without distorting children.
+    handles: selected.some((shape) => !shape.locked) && rotation === 0
       ? RESIZE_HANDLES.map((id) => ({ id, point: groupPts[id] }))
       : [],
-    rotationHandles: [],
+    rotationHandles: canRotateAll
+      ? [
+          { id: 'rotate-nw', point: fromAligned(minX - d, minY - d) },
+          { id: 'rotate-ne', point: fromAligned(maxX + d, minY - d) },
+          { id: 'rotate-se', point: fromAligned(maxX + d, maxY + d) },
+          { id: 'rotate-sw', point: fromAligned(minX - d, maxY + d) },
+        ]
+      : [],
     customHandles: null,
     isSingle: false,
   };
@@ -246,6 +315,36 @@ export function matchesMarquee(
   return mode === 'wrap' || shape.type === 'frame'
     ? geometryIsContained(geometry, marquee)
     : geometryTouchesBounds(geometry, marquee);
+}
+
+/**
+ * Whether a shape lies entirely inside a freeform loop — the magic wand's
+ * lasso rule. Enclosure only, never intersection: circling something is a
+ * deliberate act, while a stroke that merely crosses a shape on its way round
+ * is not a request to select that shape.
+ *
+ * Stroke widths are ignored (unlike the marquee's contained test, which insets
+ * by the stroke radius), so a loop drawn snugly around thick ink still selects
+ * it — the hand drew round what it could see, not round the centerline.
+ */
+export function isEnclosedByPolygon(
+  shape: Shape,
+  polygon: readonly Point[],
+): boolean {
+  const geometry = marqueeGeometry(shape);
+  if (!geometry) return false;
+  if (geometry.kind === 'region') {
+    return (
+      geometry.outline.length > 0 &&
+      geometry.outline.every((point) => pointInPolygon(point, polygon))
+    );
+  }
+  return (
+    geometry.segments.length > 0 &&
+    geometry.segments.every(
+      ([a, b]) => pointInPolygon(a, polygon) && pointInPolygon(b, polygon),
+    )
+  );
 }
 
 /**
@@ -350,6 +449,7 @@ function marqueeGeometry(shape: Shape): MarqueeGeometry | null {
     }
     case 'text':
     case 'image':
+    case 'sticker':
     case 'video':
     case 'graph':
     case 'equation':

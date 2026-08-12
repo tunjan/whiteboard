@@ -1,24 +1,115 @@
 # UI styling contract
 
-The application's reusable visual styling lives in [`src/index.css`](../../index.css).
+The design system lives in [`src/index.css`](../../index.css), in six numbered
+sections:
 
-Use that file for changes that should affect the product as a whole:
+1. **Fonts** — the three `@font-face` declarations (Inter, Geist Mono, Caveat).
+2. **Primitives** — `:root` and `.dark`. The only place a literal colour or
+   shadow value appears. Private to that file; prefixed `--c-*` / `--s-*`.
+3. **Theme** — `@theme`. The public API: every name here becomes a Tailwind
+   utility (`--color-surface` → `bg-surface`) *and* a plain custom property, so
+   raw CSS can use `var(--color-surface)`.
+4. **Base** — resets, the global focus ring, touch hardening.
+5. **Utilities** — `scrollbar-none`, coarse-pointer touch targets.
+6. **Feature CSS** — tool-panel motion and the MathLive authoring surfaces.
 
-- `@theme inline` exposes fonts, radii, shadows, and semantic colors to Tailwind.
-- `:root` contains the light theme plus shared control measurements and motion tokens.
-- `.dark` contains dark-theme token overrides.
-- `@layer components` contains the `ui-*` recipes used by the React primitives in this folder.
+## Rules
 
-Component files should keep only structure and context-specific layout in their
-`className` values. Reusable visual decisions—color, border, radius, shadow,
-typography, control height, and interaction states—belong in a `ui-*` recipe.
+**Never introduce a colour outside section 2.** To retheme, change a primitive;
+to add a semantic name, map it in section 3. A hex value in a `className`, or a
+`var(--something)` that section 3 doesn't define, is a bug.
 
-For example, change `--radius-md` once to retune standard corners, or update
-`.ui-button-outline` once to change every outline and secondary button.
+**Components carry structure and Tailwind utilities**, not bespoke CSS. There is
+no `ui-*` recipe layer any more — it was deleted because nothing referenced it.
+Shared visual decisions belong in a token, not a class.
 
-When adding a new reusable primitive:
+**Focus is single-sourced.** `:focus-visible` in section 4 draws one outline for
+the whole app. Do not add `focus-visible:ring-*` to a component, and do not add
+`outline-none` to an interactive control — either one silently removes the only
+focus indicator that control has. Popup *containers* (dialog, popover, menu
+positioners) and menu *items* are the exceptions: they suppress the outline
+because a background highlight already signals focus.
 
-1. Reuse an existing semantic token and `ui-*` recipe when possible.
-2. Add a new token only when the value is meant to be shared.
-3. Put the reusable visual recipe in `@layer components`.
-4. Keep responsive placement, one-off dimensions, and component layout local.
+## Token vocabulary
+
+| group | names |
+|---|---|
+| surfaces | `canvas` `panel` `surface` `surface-hover` `sunken` `inverse` `inverse-hover` `scrim` |
+| lines | `border` `border-strong` `border-subtle` `focus` |
+| ink | `fg` `fg-secondary` `fg-muted` `fg-subtle` `fg-inverse` |
+| status | `danger` `success` `warning` `info` `neutral` `inactive`, each as `-fg` `-bg` `-border` |
+| brand | `link` (the blue), `accent-brand` |
+| radii | `xs` 4 · `sm` 6 · `md` 8 · `lg` 10 · `xl` 12 · `2xl` 16 · `full` |
+| elevation | `e0`–`e4`, plus component aliases `xs` `sm` `md` `lg` `hover` `floating` |
+| motion | `duration-instant` `-fast` `-base` `-slow` `-slower`; `ease-out-quart` `ease-in-out-quart` |
+
+Status colours always carry the explicit `-fg` / `-bg` / `-border` suffix. The
+bare `danger` / `success` aliases resolve, but `neutral` and `inactive` have no
+bare form, so the suffixed spelling is the one that works across the whole set.
+
+`scrim` is the modal backdrop; pick the opacity per overlay (`bg-scrim/40` for
+dialogs, `bg-scrim/10` for the sheet). `inverse-hover` is the hover step for
+`bg-inverse` — it flips with the theme, which is why buttons don't need a
+`dark:` variant for it.
+
+Board chrome uses `Surface` systematically: `mode="docked" chrome` for
+viewport-edge controls and `mode="floating" chrome` for the central tool rail.
+Chrome controls are 32 px with 44 px coarse-pointer targets, 1.5 px icon
+strokes, semantic active/status colours, and one global focus outline.
+
+The shadcn aliases (`background`, `foreground`, `card`, `popover`,
+`muted-foreground`, `destructive`, `input`, `ring`, `accent`,
+`accent-foreground`) are also mapped, so components added by `shadcn add`
+resolve without edits.
+
+Two deliberate deviations from stock shadcn:
+
+- **`secondary` is ink, not a surface.** `text-secondary` is this app's
+  second-level text colour; `bg-secondary` is unused. Reach for `bg-panel`.
+- **`accent` is the hover surface, and the brand blue is `link`.** Binding
+  `accent` to the blue is what previously painted focused menu items solid blue
+  under near-black text.
+
+Those aliases are a **landing pad, not a destination.** A component pasted in by
+`shadcn add` renders correctly on day one, but before it ships its classes get
+rewritten onto the names in the table above — `text-muted-foreground` →
+`text-fg-muted`, `bg-popover` → `bg-surface`, `text-destructive` →
+`text-danger-fg`. Two spellings for one colour is how a folder ends up with
+three vocabularies and no way to grep for anything.
+
+**`dark:` is for what the tokens can't express.** Every colour token already
+flips with the theme, so `dark:bg-…` almost always means the wrong token was
+picked. The one standing exception in this folder is `avatar.tsx`, which flips
+`mix-blend-darken` → `mix-blend-lighten`: a blend mode, not a colour.
+
+## Checking your work
+
+Every utility a component references must exist in the compiled stylesheet. A
+name that isn't in the theme produces no CSS and fails silently, so this is not
+something review catches by eye — run the class-diff check:
+
+```bash
+cd client && npm run build && python3 scripts/class-diff.py
+```
+
+`UNRESOLVED: 0` and `GUIDELINE VIOLATIONS: 0` is the passing state.
+
+The script checks two different things. `UNRESOLVED` is the dead-class check:
+names that generate no CSS. `GUIDELINE VIOLATIONS` enforces the rules on this
+page, because the worst offenders are all *valid* class names —
+
+| rule | what it catches |
+|---|---|
+| `focus-ring` | `focus-visible:ring-*` competing with the global outline |
+| `outline-suppressed` | `outline-none` / `outline-hidden` outside the popup allowlist |
+| `ring-offset-no-colour` | `ring-offset-2` with no offset colour — Tailwind's default is a literal `#fff`, so it paints a white halo in dark mode |
+| `raw-palette` | `bg-stone-*`, `bg-black`, `bg-white` instead of a semantic name |
+| `dark-colour-fork` | a `dark:` variant on a colour utility |
+
+Violations are fatal inside `src/components/ui/` and reported-only elsewhere,
+so the gate can stay green while the rest of the app catches up.
+
+**One trap worth knowing:** Tailwind builds `duration-*` utilities from the
+`--transition-duration-*` namespace, *not* `--duration-*`. Defining only the
+latter gives you a real CSS variable and no utility — `duration-base` silently
+did nothing for a while. Both are declared now; add to both if you add a step.

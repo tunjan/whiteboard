@@ -46,7 +46,7 @@ export function createLaserTool(): Tool {
 
     onPointerUp() {
       if (!id) return;
-      useLaserStore.getState().end(id);
+      useLaserStore.getState().end();
       id = null;
       lastPoint = null;
       // Stay in the laser tool so the presenter can keep pointing.
@@ -55,7 +55,7 @@ export function createLaserTool(): Tool {
     // The OS reclaimed the pointer mid-stroke: keep what's drawn, let it fade.
     onCommit() {
       if (!id) return;
-      useLaserStore.getState().end(id);
+      useLaserStore.getState().end();
       id = null;
       lastPoint = null;
     },
@@ -66,6 +66,9 @@ export function createLaserTool(): Tool {
       useLaserStore.getState().discard(id);
       id = null;
       lastPoint = null;
+      // The gesture is over either way, so arm the hold that pointer-up would
+      // have: strokes drawn before this one are still held and need to fade.
+      useLaserStore.getState().end();
     },
   };
 }

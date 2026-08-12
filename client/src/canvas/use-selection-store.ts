@@ -17,6 +17,8 @@ interface SelectionStore {
   marquee: MarqueeSelection | null;
   /** Live alignment guides during a snapping drag. */
   snapGuides: SnapGuide[];
+  /** Canvas-level cursor while a corner rotation gesture is active. */
+  rotationCursor: string | null;
   setSelection: (ids: string[]) => void;
   add: (ids: string[]) => void;
   toggle: (id: string) => void;
@@ -24,6 +26,7 @@ interface SelectionStore {
   has: (id: string) => boolean;
   setMarquee: (marquee: MarqueeSelection | null) => void;
   setSnapGuides: (guides: SnapGuide[]) => void;
+  setRotationCursor: (cursor: string | null) => void;
 }
 
 // Selection is per-user, local UI state — never in the shared CRDT. It is
@@ -33,6 +36,7 @@ export const useSelectionStore = create<SelectionStore>((set, get) => ({
   selectedIds: [],
   marquee: null,
   snapGuides: [],
+  rotationCursor: null,
   setSelection: (selectedIds) => {
     const current = get().selectedIds;
     if (
@@ -63,4 +67,5 @@ export const useSelectionStore = create<SelectionStore>((set, get) => ({
   has: (id) => get().selectedIds.includes(id),
   setMarquee: (marquee) => set({ marquee }),
   setSnapGuides: (snapGuides) => set({ snapGuides }),
+  setRotationCursor: (rotationCursor) => set({ rotationCursor }),
 }));

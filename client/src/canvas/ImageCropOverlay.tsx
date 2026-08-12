@@ -214,7 +214,7 @@ export function ImageCropOverlay({
             width={rW}
             height={rH}
             fill="transparent"
-            stroke="var(--color-accent-brand, #2563eb)"
+            stroke="var(--color-accent-brand)"
             strokeWidth={1.5}
             style={{ cursor: 'move' }}
             onPointerDown={startDrag('move')}
@@ -229,8 +229,8 @@ export function ImageCropOverlay({
                 width={10}
                 height={10}
                 rx={2}
-                fill="var(--color-background, #fff)"
-                stroke="var(--color-accent-brand, #2563eb)"
+                fill="var(--color-background)"
+                stroke="var(--color-accent-brand)"
                 strokeWidth={1.5}
                 style={{ cursor: CURSORS[id] }}
                 onPointerDown={startDrag(id)}

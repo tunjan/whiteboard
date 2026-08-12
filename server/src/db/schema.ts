@@ -1,7 +1,5 @@
 import {
   customType,
-  index,
-  integer,
   pgTable,
   text,
   timestamp,
@@ -41,20 +39,3 @@ export const boardDocuments = pgTable('board_documents', {
     .notNull()
     .defaultNow(),
 });
-
-/** One row per saved animation recording; data is the UTF-8 JSON payload. */
-export const recordings = pgTable(
-  'recordings',
-  {
-    id: text('id').primaryKey(),
-    boardId: text('board_id').notNull(),
-    pageId: text('page_id').notNull(),
-    name: text('name').notNull(),
-    durationMs: integer('duration_ms').notNull(),
-    data: bytea('data').notNull(),
-    createdAt: timestamp('created_at', { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-  },
-  (t) => [index('recordings_board_id_idx').on(t.boardId)],
-);

@@ -22,6 +22,8 @@ interface VoiceStore {
   status: VoiceStatus;
   muted: boolean;
   noiseCancellation: boolean;
+  soundEffectsEnabled: boolean;
+  soundEffectsVolume: number;
   gateThresholdDb: number;
   inputLevelDb: number;
   speaking: boolean;
@@ -31,6 +33,8 @@ interface VoiceStore {
   setStatus: (status: VoiceStatus) => void;
   setMuted: (muted: boolean) => void;
   setNoiseCancellation: (enabled: boolean) => void;
+  setSoundEffectsEnabled: (enabled: boolean) => void;
+  setSoundEffectsVolume: (volume: number) => void;
   setGateThreshold: (thresholdDb: number) => void;
   setInputLevel: (levelDb: number, speaking: boolean) => void;
   setError: (error: string | null) => void;
@@ -44,7 +48,18 @@ interface VoiceStore {
 
 const NOISE_CANCELLATION_STORAGE_KEY =
   'whiteboard:voice-noise-cancellation';
+const SOUND_EFFECTS_ENABLED_STORAGE_KEY =
+  'whiteboard:voice-sound-effects-enabled';
+const SOUND_EFFECTS_VOLUME_STORAGE_KEY =
+  'whiteboard:voice-sound-effects-volume';
 const GATE_THRESHOLD_STORAGE_KEY = 'whiteboard:voice-gate-threshold-db';
+const DEFAULT_SOUND_EFFECTS_VOLUME = 0.22;
+
+function clampSoundEffectsVolume(volume: number): number {
+  return Number.isFinite(volume)
+    ? Math.min(1, Math.max(0, volume))
+    : DEFAULT_SOUND_EFFECTS_VOLUME;
+}
 
 function readStoredNoiseCancellation(): boolean {
   if (typeof window === 'undefined') return true;
@@ -68,6 +83,55 @@ function storeNoiseCancellation(enabled: boolean): void {
   } catch {
     // Storage can be unavailable in hardened/private contexts; the live device
     // preference still works for this session.
+  }
+}
+
+function readStoredSoundEffectsEnabled(): boolean {
+  if (typeof window === 'undefined') return true;
+  try {
+    const stored = window.localStorage.getItem(
+      SOUND_EFFECTS_ENABLED_STORAGE_KEY,
+    );
+    return stored === null ? true : stored !== 'false';
+  } catch {
+    return true;
+  }
+}
+
+function storeSoundEffectsEnabled(enabled: boolean): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(
+      SOUND_EFFECTS_ENABLED_STORAGE_KEY,
+      String(enabled),
+    );
+  } catch {
+    // The live sound preference still works when storage is unavailable.
+  }
+}
+
+function readStoredSoundEffectsVolume(): number {
+  if (typeof window === 'undefined') return DEFAULT_SOUND_EFFECTS_VOLUME;
+  try {
+    const stored = window.localStorage.getItem(
+      SOUND_EFFECTS_VOLUME_STORAGE_KEY,
+    );
+    const parsed = stored === null ? Number.NaN : Number(stored);
+    return clampSoundEffectsVolume(parsed);
+  } catch {
+    return DEFAULT_SOUND_EFFECTS_VOLUME;
+  }
+}
+
+function storeSoundEffectsVolume(volume: number): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(
+      SOUND_EFFECTS_VOLUME_STORAGE_KEY,
+      String(volume),
+    );
+  } catch {
+    // The live volume still works when storage is unavailable.
   }
 }
 
@@ -100,6 +164,8 @@ export const useVoiceStore = create<VoiceStore>((set) => ({
   status: 'idle',
   muted: true,
   noiseCancellation: readStoredNoiseCancellation(),
+  soundEffectsEnabled: readStoredSoundEffectsEnabled(),
+  soundEffectsVolume: readStoredSoundEffectsVolume(),
   gateThresholdDb: readStoredGateThreshold(),
   inputLevelDb: MIN_VOICE_LEVEL_DB,
   speaking: false,
@@ -111,6 +177,15 @@ export const useVoiceStore = create<VoiceStore>((set) => ({
   setNoiseCancellation: (noiseCancellation) => {
     storeNoiseCancellation(noiseCancellation);
     set({ noiseCancellation });
+  },
+  setSoundEffectsEnabled: (soundEffectsEnabled) => {
+    storeSoundEffectsEnabled(soundEffectsEnabled);
+    set({ soundEffectsEnabled });
+  },
+  setSoundEffectsVolume: (nextVolume) => {
+    const soundEffectsVolume = clampSoundEffectsVolume(nextVolume);
+    storeSoundEffectsVolume(soundEffectsVolume);
+    set({ soundEffectsVolume });
   },
   setGateThreshold: (nextThresholdDb) => {
     const gateThresholdDb = clampGateThreshold(nextThresholdDb);

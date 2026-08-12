@@ -1,7 +1,7 @@
 // Default drawing style for newly-created shapes.
 export const DEFAULT_SHAPE_STYLE = {
   /** Stroke color. Matches the first available drawing swatch. */
-  color: '#274001',
+  color: '#6a7a31',
   /** Stroke width in world units. */
   size: 2,
 } as const;

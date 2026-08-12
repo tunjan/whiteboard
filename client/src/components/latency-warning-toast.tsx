@@ -41,31 +41,31 @@ function LatencyWarningList() {
     <Toast.Root
       key={toast.id}
       toast={toast}
-      className="pointer-events-auto w-full rounded-xl bg-popover text-popover-foreground shadow-floating ring-1 ring-border-subtle transition-[transform,opacity] duration-200 ease-[var(--ease-out-expo)] data-ending-style:-translate-y-1 data-ending-style:opacity-0 data-starting-style:-translate-y-2 data-starting-style:opacity-0 motion-reduce:transition-none motion-reduce:data-ending-style:translate-y-0 motion-reduce:data-starting-style:translate-y-0"
+      className="pointer-events-auto w-full rounded-md bg-warning-bg text-primary border border-warning-border shadow-md transition-all duration-200 ease-out data-ending-style:-translate-y-1 data-ending-style:opacity-0 data-starting-style:-translate-y-2 data-starting-style:opacity-0"
     >
-      <Toast.Content className="flex items-start gap-3 p-3">
+      <Toast.Content className="flex items-start gap-3 p-3.5">
         <span
           aria-hidden="true"
-          className="flex size-8 shrink-0 items-center justify-center rounded-md bg-bg-attention text-content-attention"
+          className="flex size-7 shrink-0 items-center justify-center rounded-xs bg-warning/10 text-warning"
         >
-          <TriangleAlert />
+          <TriangleAlert className="size-4" />
         </span>
         <div className="flex min-w-0 flex-1 flex-col gap-0.5 pt-0.5">
-          <Toast.Title className="text-sm font-semibold text-content-emphasis" />
-          <Toast.Description className="text-sm leading-5 text-content-subtle" />
+          <Toast.Title className="text-xs font-semibold text-warning" />
+          <Toast.Description className="text-xs text-secondary leading-relaxed" />
         </div>
         <Toast.Action
           onClick={() => close(toast.id)}
           render={
             <Button
               variant="ghost"
-              size="icon-sm"
+              size="icon-xs"
               aria-label="Dismiss slow connection warning"
-              className="-mt-1 -mr-1"
+              className="-mt-1 -mr-1 text-secondary hover:text-primary"
             />
           }
         >
-          <X aria-hidden="true" />
+          <X className="size-3.5" aria-hidden="true" />
           <span className="sr-only">Dismiss slow connection warning</span>
         </Toast.Action>
       </Toast.Content>

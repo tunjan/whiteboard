@@ -6,18 +6,44 @@ export interface Identity {
   isTutor: boolean;
 }
 
-/** The tutor's cursor color is reserved so students can always spot them. */
-export const TUTOR_COLOR = '#e5484d';
+/**
+ * The tutor's cursor color is reserved so students can always spot them.
+ * Mirrors `--color-danger` in index.css — that file is the single source of
+ * truth for literal colors, but this math (parseHex/color-mix) needs its own
+ * literal value, so it copies rather than reads the CSS custom property.
+ */
+export const TUTOR_COLOR = '#DC2626';
 
+/**
+ * Offered to students as their identity color (see NameDialog). A muted,
+ * enterprise-soft set: hues spread evenly around the wheel at a low 36%
+ * saturation, so they read as calm product colours rather than as the
+ * saturated primaries a whiteboard normally reaches for.
+ *
+ * Every entry is tuned to the same relative luminance (~0.16) rather than to a
+ * shared HSL lightness, because the identity colour has three jobs and equal
+ * luminance is what makes all three hold at once:
+ *
+ *   - Cursor on the canvas — clears 3:1 against both the light (#F5F5F3) and
+ *     dark (#0E0E10) canvas. Measured 4.56–4.62 and 3.83–3.87.
+ *   - Cursor name tag — `textOnColor` resolves to white for every entry, so
+ *     labels never flip mid-palette the way they did before.
+ *   - Avatar — see `avatarTint`/`avatarInk` in board-chrome.
+ *
+ * Hues deliberately skip the 0–20 range: that is the reserved TUTOR_COLOR red
+ * (nearest student colour is ΔE 60 away, so a tutor is never mistakable for a
+ * student). Closest pair within the set is ΔE 20, comparable to the saturated
+ * palette this replaced.
+ */
 export const STUDENT_COLORS = [
-  '#2f6df6',
-  '#1ea672',
-  '#f5a524',
-  '#8b5cf6',
-  '#0ea5e9',
-  '#d6409f',
-  '#f97316',
-  '#14b8a6',
+  '#4F70A8', // steel blue
+  '#7762B5', // muted indigo
+  '#9F50AB', // dusty violet
+  '#AB517E', // dusty rose
+  '#856B3F', // bronze
+  '#627638', // olive
+  '#3A7B64', // pine
+  '#3D7881', // slate teal
 ];
 
 /** A darker shade of a peer colour, used for outlines on their own fill. */
@@ -55,8 +81,9 @@ export function textOnColor(color: string): string {
   }) as [number, number, number];
   const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
   // White is the house style, so keep it until its WCAG contrast drops below
-  // 3:1 — strict max-contrast would flip mid-tone blues and reds to black too.
-  return 1.05 / (luminance + 0.05) >= 3 ? '#fff' : '#101010';
+  // 4.5:1 — the guideline's minimum for text under 18px, which this always is
+  // (avatar initials, cursor name tags).
+  return 1.05 / (luminance + 0.05) >= 4.5 ? '#fff' : '#101010';
 }
 
 const NAME_KEY = 'whiteboard:display-name';

@@ -3,15 +3,12 @@ import { IndexeddbPersistence } from 'y-indexeddb';
 import { HocuspocusProvider } from '@hocuspocus/provider';
 import { create } from 'zustand';
 import {
-  DEFAULT_ANIMATION_PLAYBACK,
   DEFAULT_MUSIC_PLAYBACK,
+  MAX_CUSTOM_STICKERS_PER_BOARD,
   MAX_DOCUMENTS_PER_BOARD,
   genId,
-  isAnimationRecording,
-  type AnimationPlaybackState,
-  type AnimationPlaybackStatus,
-  type AnimationRecordingV1,
   type BoardDocumentMeta,
+  type CustomStickerMeta,
   type DrawPoint,
   type MusicPlaybackState,
   type MusicPlaybackStatus,
@@ -22,6 +19,7 @@ import {
 import type { Editor, ShapePatch } from './editor';
 import { generateKeyBetween, jitterKeyBetween } from './order';
 import {
+  encodePointsForStorage,
   ensurePointsArray,
   readPoints,
   syncYPoints,
@@ -31,6 +29,7 @@ import { shapeRotatedBounds } from './shape-bounds';
 import { SpatialIndex } from './spatial-index';
 import { useCameraStore } from './use-camera-store';
 import { type CommentMessage, useCommentsStore } from './use-comments-store';
+import { useCustomStickersStore } from './use-custom-stickers-store';
 import { useDocumentsStore } from './use-documents-store';
 import { useConnectionStore } from '@/collab/use-connection-store';
 import { startLatencyMonitor } from '@/collab/latency';
@@ -43,11 +42,6 @@ import {
 } from '@/collab/presence';
 import { stopFollowingForManualCameraChange } from '@/collab/use-follow-store';
 import { useMusicPlaybackStore } from '@/music/use-music-playback-store';
-import {
-  isAnimationPageLocked,
-  isAnimationPlaybackActive,
-  useAnimationStore,
-} from '@/animation/use-animation-store';
 import {
   deletePageInteractionState,
   enterPageInteractionState,
@@ -67,7 +61,6 @@ const DEFAULT_PAGE_NAME = 'Page 1';
 
 /** Origin tag for this client's own mutations — only these are undoable. */
 export const LOCAL_ORIGIN = 'local-user';
-const ANIMATION_ORIGIN = 'animation-system';
 // Comments are never part of undo history (not shapes, not selectable), so
 // their origin is deliberately excluded from the UndoManager's trackedOrigins.
 const COMMENT_ORIGIN = 'comments';
@@ -75,6 +68,14 @@ const COMMENT_ORIGIN = 'comments';
 // comments, they're excluded from the UndoManager's trackedOrigins so Ctrl+Z
 // never silently removes a file someone shared.
 const DOCUMENTS_ORIGIN = 'documents';
+// The board's custom sticker library is a shared asset, not canvas content:
+// excluded from undo for the same reason as documents, so Ctrl+Z never removes
+// a sticker a collaborator just added.
+const STICKERS_ORIGIN = 'stickers';
+// Shapes that only exist while a gesture is in progress (see `withoutUndo`),
+// excluded from the UndoManager so a gesture that leaves nothing behind also
+// leaves no undo entry behind.
+const EPHEMERAL_ORIGIN = 'ephemeral';
 
 /** Room name for a board's Yjs content (IndexedDB + Hocuspocus). */
 export function boardRoom(boardId: string): string {
@@ -179,7 +180,8 @@ function shapeToY(shape: Shape): YShape {
     // Y.Array the live path appends only the new points: O(n) for the stroke.
     const { points, ...props } = shape.props;
     m.set('props', props);
-    m.set('points', Y.Array.from(points));
+    // Flat number triples: see ink-points.ts for the encoding rationale.
+    m.set('points', Y.Array.from(encodePointsForStorage(points)));
   } else {
     m.set('props', shape.props);
   }
@@ -298,14 +300,12 @@ interface Session {
   pages: Y.Map<YPageMeta>;
   /** Shared playback state for the board's music player. */
   music: Y.Map<unknown>;
-  /** Legacy per-page recordings; migrated to the server library, then cleared. */
-  animations: Y.Map<AnimationRecordingV1>;
-  /** Shared animation transport state. */
-  animationPlayback: Y.Map<unknown>;
   /** Comment thread messages, flat map keyed by message id (all pages). */
   comments: Y.Map<CommentMessage>;
   /** Board document repository metadata; the bytes live at /api/docs. */
   documents: Y.Map<BoardDocumentMeta>;
+  /** The board's custom sticker library; the artwork lives at /api/blobs. */
+  stickers: Y.Map<CustomStickerMeta>;
   /** Shapes map for the active page (root `shapes` for page-default). */
   currentShapes: Y.Map<YShape>;
   currentPageId: string;
@@ -320,10 +320,9 @@ interface Session {
   shapesObserver: (events: Y.YEvent<Y.AbstractType<unknown>>[]) => void;
   pagesObserver: () => void;
   musicObserver: () => void;
-  animationsObserver: () => void;
-  animationPlaybackObserver: () => void;
   commentsObserver: () => void;
   documentsObserver: () => void;
+  stickersObserver: () => void;
   persistence: IndexeddbPersistence | null;
   provider: HocuspocusProvider | null;
   cleanup: () => void;
@@ -472,62 +471,6 @@ function publishMusicPlayback(): void {
   useMusicPlaybackStore.getState().setPlayback(readMusicPlayback());
 }
 
-function readAnimationPlayback(): AnimationPlaybackState {
-  if (!session) return DEFAULT_ANIMATION_PLAYBACK;
-  const status = session.animationPlayback.get('status');
-  return {
-    recordingId: asStringOrNull(session.animationPlayback.get('recordingId')),
-    status:
-      status === 'playing' || status === 'paused' || status === 'stopped'
-        ? status
-        : DEFAULT_ANIMATION_PLAYBACK.status,
-    positionMs: asNonNegativeNumber(
-      session.animationPlayback.get('positionMs'),
-      0,
-    ),
-    updatedAt: asNonNegativeNumber(
-      session.animationPlayback.get('updatedAt'),
-      0,
-    ),
-    version: asNonNegativeNumber(session.animationPlayback.get('version'), 0),
-  };
-}
-
-// Legacy in-doc recordings: the animation layer registers a listener so the
-// tutor client can migrate them to the server library once they sync in.
-let legacyAnimationsListener: (() => void) | null = null;
-
-export function setLegacyAnimationsListener(
-  listener: (() => void) | null,
-): void {
-  legacyAnimationsListener = listener;
-  if (listener && session && session.animations.size > 0) listener();
-}
-
-function notifyLegacyAnimations(): void {
-  if (session && session.animations.size > 0) legacyAnimationsListener?.();
-}
-
-export function readLegacyAnimationRecordings(): AnimationRecordingV1[] {
-  if (!session) return [];
-  const recordings: AnimationRecordingV1[] = [];
-  for (const [, value] of session.animations) {
-    if (isAnimationRecording(value)) recordings.push(value);
-  }
-  return recordings;
-}
-
-export function clearLegacyAnimationRecordings(): void {
-  if (!session) return;
-  session.doc.transact(() => {
-    session?.animations.clear();
-  }, ANIMATION_ORIGIN);
-}
-
-function publishAnimationPlayback(): void {
-  useAnimationStore.getState().setPlayback(readAnimationPlayback());
-}
-
 // --- Comments (flat map: message id -> plain CommentMessage object) ---
 
 function readComments(): Record<string, CommentMessage> {
@@ -552,6 +495,19 @@ function readDocuments(): Record<string, BoardDocumentMeta> {
 
 function publishDocuments(): void {
   useDocumentsStore.getState().setDocuments(readDocuments());
+}
+
+// --- Custom stickers (flat map: sticker id -> CustomStickerMeta) ---
+
+function readCustomStickers(): Record<string, CustomStickerMeta> {
+  if (!session) return {};
+  const out: Record<string, CustomStickerMeta> = {};
+  for (const [id, meta] of session.stickers) out[id] = meta;
+  return out;
+}
+
+function publishCustomStickers(): void {
+  useCustomStickersStore.getState().setStickers(readCustomStickers());
 }
 
 function asStringOrNull(value: unknown): string | null {
@@ -683,17 +639,16 @@ export function loadBoard(
     currentPageId: DEFAULT_PAGE_ID,
   });
   useMusicPlaybackStore.getState().reset();
-  useAnimationStore.getState().reset();
   useCommentsStore.getState().reset();
   useDocumentsStore.getState().reset();
+  useCustomStickersStore.getState().reset();
 
   const doc = new Y.Doc();
   const pages = doc.getMap('pages') as Y.Map<YPageMeta>;
   const music = doc.getMap('music');
-  const animations = doc.getMap<AnimationRecordingV1>('animations');
-  const animationPlayback = doc.getMap('animation-playback');
   const comments = doc.getMap<CommentMessage>('comments');
   const documents = doc.getMap<BoardDocumentMeta>('documents');
+  const stickers = doc.getMap<CustomStickerMeta>('stickers');
   const currentShapes = getShapesMap(doc, DEFAULT_PAGE_ID);
   const undo = new Y.UndoManager(currentShapes, {
     trackedOrigins: new Set([LOCAL_ORIGIN]),
@@ -735,14 +690,12 @@ export function loadBoard(
 
   const musicObserver = () => publishMusicPlayback();
   music.observe(musicObserver);
-  const animationsObserver = () => notifyLegacyAnimations();
-  animations.observe(animationsObserver);
-  const animationPlaybackObserver = () => publishAnimationPlayback();
-  animationPlayback.observe(animationPlaybackObserver);
   const commentsObserver = () => publishComments();
   comments.observe(commentsObserver);
   const documentsObserver = () => publishDocuments();
   documents.observe(documentsObserver);
+  const stickersObserver = () => publishCustomStickers();
+  stickers.observe(stickersObserver);
 
   const persistence = opts.persist
     ? new IndexeddbPersistence(boardRoom(boardId), doc)
@@ -772,10 +725,9 @@ export function loadBoard(
     doc,
     pages,
     music,
-    animations,
-    animationPlayback,
     comments,
     documents,
+    stickers,
     currentShapes,
     currentPageId: DEFAULT_PAGE_ID,
     pageRestorePending: true,
@@ -785,10 +737,9 @@ export function loadBoard(
     shapesObserver,
     pagesObserver,
     musicObserver,
-    animationsObserver,
-    animationPlaybackObserver,
     commentsObserver,
     documentsObserver,
+    stickersObserver,
     persistence,
     provider,
     cleanup: () => {
@@ -797,10 +748,9 @@ export function loadBoard(
       session?.currentShapes.unobserveDeep(session.shapesObserver);
       pages.unobserveDeep(pagesObserver);
       music.unobserve(musicObserver);
-      animations.unobserve(animationsObserver);
-      animationPlayback.unobserve(animationPlaybackObserver);
       comments.unobserve(commentsObserver);
       documents.unobserve(documentsObserver);
+      stickers.unobserve(stickersObserver);
       session?.unbindUndoState();
       for (const manager of session?.undoByPage.values() ?? []) {
         manager.destroy();
@@ -810,9 +760,9 @@ export function loadBoard(
       persistence?.destroy();
       doc.destroy();
       useMusicPlaybackStore.getState().reset();
-      useAnimationStore.getState().reset();
       useCommentsStore.getState().reset();
       useDocumentsStore.getState().reset();
+      useCustomStickersStore.getState().reset();
     },
   };
 
@@ -867,10 +817,9 @@ export function loadBoard(
 
   fullResync();
   publishMusicPlayback();
-  notifyLegacyAnimations();
-  publishAnimationPlayback();
   publishComments();
   publishDocuments();
+  publishCustomStickers();
 
   let disposed = false;
   return () => {
@@ -882,7 +831,6 @@ export function loadBoard(
 }
 
 export function undo(): void {
-  if (isAnimationPlaybackActive()) return;
   session?.undo.undo();
 }
 /** Force the next mutation to start a new undo entry (gesture boundary). */
@@ -890,7 +838,6 @@ export function breakUndoCapture(): void {
   session?.undo.stopCapturing();
 }
 export function redo(): void {
-  if (isAnimationPlaybackActive()) return;
   session?.undo.redo();
 }
 
@@ -911,7 +858,6 @@ function cleanupDeletedPageState(pageId: string): void {
 type PageSwitchSource =
   | 'user'
   | 'follow'
-  | 'animation'
   | 'restore'
   | 'integrity';
 
@@ -965,24 +911,16 @@ function switchToPageInternal(
 }
 
 export function setCurrentPage(pageId: string): void {
-  if (isAnimationPageLocked()) return;
   switchToPageInternal(pageId);
 }
 
 /** Follow mode must be able to track a tutor across pages without cancelling itself. */
 export function setCurrentPageForFollow(pageId: string): void {
-  if (isAnimationPageLocked()) return;
   switchToPageInternal(pageId, 'follow');
-}
-
-/** Playback-only page switch that bypasses the local interaction lock. */
-export function setCurrentPageForAnimation(pageId: string): void {
-  switchToPageInternal(pageId, 'animation');
 }
 
 /** Create a new page after the current one and switch to it. Returns its id. */
 export function createPage(name?: string): string {
-  if (isAnimationPageLocked()) return '';
   if (!session) return '';
   const id = genId();
   const metas = readPages(session.pages);
@@ -1004,7 +942,6 @@ export function createPage(name?: string): string {
 }
 
 export function renamePage(id: string, name: string): void {
-  if (isAnimationPageLocked()) return;
   if (!session) return;
   const trimmed = name.trim();
   if (!trimmed) return;
@@ -1015,7 +952,6 @@ export function renamePage(id: string, name: string): void {
 }
 
 export function deletePage(id: string): void {
-  if (isAnimationPageLocked()) return;
   if (!session) return;
   const metas = readPages(session.pages);
   if (metas.length <= 1) return; // never delete the last page
@@ -1027,12 +963,11 @@ export function deletePage(id: string): void {
   session.doc.transact(() => {
     session!.pages.delete(id);
     getShapesMap(session!.doc, id).clear();
-  }, ANIMATION_ORIGIN);
+  });
 }
 
 /** Move a page to a resolved list position with one fractional-index write. */
 export function movePageToIndex(id: string, targetIndex: number): void {
-  if (isAnimationPageLocked()) return;
   if (!session) return;
   const metas = readPages(session.pages);
   const currentIndex = metas.findIndex((meta) => meta.id === id);
@@ -1091,28 +1026,6 @@ export function setMusicPlayback(
       session?.music.delete('requestedBy');
     }
   });
-}
-
-// --- Whiteboard animation API ---
-
-export function setAnimationPlayback(update: {
-  recordingId?: string | null;
-  status?: AnimationPlaybackStatus;
-  positionMs?: number;
-}): void {
-  if (!session) return;
-  const current = readAnimationPlayback();
-  const recordingId =
-    update.recordingId !== undefined ? update.recordingId : current.recordingId;
-  const status = update.status ?? current.status;
-  const positionMs = Math.max(0, update.positionMs ?? current.positionMs);
-  session.doc.transact(() => {
-    session?.animationPlayback.set('recordingId', recordingId);
-    session?.animationPlayback.set('status', status);
-    session?.animationPlayback.set('positionMs', positionMs);
-    session?.animationPlayback.set('updatedAt', Date.now());
-    session?.animationPlayback.set('version', current.version + 1);
-  }, ANIMATION_ORIGIN);
 }
 
 // --- Comments API ---
@@ -1220,6 +1133,31 @@ export function removeBoardDocument(id: string): void {
   }, DOCUMENTS_ORIGIN);
 }
 
+/** Whether the board's sticker library has room for another sticker. */
+export function customStickersFull(): boolean {
+  return (session?.stickers.size ?? 0) >= MAX_CUSTOM_STICKERS_PER_BOARD;
+}
+
+/** Publish an uploaded sticker to everyone on the board. */
+export function addCustomSticker(meta: CustomStickerMeta): void {
+  if (!session) return;
+  session.doc.transact(() => {
+    session?.stickers.set(meta.id, meta);
+  }, STICKERS_ORIGIN);
+}
+
+/**
+ * Remove a sticker from the board's library. Stamps already on the canvas keep
+ * their artwork — they carry the blob id themselves — and the stored bytes are
+ * left in place, being content-addressed and possibly shared with another board.
+ */
+export function removeCustomSticker(id: string): void {
+  if (!session) return;
+  session.doc.transact(() => {
+    session?.stickers.delete(id);
+  }, STICKERS_ORIGIN);
+}
+
 /**
  * Encoded size of the whole board document, in bytes.
  *
@@ -1249,6 +1187,29 @@ function transactLocal(fn: () => void): void {
   }
 }
 
+/**
+ * Run shape mutations outside undo history. Yjs transactions are reentrant and
+ * only the outermost one carries an origin, so the `transactLocal` calls inside
+ * `editor` join this one and inherit `EPHEMERAL_ORIGIN` — which the UndoManager
+ * does not track. Peers still receive the changes; only Ctrl+Z ignores them.
+ *
+ * For shapes that exist only for the duration of a gesture (the wand's lasso
+ * stroke), where an undo entry would be a step that undoes nothing.
+ */
+export function withoutUndo(fn: () => void): void {
+  // No board session in unit tests — the caller's mutations still have to run.
+  if (!session) {
+    fn();
+    return;
+  }
+  transactDepth++;
+  try {
+    session.doc.transact(fn, EPHEMERAL_ORIGIN);
+  } finally {
+    transactDepth--;
+  }
+}
+
 export const editor: Editor = {
   getShape: (id) => {
     // Outside a transaction the cache mirrors the document, so hot read paths
@@ -1268,26 +1229,20 @@ export const editor: Editor = {
     return currentSortedShapes();
   },
   createShape: (shape) =>
-    !isAnimationPlaybackActive()
-      ? transactLocal(() => session?.currentShapes.set(shape.id, shapeToY(shape)))
-      : undefined,
+    transactLocal(() => session?.currentShapes.set(shape.id, shapeToY(shape))),
   updateShape: (id, patch) =>
-    !isAnimationPlaybackActive()
-      ? transactLocal(() => {
-          const m = session?.currentShapes.get(id);
-          if (m) applyPatchToY(m, patch);
-        })
-      : undefined,
+    transactLocal(() => {
+      const m = session?.currentShapes.get(id);
+      if (m) applyPatchToY(m, patch);
+    }),
   deleteShapes: (ids) =>
-    !isAnimationPlaybackActive()
-      ? transactLocal(() => {
-          for (const id of ids) session?.currentShapes.delete(id);
-        })
-      : undefined,
+    transactLocal(() => {
+      for (const id of ids) session?.currentShapes.delete(id);
+    }),
   // Yjs transactions are reentrant: the inner `transactLocal` calls made by
   // `updateShape` join this one, so the deep observer fires (and the snapshot
   // rebuilds) exactly once for the whole batch.
   transact: (fn) => {
-    if (!isAnimationPlaybackActive()) transactLocal(fn);
+    transactLocal(fn);
   },
 };

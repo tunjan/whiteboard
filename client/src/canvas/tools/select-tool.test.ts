@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { Shape } from '@whiteboard/shared';
+import { rotatePoint, type Shape } from '@whiteboard/shared';
 import '../shapes/register';
 import type { Editor } from '../editor';
 import { getSelectionInfo, shapeRotatedBounds } from '../selection-geometry';
@@ -69,7 +69,7 @@ function pointer(
   keys: Partial<
     Pick<
       ToolPointerInfo,
-      'shiftKey' | 'altKey' | 'ctrlKey' | 'metaKey'
+      'shiftKey' | 'altKey' | 'ctrlKey' | 'metaKey' | 'pointerType'
     >
   > = {},
 ): ToolPointerInfo {
@@ -79,7 +79,7 @@ function pointer(
     timestamp: 0,
     zoom: 1,
     pressure: 0.5,
-    pointerType: 'mouse',
+    pointerType: keys.pointerType ?? 'mouse',
     shiftKey: keys.shiftKey ?? false,
     altKey: keys.altKey ?? false,
     ctrlKey: keys.ctrlKey ?? false,
@@ -146,6 +146,7 @@ describe('select tool state machine', () => {
     useSelectionStore.getState().clear();
     useSelectionStore.getState().setMarquee(null);
     useSelectionStore.getState().setSnapGuides([]);
+    useSelectionStore.getState().setRotationCursor(null);
     useEnteredGroupStore.getState().exit();
     useCanvasUiStore.getState().setSnappingEnabled(true);
   });
@@ -392,5 +393,145 @@ describe('select tool state machine', () => {
     );
 
     expect(shapes.get(shape.id)?.rotation).toBeCloseTo(Math.PI / 2);
+  });
+
+  it('rotates a parented multi-selection as one rigid body', () => {
+    const parent = frame('frame', -100, -100, 'a0');
+    const first = { ...rectangle('first', 0, 0, 'a1'), parentId: parent.id };
+    const second = { ...rectangle('second', 80, 0, 'a2'), parentId: parent.id };
+    const { ctx, shapes, transactions } = context([parent, first, second]);
+    const tool = createSelectTool();
+    useSelectionStore
+      .getState()
+      .setSelection([first.id, second.id]);
+    const info = getSelectionInfo(
+      [parent, first, second],
+      [first.id, second.id],
+      1,
+    )!;
+    const handle = info.rotationHandles[0]!.point;
+    const target = rotatePoint(handle, info.center, Math.PI / 2);
+    const firstCenter = { x: first.x + 20, y: first.y + 15 };
+    const secondCenter = { x: second.x + 20, y: second.y + 15 };
+    const expectedFirstCenter = rotatePoint(
+      firstCenter,
+      info.center,
+      Math.PI / 2,
+    );
+    const expectedSecondCenter = rotatePoint(
+      secondCenter,
+      info.center,
+      Math.PI / 2,
+    );
+
+    tool.onPointerDown?.(pointer(handle.x, handle.y), ctx);
+    const initialCursor = useSelectionStore.getState().rotationCursor;
+    transactions.count = 0;
+    tool.onPointerMove?.(pointer(target.x, target.y), ctx);
+
+    expect(transactions.count).toBe(1);
+    expect(useSelectionStore.getState().rotationCursor).not.toBe(initialCursor);
+    expect(shapes.get(first.id)).toMatchObject({
+      parentId: parent.id,
+      x: expectedFirstCenter.x - 20,
+      y: expectedFirstCenter.y - 15,
+    });
+    expect(shapes.get(second.id)).toMatchObject({
+      parentId: parent.id,
+      x: expectedSecondCenter.x - 20,
+      y: expectedSecondCenter.y - 15,
+    });
+    expect(shapes.get(first.id)?.rotation).toBeCloseTo(Math.PI / 2);
+    expect(shapes.get(second.id)?.rotation).toBeCloseTo(Math.PI / 2);
+
+    tool.onPointerUp?.(pointer(target.x, target.y), ctx);
+    expect(useSelectionStore.getState().rotationCursor).toBeNull();
+  });
+
+  it('uses the gesture snapshot instead of accumulating rotation drift', () => {
+    const first = rectangle('first', 0, 0, 'a0');
+    const second = rectangle('second', 80, 0, 'a1');
+    const { ctx, shapes } = context([first, second]);
+    const tool = createSelectTool();
+    useSelectionStore.getState().setSelection([first.id, second.id]);
+    const info = getSelectionInfo(
+      [first, second],
+      [first.id, second.id],
+      1,
+    )!;
+    const handle = info.rotationHandles[2]!.point;
+    const halfway = rotatePoint(handle, info.center, Math.PI / 4);
+    const target = rotatePoint(handle, info.center, Math.PI / 2);
+
+    tool.onPointerDown?.(pointer(handle.x, handle.y), ctx);
+    tool.onPointerMove?.(pointer(halfway.x, halfway.y), ctx);
+    tool.onPointerMove?.(pointer(target.x, target.y), ctx);
+    tool.onPointerUp?.(pointer(target.x, target.y), ctx);
+
+    expect(shapes.get(first.id)).toMatchObject({ x: 40, y: -40 });
+    expect(shapes.get(second.id)).toMatchObject({ x: 40, y: 40 });
+  });
+
+  it('snaps Shift rotation to 15 degrees and rounds free rotation on drop', () => {
+    const shiftShape = rectangle('shift', 0, 0, 'a0');
+    const freeShape = rectangle('free', 100, 0, 'a1');
+    const { ctx, shapes } = context([shiftShape, freeShape]);
+    const tool = createSelectTool();
+    const requested = (22.4 * Math.PI) / 180;
+
+    useSelectionStore.getState().setSelection([shiftShape.id]);
+    const shiftInfo = getSelectionInfo([shiftShape], [shiftShape.id], 1)!;
+    const shiftHandle = shiftInfo.rotationHandles[0]!.point;
+    const shiftTarget = rotatePoint(shiftHandle, shiftInfo.center, requested);
+    tool.onPointerDown?.(
+      pointer(shiftHandle.x, shiftHandle.y, { shiftKey: true }),
+      ctx,
+    );
+    tool.onPointerMove?.(
+      pointer(shiftTarget.x, shiftTarget.y, { shiftKey: true }),
+      ctx,
+    );
+    tool.onPointerUp?.(
+      pointer(shiftTarget.x, shiftTarget.y, { shiftKey: true }),
+      ctx,
+    );
+    expect(shapes.get(shiftShape.id)?.rotation).toBeCloseTo(
+      (15 * Math.PI) / 180,
+    );
+
+    useSelectionStore.getState().setSelection([freeShape.id]);
+    const freeInfo = getSelectionInfo([freeShape], [freeShape.id], 1)!;
+    const freeHandle = freeInfo.rotationHandles[0]!.point;
+    const freeTarget = rotatePoint(freeHandle, freeInfo.center, requested);
+    tool.onPointerDown?.(pointer(freeHandle.x, freeHandle.y), ctx);
+    tool.onPointerMove?.(pointer(freeTarget.x, freeTarget.y), ctx);
+    expect(shapes.get(freeShape.id)?.rotation).toBeCloseTo(requested);
+    tool.onPointerUp?.(pointer(freeTarget.x, freeTarget.y), ctx);
+    expect(shapes.get(freeShape.id)?.rotation).toBeCloseTo(
+      (22 * Math.PI) / 180,
+    );
+  });
+
+  it('magnetizes coarse touch rotation to nearby right angles', () => {
+    const shape = rectangle('touch', 0, 0, 'a0');
+    const { ctx, shapes } = context([shape]);
+    const tool = createSelectTool();
+    useSelectionStore.getState().setSelection([shape.id]);
+    const info = getSelectionInfo([shape], [shape.id], 1)!;
+    const handle = info.rotationHandles[0]!.point;
+    const target = rotatePoint(handle, info.center, (87 * Math.PI) / 180);
+
+    tool.onPointerDown?.(
+      pointer(handle.x, handle.y, { pointerType: 'touch' }),
+      ctx,
+    );
+    tool.onPointerMove?.(
+      pointer(target.x, target.y, { pointerType: 'touch' }),
+      ctx,
+    );
+
+    expect(shapes.get(shape.id)?.rotation).toBeCloseTo(Math.PI / 2);
+    tool.onCancel?.(ctx);
+    expect(shapes.get(shape.id)).toMatchObject({ x: 0, y: 0, rotation: 0 });
   });
 });

@@ -19,12 +19,15 @@ import {
   shapeRotatedBounds,
   type MarqueeMode,
   type ResizeHandleId,
+  type RotationHandleId,
 } from '../selection-geometry';
+import { rotationCursor } from '../rotation-cursor';
 import {
   leafDescendants,
   moveTargetIds,
   selectionTargetId,
 } from '../hierarchy';
+import { requestEquationFocus } from '../equation-focus';
 import { getSnapGridStep } from '../grid';
 import { isSelectable, isVisible } from '../selectable';
 import { useEnteredGroupStore } from '../use-entered-group-store';
@@ -33,7 +36,13 @@ import { findBindableShapeAt } from '../shapes/connector-routing';
 import { textIndexAtWorldPoint } from '../shapes/text';
 import { layoutTextProps, MIN_TEXT_WIDTH } from '../shapes/text-measure';
 import type { ShapeUtil } from '../shapes/types';
-import { shapeSnapGeometry } from '../snap-geometry';
+import { selfSnapTarget, shapeSnapGeometry } from '../snap-geometry';
+import {
+  SNAP_SCREEN,
+  snapRegion,
+  snapTargetBounds,
+  snapTargetShapes,
+} from '../snap-targets';
 import {
   type PointSnapTarget,
   snapBounds,
@@ -55,15 +64,22 @@ const HANDLE_HIT_SCREEN = 10;
 const SHAPE_HIT_SCREEN = 4;
 const DRAG_SLOP_SCREEN = 3;
 const ROTATE_SNAP = (15 * Math.PI) / 180;
+const RIGHT_ANGLE_SNAP = Math.PI / 2;
+const COARSE_ROTATE_TOLERANCE = (5 * Math.PI) / 180;
+const ONE_DEGREE = Math.PI / 180;
+const TAU = Math.PI * 2;
 const MIN_RESIZE = 1;
-/** Snap threshold in screen px (divided by zoom for world distance). */
-const SNAP_SCREEN = 8;
 
 interface GroupItem {
   initial: Shape;
   util: ShapeUtil;
   /** The shape's unrotated bounds at gesture start. */
   b0: Bounds;
+}
+
+interface RotationItem {
+  initial: Shape;
+  center: Point;
 }
 
 type Axis = 'x' | 'y';
@@ -123,7 +139,18 @@ type SelectState =
       items: GroupItem[];
       targets: Bounds[];
     }
-  | { type: 'rotate'; initial: Shape; center: Point; startAngle: number }
+  | {
+      type: 'rotate';
+      handle: RotationHandleId;
+      items: RotationItem[];
+      center: Point;
+      startAngle: number;
+      initialSharedRotation: number;
+      current: Point;
+      shiftKey: boolean;
+      pointerType: string;
+      completed: boolean;
+    }
   | {
       type: 'handle';
       shapeId: string;
@@ -282,8 +309,81 @@ function marqueeMode(ctrlKey: boolean, metaKey: boolean): MarqueeMode {
   return ctrlKey || metaKey ? 'wrap' : 'intersect';
 }
 
+function normalizeRotation(angle: number): number {
+  return ((angle % TAU) + TAU) % TAU;
+}
+
+function snapRotation(angle: number, step: number): number {
+  return Math.round(angle / step) * step;
+}
+
+function shortAngleDistance(from: number, to: number): number {
+  return ((to - from + Math.PI) % TAU + TAU) % TAU - Math.PI;
+}
+
+function effectiveRotation(
+  target: number,
+  shiftKey: boolean,
+  pointerType: string,
+  complete: boolean,
+): number {
+  let rotation = shiftKey
+    ? snapRotation(target, ROTATE_SNAP)
+    : complete
+      ? snapRotation(target, ONE_DEGREE)
+      : target;
+  if (pointerType === 'touch') {
+    const rightAngle = snapRotation(rotation, RIGHT_ANGLE_SNAP);
+    if (
+      Math.abs(shortAngleDistance(rotation, rightAngle)) <
+      COARSE_ROTATE_TOLERANCE
+    ) {
+      rotation = rightAngle;
+    }
+  }
+  return rotation;
+}
+
 export function createSelectTool(): Tool {
   let state: SelectState = { type: 'idle' };
+
+  function applyRotation(
+    rotate: Extract<SelectState, { type: 'rotate' }>,
+    point: Point,
+    shiftKey: boolean,
+    pointerType: string,
+    complete: boolean,
+    ctx: ToolContext,
+  ): void {
+    rotate.current = point;
+    rotate.shiftKey = shiftKey;
+    rotate.pointerType = pointerType;
+    rotate.completed = complete;
+    const pointerAngle = Math.atan2(
+      point.y - rotate.center.y,
+      point.x - rotate.center.x,
+    );
+    const target = effectiveRotation(
+      rotate.initialSharedRotation + pointerAngle - rotate.startAngle,
+      shiftKey,
+      pointerType,
+      complete,
+    );
+    const delta = target - rotate.initialSharedRotation;
+    ctx.editor.transact(() => {
+      for (const item of rotate.items) {
+        const nextCenter = rotatePoint(item.center, rotate.center, delta);
+        ctx.editor.updateShape(item.initial.id, {
+          x: item.initial.x + nextCenter.x - item.center.x,
+          y: item.initial.y + nextCenter.y - item.center.y,
+          rotation: normalizeRotation(item.initial.rotation + delta),
+        });
+      }
+    });
+    useSelectionStore
+      .getState()
+      .setRotationCursor(rotationCursor(rotate.handle, target));
+  }
 
   function createMoveState(
     start: Point,
@@ -320,40 +420,6 @@ export function createSelectTool(): Tool {
       axis: null,
       targets: null,
     };
-  }
-
-  /** Visible, non-moving shapes in the viewport that permit snapping. */
-  function snapTargetShapes(
-    editor: Editor,
-    movingIds: Set<string>,
-    region: Bounds,
-  ): Shape[] {
-    if (!useCanvasUiStore.getState().snappingEnabled) return [];
-    const targets: Shape[] = [];
-    for (const id of spatialIndex.search(region)) {
-      if (movingIds.has(id)) continue;
-      const shape = editor.getShape(id);
-      if (!shape || !isVisible(shape)) continue;
-      const util = shapeRegistry.getFor(shape);
-      if (!util || util.canSnap === false || shape.type === 'group') continue;
-      targets.push(shape);
-    }
-    return targets;
-  }
-
-  function snapRegion(ctx: ToolContext, fallback: Bounds): Bounds {
-    return ctx.getViewportBounds?.() ?? spatialIndex.totalBounds() ?? fallback;
-  }
-
-  function snapTargetBounds(
-    editor: Editor,
-    movingIds: Set<string>,
-    region: Bounds,
-  ): Bounds[] {
-    return snapTargetShapes(editor, movingIds, region).flatMap((shape) => {
-      const bounds = spatialIndex.getBounds(shape.id);
-      return bounds ? [bounds] : [];
-    });
   }
 
   function applyMove(move: Extract<SelectState, { type: 'move' }>, info: ToolPointerInfo, ctx: ToolContext): void {
@@ -532,6 +598,7 @@ export function createSelectTool(): Tool {
   function clearTransientState(): void {
     useSelectionStore.getState().setMarquee(null);
     useSelectionStore.getState().setSnapGuides([]);
+    useSelectionStore.getState().setRotationCursor(null);
   }
 
   // Finish the gesture, keeping its result. The live drag already wrote the
@@ -540,6 +607,16 @@ export function createSelectTool(): Tool {
   // commit (the OS reclaimed the pointer mid-gesture).
   function commit(ctx: ToolContext): void {
     const finished = state;
+    if (finished.type === 'rotate' && !finished.completed) {
+      applyRotation(
+        finished,
+        finished.current,
+        finished.shiftKey,
+        finished.pointerType,
+        true,
+        ctx,
+      );
+    }
     if (finished.type === 'pending-shape') {
       if (finished.additive) {
         useSelectionStore.getState().toggle(finished.targetId);
@@ -582,7 +659,7 @@ export function createSelectTool(): Tool {
           const shape = ctx.editor.getShape(selectionInfo.ids[0]!);
           const util = shape ? shapeRegistry.getFor(shape) : undefined;
           if (shape && util?.onHandleDrag) {
-            const targets = snapTargetShapes(
+            const targets: PointSnapTarget[] = snapTargetShapes(
               ctx.editor,
               new Set([shape.id]),
               snapRegion(ctx, selectionInfo.bounds),
@@ -590,6 +667,9 @@ export function createSelectTool(): Tool {
               const geometry = shapeSnapGeometry(target);
               return geometry ? [{ ...geometry, shapeId: target.id }] : [];
             });
+            // The shape's own far ends, snapshotted before the drag mutates it.
+            const self = selfSnapTarget(shape, handle.id);
+            if (self) targets.push(self);
             state = {
               type: 'handle',
               shapeId: shape.id,
@@ -673,17 +753,45 @@ export function createSelectTool(): Tool {
           ) {
             continue;
           }
-          const initial = ctx.editor.getShape(selectionInfo.ids[0]!);
-          if (initial) {
+          const items: RotationItem[] = [];
+          for (const id of selectionInfo.ids) {
+            const initial = ctx.editor.getShape(id);
+            if (
+              !initial ||
+              initial.locked ||
+              initial.type === 'group' ||
+              initial.type === 'frame'
+            ) {
+              continue;
+            }
+            const util = shapeRegistry.getFor(initial);
+            if (!util) continue;
+            items.push({
+              initial,
+              center: boundsCenter(util.getBounds(initial as never)),
+            });
+          }
+          if (items.length) {
             state = {
               type: 'rotate',
-              initial,
+              handle: handle.id,
+              items,
               center: selectionInfo.center,
               startAngle: Math.atan2(
                 info.point.y - selectionInfo.center.y,
                 info.point.x - selectionInfo.center.x,
               ),
+              initialSharedRotation: selectionInfo.rotation,
+              current: info.point,
+              shiftKey: info.shiftKey,
+              pointerType: info.pointerType,
+              completed: false,
             };
+            useSelectionStore
+              .getState()
+              .setRotationCursor(
+                rotationCursor(handle.id, selectionInfo.rotation),
+              );
           }
           return;
         }
@@ -795,7 +903,8 @@ export function createSelectTool(): Tool {
           const lockAspect =
             info.shiftKey ||
             ((state.initial.type === 'text' ||
-              state.initial.type === 'equation') &&
+              state.initial.type === 'equation' ||
+              state.initial.type === 'sticker') &&
               state.handle.length === 2);
           let bounds = computeResizeBounds(
             state.initial,
@@ -950,13 +1059,14 @@ export function createSelectTool(): Tool {
           return;
         }
         case 'rotate': {
-          const angle = Math.atan2(
-            info.point.y - state.center.y,
-            info.point.x - state.center.x,
+          applyRotation(
+            state,
+            info.point,
+            info.shiftKey,
+            info.pointerType,
+            false,
+            ctx,
           );
-          let rotation = state.initial.rotation + (angle - state.startAngle);
-          if (info.shiftKey) rotation = Math.round(rotation / ROTATE_SNAP) * ROTATE_SNAP;
-          ctx.editor.updateShape(state.initial.id, { rotation });
           return;
         }
         case 'marquee': {
@@ -974,7 +1084,16 @@ export function createSelectTool(): Tool {
     },
 
     onPointerUp(info: ToolPointerInfo, ctx: ToolContext) {
-      if (state.type === 'marquee') {
+      if (state.type === 'rotate') {
+        applyRotation(
+          state,
+          info.point,
+          info.shiftKey,
+          info.pointerType,
+          true,
+          ctx,
+        );
+      } else if (state.type === 'marquee') {
         updateMarquee(
           state,
           info.point,
@@ -988,6 +1107,17 @@ export function createSelectTool(): Tool {
     },
 
     onKeyDown(event: KeyboardEvent, ctx: ToolContext) {
+      if (state.type === 'rotate' && event.key === 'Shift') {
+        applyRotation(
+          state,
+          state.current,
+          true,
+          state.pointerType,
+          false,
+          ctx,
+        );
+        return true;
+      }
       if (
         state.type !== 'marquee' ||
         (event.key !== 'Shift' &&
@@ -1008,6 +1138,17 @@ export function createSelectTool(): Tool {
     },
 
     onKeyUp(event: KeyboardEvent, ctx: ToolContext) {
+      if (state.type === 'rotate' && event.key === 'Shift') {
+        applyRotation(
+          state,
+          state.current,
+          false,
+          state.pointerType,
+          false,
+          ctx,
+        );
+        return true;
+      }
       if (
         state.type !== 'marquee' ||
         (event.key !== 'Shift' &&
@@ -1061,9 +1202,13 @@ export function createSelectTool(): Tool {
           useSelectionStore.getState().setSelection(cancelled.selectionBefore);
           return;
         case 'resize':
-        case 'rotate':
         case 'handle':
           restore(cancelled.initial);
+          return;
+        case 'rotate':
+          ctx.editor.transact(() => {
+            for (const item of cancelled.items) restore(item.initial);
+          });
           return;
         case 'group-resize':
           for (const item of cancelled.items) restore(item.initial);
@@ -1130,6 +1275,11 @@ export function createSelectTool(): Tool {
         useTextEditingStore
           .getState()
           .start(hitShape.id, { anchor: index, head: index });
+        return;
+      }
+      if (hitShape?.type === 'equation') {
+        useSelectionStore.getState().setSelection([hitShape.id]);
+        requestEquationFocus(hitShape.id);
         return;
       }
       if (hitShape?.type === 'video') {

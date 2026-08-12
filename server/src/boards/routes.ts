@@ -3,7 +3,7 @@ import { desc, eq } from 'drizzle-orm';
 import { type BoardMeta, genBoardId } from '@whiteboard/shared';
 import { requireTutor } from '../auth/middleware';
 import { db } from '../db/client';
-import { boardDocuments, boards, recordings } from '../db/schema';
+import { boardDocuments, boards } from '../db/schema';
 
 type BoardRow = typeof boards.$inferSelect;
 
@@ -101,7 +101,6 @@ boardRoutes.put('/:id/notes', async (c) => {
 boardRoutes.delete('/:id', async (c) => {
   const id = c.req.param('id');
   await db.delete(boardDocuments).where(eq(boardDocuments.boardId, id));
-  await db.delete(recordings).where(eq(recordings.boardId, id));
   await db.delete(boards).where(eq(boards.id, id));
   return c.json({ ok: true });
 });

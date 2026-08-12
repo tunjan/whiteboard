@@ -15,6 +15,15 @@ const BARS = [
   { x: 13, y: 2, height: 13 },
 ] as const;
 
+/**
+ * Bar count carries the quality; colour is held back until the connection
+ * actually needs attention. A healthy link is the normal case and reads as
+ * neutral ink, so a coloured indicator anywhere in the chrome always means
+ * something is wrong rather than "still fine, still fine, still fine".
+ *
+ * Severity is still double-encoded for anyone who can't separate the hues:
+ * four bars vs one says the same thing as grey vs red.
+ */
 function connectionQuality(
   status: ConnectionStatus,
   latencyMs: number | null,
@@ -23,7 +32,7 @@ function connectionQuality(
     return {
       activeBars: 0,
       label: 'Disconnected',
-      colorClass: 'text-content-error',
+      colorClass: 'text-danger',
       pending: false,
     };
   }
@@ -31,7 +40,7 @@ function connectionQuality(
     return {
       activeBars: 0,
       label: status === 'connecting' ? 'Connecting' : 'Measuring connection',
-      colorClass: 'text-content-attention',
+      colorClass: 'text-fg-subtle',
       pending: true,
     };
   }
@@ -39,7 +48,7 @@ function connectionQuality(
     return {
       activeBars: 4,
       label: 'Excellent connection',
-      colorClass: 'text-content-success',
+      colorClass: 'text-fg-muted',
       pending: false,
     };
   }
@@ -47,7 +56,7 @@ function connectionQuality(
     return {
       activeBars: 3,
       label: 'Good connection',
-      colorClass: 'text-content-success',
+      colorClass: 'text-fg-muted',
       pending: false,
     };
   }
@@ -55,14 +64,14 @@ function connectionQuality(
     return {
       activeBars: 2,
       label: 'Fair connection',
-      colorClass: 'text-content-attention',
+      colorClass: 'text-warning',
       pending: false,
     };
   }
   return {
     activeBars: 1,
     label: 'Poor connection',
-    colorClass: 'text-content-error',
+    colorClass: 'text-danger',
     pending: false,
   };
 }
@@ -124,9 +133,10 @@ export function ConnectionIndicator() {
           render={
             <div
               aria-label={accessibleLabel}
-              className="flex size-8 items-center justify-center rounded-[var(--surface-control-radius,var(--radius-lg))] select-none hover:bg-bg-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-emphasis"
+              data-toolbar-item
+              className="flex size-8 items-center justify-center rounded-md select-none hover:bg-[var(--chrome-hover,var(--color-panel))]"
               role="status"
-              tabIndex={0}
+              tabIndex={-1}
             />
           }
         >

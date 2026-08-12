@@ -326,14 +326,14 @@ export function SortableList<T extends { id: string }>({
       <div
         aria-hidden="true"
         className={cn(
-          'pointer-events-none absolute inset-x-0 top-0 h-4 bg-linear-to-b from-bg-default to-transparent transition-opacity duration-150 motion-reduce:transition-none',
+          'pointer-events-none absolute inset-x-0 top-0 h-4 bg-linear-to-b from-surface to-transparent transition-opacity duration-150 motion-reduce:transition-none',
           overflow.top ? 'opacity-100' : 'opacity-0',
         )}
       />
       <div
         aria-hidden="true"
         className={cn(
-          'pointer-events-none absolute inset-x-0 bottom-0 h-4 bg-linear-to-t from-bg-default to-transparent transition-opacity duration-150 motion-reduce:transition-none',
+          'pointer-events-none absolute inset-x-0 bottom-0 h-4 bg-linear-to-t from-surface to-transparent transition-opacity duration-150 motion-reduce:transition-none',
           overflow.bottom ? 'opacity-100' : 'opacity-0',
         )}
       />

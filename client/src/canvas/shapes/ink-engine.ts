@@ -18,6 +18,67 @@ const MIN_RADIUS = 0.01;
 const textDecoder = new TextDecoder();
 const linearEasing = (value: number): number => value;
 
+/**
+ * Sample spacing every distance-domain filter here is calibrated at, in world
+ * units. The draw tool records a point only once the pointer has moved at
+ * least this far, so a slow, deliberate stroke arrives at almost exactly this
+ * spacing and gets exactly the weights the settings sliders name.
+ */
+export const NOMINAL_SAMPLE_SPACING = 1;
+
+/**
+ * Distance over which physical stylus pressure closes ~63% of a change, in
+ * world units. Real pressure is noisy enough to need smoothing, but the rate
+ * must not depend on the brush: relaxing by a fraction of `distance / size`
+ * made a thick pen respond roughly four times more sluggishly than a thin one
+ * to the very same hand.
+ */
+const PRESSURE_RESPONSE_DISTANCE = 8;
+
+/**
+ * Fraction of the brush width the decimated outline may deviate from the exact
+ * one at `smoothing: 1`. Applied as a perpendicular error bound rather than a
+ * minimum spacing, so straight runs collapse to their endpoints while a tight
+ * curve keeps every point that carries it — the old spacing rule dropped
+ * detail in proportion to `size`, which cost thick brushes the most.
+ */
+const TRACK_ERROR_LIMIT = 0.15;
+
+/**
+ * How much of each end of a stroke may be discarded as press/lift jitter, in
+ * world units, capped below by the brush so sub-pixel nibs keep their tighter
+ * threshold.
+ *
+ * This used to be `size / 3` outright. Because the discarded run is replaced
+ * by a single straight segment to the endpoint, a size-32 brush opened and
+ * closed every stroke with an ~11-unit straight stub while a size-4 brush used
+ * ~1.3 — the same hand tracing the same arc got a visibly stiffer line from
+ * the thicker pen, and while drawing, the live tip is that stub. Press and
+ * lift jitter is a property of the hand and the digitizer; it does not get
+ * larger because the brush did.
+ */
+const ENDPOINT_JITTER_DISTANCE = 2;
+
+/**
+ * Greatest multiple of the brush radius a corner may push the outline out to.
+ *
+ * Offsetting a turn along its bisector is what keeps the ribbon exactly one
+ * radius wide measured perpendicular to each arm, but the bisector offset
+ * grows without bound as the turn approaches a reversal. Past this limit the
+ * corner is partitioned instead and emitted as two round-capped subpaths, so
+ * the join rounds off rather than growing a spike.
+ */
+const INK_MITER_LIMIT = 1.5;
+
+/**
+ * `1 + directionChange` below which the miter exceeds `INK_MITER_LIMIT`.
+ *
+ * `1 + cos(turn)` is `2 cos²(turn / 2)`, and the miter's length is
+ * `radius / cos(turn / 2)`, so the limit is reached exactly at
+ * `2 / INK_MITER_LIMIT²` — a turn of about 96 degrees.
+ */
+const MITER_DENOMINATOR_FLOOR = 2 / (INK_MITER_LIMIT * INK_MITER_LIMIT);
+
 function clamp(value: number, min: number, max: number): number {
   if (!Number.isFinite(value)) return min;
   return Math.max(min, Math.min(max, value));
@@ -25,6 +86,63 @@ function clamp(value: number, min: number, max: number): number {
 
 function clamp01(value: number): number {
   return clamp(value, 0, 1);
+}
+
+/** Weight given to the raw sample in the streamline filter, per nominal step. */
+function streamlineRawWeight(streamlineAmount: number): number {
+  return 0.15 + (1 - clamp01(streamlineAmount)) * 0.85;
+}
+
+/**
+ * Convert a one-pole weight quoted per `NOMINAL_SAMPLE_SPACING` step into the
+ * distance over which that filter closes ~63% of a gap.
+ *
+ * Filtering once per *sample* made every smoothing amount a function of
+ * drawing speed: samples land a world unit apart when the hand is slow and
+ * twenty apart when it is fast, so the same slider lagged the ink by under a
+ * unit in one stroke and by tens of units in the next, rounding off exactly
+ * the corners that were drawn quickly. Re-deriving the weight from the step's
+ * length makes the filter depend on the path, not on how it was sampled.
+ */
+function responseDistanceFor(weightPerNominalStep: number): number {
+  if (weightPerNominalStep >= 1) return 0;
+  if (weightPerNominalStep <= 0) return Number.POSITIVE_INFINITY;
+  return -NOMINAL_SAMPLE_SPACING / Math.log(1 - weightPerNominalStep);
+}
+
+/**
+ * Fraction of the remaining gap a one-pole filter closes over `distance`.
+ * Equals the per-sample weight exactly when `distance` is the spacing the
+ * response was calibrated at, so existing strokes and settings are unaffected
+ * at the spacing they were tuned for.
+ */
+function onePoleWeight(distance: number, response: number): number {
+  if (!(distance > 0)) return 0;
+  if (response <= 0) return 1;
+  if (!Number.isFinite(response)) return 0;
+  return 1 - Math.exp(-distance / response);
+}
+
+/** Squared distance from a point to a segment, on scalars to stay allocation-free. */
+function segmentDistanceSquared(
+  pointX: number,
+  pointY: number,
+  startX: number,
+  startY: number,
+  endX: number,
+  endY: number,
+): number {
+  const dx = endX - startX;
+  const dy = endY - startY;
+  const lengthSquared = dx * dx + dy * dy;
+  let t =
+    lengthSquared > 0
+      ? ((pointX - startX) * dx + (pointY - startY) * dy) / lengthSquared
+      : 0;
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  const offsetX = pointX - (startX + t * dx);
+  const offsetY = pointY - (startY + t * dy);
+  return offsetX * offsetX + offsetY * offsetY;
 }
 
 function toCenti(value: number): number {
@@ -279,7 +397,8 @@ function ingest(
   }
   if (count <= 1) return count;
 
-  const thresholdSquared = (size / 3) ** 2;
+  const thresholdSquared =
+    Math.min(size / 3, ENDPOINT_JITTER_DISTANCE) ** 2;
   const startX = buffers.stageX[0]!;
   const startY = buffers.stageY[0]!;
   let startPressure = buffers.stageZ[0]!;
@@ -329,10 +448,10 @@ function streamline(
   stagedCount: number,
   size: number,
   streamlineAmount: number,
+  last: boolean,
 ): number {
   if (stagedCount === 0) return 0;
-  const rawWeight =
-    0.15 + (1 - clamp01(streamlineAmount)) * 0.85;
+  const response = responseDistanceFor(streamlineRawWeight(streamlineAmount));
 
   buffers.pointX[0] = buffers.stageX[0]!;
   buffers.pointY[0] = buffers.stageY[0]!;
@@ -344,14 +463,30 @@ function streamline(
 
   let previousX = buffers.pointX[0]!;
   let previousY = buffers.pointY[0]!;
+  let previousRawX = buffers.stageX[0]!;
+  let previousRawY = buffers.stageY[0]!;
   let totalLength = 0;
   let pointCount = 1;
 
   for (let i = 1; i < stagedCount; i++) {
-    const x =
-      rawWeight * buffers.stageX[i]! + (1 - rawWeight) * previousX;
-    const y =
-      rawWeight * buffers.stageY[i]! + (1 - rawWeight) * previousY;
+    // `last` pins the final sample to its raw position instead of the
+    // filtered one, so the ink ends exactly where the pointer is. The
+    // renderer asks for it on every stroke, in progress or committed: under
+    // heavy stabilization the filter trails the pointer, and pinning only on
+    // commit would snap the stroke forward at pointer-up.
+    const pinToRaw = last && i === stagedCount - 1;
+    const rawX = buffers.stageX[i]!;
+    const rawY = buffers.stageY[i]!;
+    // Weight this step by how far the hand actually travelled, not by the fact
+    // that a sample arrived. See `responseDistanceFor`.
+    const weight = onePoleWeight(
+      Math.hypot(rawX - previousRawX, rawY - previousRawY),
+      response,
+    );
+    previousRawX = rawX;
+    previousRawY = rawY;
+    const x = pinToRaw ? rawX : previousX + (rawX - previousX) * weight;
+    const y = pinToRaw ? rawY : previousY + (rawY - previousY) * weight;
     const step = Math.hypot(x - previousX, y - previousY);
     totalLength += step;
     previousX = x;
@@ -407,14 +542,29 @@ function calculateDynamics(
 
   for (let i = 0; i < pointCount; i++) {
     if (i > 0) {
-      const stepRatio = clamp01(buffers.distance[i]! / options.size);
-      const target = options.simulatePressure
-        ? Math.min(1, 1 - stepRatio)
-        : Math.max(MIN_PHYSICAL_PRESSURE, buffers.inputZ[i]!);
-      pressure = clamp01(
-        pressure +
-          (target - pressure) * stepRatio * PRESSURE_RELAXATION,
-      );
+      if (options.simulatePressure) {
+        // Legacy path: strokes saved before the draw tool derived pressure from
+        // true pointer velocity carry no usable signal, only the neutral
+        // default, so their width still has to come from per-sample spacing.
+        // Left exactly as it was — this is what those strokes look like.
+        const stepRatio = clamp01(buffers.distance[i]! / options.size);
+        pressure = clamp01(
+          pressure +
+            (Math.min(1, 1 - stepRatio) - pressure) *
+              stepRatio *
+              PRESSURE_RELAXATION,
+        );
+      } else {
+        const target = Math.max(MIN_PHYSICAL_PRESSURE, buffers.inputZ[i]!);
+        pressure = clamp01(
+          pressure +
+            (target - pressure) *
+              onePoleWeight(
+                buffers.distance[i]!,
+                PRESSURE_RESPONSE_DISTANCE,
+              ),
+        );
+      }
     }
     buffers.pressure[i] = pressure;
     maximumPressure = Math.max(maximumPressure, pressure);
@@ -494,25 +644,12 @@ function partition(pointCount: number): number {
       1,
     );
     const acute = directionChange < -0.8;
-    let hard = false;
-    if (!acute && directionChange <= 0.7) {
-      const meanRadius =
-        (buffers.radius[i - 1]! +
-          buffers.radius[i]! +
-          buffers.radius[i + 1]!) /
-        3;
-      const previousDx = buffers.pointX[i]! - buffers.pointX[i - 1]!;
-      const previousDy = buffers.pointY[i]! - buffers.pointY[i - 1]!;
-      const nextDx = buffers.pointX[i + 1]! - buffers.pointX[i]!;
-      const nextDy = buffers.pointY[i + 1]! - buffers.pointY[i]!;
-      const neighborhoodDistance =
-        (previousDx * previousDx +
-          previousDy * previousDy +
-          nextDx * nextDx +
-          nextDy * nextDy) /
-        Math.max(MIN_RADIUS ** 2, meanRadius * meanRadius);
-      hard = neighborhoodDistance < 1.5;
-    }
+    // Split exactly where the corner's miter would overshoot its limit, so the
+    // join rounds off instead of spiking. The angle alone decides it: the old
+    // test divided the neighbouring segment lengths by the brush radius, and
+    // sample spacing is a record of hand speed, so one and the same corner
+    // partitioned cleanly when drawn slowly and grew a spike when drawn fast.
+    const hard = !acute && 1 + directionChange < MITER_DENOMINATOR_FLOOR;
     if (!acute && !hard) continue;
 
     buffers.boundary[i] = 1;
@@ -658,15 +795,22 @@ function calculatePartitionTracks(
     }
   }
 
-  const minimumTrackDistance =
-    clamp01(smoothing) * size;
-  const minimumTrackDistanceSquared =
-    minimumTrackDistance * minimumTrackDistance;
+  const errorLimit = clamp01(smoothing) * size * TRACK_ERROR_LIMIT;
+  const errorLimitSquared = errorLimit * errorLimit;
   let trackCount = 0;
-  let previousLeftX = 0;
-  let previousLeftY = 0;
-  let previousRightX = 0;
-  let previousRightY = 0;
+  // Greedy chord simplification: a candidate is held back one step and dropped
+  // only if both tracks stay within `errorLimit` of the chord that would
+  // replace it. Dropping on spacing alone discarded points that carried real
+  // curvature whenever the brush was wide.
+  let keptLeftX = 0;
+  let keptLeftY = 0;
+  let keptRightX = 0;
+  let keptRightY = 0;
+  let pendingLeftX = 0;
+  let pendingLeftY = 0;
+  let pendingRightX = 0;
+  let pendingRightY = 0;
+  let hasPending = false;
 
   for (let local = 0; local < localCount; local++) {
     const index = sequenceIndex(local, start, innerStart);
@@ -691,41 +835,79 @@ function calculatePartitionTracks(
       -1,
       1,
     );
-    const lerpX =
-      buffers.vectorX[next]! +
-      (buffers.vectorX[local]! - buffers.vectorX[next]!) *
-        directionChange;
-    const lerpY =
-      buffers.vectorY[next]! +
-      (buffers.vectorY[local]! - buffers.vectorY[next]!) *
-        directionChange;
-    const offsetX = lerpY * buffers.radius[index]!;
-    const offsetY = -lerpX * buffers.radius[index]!;
+    // Offset along the turn's bisector, scaled so the ribbon stays exactly one
+    // radius wide measured perpendicular to each arm. The previous offset was
+    // an un-normalized lerp between the two segment normals, whose length rode
+    // the turn angle in both directions — 0.87x at a 60-degree turn, so the
+    // line pinched, and 2.1x approaching a reversal, so it bulged.
+    // `directionChange === 1` (a straight run) reduces this to the plain
+    // segment normal, leaving straight ink byte-identical.
+    const miterScale =
+      buffers.radius[index]! /
+      Math.max(1 + directionChange, MITER_DENOMINATOR_FLOOR);
+    const offsetX =
+      (buffers.vectorY[next]! + buffers.vectorY[local]!) * miterScale;
+    const offsetY =
+      -(buffers.vectorX[next]! + buffers.vectorX[local]!) * miterScale;
     const leftX = centerX - offsetX;
     const leftY = centerY - offsetY;
     const rightX = centerX + offsetX;
     const rightY = centerY + offsetY;
-    const leftDx = leftX - previousLeftX;
-    const leftDy = leftY - previousLeftY;
-    const rightDx = rightX - previousRightX;
-    const rightDy = rightY - previousRightY;
-    const keep =
-      local === 0 ||
-      local === localCount - 1 ||
-      leftDx * leftDx + leftDy * leftDy >=
-        minimumTrackDistanceSquared ||
-      rightDx * rightDx + rightDy * rightDy >=
-        minimumTrackDistanceSquared;
-    if (!keep) continue;
 
-    buffers.trackLeftX[trackCount] = leftX;
-    buffers.trackLeftY[trackCount] = leftY;
-    buffers.trackRightX[trackCount] = rightX;
-    buffers.trackRightY[trackCount] = rightY;
-    previousLeftX = leftX;
-    previousLeftY = leftY;
-    previousRightX = rightX;
-    previousRightY = rightY;
+    if (local === 0) {
+      buffers.trackLeftX[0] = leftX;
+      buffers.trackLeftY[0] = leftY;
+      buffers.trackRightX[0] = rightX;
+      buffers.trackRightY[0] = rightY;
+      keptLeftX = leftX;
+      keptLeftY = leftY;
+      keptRightX = rightX;
+      keptRightY = rightY;
+      trackCount = 1;
+    } else {
+      if (
+        hasPending &&
+        (segmentDistanceSquared(
+          pendingLeftX,
+          pendingLeftY,
+          keptLeftX,
+          keptLeftY,
+          leftX,
+          leftY,
+        ) > errorLimitSquared ||
+          segmentDistanceSquared(
+            pendingRightX,
+            pendingRightY,
+            keptRightX,
+            keptRightY,
+            rightX,
+            rightY,
+          ) > errorLimitSquared)
+      ) {
+        buffers.trackLeftX[trackCount] = pendingLeftX;
+        buffers.trackLeftY[trackCount] = pendingLeftY;
+        buffers.trackRightX[trackCount] = pendingRightX;
+        buffers.trackRightY[trackCount] = pendingRightY;
+        keptLeftX = pendingLeftX;
+        keptLeftY = pendingLeftY;
+        keptRightX = pendingRightX;
+        keptRightY = pendingRightY;
+        trackCount++;
+      }
+      pendingLeftX = leftX;
+      pendingLeftY = leftY;
+      pendingRightX = rightX;
+      pendingRightY = rightY;
+      hasPending = true;
+    }
+  }
+
+  // The tip is never a candidate for removal — it is where the stroke ends.
+  if (hasPending) {
+    buffers.trackLeftX[trackCount] = pendingLeftX;
+    buffers.trackLeftY[trackCount] = pendingLeftY;
+    buffers.trackRightX[trackCount] = pendingRightX;
+    buffers.trackRightY[trackCount] = pendingRightY;
     trackCount++;
   }
   return trackCount;
@@ -852,6 +1034,56 @@ function writePartition(
   writer.close();
 }
 
+/**
+ * The conditioned centerline of a stroke: the samples the outline is actually
+ * built around, after compaction and stabilization.
+ *
+ * `x` and `y` are borrowed views onto the engine's workspace, valid only until
+ * the next call into this module — copy out anything that must outlive that.
+ */
+export interface InkCenterline {
+  count: number;
+  x: Float64Array;
+  y: Float64Array;
+}
+
+const centerlineView: InkCenterline = {
+  count: 0,
+  x: buffers.pointX,
+  y: buffers.pointY,
+};
+
+/**
+ * Condition a stroke's samples exactly as the outline pipeline does, without
+ * building the outline.
+ *
+ * Callers that need to follow the rendered stroke — hit-testing, the dashed
+ * centerline — used to re-implement the smoothing themselves and each missed a
+ * different part of it, so a click could land off the visible ink and a dashed
+ * stroke could sit beside the solid one drawn from the same points.
+ */
+export function buildInkCenterline(
+  points: DrawPoint[],
+  size: number,
+  streamlineAmount: number,
+  last: boolean,
+): InkCenterline {
+  centerlineView.x = buffers.pointX;
+  centerlineView.y = buffers.pointY;
+  if (points.length === 0 || !Number.isFinite(size) || size <= 0) {
+    centerlineView.count = 0;
+    return centerlineView;
+  }
+  // Pressure never moves the centerline, so the simulation flag is irrelevant
+  // here; `false` skips the two-point expansion, which only interpolates
+  // collinear samples anyway.
+  const stagedCount = ingest(points, size, false);
+  centerlineView.count = streamline(stagedCount, size, streamlineAmount, last);
+  centerlineView.x = buffers.pointX;
+  centerlineView.y = buffers.pointY;
+  return centerlineView;
+}
+
 /** Run the complete non-reentrant ink pipeline and emit SVG path data. */
 export function getFreehandPathData(
   points: DrawPoint[],
@@ -874,6 +1106,7 @@ export function getFreehandPathData(
     stagedCount,
     options.size,
     options.streamline,
+    options.last,
   );
   if (pointCount === 0) return '';
 

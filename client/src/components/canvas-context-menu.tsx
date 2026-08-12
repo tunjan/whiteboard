@@ -17,7 +17,10 @@ import {
   groupShapes,
   ungroupShapes,
 } from '@/canvas/commands';
-import { exportSelectionToPng } from '@/canvas/export-png';
+import {
+  copySelectionToPngClipboard,
+  exportSelectionToPng,
+} from '@/canvas/export-png';
 import { deleteTargetIds } from '@/canvas/hierarchy';
 import { editor } from '@/canvas/use-document-store';
 import { useHiddenStore } from '@/canvas/use-hidden-store';
@@ -105,6 +108,19 @@ export function CanvasContextMenu({ children }: { children: ReactNode }) {
         >
           Paste
           <ContextMenuShortcut>⌘V</ContextMenuShortcut>
+        </ContextMenuItem>
+        <ContextMenuItem
+          disabled={!has}
+          // Not awaited: the clipboard write has to be issued while this click
+          // is still the current task (see `writePngToClipboard`).
+          onClick={() => {
+            copySelectionToPngClipboard(selectedIds).catch((err: unknown) =>
+              console.error('[clipboard] copy as PNG failed', err),
+            );
+          }}
+        >
+          Copy as PNG
+          <ContextMenuShortcut>⇧⌘C</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuItem
           disabled={!has}

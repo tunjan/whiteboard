@@ -30,6 +30,38 @@ export async function writeShapesToOsClipboard(
   }
 }
 
+/**
+ * Write a PNG to the system clipboard, given a blob that is still rendering.
+ *
+ * Safari only allows `navigator.clipboard.write` while the user gesture that
+ * triggered it is still the current task, so awaiting the render before calling
+ * it fails with `NotAllowedError`. `ClipboardItem` accepts a `Promise<Blob>`
+ * precisely for this: the item is constructed synchronously and the browser
+ * waits on the promise itself, keeping the write inside the activation window.
+ *
+ * Firefox has no promise support in `ClipboardItem`, so a rejected write is
+ * retried once with the resolved blob. That retry is outside the gesture, which
+ * Firefox permits but Safari does not — hence trying the promise form first.
+ */
+export function writePngToClipboard(png: Promise<Blob>): Promise<void> {
+  if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') {
+    // Nothing will consume the render; settle it so it can't surface as an
+    // unhandled rejection.
+    void png.catch(() => undefined);
+    return Promise.reject(new Error('Clipboard API unavailable'));
+  }
+  return navigator.clipboard
+    .write([new ClipboardItem({ 'image/png': png })])
+    .catch(async () => {
+      // Awaiting here also re-raises a render failure, so a broken export
+      // reports its own cause rather than the clipboard rejection it caused.
+      const blob = await png;
+      await navigator.clipboard.write([
+        new ClipboardItem({ 'image/png': blob }),
+      ]);
+    });
+}
+
 /** Fetch a stored image blob and return it as a PNG (re-encoding if needed). */
 async function imageBlobToPng(blobId: string): Promise<Blob> {
   const res = await fetch(blobUrl(blobId), { credentials: 'include' });
