@@ -26,6 +26,7 @@ import {
 } from './shapes/ink-points';
 import { shapeRegistry } from './shapes/shape-registry';
 import { shapeRotatedBounds } from './shape-bounds';
+import { BindingGraph } from './binding-graph';
 import { SpatialIndex } from './spatial-index';
 import { useCameraStore } from './use-camera-store';
 import { type CommentMessage, useCommentsStore } from './use-comments-store';
@@ -94,6 +95,35 @@ function collabUrl(): string {
 }
 
 export const spatialIndex = new SpatialIndex();
+
+/** `target -> bound arrows`, kept in sync with the spatial index. */
+export const bindingGraph = new BindingGraph();
+
+/**
+ * Shape ids changed since the connector sync last ran, or `null` to mean "the
+ * whole page changed, rescan everything" (initial load, page switch, resync).
+ *
+ * Accumulated rather than overwritten: React can batch several store updates
+ * into one effect run, and dropping the earlier ones would leave those arrows
+ * unresolved until something else happened to touch them.
+ */
+let pendingBindingDirty: Set<string> | null = null;
+
+function markBindingDirty(ids: Iterable<string>): void {
+  // Already pending a full rescan — narrowing it now would lose work.
+  if (pendingBindingDirty === null) return;
+  for (const id of ids) pendingBindingDirty.add(id);
+}
+
+/**
+ * Drain the pending dirty set. Returns `null` when a full rescan is required.
+ * Callers expand it across binding edges via {@link bindingGraph}.
+ */
+export function takeBindingDirty(): Set<string> | null {
+  const out = pendingBindingDirty;
+  pendingBindingDirty = new Set();
+  return out;
+}
 
 /**
  * Order by fractional index, breaking ties on id.
@@ -548,14 +578,17 @@ function applyAffected(ids: Set<string>): void {
       // Groups have no geometry of their own — keep them out of the index.
       if (util && shape.type !== 'group')
         spatialIndex.insert(id, shapeRotatedBounds(shape));
+      bindingGraph.update(shape);
       if (!prev || prev.index !== shape.index) orderChanged = true;
       else updated.set(id, shape);
     } else {
       shapeCache.delete(id);
       spatialIndex.remove(id);
+      bindingGraph.remove(id);
       orderChanged = true;
     }
   }
+  markBindingDirty(ids);
   if (orderChanged || !sortedShapesCache) {
     sortedShapesCache = null;
   } else {
@@ -570,6 +603,8 @@ function fullResync(): void {
   shapeCache.clear();
   sortedShapesCache = null;
   spatialIndex.clear();
+  bindingGraph.clear();
+  pendingBindingDirty = null;
   for (const [id, m] of session.currentShapes) {
     const shape = yToShape(m);
     shapeCache.set(id, shape);
@@ -577,6 +612,7 @@ function fullResync(): void {
     // Groups have no geometry of their own — keep them out of the index.
     if (util && shape.type !== 'group')
       spatialIndex.insert(id, shapeRotatedBounds(shape));
+    bindingGraph.update(shape);
   }
   rebuildPagesCache();
   rebuildSnapshot();
@@ -630,6 +666,8 @@ export function loadBoard(
   shapeCache.clear();
   sortedShapesCache = null;
   spatialIndex.clear();
+  bindingGraph.clear();
+  pendingBindingDirty = null;
   cachedPages = {};
   cachedPageOrder = [];
   useDocumentStore.setState({

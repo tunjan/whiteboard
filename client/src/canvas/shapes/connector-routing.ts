@@ -417,20 +417,39 @@ function pointsEqual(a: readonly Vec[], b: readonly Vec[]): boolean {
   );
 }
 
-/** Keep bound endpoints and elbow routes synchronized with their target shapes. */
-export function syncBoundArrows(shapes: readonly Shape[], editor: Editor): void {
-  // Runs on every document mutation, which means once per frame for the whole
-  // of a stroke or drag. Building the lookup up front paid for an N-entry Map
-  // plus its N-tuple source array on all of those frames even on a page holding
-  // no bound arrows at all, so probe for the work before indexing for it.
-  let hasBoundArrow = false;
+/**
+ * Keep bound endpoints and elbow routes synchronized with their target shapes.
+ *
+ * Runs on every document mutation, which means once per frame for the whole of
+ * a stroke or drag. `dirty` is the caller's dirty set already expanded across
+ * binding edges (see `BindingGraph.expand`): only arrows in it can need
+ * re-resolving, so a drag elsewhere on the page costs nothing. Pass `null` to
+ * rescan every arrow — required after a load, page switch, or resync, where no
+ * meaningful dirty set exists.
+ */
+export function syncBoundArrows(
+  shapes: readonly Shape[],
+  editor: Editor,
+  dirty: ReadonlySet<string> | null = null,
+): void {
+  if (dirty?.size === 0) return;
+
+  // Gather the arrows that could need re-resolving before building any lookup.
+  // The `byId` Map costs an N-entry allocation every frame of every stroke and
+  // drag, so it must not be built on the frames that turn out to have no work —
+  // which, with a dirty set, is most of them.
+  // Carries the narrowed `bindings` so the resolve loop below keeps the
+  // non-undefined type the guard here established.
+  const candidates: Array<{
+    shape: ArrowShape;
+    bindings: NonNullable<ArrowShape['props']['bindings']>;
+  }> = [];
   for (const shape of shapes) {
-    if (shape.type === 'arrow' && shape.props.bindings) {
-      hasBoundArrow = true;
-      break;
-    }
+    if (shape.type !== 'arrow' || !shape.props.bindings) continue;
+    if (dirty && !dirty.has(shape.id)) continue;
+    candidates.push({ shape, bindings: shape.props.bindings });
   }
-  if (!hasBoundArrow) return;
+  if (candidates.length === 0) return;
 
   const byId = new Map(shapes.map((shape) => [shape.id, shape]));
   const updates: Array<{
@@ -438,15 +457,14 @@ export function syncBoundArrows(shapes: readonly Shape[], editor: Editor): void 
     points: Vec[];
     bindings: ArrowShape['props']['bindings'];
   }> = [];
-  for (const shape of shapes) {
-    if (shape.type !== 'arrow' || !shape.props.bindings) continue;
+  for (const { shape, bindings: initialBindings } of candidates) {
     const current = shape.props.points;
     const first = current[0];
     const last = current[current.length - 1];
     if (!first || !last) continue;
     let start = first;
     let end = last;
-    let bindings = shape.props.bindings;
+    let bindings = initialBindings;
     const startTarget = bindings.start ? byId.get(bindings.start.shapeId) : undefined;
     const endTarget = bindings.end ? byId.get(bindings.end.shapeId) : undefined;
     if (bindings.start && startTarget) {

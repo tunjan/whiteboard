@@ -61,12 +61,14 @@ import { placeImageFiles } from './place-image';
 import { createYoutubeShape, parseYoutubeId } from './place-video';
 import { useEnteredGroupStore } from './use-entered-group-store';
 import {
+  bindingGraph,
   breakUndoCapture,
   editor,
   redo,
   setCurrentPage,
   setCurrentPageForFollow,
   spatialIndex,
+  takeBindingDirty,
   undo,
   useDocumentStore,
   useUndoStore,
@@ -242,7 +244,14 @@ export function Canvas() {
   const liveShapes = useDocumentStore((s) => s.shapes);
   const shapes = liveShapes;
   useEffect(() => {
-    syncBoundArrows(liveShapes, editor);
+    // Only arrows bound to something that actually changed can need
+    // re-resolving; `null` means "rescan everything" after a load or resync.
+    const changed = takeBindingDirty();
+    syncBoundArrows(
+      liveShapes,
+      editor,
+      changed === null ? null : bindingGraph.expand(changed),
+    );
   }, [liveShapes]);
   const equationItems = useMemo(
     () =>
