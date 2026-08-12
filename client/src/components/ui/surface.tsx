@@ -29,7 +29,7 @@ const surfaceVariants = cva(
         // sit on different surfaces: a floating panel is `surface`, so its
         // controls darken to `panel`; a docked panel already *is* `panel`, so
         // its controls have to go the other way, up to `surface`.
-        floating: "bg-surface shadow-e2 [--chrome-hover:var(--color-panel)]",
+        floating: "bg-surface shadow-e5 [--chrome-hover:var(--color-panel)]",
         docked: "bg-panel shadow-none [--chrome-hover:var(--color-surface)]",
       },
       chrome: {

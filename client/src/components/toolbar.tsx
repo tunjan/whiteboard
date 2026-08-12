@@ -100,7 +100,7 @@ const COMPACT_MORE_TOOLS = ['hand', 'wand', 'laser', 'comment', 'graph', 'equati
  * always means "look here" rather than "this is on".
  */
 const TOOL_ACTIVE =
-  'border-transparent bg-inverse text-fg-inverse hover:bg-inverse-hover hover:text-fg-inverse';
+  'border-transparent bg-blue-100 text-blue-700 hover:bg-blue-200 dark:bg-blue-900/60 dark:text-blue-200 dark:hover:bg-blue-900/80';
 const TOOL_PRESSED = 'border-border bg-panel text-primary hover:bg-panel';
 const TOOL_IDLE =
   'border-transparent bg-transparent text-secondary hover:bg-panel hover:text-primary';
@@ -693,7 +693,7 @@ export function Toolbar() {
           onKeyDown={toolbar.onKeyDown}
           onFocusCapture={toolbar.onFocusCapture}
           className={cn(
-            'relative flex w-max max-w-[calc(100vw-1rem)] items-center rounded-2xl p-1.5',
+            'relative flex w-max max-w-[calc(100vw-1rem)] items-center rounded-2xl p-1.5 shadow-e5',
             'origin-bottom transition-[opacity,transform] duration-base ease-out-quart',
             'motion-reduce:transition-none',
             hidden && 'pointer-events-none translate-y-[calc(100%+0.75rem)] opacity-0',

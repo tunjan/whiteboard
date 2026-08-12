@@ -170,7 +170,7 @@ export function SelectionToolbar({ camera }: SelectionToolbarProps) {
           role="toolbar"
           aria-label="Selection actions"
           className={cn(
-            'touch-targets flex h-11 items-center gap-1.5 p-1.5',
+            'touch-targets flex h-11 items-center gap-1.5 p-1.5 shadow-e5',
             'motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95 motion-safe:duration-200 motion-safe:ease-[var(--ease-out-expo)]',
             below
               ? 'origin-top motion-safe:slide-in-from-top-1'

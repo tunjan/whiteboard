@@ -40,7 +40,7 @@ because a background highlight already signals focus.
 | status | `danger` `success` `warning` `info` `neutral` `inactive`, each as `-fg` `-bg` `-border` |
 | brand | `link` (the blue), `accent-brand` |
 | radii | `xs` 4 · `sm` 6 · `md` 8 · `lg` 10 · `xl` 12 · `2xl` 16 · `full` |
-| elevation | `e0`–`e4`, plus component aliases `xs` `sm` `md` `lg` `hover` `floating` |
+| elevation | `e0`–`e5`, plus component aliases `xs` `sm` `md` `lg` `hover` `floating` |
 | motion | `duration-instant` `-fast` `-base` `-slow` `-slower`; `ease-out-quart` `ease-in-out-quart` |
 
 Status colours always carry the explicit `-fg` / `-bg` / `-border` suffix. The
