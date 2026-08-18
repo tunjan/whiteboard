@@ -20,7 +20,12 @@ import type { Camera } from './camera';
 import { worldToScreen } from './camera';
 import { alignShapes, distributeShapes } from './align';
 import { copyShapes } from './clipboard';
-import { duplicateShapes, groupShapes, ungroupShapes } from './commands';
+import {
+  deleteShapesWithCleanup,
+  duplicateShapes,
+  groupShapes,
+  ungroupShapes,
+} from './commands';
 import {
   copySelectionToPngClipboard,
   exportSelectionToPng,
@@ -83,11 +88,9 @@ export function SelectionToolbar({ camera }: SelectionToolbarProps) {
   // full-document scan in `getSelectionInfo`) once per frame of every stroke.
   const shapesRecord = useDocumentStore(
     useShallow((s) => {
-      const record = s.doc.pages[s.currentPageId]?.shapes;
       const out: Record<string, Shape> = {};
-      if (!record) return out;
       for (const id of selectedIds) {
-        const shape = record[id];
+        const shape = s.shapesById.get(id);
         if (shape) out[id] = shape;
       }
       return out;
@@ -157,7 +160,7 @@ export function SelectionToolbar({ camera }: SelectionToolbarProps) {
     <TooltipProvider delay={300}>
       <div
         data-ui-layer
-        className="pointer-events-auto absolute z-20"
+        className="pointer-events-auto absolute z-[var(--z-canvas-front)]"
         style={{
           left,
           top,
@@ -217,7 +220,8 @@ export function SelectionToolbar({ camera }: SelectionToolbarProps) {
                 const unlocked = selectedIds.filter(
                   (id) => !editor.getShape(id)?.locked,
                 );
-                editor.deleteShapes(
+                deleteShapesWithCleanup(
+                  editor,
                   deleteTargetIds(editor.getShapes(), unlocked),
                 );
                 useSelectionStore.getState().clear();

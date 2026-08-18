@@ -1,8 +1,10 @@
 import {
   encodeVoiceSignal,
+  type VideoKind,
   type VoiceSignal,
 } from '@whiteboard/shared';
 import { setLocalVoice } from '@/collab/presence';
+import { useConnectionStore } from '@/collab/use-connection-store';
 import {
   type PeerPresence,
   usePresenceStore,
@@ -13,6 +15,7 @@ import {
   startVoiceSignaling,
   type VoiceSignalingProvider,
 } from './signaling';
+import { useVideoStore } from './use-video-store';
 import { useVoiceStore } from './use-voice-store';
 import {
   createVoiceGate,
@@ -21,11 +24,19 @@ import {
 } from './voice-gate';
 
 const DISCONNECTED_PEER_TIMEOUT_MS = 10_000;
+// A peer whose offer never arrived stays in `new` forever, so the connection
+// state machine alone never reports it as failed.
+const CONNECTING_PEER_TIMEOUT_MS = 20_000;
 
 let provider: VoiceSignalingProvider | null = null;
 let localClientId: number | null = null;
 let localSessionId: string | null = null;
 let localTrack: MediaStreamTrack | null = null;
+// Held here rather than in the video store because `ensurePeer` needs the live
+// tracks when it builds a connection: negotiation runs once, so a peer that
+// joins later can only receive video that was attached at construction.
+let localCameraTrack: MediaStreamTrack | null = null;
+let localScreenTrack: MediaStreamTrack | null = null;
 let voiceGate: VoiceGate | null = null;
 let activeBindingCleanup: (() => void) | null = null;
 let joinGeneration = 0;
@@ -37,10 +48,7 @@ const blockedPeerSessions = new Map<
   number,
   { sessionId: string; reason: 'failed' | 'bye' }
 >();
-const disconnectTimers = new Map<
-  number,
-  ReturnType<typeof setTimeout>
->();
+const peerTimers = new Map<number, ReturnType<typeof setTimeout>>();
 
 export async function joinVoice(): Promise<void> {
   const binding = provider;
@@ -90,7 +98,7 @@ export async function joinVoice(): Promise<void> {
     localTrack = track;
     voiceGate = gate;
     blockedPeerSessions.clear();
-    clearAllDisconnectTimers();
+    clearAllPeerTimers();
     lastPublishedSpeaking = false;
     useVoiceStore.getState().setMuted(true);
     useVoiceStore.getState().setInputLevel(
@@ -196,17 +204,39 @@ export function leaveVoice(): void {
   }
 
   blockedPeerSessions.clear();
-  clearAllDisconnectTimers();
+  clearAllPeerTimers();
   voiceGate?.stop();
   voiceGate = null;
   localTrack?.stop();
   localTrack = null;
+  localCameraTrack?.stop();
+  localCameraTrack = null;
+  localScreenTrack?.stop();
+  localScreenTrack = null;
   localClientId = null;
   localSessionId = null;
   lastPublishedSpeaking = false;
   noiseQueue = Promise.resolve();
   setLocalVoice(null);
   useVoiceStore.getState().resetSession();
+  useVideoStore.getState().resetSession();
+}
+
+/**
+ * Publish or clear one video slot across the whole mesh. Every peer connection
+ * already carries an empty camera and screen transceiver, so this is a track
+ * swap on each — no renegotiation, no signaling.
+ */
+export function setLocalVideoTrack(
+  kind: VideoKind,
+  track: MediaStreamTrack | null,
+): void {
+  if (kind === 'camera') localCameraTrack = track;
+  else localScreenTrack = track;
+  for (const peer of peerConnections.values()) {
+    void peer.setVideoTrack(kind, track);
+  }
+  publishLocalVoice();
 }
 
 export function setMuted(muted: boolean): void {
@@ -277,9 +307,28 @@ export function retryFailedVoiceConnections(): void {
     if (blocked.reason !== 'failed') continue;
     blockedPeerSessions.delete(clientId);
     useVoiceStore.getState().setPeerStatus(clientId, null);
+    // A connection failure is symmetric, so the peer blocked this session too
+    // and will not offer again on its own. Clearing only our side leaves the
+    // retry stuck at `connecting`, so ask the peer to clear its block as well.
+    sendRetry(clientId, blocked.sessionId);
   }
   useVoiceStore.getState().setError(null);
   reconcilePeers(usePresenceStore.getState().peers);
+}
+
+function sendRetry(peerClientId: number, peerSessionId: string): void {
+  const binding = provider;
+  const sessionId = localSessionId;
+  if (!binding || localClientId === null || !sessionId) return;
+  binding.sendStateless(
+    encodeVoiceSignal({
+      from: localClientId,
+      to: peerClientId,
+      fromSessionId: sessionId,
+      toSessionId: peerSessionId,
+      kind: 'retry',
+    }),
+  );
 }
 
 /**
@@ -300,10 +349,16 @@ export function bindVoiceProvider(
   const stopPresence = usePresenceStore.subscribe((state) => {
     reconcilePeers(state.peers);
   });
+  // Reconciling is suppressed while the socket is down, so reconnecting has to
+  // drive its own pass rather than waiting for the next presence change.
+  const stopConnection = useConnectionStore.subscribe(() => {
+    reconcilePeers(usePresenceStore.getState().peers);
+  });
 
   const cleanup = () => {
     if (activeBindingCleanup !== cleanup) return;
     leaveVoice();
+    stopConnection();
     stopPresence();
     stopSignaling();
     provider = null;
@@ -350,6 +405,21 @@ async function handleSignal(
     return;
   }
 
+  // The peer is restarting this connection: drop our own failure block and any
+  // half-open connection so both sides renegotiate from `new`.
+  if (signal.kind === 'retry') {
+    const blocked = blockedPeerSessions.get(signal.from);
+    if (
+      blocked?.reason === 'failed' &&
+      blocked.sessionId === signal.fromSessionId
+    ) {
+      blockedPeerSessions.delete(signal.from);
+    }
+    removePeer(signal.from);
+    reconcilePeers(usePresenceStore.getState().peers);
+    return;
+  }
+
   const peer = ensurePeer(signal.from, signal.fromSessionId);
   if (!peer) return;
   try {
@@ -376,6 +446,12 @@ function reconcilePeers(peers: PeerPresence[]): void {
   ) {
     return;
   }
+
+  // A dropped collaboration socket clears every remote awareness state at once,
+  // which would read as "everyone left the call". The audio mesh does not run
+  // over that socket, so healthy connections stay up until presence is
+  // trustworthy again — the peers repopulate on reconnect and reconcile then.
+  if (useConnectionStore.getState().status !== 'connected') return;
 
   const desiredPeers = new Map<number, string>();
   for (const peer of peers) {
@@ -432,6 +508,8 @@ function ensurePeer(
     localSessionId: sessionId,
     peerSessionId,
     localTrack: voiceGate.outboundTrack,
+    cameraTrack: localCameraTrack,
+    screenTrack: localScreenTrack,
     sendSignal: (signal) => {
       if (
         provider === binding &&
@@ -446,6 +524,14 @@ function ensurePeer(
         useVoiceStore.getState().setRemote(peerClientId, stream);
       }
     },
+    onRemoteVideoTrack: (kind, track) => {
+      if (peerConnections.get(peerClientId) !== peer) return;
+      // The track arrives at negotiation and stays for the connection's life;
+      // whether the peer is actually publishing comes from their awareness.
+      useVideoStore
+        .getState()
+        .setRemoteVideo(peerClientId, kind, new MediaStream([track]));
+    },
     onConnectionStateChange: (state) => {
       if (peerConnections.get(peerClientId) !== peer) return;
       handlePeerConnectionState(peerClientId, peerSessionId, peer, state);
@@ -453,6 +539,12 @@ function ensurePeer(
   });
   peerConnections.set(peerClientId, peer);
   useVoiceStore.getState().setPeerStatus(peerClientId, 'connecting');
+  armPeerTimeout(
+    peerClientId,
+    peer,
+    peerSessionId,
+    CONNECTING_PEER_TIMEOUT_MS,
+  );
   void peer.start().catch((error: unknown) => {
     if (
       provider !== binding ||
@@ -473,7 +565,7 @@ function handlePeerConnectionState(
   state: RTCPeerConnectionState,
 ): void {
   if (state === 'connected') {
-    clearDisconnectTimer(peerClientId);
+    clearPeerTimer(peerClientId);
     useVoiceStore.getState().setPeerStatus(peerClientId, 'connected');
     clearConnectionErrorIfRecovered();
     return;
@@ -489,22 +581,12 @@ function handlePeerConnectionState(
   }
   if (state === 'disconnected') {
     useVoiceStore.getState().setPeerStatus(peerClientId, 'disconnected');
-    if (!disconnectTimers.has(peerClientId)) {
-      disconnectTimers.set(
-        peerClientId,
-        setTimeout(() => {
-          disconnectTimers.delete(peerClientId);
-          if (peerConnections.get(peerClientId) === peer) {
-            markPeerFailed(
-              peerClientId,
-              peer,
-              peerSessionId,
-              new Error('Voice connection timed out'),
-            );
-          }
-        }, DISCONNECTED_PEER_TIMEOUT_MS),
-      );
-    }
+    armPeerTimeout(
+      peerClientId,
+      peer,
+      peerSessionId,
+      DISCONNECTED_PEER_TIMEOUT_MS,
+    );
     return;
   }
   if (state === 'connecting' || state === 'new') {
@@ -532,25 +614,55 @@ function removePeer(
   peerClientId: number,
   preserveStatus = false,
 ): void {
-  clearDisconnectTimer(peerClientId);
+  clearPeerTimer(peerClientId);
   const peer = peerConnections.get(peerClientId);
   peerConnections.delete(peerClientId);
   peer?.close();
   useVoiceStore.getState().setRemote(peerClientId, null);
+  useVideoStore.getState().setRemoteVideo(peerClientId, 'camera', null);
+  useVideoStore.getState().setRemoteVideo(peerClientId, 'screen', null);
   if (!preserveStatus) {
     useVoiceStore.getState().setPeerStatus(peerClientId, null);
   }
 }
 
-function clearDisconnectTimer(peerClientId: number): void {
-  const timer = disconnectTimers.get(peerClientId);
-  if (timer !== undefined) clearTimeout(timer);
-  disconnectTimers.delete(peerClientId);
+/**
+ * Fail a peer that never reaches `connected` within `timeoutMs`. An already
+ * armed timer is kept, so the deadline runs from the first unhealthy state
+ * rather than restarting on every state change.
+ */
+function armPeerTimeout(
+  peerClientId: number,
+  peer: VoicePeerConnection,
+  peerSessionId: string,
+  timeoutMs: number,
+): void {
+  if (peerTimers.has(peerClientId)) return;
+  peerTimers.set(
+    peerClientId,
+    setTimeout(() => {
+      peerTimers.delete(peerClientId);
+      if (peerConnections.get(peerClientId) === peer) {
+        markPeerFailed(
+          peerClientId,
+          peer,
+          peerSessionId,
+          new Error('Voice connection timed out'),
+        );
+      }
+    }, timeoutMs),
+  );
 }
 
-function clearAllDisconnectTimers(): void {
-  disconnectTimers.forEach((timer) => clearTimeout(timer));
-  disconnectTimers.clear();
+function clearPeerTimer(peerClientId: number): void {
+  const timer = peerTimers.get(peerClientId);
+  if (timer !== undefined) clearTimeout(timer);
+  peerTimers.delete(peerClientId);
+}
+
+function clearAllPeerTimers(): void {
+  peerTimers.forEach((timer) => clearTimeout(timer));
+  peerTimers.clear();
 }
 
 function clearConnectionErrorIfRecovered(): void {
@@ -590,6 +702,9 @@ function publishLocalVoice(): void {
     inCall: true,
     muted: store.muted,
     speaking: store.speaking,
+    // Derived from the tracks, not the video store, so the two cannot drift.
+    camera: localCameraTrack !== null,
+    screen: localScreenTrack !== null,
     sessionId: localSessionId,
   });
 }
@@ -606,7 +721,7 @@ function promoteVoiceTestToCall(clientId: number): void {
   localClientId = clientId;
   localSessionId = createVoiceSessionId();
   blockedPeerSessions.clear();
-  clearAllDisconnectTimers();
+  clearAllPeerTimers();
   lastPublishedSpeaking = false;
   voiceGate.setMuted(true);
   useVoiceStore.getState().setMuted(true);

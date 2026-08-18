@@ -53,6 +53,31 @@ export function getTopIndex(shapes: readonly Shape[]): string {
   return jitterKeyBetween(max, null);
 }
 
+/**
+ * A key directly above the topmost shape in `ids`, without jumping over the
+ * shapes already stacked above them the way `getTopIndex` does. Used when a
+ * group is created: it takes the z-slot of its highest member, so grouping
+ * never reorders anything.
+ */
+export function getIndexAboveTopmostOf(
+  shapes: readonly Shape[],
+  ids: readonly string[],
+): string {
+  const members = new Set(ids);
+  let max: string | null = null;
+  for (const s of shapes) {
+    if (members.has(s.id) && (max === null || s.index > max)) max = s.index;
+  }
+  if (max === null) return getTopIndex(shapes);
+  // The nearest non-member above, so the new key lands strictly between them.
+  let next: string | null = null;
+  for (const s of shapes) {
+    if (members.has(s.id) || s.index <= max) continue;
+    if (next === null || s.index < next) next = s.index;
+  }
+  return jitterKeyBetween(max, next);
+}
+
 /** A key strictly below every shape's index (i.e. at the back). */
 export function getBottomIndex(shapes: readonly Shape[]): string {
   let min: string | null = null;

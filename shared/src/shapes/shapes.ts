@@ -3,7 +3,8 @@ import type { BaseShape } from './base';
 
 // Style primitives.
 export type FillStyle = 'none' | 'solid' | 'hatch' | 'crosshatch';
-export type StrokeDash = 'solid' | 'dashed' | 'dotted';
+/** Visual treatment of a vector stroke. */
+export type StrokeDash = 'solid' | 'dashed' | 'dotted' | 'draw';
 
 /** How a multi-point line interpolates between its editable vertices. */
 export type LineSpline = 'linear' | 'smooth';
@@ -19,11 +20,7 @@ export interface ConnectorBinding {
 
 /** Regular/normalized polygons that fit a w x h box. */
 export type PolygonKind =
-  | 'triangle'
-  | 'diamond'
-  | 'trapezoid'
-  | 'pentagon'
-  | 'hexagon';
+  'triangle' | 'diamond' | 'trapezoid' | 'pentagon' | 'hexagon';
 
 /** Text font families (mapped to concrete font stacks on the client). */
 export type FontFamily = 'sans' | 'serif' | 'mono' | 'hand';
@@ -50,6 +47,10 @@ export interface DrawPoint {
   pressure?: number;
 }
 
+/** Serializable pressure curve used by the freehand radius model. */
+export type PressureEasing =
+  'linear' | 'ease-out-sine' | 'stylus' | 'smoothstep';
+
 export interface DrawProps {
   /** Ink points in shape-local coordinates (append-only under the CRDT). */
   points: DrawPoint[];
@@ -63,6 +64,10 @@ export interface DrawProps {
   fillStyle?: FillStyle;
   /** Whether to derive pressure from pointer velocity instead of hardware pressure. */
   simulatePressure?: boolean;
+  /** Pressure curve captured with the stroke; absent preserves legacy rendering. */
+  pressureEasing?: PressureEasing;
+  /** Whether the opening pressure is conditioned over the first five brush widths. */
+  pressureWarmup?: boolean;
   /** Pressure-to-width multiplier. Undefined preserves legacy uniform strokes. */
   thinning?: number;
   /** Softening applied while constructing the outline. */
@@ -201,6 +206,39 @@ export interface VideoProps {
   h: number;
 }
 
+/**
+ * A pasted link, rendered as a preview card. Metadata arrives asynchronously
+ * (see the client's `place-link.ts`), so every field but `url` is optional and
+ * the card renders from whatever has landed so far.
+ */
+export interface BookmarkProps {
+  /**
+   * Target URL. Only http(s) links are ever created, but the value travels
+   * through the CRDT, so anything that opens or renders it re-checks the
+   * protocol rather than trusting the stored string.
+   */
+  url: string;
+  /** Rendered size in world units. */
+  w: number;
+  h: number;
+  /**
+   * Whether the metadata fetch has settled. Stays 'loading' only while it is
+   * in flight — a failed unfurl still resolves to 'ready' so a peer that joins
+   * afterwards doesn't render a placeholder forever.
+   */
+  status: 'loading' | 'ready';
+  title?: string;
+  description?: string;
+  /**
+   * Blob ids of the unfurled preview image and site icon. The server stores
+   * them alongside pasted images rather than the card pointing at the origin,
+   * so a card can't phone home from a viewer's browser and PNG export inlines
+   * it like any other image.
+   */
+  imageBlobId?: string;
+  faviconBlobId?: string;
+}
+
 export interface GraphViewport {
   xMin: number;
   xMax: number;
@@ -208,13 +246,27 @@ export interface GraphViewport {
   yMax: number;
 }
 
+/** Parameter range swept by a parametric expression like `(cos(t), sin(t))`. */
+export interface GraphParametricDomain {
+  min: number;
+  max: number;
+}
+
 export interface GraphExpression {
   id: string;
-  /** Explicit expression in `x`, or an implicit equation in `x` and `y`. */
+  /**
+   * Explicit expression in `x`, an implicit equation in `x` and `y`, or a
+   * coordinate `(a, b)` — a plotted point, or a parametric curve when it
+   * references `t`.
+   */
   expression: string;
   color: string;
   visible: boolean;
   dash: StrokeDash;
+  /** Curve stroke width. Absent on boards saved before this was adjustable. */
+  width?: number;
+  /** `t` range for parametric expressions. Absent means the default sweep. */
+  domain?: GraphParametricDomain;
 }
 
 export interface GraphParameter {
@@ -241,7 +293,10 @@ export interface GraphProps {
   parameters: Record<string, GraphParameter>;
   /** Whether tick numbers are shown along the visible axes. */
   showAxisLabels: boolean;
-  /** Discrete plotted points. Absent on boards saved before this feature. */
+  /**
+   * Points from the retired points list, still rendered for boards that have
+   * them. New points come from `(x, y)` expressions.
+   */
   points?: GraphPoint[];
   /** Render intersection markers for explicit curves. Defaults to false. */
   showIntersections?: boolean;
@@ -268,6 +323,8 @@ export interface FrameProps {
   h: number;
   /** Title shown above the frame. */
   name: string;
+  /** Border and title color. Absent on boards created before colored frames. */
+  color?: string;
 }
 
 export type DrawShape = BaseShape<'draw', DrawProps>;
@@ -280,6 +337,7 @@ export type TextShape = BaseShape<'text', TextProps>;
 export type ImageShape = BaseShape<'image', ImageProps>;
 export type StickerShape = BaseShape<'sticker', StickerProps>;
 export type VideoShape = BaseShape<'video', VideoProps>;
+export type BookmarkShape = BaseShape<'bookmark', BookmarkProps>;
 export type GraphShape = BaseShape<'graph', GraphProps>;
 export type EquationShape = BaseShape<'equation', EquationProps>;
 export type GroupShape = BaseShape<'group', GroupProps>;
@@ -301,6 +359,7 @@ export type Shape =
   | ImageShape
   | StickerShape
   | VideoShape
+  | BookmarkShape
   | GraphShape
   | EquationShape
   | GroupShape
@@ -320,6 +379,7 @@ export interface ShapeMap {
   image: ImageShape;
   sticker: StickerShape;
   video: VideoShape;
+  bookmark: BookmarkShape;
   graph: GraphShape;
   equation: EquationShape;
   group: GroupShape;

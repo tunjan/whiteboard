@@ -14,7 +14,27 @@ export class SpatialIndex {
   private tree = new RBush<IndexItem>();
   private byId = new Map<string, IndexItem>();
 
+  /**
+   * Index `id` at `bounds`, replacing any previous entry.
+   *
+   * Re-indexing is skipped when the bounds are unchanged. Callers re-`insert`
+   * every shape touched by a mutation, but most mutations are not spatial — a
+   * recolour, a z-reorder, a style or text change all leave the AABB identical.
+   * Those used to pay an R-tree `remove` (which searches the tree for the item)
+   * plus a re-`insert`, per shape, per frame. Comparing four numbers first makes
+   * the non-spatial case free.
+   */
   insert(id: string, bounds: Bounds): void {
+    const existing = this.byId.get(id);
+    if (
+      existing &&
+      existing.minX === bounds.minX &&
+      existing.minY === bounds.minY &&
+      existing.maxX === bounds.maxX &&
+      existing.maxY === bounds.maxY
+    ) {
+      return;
+    }
     this.remove(id);
     const item: IndexItem = { ...bounds, id };
     this.tree.insert(item);

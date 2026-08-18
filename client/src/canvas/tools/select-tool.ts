@@ -8,7 +8,6 @@ import {
   boundsCenter,
   boundsContainsPoint,
   distance,
-  isContainerType,
   rotatePoint,
 } from '@whiteboard/shared';
 import {
@@ -23,13 +22,23 @@ import {
 } from '../selection-geometry';
 import { rotationCursor } from '../rotation-cursor';
 import {
+  descendantsOf,
+  findCommonAncestor,
   leafDescendants,
   moveTargetIds,
   selectionTargetId,
 } from '../hierarchy';
+import {
+  fitFrameToContent,
+  kickoutOccludedFrameChildren,
+  movingSubtreeIds,
+  selectionRoots,
+  topFrameOverlappingShape,
+} from '../frame-operations';
 import { requestEquationFocus } from '../equation-focus';
 import { getSnapGridStep } from '../grid';
-import { isSelectable, isVisible } from '../selectable';
+import { safeLinkUrl } from '../link-url';
+import { isSelectable } from '../selectable';
 import { useEnteredGroupStore } from '../use-entered-group-store';
 import { shapeRegistry } from '../shapes/shape-registry';
 import { findBindableShapeAt } from '../shapes/connector-routing';
@@ -44,7 +53,11 @@ import {
   snapTargetShapes,
 } from '../snap-targets';
 import {
+  type BoundsSnapTarget,
   type PointSnapTarget,
+  boundsSnapPoints,
+  shortAngleDist,
+  snapAngle,
   snapBounds,
   snapPoint,
   snapResizeBounds,
@@ -55,6 +68,7 @@ import { useCanvasUiStore } from '../use-canvas-ui-store';
 import { useSelectionStore } from '../use-selection-store';
 import { useStyleStore } from '../use-style-store';
 import { useTextEditingStore } from '../use-text-editing-store';
+import { useFrameEditingStore } from '../use-frame-editing-store';
 import { useVideoPlayingStore } from '../use-video-playing-store';
 import { useImageCroppingStore } from '../use-image-cropping-store';
 import type { Editor } from '../editor';
@@ -112,9 +126,20 @@ type SelectState =
       type: 'move';
       start: Point;
       initial: Map<string, { x: number; y: number }>;
+      /** Selected hierarchy roots whose parent can change during this drag. */
+      rootIds: string[];
+      /** Parent snapshots for live reparenting cancellation. */
+      initialParents: Map<string, string | null>;
+      /** Moving roots plus descendants: none may become its own drop target. */
+      dropExclusions: Set<string>;
+      lastReparentAt: number;
       bounds0: Bounds | null;
       selectionBefore: string[];
       axis: Axis | null;
+      /** Container the dragged shapes live in, which scopes snap candidates. */
+      ancestor: string | null;
+      /** Gesture-start feature points, translated with the moving selection. */
+      snapPoints0: Point[];
       /**
        * Snap candidates for this drag, filled on first use and reused for the
        * rest of the gesture — the same lifetime the resize/handle states
@@ -123,21 +148,23 @@ type SelectState =
        * Lazy rather than captured at pointer-down so toggling snapping on
        * mid-drag still finds targets.
        */
-      targets: Bounds[] | null;
+      targets: BoundsSnapTarget[] | null;
     }
   | {
       type: 'resize';
       handle: ResizeHandleId;
       initial: Shape;
       util: ShapeUtil;
-      targets: Bounds[];
+      targets: BoundsSnapTarget[];
+      /** Descendant page positions used by normal (non-crop) frame resize. */
+      frameChildren: Map<string, { x: number; y: number }> | null;
     }
   | {
       type: 'group-resize';
       handle: ResizeHandleId;
       bounds0: Bounds;
       items: GroupItem[];
-      targets: Bounds[];
+      targets: BoundsSnapTarget[];
     }
   | {
       type: 'rotate';
@@ -236,8 +263,16 @@ function computeResizeBounds(
 
   // Keep the displayed anchor (opposite corner) fixed as the pivot shifts.
   const anchor = {
-    x: handle.includes('e') ? b1.minX : handle.includes('w') ? b1.maxX : b1.minX,
-    y: handle.includes('s') ? b1.minY : handle.includes('n') ? b1.maxY : b1.minY,
+    x: handle.includes('e')
+      ? b1.minX
+      : handle.includes('w')
+        ? b1.maxX
+        : b1.minX,
+    y: handle.includes('s')
+      ? b1.minY
+      : handle.includes('n')
+        ? b1.maxY
+        : b1.minY,
   };
   const c1 = boundsCenter(b1);
   const o0 = rotatePoint(anchor, c0, initial.rotation);
@@ -279,7 +314,8 @@ function syncStyleFromSelection(editor: Editor): void {
   if (props.dash) style.setDash(props.dash);
   if (props.kind) style.setPolygonKind(props.kind);
   if (first.type === 'arrow') {
-    if (typeof props.arrowStart === 'boolean') style.setArrowStart(props.arrowStart);
+    if (typeof props.arrowStart === 'boolean')
+      style.setArrowStart(props.arrowStart);
     if (typeof props.arrowEnd === 'boolean') style.setArrowEnd(props.arrowEnd);
     style.setArrowTopology(
       props.topology ??
@@ -287,8 +323,10 @@ function syncStyleFromSelection(editor: Editor): void {
     );
   }
   if (first.type === 'line') style.setLineSpline(props.spline ?? 'linear');
-  if (first.type === 'text' && props.fontFamily) style.setFontFamily(props.fontFamily);
-  if (first.type === 'text' && props.fontWeight) style.setFontWeight(props.fontWeight);
+  if (first.type === 'text' && props.fontFamily)
+    style.setFontFamily(props.fontFamily);
+  if (first.type === 'text' && props.fontWeight)
+    style.setFontWeight(props.fontWeight);
   if (first.type === 'text' && props.align) style.setAlign(props.align);
 }
 
@@ -313,14 +351,6 @@ function normalizeRotation(angle: number): number {
   return ((angle % TAU) + TAU) % TAU;
 }
 
-function snapRotation(angle: number, step: number): number {
-  return Math.round(angle / step) * step;
-}
-
-function shortAngleDistance(from: number, to: number): number {
-  return ((to - from + Math.PI) % TAU + TAU) % TAU - Math.PI;
-}
-
 function effectiveRotation(
   target: number,
   shiftKey: boolean,
@@ -328,15 +358,14 @@ function effectiveRotation(
   complete: boolean,
 ): number {
   let rotation = shiftKey
-    ? snapRotation(target, ROTATE_SNAP)
+    ? snapAngle(target, Math.round(TAU / ROTATE_SNAP))
     : complete
-      ? snapRotation(target, ONE_DEGREE)
+      ? snapAngle(target, Math.round(TAU / ONE_DEGREE))
       : target;
   if (pointerType === 'touch') {
-    const rightAngle = snapRotation(rotation, RIGHT_ANGLE_SNAP);
+    const rightAngle = snapAngle(rotation, Math.round(TAU / RIGHT_ANGLE_SNAP));
     if (
-      Math.abs(shortAngleDistance(rotation, rightAngle)) <
-      COARSE_ROTATE_TOLERANCE
+      Math.abs(shortAngleDist(rotation, rightAngle)) < COARSE_ROTATE_TOLERANCE
     ) {
       rotation = rightAngle;
     }
@@ -393,13 +422,16 @@ export function createSelectTool(): Tool {
     // Expand selection to the shapes that actually move (group → descendants,
     // frame → frame + descendants, leaf → itself).
     const shapes = editor.getShapes();
-    const ids = moveTargetIds(shapes, useSelectionStore.getState().selectedIds);
+    const selectedIds = useSelectionStore.getState().selectedIds;
+    const rootIds = selectionRoots(editor, selectedIds);
+    const ids = moveTargetIds(shapes, selectedIds);
     const initial = new Map<string, { x: number; y: number }>();
     let bounds0: Bounds | null = null;
     for (const id of ids) {
       const shape = editor.getShape(id);
-      // Locked shapes stay put even when part of the selection.
-      if (!shape || shape.locked) continue;
+      // An explicitly selected locked root stays put. A locked descendant still
+      // follows an unlocked container, matching a real local transform tree.
+      if (!shape || (shape.locked && rootIds.includes(shape.id))) continue;
       initial.set(id, { x: shape.x, y: shape.y });
       const bounds = shapeRotatedBounds(shape);
       bounds0 = bounds0
@@ -411,22 +443,58 @@ export function createSelectTool(): Tool {
           }
         : bounds;
     }
+    const selectionInfo = getSelectionInfo(
+      shapes,
+      selectedIds,
+      1,
+      editor.getShape,
+    );
+    const selectionCanMove = selectedIds.every(
+      (id) => !editor.getShape(id)?.locked,
+    );
+    const snapPoints0 =
+      selectionInfo && selectionCanMove
+        ? [
+            selectionInfo.corners.nw,
+            selectionInfo.corners.ne,
+            selectionInfo.corners.se,
+            selectionInfo.corners.sw,
+            selectionInfo.center,
+          ]
+        : bounds0
+          ? boundsSnapPoints(bounds0)
+          : [];
     return {
       type: 'move',
       start,
       initial,
+      rootIds,
+      initialParents: new Map(
+        rootIds.map((id) => [id, editor.getShape(id)?.parentId ?? null]),
+      ),
+      dropExclusions: movingSubtreeIds(shapes, rootIds),
+      lastReparentAt: -Infinity,
       bounds0,
       selectionBefore,
       axis: null,
+      // From the selection itself, not the expanded move set: a selected group
+      // is scoped by the group's own container, not by the group.
+      ancestor: findCommonAncestor(editor.getShape, selectedIds),
+      snapPoints0,
       targets: null,
     };
   }
 
-  function applyMove(move: Extract<SelectState, { type: 'move' }>, info: ToolPointerInfo, ctx: ToolContext): void {
+  function applyMove(
+    move: Extract<SelectState, { type: 'move' }>,
+    info: ToolPointerInfo,
+    ctx: ToolContext,
+  ): void {
     const rawDx = info.point.x - move.start.x;
     const rawDy = info.point.y - move.start.y;
     if (!info.shiftKey) move.axis = null;
-    else if (!move.axis) move.axis = Math.abs(rawDx) >= Math.abs(rawDy) ? 'x' : 'y';
+    else if (!move.axis)
+      move.axis = Math.abs(rawDx) >= Math.abs(rawDy) ? 'x' : 'y';
 
     let dx = move.axis === 'y' ? 0 : rawDx;
     let dy = move.axis === 'x' ? 0 : rawDy;
@@ -447,6 +515,7 @@ export function createSelectTool(): Tool {
       move.targets ??= snapTargetBounds(
         ctx.editor,
         new Set(move.initial.keys()),
+        move.ancestor,
         snapRegion(ctx, {
           minX: moving.minX - threshold,
           minY: moving.minY - threshold,
@@ -457,16 +526,31 @@ export function createSelectTool(): Tool {
       const snap = snapBounds(
         moving,
         move.targets,
-        getSnapGridStep(background, camera),
+        info.metaKey || info.ctrlKey
+          ? null
+          : getSnapGridStep(background, camera),
         threshold,
+        {
+          points: move.snapPoints0.map((point) => ({
+            x: point.x + dx,
+            y: point.y + dy,
+          })),
+          axis: move.axis,
+        },
       );
       if (move.axis !== 'y') dx += snap.dx;
       if (move.axis !== 'x') dy += snap.dy;
-      useSelectionStore.getState().setSnapGuides(
-        snap.guides.filter((guide) =>
-          move.axis === 'x' ? guide.axis === 'x' : move.axis === 'y' ? guide.axis === 'y' : true,
-        ),
-      );
+      useSelectionStore
+        .getState()
+        .setSnapGuides(
+          snap.guides.filter((guide) =>
+            move.axis === 'x'
+              ? guide.axis === 'x'
+              : move.axis === 'y'
+                ? guide.axis === 'y'
+                : true,
+          ),
+        );
     } else {
       useSelectionStore.getState().setSnapGuides([]);
     }
@@ -475,6 +559,9 @@ export function createSelectTool(): Tool {
         ctx.editor.updateShape(id, { x: initial.x + dx, y: initial.y + dy });
       }
     });
+    // Parenting follows the gesture while it is visible, so clipping and nested
+    // stacking preview immediately rather than jumping only on pointer-up.
+    reparentMovedRoots(move, ctx);
   }
 
   function intersectsAncestorMasks(
@@ -483,6 +570,7 @@ export function createSelectTool(): Tool {
     pointer: Point,
     editor: Editor,
   ): boolean {
+    if (shape.type === 'arrow') return true;
     let current: Shape | undefined = shape;
     const visited = new Set<string>();
     while (current?.parentId && !visited.has(current.id)) {
@@ -547,9 +635,7 @@ export function createSelectTool(): Tool {
     useSelectionStore
       .getState()
       .setSelection(
-        additive
-          ? [...new Set([...selectionBefore, ...found])]
-          : [...found],
+        additive ? [...new Set([...selectionBefore, ...found])] : [...found],
       );
   }
 
@@ -576,23 +662,46 @@ export function createSelectTool(): Tool {
     );
   }
 
-  function reparentMovedLeaves(move: Extract<SelectState, { type: 'move' }>, ctx: ToolContext): void {
+  function reparentMovedRoots(
+    move: Extract<SelectState, { type: 'move' }>,
+    ctx: ToolContext,
+    force = false,
+  ): void {
+    const now = Date.now();
+    if (!force && now - move.lastReparentAt < 60) return;
+    move.lastReparentAt = now;
     const shapes = ctx.editor.getShapes();
-    const movingIds = new Set(move.initial.keys());
-    for (const id of move.initial.keys()) {
+    const updates: Array<{ id: string; parentId: string | null }> = [];
+    for (const id of move.rootIds) {
       const shape = ctx.editor.getShape(id);
-      if (!shape || isContainerType(shape.type)) continue;
-      const parent = shape.parentId ? ctx.editor.getShape(shape.parentId) : null;
-      // Preserve membership in explicit groups; only frame parenting follows a drag.
+      if (!shape || shape.locked) continue;
+      const parent = shape.parentId
+        ? ctx.editor.getShape(shape.parentId)
+        : null;
+      // Entering a group permits moving one of its members, but never silently
+      // dissolves the explicit group relationship. Groups and frames themselves
+      // remain eligible to move between frames.
       if (parent?.type === 'group') continue;
-      const util = shapeRegistry.getFor(shape);
-      if (!util) continue;
-      const center = boundsCenter(util.getBounds(shape));
-      const nextParentId = topFrameAt(shapes, center, movingIds);
+      // Bound arrows choose their closest common container in the routing pass.
+      if (
+        shape.type === 'arrow' &&
+        (shape.props.bindings?.start || shape.props.bindings?.end)
+      ) {
+        continue;
+      }
+      const nextParentId =
+        topFrameOverlappingShape(shapes, shape, move.dropExclusions)?.id ??
+        null;
       if ((shape.parentId ?? null) !== (nextParentId ?? null)) {
-        ctx.editor.updateShape(id, { parentId: nextParentId });
+        updates.push({ id, parentId: nextParentId });
       }
     }
+    if (!updates.length) return;
+    ctx.editor.transact(() => {
+      for (const update of updates) {
+        ctx.editor.updateShape(update.id, { parentId: update.parentId });
+      }
+    });
   }
 
   function clearTransientState(): void {
@@ -627,7 +736,12 @@ export function createSelectTool(): Tool {
     } else if (finished.type === 'marquee') {
       syncStyleFromSelection(ctx.editor);
     } else if (finished.type === 'move') {
-      reparentMovedLeaves(finished, ctx);
+      reparentMovedRoots(finished, ctx, true);
+    } else if (
+      finished.type === 'resize' &&
+      finished.initial.type === 'frame'
+    ) {
+      kickoutOccludedFrameChildren(ctx.editor, finished.initial.id);
     }
     clearTransientState();
     state = { type: 'idle' };
@@ -655,13 +769,15 @@ export function createSelectTool(): Tool {
       // 1a. Custom shape handles (connector endpoints/bend) take priority.
       if (selectionInfo?.isSingle && selectionInfo.customHandles) {
         for (const handle of selectionInfo.customHandles) {
-          if (distance(info.point, handle.point) > HANDLE_HIT_SCREEN / zoom) continue;
+          if (distance(info.point, handle.point) > HANDLE_HIT_SCREEN / zoom)
+            continue;
           const shape = ctx.editor.getShape(selectionInfo.ids[0]!);
           const util = shape ? shapeRegistry.getFor(shape) : undefined;
           if (shape && util?.onHandleDrag) {
             const targets: PointSnapTarget[] = snapTargetShapes(
               ctx.editor,
               new Set([shape.id]),
+              shape.parentId ?? null,
               snapRegion(ctx, selectionInfo.bounds),
             ).flatMap((target) => {
               const geometry = shapeSnapGeometry(target);
@@ -700,20 +816,33 @@ export function createSelectTool(): Tool {
       // 1b. Generic resize handles (single or group bounding box).
       if (selectionInfo) {
         for (const handle of selectionInfo.handles) {
-          if (distance(info.point, handle.point) > HANDLE_HIT_SCREEN / zoom) continue;
+          if (distance(info.point, handle.point) > HANDLE_HIT_SCREEN / zoom)
+            continue;
           if (selectionInfo.isSingle) {
             const initial = ctx.editor.getShape(selectionInfo.ids[0]!);
             const util = initial ? shapeRegistry.getFor(initial) : undefined;
             if (initial && util?.canResize) {
-              const movingIds = new Set(moveTargetIds(shapes, selectionInfo.ids));
+              const movingIds = new Set(
+                moveTargetIds(shapes, selectionInfo.ids),
+              );
               state = {
                 type: 'resize',
                 handle: handle.id,
                 initial,
                 util,
+                frameChildren:
+                  initial.type === 'frame'
+                    ? new Map(
+                        descendantsOf(shapes, initial.id).map((child) => [
+                          child.id,
+                          { x: child.x, y: child.y },
+                        ]),
+                      )
+                    : null,
                 targets: snapTargetBounds(
                   ctx.editor,
                   movingIds,
+                  initial.parentId ?? null,
                   snapRegion(ctx, selectionInfo.bounds),
                 ),
               };
@@ -724,10 +853,17 @@ export function createSelectTool(): Tool {
               const shape = ctx.editor.getShape(id);
               if (!shape || shape.locked) continue;
               const util = shapeRegistry.getFor(shape);
-              if (util?.canResize) items.push({ initial: shape, util, b0: util.getBounds(shape as never) });
+              if (util?.canResize)
+                items.push({
+                  initial: shape,
+                  util,
+                  b0: util.getBounds(shape as never),
+                });
             }
             if (items.length) {
-              const movingIds = new Set(moveTargetIds(shapes, selectionInfo.ids));
+              const movingIds = new Set(
+                moveTargetIds(shapes, selectionInfo.ids),
+              );
               state = {
                 type: 'group-resize',
                 handle: handle.id,
@@ -736,6 +872,7 @@ export function createSelectTool(): Tool {
                 targets: snapTargetBounds(
                   ctx.editor,
                   movingIds,
+                  findCommonAncestor(ctx.editor.getShape, selectionInfo.ids),
                   snapRegion(ctx, selectionInfo.bounds),
                 ),
               };
@@ -754,13 +891,14 @@ export function createSelectTool(): Tool {
             continue;
           }
           const items: RotationItem[] = [];
-          for (const id of selectionInfo.ids) {
+          const rotationIds = moveTargetIds(shapes, selectionInfo.ids);
+          const explicit = new Set(selectionInfo.ids);
+          for (const id of rotationIds) {
             const initial = ctx.editor.getShape(id);
             if (
               !initial ||
-              initial.locked ||
-              initial.type === 'group' ||
-              initial.type === 'frame'
+              (initial.locked && explicit.has(initial.id)) ||
+              initial.type === 'group'
             ) {
               continue;
             }
@@ -823,11 +961,20 @@ export function createSelectTool(): Tool {
         return;
       }
 
-      // 3. Empty space inside a multi-selection box can drag that selection.
+      // 3. Empty space inside the selection box can drag that selection: a
+      // multi-selection, or a selected group. A group is a *single* selection
+      // whose box is derived from its children, so without the group case a
+      // click in the gap between two of its strokes would fall through to the
+      // marquee below and deselect it — the whole group has to be draggable
+      // from anywhere inside its box, not just from a child's ink. Any shape
+      // actually under the pointer still wins, because step 2 runs first.
+      const singleGroupSelected =
+        selectionInfo?.isSingle &&
+        ctx.editor.getShape(selectionInfo.ids[0]!)?.type === 'group';
       if (
         !info.shiftKey &&
         selectionInfo &&
-        !selectionInfo.isSingle &&
+        (!selectionInfo.isSingle || singleGroupSelected) &&
         boundsContainsPoint(selectionInfo.bounds, info.point)
       ) {
         state = {
@@ -857,19 +1004,29 @@ export function createSelectTool(): Tool {
         case 'pending-shape': {
           if (!hasCrossedDragSlop(state.screenStart, info.screenPoint)) return;
           if (state.additive && !state.targetWasSelected) {
-            useSelectionStore.getState().setSelection([
-              ...new Set([...state.selectionBefore, state.targetId]),
-            ]);
+            useSelectionStore
+              .getState()
+              .setSelection([
+                ...new Set([...state.selectionBefore, state.targetId]),
+              ]);
             syncStyleFromSelection(ctx.editor);
           }
-          const move = createMoveState(state.start, state.selectionBefore, ctx.editor);
+          const move = createMoveState(
+            state.start,
+            state.selectionBefore,
+            ctx.editor,
+          );
           state = move;
           applyMove(move, info, ctx);
           return;
         }
         case 'pending-selection': {
           if (!hasCrossedDragSlop(state.screenStart, info.screenPoint)) return;
-          const move = createMoveState(state.start, state.selectionBefore, ctx.editor);
+          const move = createMoveState(
+            state.start,
+            state.selectionBefore,
+            ctx.editor,
+          );
           state = move;
           applyMove(move, info, ctx);
           return;
@@ -921,7 +1078,9 @@ export function createSelectTool(): Tool {
               bounds,
               state.handle,
               state.targets,
-              getSnapGridStep(background, camera),
+              info.metaKey || info.ctrlKey
+                ? null
+                : getSnapGridStep(background, camera),
               SNAP_SCREEN / camera.z,
               lockAspect,
               (initialBounds.maxX - initialBounds.minX) /
@@ -954,11 +1113,36 @@ export function createSelectTool(): Tool {
             return;
           }
           const resized = state.util.resize(state.initial as never, bounds);
-          ctx.editor.updateShape(state.initial.id, {
-            x: resized.x,
-            y: resized.y,
-            props: resized.props as unknown as Record<string, unknown>,
-          });
+          if (state.initial.type === 'frame' && state.frameChildren) {
+            const initialFrame = state.initial;
+            const frameChildren = state.frameChildren;
+            const cropResize = info.metaKey || info.ctrlKey;
+            const dx = resized.x - initialFrame.x;
+            const dy = resized.y - initialFrame.y;
+            ctx.editor.transact(() => {
+              ctx.editor.updateShape(initialFrame.id, {
+                x: resized.x,
+                y: resized.y,
+                props: resized.props as unknown as Record<string, unknown>,
+              });
+              // Normal resize keeps child coordinates relative to the frame's
+              // moving origin. Command/Ctrl switches to crop mode and pins page
+              // positions instead; using gesture-start snapshots makes the
+              // modifier fully reversible while the pointer is still down.
+              for (const [id, initial] of frameChildren) {
+                ctx.editor.updateShape(id, {
+                  x: initial.x + (cropResize ? 0 : dx),
+                  y: initial.y + (cropResize ? 0 : dy),
+                });
+              }
+            });
+          } else {
+            ctx.editor.updateShape(state.initial.id, {
+              x: resized.x,
+              y: resized.y,
+              props: resized.props as unknown as Record<string, unknown>,
+            });
+          }
           return;
         }
         case 'group-resize': {
@@ -975,7 +1159,9 @@ export function createSelectTool(): Tool {
               bounds,
               state.handle,
               state.targets,
-              getSnapGridStep(background, camera),
+              info.metaKey || info.ctrlKey
+                ? null
+                : getSnapGridStep(background, camera),
               SNAP_SCREEN / camera.z,
               info.shiftKey,
               (state.bounds0.maxX - state.bounds0.minX) /
@@ -986,10 +1172,18 @@ export function createSelectTool(): Tool {
           } else {
             useSelectionStore.getState().setSnapGuides([]);
           }
-          const sx = (bounds.maxX - bounds.minX) / (state.bounds0.maxX - state.bounds0.minX || 1);
-          const sy = (bounds.maxY - bounds.minY) / (state.bounds0.maxY - state.bounds0.minY || 1);
-          const fixedX = state.handle.includes('w') ? state.bounds0.maxX : state.bounds0.minX;
-          const fixedY = state.handle.includes('n') ? state.bounds0.maxY : state.bounds0.minY;
+          const sx =
+            (bounds.maxX - bounds.minX) /
+            (state.bounds0.maxX - state.bounds0.minX || 1);
+          const sy =
+            (bounds.maxY - bounds.minY) /
+            (state.bounds0.maxY - state.bounds0.minY || 1);
+          const fixedX = state.handle.includes('w')
+            ? state.bounds0.maxX
+            : state.bounds0.minX;
+          const fixedY = state.handle.includes('n')
+            ? state.bounds0.maxY
+            : state.bounds0.minY;
           const items = state.items;
           ctx.editor.transact(() => {
             for (const item of items) {
@@ -1020,7 +1214,11 @@ export function createSelectTool(): Tool {
             state.canSnap
           ) {
             const camera = useCameraStore.getState().camera;
-            const snapped = snapPoint(point, state.targets, SNAP_SCREEN / camera.z);
+            const snapped = snapPoint(
+              point,
+              state.targets,
+              SNAP_SCREEN / camera.z,
+            );
             point = snapped.point;
             bindingTarget = snapped.targetId
               ? ctx.editor.getShape(snapped.targetId)
@@ -1051,10 +1249,15 @@ export function createSelectTool(): Tool {
             point,
             { shiftKey: info.shiftKey, bindingTarget },
           );
-          const patch: { x?: number; y?: number; props?: Record<string, unknown> } = {};
+          const patch: {
+            x?: number;
+            y?: number;
+            props?: Record<string, unknown>;
+          } = {};
           if (result.x !== undefined) patch.x = result.x;
           if (result.y !== undefined) patch.y = result.y;
-          if (result.props) patch.props = result.props as unknown as Record<string, unknown>;
+          if (result.props)
+            patch.props = result.props as unknown as Record<string, unknown>;
           ctx.editor.updateShape(state.shapeId, patch);
           return;
         }
@@ -1198,10 +1401,20 @@ export function createSelectTool(): Tool {
             for (const [id, initial] of cancelled.initial) {
               ctx.editor.updateShape(id, { x: initial.x, y: initial.y });
             }
+            for (const [id, parentId] of cancelled.initialParents) {
+              ctx.editor.updateShape(id, { parentId });
+            }
           });
           useSelectionStore.getState().setSelection(cancelled.selectionBefore);
           return;
         case 'resize':
+          ctx.editor.transact(() => {
+            restore(cancelled.initial);
+            for (const [id, initial] of cancelled.frameChildren ?? []) {
+              ctx.editor.updateShape(id, { x: initial.x, y: initial.y });
+            }
+          });
+          return;
         case 'handle':
           restore(cancelled.initial);
           return;
@@ -1231,6 +1444,22 @@ export function createSelectTool(): Tool {
         zoom,
         ctx.editor.getShape,
       );
+
+      // A frame corner handle is a direct "fit viewport to content" target.
+      // Do this before the text-width special case because both live in the
+      // generic handle list.
+      if (selectionInfo?.isSingle) {
+        const selected = ctx.editor.getShape(selectionInfo.ids[0]!);
+        const corner = selectionInfo.handles.find(
+          (candidate) =>
+            candidate.id.length === 2 &&
+            distance(info.point, candidate.point) <= HANDLE_HIT_SCREEN / zoom,
+        );
+        if (corner && selected?.type === 'frame') {
+          fitFrameToContent(ctx.editor, selected.id);
+          return;
+        }
+      }
 
       // A double click on either text width handle releases the constraint and
       // returns to content-driven auto sizing. Keep the opposite side's center
@@ -1269,6 +1498,11 @@ export function createSelectTool(): Tool {
       const hitLeaf = topmostHit(shapes, info.point, SHAPE_HIT_SCREEN / zoom);
       if (!hitLeaf) return;
       const hitShape = ctx.editor.getShape(hitLeaf);
+      if (hitShape?.type === 'frame') {
+        useSelectionStore.getState().setSelection([hitShape.id]);
+        useFrameEditingStore.getState().start(hitShape.id);
+        return;
+      }
       if (hitShape?.type === 'text') {
         const index = textIndexAtWorldPoint(hitShape, info.point);
         useSelectionStore.getState().setSelection([hitShape.id]);
@@ -1286,6 +1520,13 @@ export function createSelectTool(): Tool {
         useVideoPlayingStore.getState().start(hitShape.id);
         return;
       }
+      if (hitShape?.type === 'bookmark') {
+        // Re-check the protocol: the URL came from the shared document, so a
+        // peer (or a tampered board) is not a trusted source for what opens.
+        const url = safeLinkUrl(hitShape.props.url);
+        if (url) window.open(url, '_blank', 'noopener,noreferrer');
+        return;
+      }
       if (hitShape?.type === 'image') {
         useImageCroppingStore.getState().start(hitShape.id);
         return;
@@ -1297,37 +1538,12 @@ export function createSelectTool(): Tool {
       );
       if (ctx.editor.getShape(target)?.type === 'group') {
         useEnteredGroupStore.getState().enter(target);
-        useSelectionStore.getState().setSelection([
-          selectionTargetId(ctx.editor.getShape, hitLeaf, target),
-        ]);
+        useSelectionStore
+          .getState()
+          .setSelection([
+            selectionTargetId(ctx.editor.getShape, hitLeaf, target),
+          ]);
       }
     },
   };
-}
-
-/** Topmost visible frame whose interior contains world point `point`. */
-function topFrameAt(shapes: Shape[], point: Point, excludeIds: Set<string>): string | null {
-  const candidates = new Set(
-    spatialIndex.search({ minX: point.x, minY: point.y, maxX: point.x, maxY: point.y }),
-  );
-  for (let i = shapes.length - 1; i >= 0; i--) {
-    const shape = shapes[i]!;
-    if (
-      !candidates.has(shape.id) ||
-      shape.type !== 'frame' ||
-      excludeIds.has(shape.id) ||
-      !isVisible(shape)
-    ) {
-      continue;
-    }
-    if (
-      point.x >= shape.x &&
-      point.x <= shape.x + shape.props.w &&
-      point.y >= shape.y &&
-      point.y <= shape.y + shape.props.h
-    ) {
-      return shape.id;
-    }
-  }
-  return null;
 }

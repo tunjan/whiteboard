@@ -3,7 +3,11 @@ import type {
   GraphParameter,
   GraphViewport,
 } from '@whiteboard/shared';
-import { parseGraphExpression } from './graph-expressions';
+import {
+  createGraphFunctionDefinitions,
+  parseGraphExpression,
+  type GraphFunctionDefinitions,
+} from './graph-parser';
 
 export type IntersectionKind = 'curve-curve' | 'x-axis' | 'y-axis';
 
@@ -77,13 +81,18 @@ export function findGraphIntersections(
   viewport: GraphViewport,
   parameters: Record<string, GraphParameter>,
   samples = 240,
+  definitions: GraphFunctionDefinitions = createGraphFunctionDefinitions(
+    expressions,
+  ),
 ): IntersectionPoint[] {
   const curves: ((x: number) => number)[] = [];
   for (const expression of expressions) {
     if (!expression.visible) continue;
-    const parsed = parseGraphExpression(expression.expression);
+    const parsed = parseGraphExpression(expression.expression, definitions);
     if (!parsed.ok || parsed.kind !== 'explicit') continue;
-    curves.push((x) => parsed.evaluate(x, parameters));
+    // Root finding evaluates each curve thousands of times, so bind the
+    // sliders once rather than rebuilding the scope on every probe.
+    curves.push(parsed.createEvaluator(parameters));
   }
 
   const candidates: IntersectionPoint[] = [];
@@ -130,4 +139,20 @@ export function findGraphIntersections(
     if (result.length >= MAX_INTERSECTIONS) break;
   }
   return result;
+}
+
+/**
+ * Format an intersection coordinate with at most two decimal places.
+ * Trailing zeros are omitted (e.g. 2 -> "2", 2.5 -> "2.5", 2.567 -> "2.57").
+ */
+export function formatIntersectionCoordinate(value: number): string {
+  if (!Number.isFinite(value)) return '';
+  const rounded = Number(value.toFixed(2));
+  if (Object.is(rounded, -0) || rounded === 0) return '0';
+  return rounded.toString();
+}
+
+/** Format an intersection point into a label, e.g. `(1.25, 0)` */
+export function formatIntersectionLabel(point: { x: number; y: number }): string {
+  return `(${formatIntersectionCoordinate(point.x)}, ${formatIntersectionCoordinate(point.y)})`;
 }

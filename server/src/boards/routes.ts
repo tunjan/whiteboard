@@ -73,25 +73,32 @@ boardRoutes.post('/:id/opened', async (c) => {
   return c.json(toMeta(row));
 });
 
-// Tutor-only private notes about the student. Stored relationally and served
-// only here (behind requireTutor) so they never reach a student client.
+// Tutor-only private notes and error log about the student. Stored relationally
+// and served only here (behind requireTutor) so they never reach a student client.
 boardRoutes.get('/:id/notes', async (c) => {
   const id = c.req.param('id');
   const [row] = await db
-    .select({ privateNotes: boards.privateNotes })
+    .select({ privateNotes: boards.privateNotes, errorLog: boards.errorLog })
     .from(boards)
     .where(eq(boards.id, id));
   if (!row) return c.json({ error: 'not found' }, 404);
-  return c.json({ notes: row.privateNotes });
+  return c.json({ notes: row.privateNotes, errorLog: row.errorLog });
 });
 
 boardRoutes.put('/:id/notes', async (c) => {
   const id = c.req.param('id');
-  const body = (await c.req.json().catch(() => ({}))) as { notes?: string };
-  const notes = typeof body.notes === 'string' ? body.notes : '';
+  const body = (await c.req.json().catch(() => ({}))) as {
+    notes?: string;
+    errorLog?: string;
+  };
+  // Only the fields present are written, so saving one pane never clears the other.
+  const set: { privateNotes?: string; errorLog?: string } = {};
+  if (typeof body.notes === 'string') set.privateNotes = body.notes;
+  if (typeof body.errorLog === 'string') set.errorLog = body.errorLog;
+  if (Object.keys(set).length === 0) return c.json({ error: 'nothing to update' }, 400);
   const [row] = await db
     .update(boards)
-    .set({ privateNotes: notes })
+    .set(set)
     .where(eq(boards.id, id))
     .returning({ id: boards.id });
   if (!row) return c.json({ error: 'not found' }, 404);

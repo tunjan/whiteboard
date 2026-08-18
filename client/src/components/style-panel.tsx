@@ -6,7 +6,6 @@ import {
   AlignRight,
   ArrowLeft,
   ArrowRight,
-  ChevronsUpDown,
 } from 'lucide-react';
 import type {
   ArrowTopology,
@@ -22,7 +21,6 @@ import { fontStack } from '@/canvas/shapes/text-measure';
 import { editor, useDocumentStore } from '@/canvas/use-document-store';
 import { useSelectionStore } from '@/canvas/use-selection-store';
 import {
-  PALETTES,
   paletteColors,
   SIZE_OPTIONS,
   useStyleStore,
@@ -30,16 +28,8 @@ import {
 import { useToolStore } from '@/canvas/use-tool-store';
 import { useThemeStore } from '@/use-theme-store';
 import { cn, swatchBorder } from '@/lib/utils';
-import { Button } from '@/components/ui/button';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
-import { Slider } from '@/components/ui/slider';
+import { OpacitySlider } from '@/components/opacity-slider';
 import { Surface } from '@/components/ui/surface';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import {
@@ -51,11 +41,18 @@ import {
 import { ToolPanelPresence } from '@/components/tool-panel-presence';
 
 const FILLS: FillStyle[] = ['none', 'solid', 'hatch', 'crosshatch'];
-const DASHES: StrokeDash[] = ['solid', 'dashed', 'dotted'];
+const DASHES: StrokeDash[] = ['solid', 'dashed', 'dotted', 'draw'];
 // Draw shapes take a fill too, but only show it once the stroke closed on
 // itself — an open squiggle has no interior to paint.
 const FILLABLE = new Set(['rectangle', 'ellipse', 'polygon', 'draw']);
-const DASHABLE = new Set(['rectangle', 'ellipse', 'polygon', 'line', 'arrow', 'draw']);
+const DASHABLE = new Set([
+  'rectangle',
+  'ellipse',
+  'polygon',
+  'line',
+  'arrow',
+  'draw',
+]);
 
 const FILL_LABELS: Record<FillStyle, string> = {
   none: 'No fill',
@@ -67,6 +64,7 @@ const DASH_LABELS: Record<StrokeDash, string> = {
   solid: 'Solid stroke',
   dashed: 'Dashed stroke',
   dotted: 'Dotted stroke',
+  draw: 'Hand-drawn stroke',
 };
 const FONTS: { family: FontFamily; label: string }[] = [
   { family: 'sans', label: 'Aa' },
@@ -84,12 +82,22 @@ const WEIGHTS: { weight: FontWeight; label: string }[] = [
 // the swatch grid's edges (and its columns, for four-option rows).
 const TOGGLE_ROW = 'w-full';
 const TOGGLE_ITEM = 'grow basis-0';
-const ALIGNS: { align: TextAlign; Icon: ComponentType<{ className?: string; 'aria-hidden'?: boolean | 'true' | 'false' }> }[] = [
+const ALIGNS: {
+  align: TextAlign;
+  Icon: ComponentType<{
+    className?: string;
+    'aria-hidden'?: boolean | 'true' | 'false';
+  }>;
+}[] = [
   { align: 'start', Icon: AlignLeft },
   { align: 'middle', Icon: AlignCenter },
   { align: 'end', Icon: AlignRight },
 ];
-const ARROW_TOPOLOGIES: Array<{ value: ArrowTopology; label: string; glyph: string }> = [
+const ARROW_TOPOLOGIES: Array<{
+  value: ArrowTopology;
+  label: string;
+  glyph: string;
+}> = [
   { value: 'straight', label: 'Straight arrow', glyph: '—' },
   { value: 'arc', label: 'Curved arrow', glyph: '⌒' },
   { value: 'elbow', label: 'Elbow arrow', glyph: '└' },
@@ -110,16 +118,44 @@ function FillPreview({ style }: { style: FillStyle }) {
         strokeWidth={1}
       />
       {style === 'hatch' ? (
-        <path d="M4 12 L12 4 M7 13 L13 7 M3 9 L9 3" stroke="currentColor" strokeWidth={0.8} />
+        <path
+          d="M4 12 L12 4 M7 13 L13 7 M3 9 L9 3"
+          stroke="currentColor"
+          strokeWidth={0.8}
+        />
       ) : null}
       {style === 'crosshatch' ? (
-        <path d="M4 12 L12 4 M4 4 L12 12" stroke="currentColor" strokeWidth={0.8} />
+        <path
+          d="M4 12 L12 4 M4 4 L12 12"
+          stroke="currentColor"
+          strokeWidth={0.8}
+        />
       ) : null}
     </svg>
   );
 }
 
 function DashPreview({ dash }: { dash: StrokeDash }) {
+  if (dash === 'draw') {
+    return (
+      <svg width={22} height={12} viewBox="0 0 22 12" aria-hidden="true">
+        <path
+          d="M2 6.4 Q6 4.9 10 6.1 T20 5.5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={1.5}
+          strokeLinecap="round"
+        />
+        <path
+          d="M2 5.7 Q6 6.8 10 5.6 T20 6.3"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={1.2}
+          strokeLinecap="round"
+        />
+      </svg>
+    );
+  }
   const dasharray =
     dash === 'dashed' ? '4 3' : dash === 'dotted' ? '0 4' : undefined;
   return (
@@ -154,11 +190,9 @@ export function StylePanel() {
     fontFamily,
     fontWeight,
     align,
-    paletteId,
   } = useStyleStore();
   const theme = useThemeStore((s) => s.theme);
-  const activePalette = PALETTES.find((p) => p.id === paletteId) ?? PALETTES[0]!;
-  const colors = paletteColors(paletteId, theme);
+  const colors = paletteColors(theme);
   const {
     setColor,
     setSize,
@@ -172,7 +206,6 @@ export function StylePanel() {
     setFontFamily,
     setFontWeight,
     setAlign,
-    setPaletteId,
   } = useStyleStore.getState();
   const selectedIds = useSelectionStore((s) => s.selectedIds);
   const activeToolId = useToolStore((s) => s.activeToolId);
@@ -181,37 +214,40 @@ export function StylePanel() {
   // shapes record instead would re-render this panel once per frame of every
   // stroke, because the record is a fresh object on every mutation.
   const selectedType = useDocumentStore((s) => {
-    const record = s.doc.pages[s.currentPageId]?.shapes;
-    if (!record || selectedIds.length === 0) return null;
+    if (selectedIds.length === 0) return null;
     const firstId = selectedIds[0];
-    const firstShape = firstId ? record[firstId] : undefined;
+    const firstShape = firstId ? s.shapesById.get(firstId) : undefined;
     if (!firstShape) return null;
     const allSameType = selectedIds.every(
-      (id) => id && record[id]?.type === firstShape.type,
+      (id) => id && s.shapesById.get(id)?.type === firstShape.type,
     );
     return allSameType ? firstShape.type : 'mixed';
   });
   // Whether the selection holds a stroke that closed on itself. Only those have
   // an interior, so the fill control would be inert on any other pen stroke.
-  const hasClosedDraw = useDocumentStore((s) => {
-    const record = s.doc.pages[s.currentPageId]?.shapes;
-    if (!record) return false;
-    return selectedIds.some((id) => {
-      const shape = id ? record[id] : undefined;
+  const hasClosedDraw = useDocumentStore((s) =>
+    selectedIds.some((id) => {
+      const shape = id ? s.shapesById.get(id) : undefined;
       return shape?.type === 'draw' && shape.props.isClosed;
-    });
-  });
+    }),
+  );
   const connectorLabel = useDocumentStore((s) => {
     if (selectedIds.length !== 1) return '';
     const id = selectedIds[0];
-    const shape = id ? s.doc.pages[s.currentPageId]?.shapes[id] : undefined;
+    const shape = id ? s.shapesById.get(id) : undefined;
     return shape && (shape.type === 'line' || shape.type === 'arrow')
-      ? shape.props.label ?? ''
+      ? (shape.props.label ?? '')
       : '';
   });
   // Contextual visibility checks
   const isStylePanelVisible = (() => {
-    if (activeToolId === 'eraser' || activeToolId === 'hand' || activeToolId === 'laser') {
+    // The eraser paints nothing, so every control here would be inert on it;
+    // its one setting — object vs precision — rides on its toolbar button.
+    if (
+      activeToolId === 'hand' ||
+      activeToolId === 'laser' ||
+      activeToolId === 'eraser'
+    ) {
       return false;
     }
     if (activeToolId === 'select') {
@@ -230,19 +266,15 @@ export function StylePanel() {
         : selectedType;
 
   const panelVisible =
-    isStylePanelVisible &&
-    targetType !== 'graph' &&
-    targetType !== 'equation';
+    isStylePanelVisible && targetType !== 'graph' && targetType !== 'equation';
 
-  // Frames are fixed chrome, images/videos are media and stickers carry their
-  // own fixed artwork colors: none of them carry a color/size/fill/dash prop,
-  // so that control would be inert. Opacity is a shape-level field and still
-  // applies to all of them.
+  // Media and stickers carry fixed artwork colors. Frames do expose color for
+  // their structural border and title, while opacity remains shape-level.
   const showColor =
-    targetType !== 'frame' &&
     targetType !== 'image' &&
     targetType !== 'sticker' &&
-    targetType !== 'video';
+    targetType !== 'video' &&
+    targetType !== 'bookmark';
 
   const showSize =
     targetType === 'draw' ||
@@ -258,7 +290,7 @@ export function StylePanel() {
     targetType === 'ellipse' ||
     targetType === 'polygon' ||
     targetType === 'mixed' ||
-    (targetType === 'draw' && hasClosedDraw);
+    (targetType === 'draw' && (activeToolId !== 'select' || hasClosedDraw));
 
   const showDash =
     targetType === 'draw' ||
@@ -291,29 +323,25 @@ export function StylePanel() {
     : colors;
   const swatchRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
-  // Switching palette or theme keeps the same slot rather than stranding the
-  // pen on a color that is no longer shown.
+  // Switching theme keeps the same slot rather than stranding the pen on a
+  // color that is no longer shown.
   const previousTheme = useRef(theme);
   useEffect(() => {
     if (previousTheme.current === theme) return;
-    const from = paletteColors(paletteId, previousTheme.current);
-    const to = paletteColors(paletteId, theme);
+    const from = paletteColors(previousTheme.current);
+    const to = paletteColors(theme);
     previousTheme.current = theme;
-    const slot = from.findIndex((c) => c.value === useStyleStore.getState().color);
+    const slot = from.findIndex(
+      (c) => c.value === useStyleStore.getState().color,
+    );
     const next = slot >= 0 ? to[slot] : undefined;
     if (next) setColor(next.value);
-  }, [theme, paletteId]);
+  }, [theme]);
 
   const applyColor = (c: string) => {
     setColor(c);
-    for (const id of selectedIds) editor.updateShape(id, { props: { color: c } });
-  };
-
-  const changePalette = (id: string) => {
-    const slot = colors.findIndex((c) => c.value === color);
-    setPaletteId(id);
-    const next = slot >= 0 ? paletteColors(id, theme)[slot] : undefined;
-    if (next) applyColor(next.value);
+    for (const id of selectedIds)
+      editor.updateShape(id, { props: { color: c } });
   };
 
   // Arrow keys move between swatches, matching radiogroup conventions.
@@ -373,7 +401,8 @@ export function StylePanel() {
       editor.updateShape(id, {
         props: {
           topology,
-          points: topology === 'elbow' ? orthogonalRoute(first, last) : [first, last],
+          points:
+            topology === 'elbow' ? orthogonalRoute(first, last) : [first, last],
           bend:
             topology === 'arc'
               ? Math.abs(shape.props.bend ?? 0) >= 0.5
@@ -456,455 +485,410 @@ export function StylePanel() {
           className="touch-targets w-[min(14.5rem,calc(100vw-2rem))] max-h-[calc(100dvh-8rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] overflow-y-auto overscroll-contain p-3.5 sm:max-h-[calc(100dvh-5.5rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))]"
         >
           <TooltipProvider delay={300}>
-          <div
-            key={panelContentKey}
-            className="tool-panel-content flex flex-col gap-2.5"
-          >
-        <div className="flex flex-col gap-2">
-          {showColor ? (
-            <>
-              <div className="flex flex-col gap-1.5">
-                <DropdownMenu>
-                  <DropdownMenuTrigger
-                    render={
-                      <Button
-                        variant="outline"
-                        size="xs"
-                        aria-label={`Color palette: ${activePalette.name}`}
-                        className="w-full justify-between"
-                      />
-                    }
-                  >
-                    <span className="flex min-w-0 items-center gap-1.5">
-                      <span className="flex shrink-0 items-center gap-0.5">
-                        {colors.slice(0, 4).map((paletteColor) => (
-                          <span
-                            key={paletteColor.name}
-                            className="size-2 rounded-full border"
-                            style={{
-                              backgroundColor: paletteColor.value,
-                              borderColor: swatchBorder(paletteColor.value),
-                            }}
-                          />
-                        ))}
-                      </span>
-                      <span className="truncate">{activePalette.name}</span>
-                    </span>
-                    <ChevronsUpDown data-icon="inline-end" aria-hidden="true" />
-                  </DropdownMenuTrigger>
-                  {/* Opens to the side so the swatch grid it controls stays
-                      visible while choosing. */}
-                  <DropdownMenuContent side="left" align="start" className="w-auto">
-                    <DropdownMenuRadioGroup
-                      value={paletteId}
-                      onValueChange={changePalette}
-                    >
-                      {PALETTES.map((palette) => (
-                        <DropdownMenuRadioItem
-                          key={palette.id}
-                          value={palette.id}
-                          closeOnClick
-                        >
-                          <span className="flex min-w-0 items-center gap-2">
-                            <span className="flex shrink-0 items-center gap-1">
-                              {(theme === 'dark' ? palette.dark : palette.light).map(
-                                (paletteColor) => (
-                                  <span
-                                    key={paletteColor.name}
-                                    className="size-2.5 rounded-full border"
-                                    style={{
-                                      backgroundColor: paletteColor.value,
-                                      borderColor: swatchBorder(paletteColor.value),
+            <div
+              key={panelContentKey}
+              className="tool-panel-content flex flex-col gap-2.5"
+            >
+              <div className="flex flex-col gap-2">
+                {showColor ? (
+                  <>
+                    <div className="flex flex-col gap-1.5">
+                      <div
+                        role="radiogroup"
+                        aria-label="Color"
+                        className="grid grid-cols-4 gap-1.5"
+                      >
+                        {swatches.map((paletteColor, index) => {
+                          const active = color === paletteColor.value;
+                          return (
+                            <Tooltip key={paletteColor.value}>
+                              <TooltipTrigger
+                                render={
+                                  <button
+                                    ref={(node) => {
+                                      swatchRefs.current[index] = node;
                                     }}
+                                    type="button"
+                                    role="radio"
+                                    aria-label={paletteColor.name}
+                                    aria-checked={active}
+                                    tabIndex={active ? 0 : -1}
+                                    onClick={() =>
+                                      applyColor(paletteColor.value)
+                                    }
+                                    onKeyDown={(event) => {
+                                      const delta =
+                                        event.key === 'ArrowRight' ||
+                                        event.key === 'ArrowDown'
+                                          ? 1
+                                          : event.key === 'ArrowLeft' ||
+                                              event.key === 'ArrowUp'
+                                            ? -1
+                                            : 0;
+                                      if (!delta) return;
+                                      event.preventDefault();
+                                      moveSwatchFocus(index, delta);
+                                    }}
+                                    className="flex h-8 w-full items-center justify-center rounded-md transition-colors duration-150 ease-out hover:bg-accent active:scale-[0.98] motion-reduce:transition-none"
                                   />
-                                ),
-                              )}
-                            </span>
-                            <span className="truncate">{palette.name}</span>
-                          </span>
-                        </DropdownMenuRadioItem>
-                      ))}
-                    </DropdownMenuRadioGroup>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                                }
+                              >
+                                <span
+                                  className={cn(
+                                    'size-5 rounded-full border',
+                                    active &&
+                                      'ring-2 ring-ring ring-offset-2 ring-offset-background',
+                                  )}
+                                  style={{
+                                    backgroundColor: paletteColor.value,
+                                    borderColor: swatchBorder(
+                                      paletteColor.value,
+                                    ),
+                                  }}
+                                />
+                              </TooltipTrigger>
+                              <TooltipContent side="left">
+                                {paletteColor.name}
+                              </TooltipContent>
+                            </Tooltip>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </>
+                ) : null}
 
-                <div
-                  role="radiogroup"
-                  aria-label="Color"
-                  className="grid grid-cols-4 gap-1.5"
-                >
-                  {swatches.map((paletteColor, index) => {
-                    const active = color === paletteColor.value;
-                    return (
-                      <Tooltip key={paletteColor.value}>
-                        <TooltipTrigger
-                          render={
-                            <button
-                              ref={(node) => {
-                                swatchRefs.current[index] = node;
-                              }}
-                              type="button"
-                              role="radio"
-                              aria-label={paletteColor.name}
-                              aria-checked={active}
-                              tabIndex={active ? 0 : -1}
-                              onClick={() => applyColor(paletteColor.value)}
-                              onKeyDown={(event) => {
-                                const delta =
-                                  event.key === 'ArrowRight' || event.key === 'ArrowDown'
-                                    ? 1
-                                    : event.key === 'ArrowLeft' || event.key === 'ArrowUp'
-                                      ? -1
-                                      : 0;
-                                if (!delta) return;
-                                event.preventDefault();
-                                moveSwatchFocus(index, delta);
-                              }}
-                              className="flex h-8 w-full items-center justify-center rounded-md transition-colors duration-150 ease-out hover:bg-accent active:scale-[0.98] motion-reduce:transition-none"
-                            />
-                          }
-                        >
-                          <span
-                            className={cn(
-                              'size-5 rounded-full border',
-                              active &&
-                                'ring-2 ring-ring ring-offset-2 ring-offset-background',
-                            )}
-                            style={{
-                              backgroundColor: paletteColor.value,
-                              borderColor: swatchBorder(paletteColor.value),
-                            }}
-                          />
-                        </TooltipTrigger>
-                        <TooltipContent side="left">
-                          {paletteColor.name}
-                        </TooltipContent>
-                      </Tooltip>
-                    );
-                  })}
-                </div>
+                <Tooltip>
+                  <TooltipTrigger render={<div />}>
+                    <OpacitySlider
+                      aria-label="Opacity"
+                      value={opacity}
+                      onValueChange={applyOpacity}
+                    />
+                  </TooltipTrigger>
+                  <TooltipContent side="left">
+                    Opacity {Math.round(opacity * 100)}%
+                  </TooltipContent>
+                </Tooltip>
               </div>
-            </>
-          ) : null}
 
-          {/* The only control here with no self-describing glyph, so it keeps
-              a readout; the tooltip names it. */}
-          <Tooltip>
-            <TooltipTrigger
-              render={<div className="flex items-center gap-2" />}
-            >
-              <Slider
-                aria-label="Opacity"
-                min={0}
-                max={1}
-                step={0.01}
-                value={opacity}
-                onValueChange={(value) =>
-                  applyOpacity(Array.isArray(value) ? value[0]! : value)
-                }
-              />
-              <span className="w-10 shrink-0 text-right font-mono text-xs font-semibold tabular-nums text-primary">
-                {Math.round(opacity * 100)}%
-              </span>
-            </TooltipTrigger>
-            <TooltipContent side="left">Opacity</TooltipContent>
-          </Tooltip>
-        </div>
-
-        {showFill || showDash || showSize || showFont || showAlign || showArrows || showLineOptions || showConnectorLabel ? (
-        <div className="flex flex-col gap-2">
-          {showFill ? (
-            <ToggleGroup
-                className={TOGGLE_ROW}
-                spacing={1.5}
-                aria-label="Fill style"
-                value={[fill]}
-                onValueChange={(values) =>
-                  values[0] && applyFill(values[0] as FillStyle)
-                }
-              >
-                {FILLS.map((fillStyle) => (
-                  <Tooltip key={fillStyle}>
-                    <TooltipTrigger
-                      render={
-                        <ToggleGroupItem
-                          className={TOGGLE_ITEM}
-                          value={fillStyle}
-                          aria-label={FILL_LABELS[fillStyle]}
-                        />
+              {showFill ||
+              showDash ||
+              showSize ||
+              showFont ||
+              showAlign ||
+              showArrows ||
+              showLineOptions ||
+              showConnectorLabel ? (
+                <div className="flex flex-col gap-2">
+                  {showFill ? (
+                    <ToggleGroup
+                      className={TOGGLE_ROW}
+                      spacing={1.5}
+                      aria-label="Fill style"
+                      value={[fill]}
+                      onValueChange={(values) =>
+                        values[0] && applyFill(values[0] as FillStyle)
                       }
                     >
-                      <FillPreview style={fillStyle} />
-                    </TooltipTrigger>
-                    <TooltipContent side="left">
-                      {FILL_LABELS[fillStyle]}
-                    </TooltipContent>
-                  </Tooltip>
-                ))}
-              </ToggleGroup>
-          ) : null}
+                      {FILLS.map((fillStyle) => (
+                        <Tooltip key={fillStyle}>
+                          <TooltipTrigger
+                            render={
+                              <ToggleGroupItem
+                                className={TOGGLE_ITEM}
+                                value={fillStyle}
+                                aria-label={FILL_LABELS[fillStyle]}
+                              />
+                            }
+                          >
+                            <FillPreview style={fillStyle} />
+                          </TooltipTrigger>
+                          <TooltipContent side="left">
+                            {FILL_LABELS[fillStyle]}
+                          </TooltipContent>
+                        </Tooltip>
+                      ))}
+                    </ToggleGroup>
+                  ) : null}
 
-          {showDash ? (
-            <ToggleGroup
-                className={TOGGLE_ROW}
-                spacing={1.5}
-                aria-label="Stroke style"
-                value={[dash]}
-                onValueChange={(values) =>
-                  values[0] && applyDash(values[0] as StrokeDash)
-                }
-              >
-                {DASHES.map((strokeDash) => (
-                  <Tooltip key={strokeDash}>
-                    <TooltipTrigger
-                      render={
-                        <ToggleGroupItem
-                          className={TOGGLE_ITEM}
-                          value={strokeDash}
-                          aria-label={DASH_LABELS[strokeDash]}
-                        />
+                  {showDash ? (
+                    <ToggleGroup
+                      className={TOGGLE_ROW}
+                      spacing={1.5}
+                      aria-label="Stroke style"
+                      value={[dash]}
+                      onValueChange={(values) =>
+                        values[0] && applyDash(values[0] as StrokeDash)
                       }
                     >
-                      <DashPreview dash={strokeDash} />
-                    </TooltipTrigger>
-                    <TooltipContent side="left">
-                      {DASH_LABELS[strokeDash]}
-                    </TooltipContent>
-                  </Tooltip>
-                ))}
-              </ToggleGroup>
-          ) : null}
+                      {DASHES.map((strokeDash) => (
+                        <Tooltip key={strokeDash}>
+                          <TooltipTrigger
+                            render={
+                              <ToggleGroupItem
+                                className={TOGGLE_ITEM}
+                                value={strokeDash}
+                                aria-label={DASH_LABELS[strokeDash]}
+                              />
+                            }
+                          >
+                            <DashPreview dash={strokeDash} />
+                          </TooltipTrigger>
+                          <TooltipContent side="left">
+                            {DASH_LABELS[strokeDash]}
+                          </TooltipContent>
+                        </Tooltip>
+                      ))}
+                    </ToggleGroup>
+                  ) : null}
 
-          {showSize ? (
-            <ToggleGroup
-                className={TOGGLE_ROW}
-                spacing={1.5}
-                aria-label="Stroke weight"
-                value={[String(size)]}
-                onValueChange={(values) =>
-                  values[0] && applySize(Number(values[0]))
-                }
-              >
-                {SIZE_OPTIONS.map((option) => (
-                  <Tooltip key={option.name}>
-                    <TooltipTrigger
-                      render={
-                        <ToggleGroupItem
-                          className={TOGGLE_ITEM}
-                          value={String(option.value)}
-                          aria-label={`${option.name}, ${option.value} pixels`}
-                        />
+                  {showSize ? (
+                    <ToggleGroup
+                      className={TOGGLE_ROW}
+                      spacing={1.5}
+                      aria-label="Stroke weight"
+                      value={[String(size)]}
+                      onValueChange={(values) =>
+                        values[0] && applySize(Number(values[0]))
                       }
                     >
-                      {option.name}
-                    </TooltipTrigger>
-                    <TooltipContent side="left">
-                      {option.name} — {option.value}px
-                    </TooltipContent>
-                  </Tooltip>
-                ))}
-              </ToggleGroup>
-          ) : null}
+                      {SIZE_OPTIONS.map((option) => (
+                        <Tooltip key={option.name}>
+                          <TooltipTrigger
+                            render={
+                              <ToggleGroupItem
+                                className={TOGGLE_ITEM}
+                                value={String(option.value)}
+                                aria-label={`${option.name}, ${option.value} pixels`}
+                              />
+                            }
+                          >
+                            {option.name}
+                          </TooltipTrigger>
+                          <TooltipContent side="left">
+                            {option.name} — {option.value}px
+                          </TooltipContent>
+                        </Tooltip>
+                      ))}
+                    </ToggleGroup>
+                  ) : null}
 
-          {showFont ? (
-            <ToggleGroup
-                className={TOGGLE_ROW}
-                spacing={1.5}
-                aria-label="Typeface"
-                value={[fontFamily]}
-                onValueChange={(values) =>
-                  values[0] && applyFontFamily(values[0] as FontFamily)
-                }
-              >
-                {FONTS.map(({ family, label }) => (
-                  <Tooltip key={family}>
-                    <TooltipTrigger
-                      render={
-                        <ToggleGroupItem
-                          className={TOGGLE_ITEM}
-                          value={family}
-                          aria-label={`${family} typeface`}
-                          style={{ fontFamily: fontStack(family) }}
-                        />
+                  {showFont ? (
+                    <ToggleGroup
+                      className={TOGGLE_ROW}
+                      spacing={1.5}
+                      aria-label="Typeface"
+                      value={[fontFamily]}
+                      onValueChange={(values) =>
+                        values[0] && applyFontFamily(values[0] as FontFamily)
                       }
                     >
-                      {label}
-                    </TooltipTrigger>
-                    <TooltipContent side="left">{family}</TooltipContent>
-                  </Tooltip>
-                ))}
-              </ToggleGroup>
-          ) : null}
+                      {FONTS.map(({ family, label }) => (
+                        <Tooltip key={family}>
+                          <TooltipTrigger
+                            render={
+                              <ToggleGroupItem
+                                className={TOGGLE_ITEM}
+                                value={family}
+                                aria-label={`${family} typeface`}
+                                style={{ fontFamily: fontStack(family) }}
+                              />
+                            }
+                          >
+                            {label}
+                          </TooltipTrigger>
+                          <TooltipContent side="left">{family}</TooltipContent>
+                        </Tooltip>
+                      ))}
+                    </ToggleGroup>
+                  ) : null}
 
-          {showFont ? (
-            <ToggleGroup
-                className={TOGGLE_ROW}
-                spacing={1.5}
-                aria-label="Font weight"
-                value={[String(fontWeight)]}
-                onValueChange={(values) =>
-                  values[0] && applyFontWeight(Number(values[0]) as FontWeight)
-                }
-              >
-                {WEIGHTS.map(({ weight, label }) => (
-                  <Tooltip key={weight}>
-                    <TooltipTrigger
-                      render={
-                        <ToggleGroupItem
-                          className={TOGGLE_ITEM}
-                          value={String(weight)}
-                          aria-label={`${label} weight`}
-                          // Preview each option in the weight it applies, using
-                          // the typeface currently selected.
-                          style={{ fontFamily: fontStack(fontFamily), fontWeight: weight }}
-                        />
+                  {showFont ? (
+                    <ToggleGroup
+                      className={TOGGLE_ROW}
+                      spacing={1.5}
+                      aria-label="Font weight"
+                      value={[String(fontWeight)]}
+                      onValueChange={(values) =>
+                        values[0] &&
+                        applyFontWeight(Number(values[0]) as FontWeight)
                       }
                     >
-                      A
-                    </TooltipTrigger>
-                    <TooltipContent side="left">{label}</TooltipContent>
-                  </Tooltip>
-                ))}
-              </ToggleGroup>
-          ) : null}
+                      {WEIGHTS.map(({ weight, label }) => (
+                        <Tooltip key={weight}>
+                          <TooltipTrigger
+                            render={
+                              <ToggleGroupItem
+                                className={TOGGLE_ITEM}
+                                value={String(weight)}
+                                aria-label={`${label} weight`}
+                                // Preview each option in the weight it applies, using
+                                // the typeface currently selected.
+                                style={{
+                                  fontFamily: fontStack(fontFamily),
+                                  fontWeight: weight,
+                                }}
+                              />
+                            }
+                          >
+                            A
+                          </TooltipTrigger>
+                          <TooltipContent side="left">{label}</TooltipContent>
+                        </Tooltip>
+                      ))}
+                    </ToggleGroup>
+                  ) : null}
 
-          {showAlign ? (
-            <ToggleGroup
-                className={TOGGLE_ROW}
-                spacing={1.5}
-                aria-label="Text alignment"
-                value={[align]}
-                onValueChange={(values) =>
-                  values[0] && applyAlign(values[0] as TextAlign)
-                }
-              >
-                {ALIGNS.map(({ align: textAlign, Icon }) => (
-                  <Tooltip key={textAlign}>
-                    <TooltipTrigger
-                      render={
-                        <ToggleGroupItem
-                          className={TOGGLE_ITEM}
-                          value={textAlign}
-                          aria-label={`${textAlign} alignment`}
-                        />
+                  {showAlign ? (
+                    <ToggleGroup
+                      className={TOGGLE_ROW}
+                      spacing={1.5}
+                      aria-label="Text alignment"
+                      value={[align]}
+                      onValueChange={(values) =>
+                        values[0] && applyAlign(values[0] as TextAlign)
                       }
                     >
-                      <Icon aria-hidden="true" />
-                    </TooltipTrigger>
-                    <TooltipContent side="left">
-                      {textAlign} alignment
-                    </TooltipContent>
-                  </Tooltip>
-                ))}
-              </ToggleGroup>
-          ) : null}
+                      {ALIGNS.map(({ align: textAlign, Icon }) => (
+                        <Tooltip key={textAlign}>
+                          <TooltipTrigger
+                            render={
+                              <ToggleGroupItem
+                                className={TOGGLE_ITEM}
+                                value={textAlign}
+                                aria-label={`${textAlign} alignment`}
+                              />
+                            }
+                          >
+                            <Icon aria-hidden="true" />
+                          </TooltipTrigger>
+                          <TooltipContent side="left">
+                            {textAlign} alignment
+                          </TooltipContent>
+                        </Tooltip>
+                      ))}
+                    </ToggleGroup>
+                  ) : null}
 
-          {showLineOptions ? (
-            <ToggleGroup
-              className={TOGGLE_ROW}
-              spacing={1.5}
-              aria-label="Line interpolation"
-              value={[lineSpline ?? 'linear']}
-              onValueChange={(values) =>
-                values[0] && applyLineSpline(values[0] as LineSpline)
-              }
-            >
-              <ToggleGroupItem className={TOGGLE_ITEM} value="linear">
-                Linear
-              </ToggleGroupItem>
-              <ToggleGroupItem className={TOGGLE_ITEM} value="smooth">
-                Smooth
-              </ToggleGroupItem>
-            </ToggleGroup>
-          ) : null}
-
-          {showArrows ? (
-            <>
-              <ToggleGroup
-                className={TOGGLE_ROW}
-                spacing={1.5}
-                aria-label="Arrow route"
-                value={[arrowTopology ?? 'straight']}
-                onValueChange={(values) =>
-                  values[0] && applyArrowTopology(values[0] as ArrowTopology)
-                }
-              >
-                {ARROW_TOPOLOGIES.map((option) => (
-                  <Tooltip key={option.value}>
-                    <TooltipTrigger
-                      render={
-                        <ToggleGroupItem
-                          className={TOGGLE_ITEM}
-                          value={option.value}
-                          aria-label={option.label}
-                        />
+                  {showLineOptions ? (
+                    <ToggleGroup
+                      className={TOGGLE_ROW}
+                      spacing={1.5}
+                      aria-label="Line interpolation"
+                      value={[lineSpline ?? 'linear']}
+                      onValueChange={(values) =>
+                        values[0] && applyLineSpline(values[0] as LineSpline)
                       }
                     >
-                      <span className="text-base leading-none" aria-hidden="true">
-                        {option.glyph}
-                      </span>
-                    </TooltipTrigger>
-                    <TooltipContent side="left">{option.label}</TooltipContent>
-                  </Tooltip>
-                ))}
-              </ToggleGroup>
-              <ToggleGroup
-                className={TOGGLE_ROW}
-                spacing={1.5}
-                multiple
-                aria-label="Arrowheads"
-                value={[
-                  ...(arrowStart ? ['start'] : []),
-                  ...(arrowEnd ? ['end'] : []),
-                ]}
-                onValueChange={(values) => {
-                  applyArrowStart(values.includes('start'));
-                  applyArrowEnd(values.includes('end'));
-                }}
-              >
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <ToggleGroupItem
-                        className={TOGGLE_ITEM}
-                        value="start"
-                        aria-label="Arrowhead at start"
-                      />
-                    }
-                  >
-                    <ArrowLeft aria-hidden="true" />
-                  </TooltipTrigger>
-                  <TooltipContent side="left">Arrowhead at start</TooltipContent>
-                </Tooltip>
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <ToggleGroupItem
-                        className={TOGGLE_ITEM}
-                        value="end"
-                        aria-label="Arrowhead at end"
-                      />
-                    }
-                  >
-                    <ArrowRight aria-hidden="true" />
-                  </TooltipTrigger>
-                  <TooltipContent side="left">Arrowhead at end</TooltipContent>
-                </Tooltip>
-              </ToggleGroup>
-            </>
-          ) : null}
+                      <ToggleGroupItem className={TOGGLE_ITEM} value="linear">
+                        Linear
+                      </ToggleGroupItem>
+                      <ToggleGroupItem className={TOGGLE_ITEM} value="smooth">
+                        Smooth
+                      </ToggleGroupItem>
+                    </ToggleGroup>
+                  ) : null}
 
-          {showConnectorLabel ? (
-            <Input
-              aria-label="Connector label"
-              placeholder="Label"
-              value={connectorLabel}
-              onChange={(event) => applyConnectorLabel(event.target.value)}
-            />
-          ) : null}
-        </div>
-        ) : null}
-          </div>
+                  {showArrows ? (
+                    <>
+                      <ToggleGroup
+                        className={TOGGLE_ROW}
+                        spacing={1.5}
+                        aria-label="Arrow route"
+                        value={[arrowTopology ?? 'straight']}
+                        onValueChange={(values) =>
+                          values[0] &&
+                          applyArrowTopology(values[0] as ArrowTopology)
+                        }
+                      >
+                        {ARROW_TOPOLOGIES.map((option) => (
+                          <Tooltip key={option.value}>
+                            <TooltipTrigger
+                              render={
+                                <ToggleGroupItem
+                                  className={TOGGLE_ITEM}
+                                  value={option.value}
+                                  aria-label={option.label}
+                                />
+                              }
+                            >
+                              <span
+                                className="text-base leading-none"
+                                aria-hidden="true"
+                              >
+                                {option.glyph}
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent side="left">
+                              {option.label}
+                            </TooltipContent>
+                          </Tooltip>
+                        ))}
+                      </ToggleGroup>
+                      <ToggleGroup
+                        className={TOGGLE_ROW}
+                        spacing={1.5}
+                        multiple
+                        aria-label="Arrowheads"
+                        value={[
+                          ...(arrowStart ? ['start'] : []),
+                          ...(arrowEnd ? ['end'] : []),
+                        ]}
+                        onValueChange={(values) => {
+                          applyArrowStart(values.includes('start'));
+                          applyArrowEnd(values.includes('end'));
+                        }}
+                      >
+                        <Tooltip>
+                          <TooltipTrigger
+                            render={
+                              <ToggleGroupItem
+                                className={TOGGLE_ITEM}
+                                value="start"
+                                aria-label="Arrowhead at start"
+                              />
+                            }
+                          >
+                            <ArrowLeft aria-hidden="true" />
+                          </TooltipTrigger>
+                          <TooltipContent side="left">
+                            Arrowhead at start
+                          </TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                          <TooltipTrigger
+                            render={
+                              <ToggleGroupItem
+                                className={TOGGLE_ITEM}
+                                value="end"
+                                aria-label="Arrowhead at end"
+                              />
+                            }
+                          >
+                            <ArrowRight aria-hidden="true" />
+                          </TooltipTrigger>
+                          <TooltipContent side="left">
+                            Arrowhead at end
+                          </TooltipContent>
+                        </Tooltip>
+                      </ToggleGroup>
+                    </>
+                  ) : null}
+
+                  {showConnectorLabel ? (
+                    <Input
+                      aria-label="Connector label"
+                      placeholder="Label"
+                      value={connectorLabel}
+                      onChange={(event) =>
+                        applyConnectorLabel(event.target.value)
+                      }
+                    />
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
           </TooltipProvider>
         </Surface>
       ) : null}

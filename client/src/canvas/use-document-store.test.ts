@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   DrawPoint,
   DrawShape,
+  EquationShape,
   GroupShape,
   RectangleShape,
   TextShape,
@@ -20,6 +21,7 @@ import {
   useDocumentStore,
 } from './use-document-store';
 import { useCameraStore } from './use-camera-store';
+import { beginLiveStroke, endLiveStroke } from './use-live-stroke-store';
 import { useEnteredGroupStore } from './use-entered-group-store';
 import { useSelectionStore } from './use-selection-store';
 import { useTextEditingStore } from './use-text-editing-store';
@@ -81,6 +83,18 @@ function group(id: string): GroupShape {
     rotation: 0,
     index: 'a0',
     props: {},
+  };
+}
+
+function equation(id: string, index: string): EquationShape {
+  return {
+    id,
+    type: 'equation',
+    x: 0,
+    y: 0,
+    rotation: 0,
+    index,
+    props: { latex: 'x^2', color: '#000000', fontSize: 16, w: 40, h: 20 },
   };
 }
 
@@ -284,6 +298,99 @@ describe('document store snapshot', () => {
   });
 });
 
+describe('hierarchy and equation flags', () => {
+  // These gate the Canvas's page-wide derivations, so a flag that drifts to
+  // false while parented shapes exist stops frames rendering their children —
+  // a correctness bug, not a slow frame. Every path that can change the count
+  // is covered: create, reparent, unparent, delete, undo, and page switch.
+  const flags = () => {
+    const s = useDocumentStore.getState();
+    return { hierarchy: s.hasHierarchy, equations: s.hasEquations };
+  };
+
+  it('stays false for a page of unparented shapes', () => {
+    editor.createShape(rect('a', 'a1'));
+    editor.createShape(rect('b', 'a2'));
+    expect(flags()).toEqual({ hierarchy: false, equations: false });
+  });
+
+  it('tracks a shape being parented and then unparented', () => {
+    editor.createShape(group('g'));
+    editor.createShape(rect('a', 'a1'));
+    expect(flags().hierarchy).toBe(false);
+
+    editor.updateShape('a', { parentId: 'g' });
+    expect(flags().hierarchy).toBe(true);
+
+    // Ungrouping writes `parentId: null` rather than removing the key.
+    editor.updateShape('a', { parentId: null });
+    expect(flags().hierarchy).toBe(false);
+  });
+
+  it('does not double-count repeated writes to an already-parented shape', () => {
+    editor.createShape(group('g'));
+    editor.createShape(rect('a', 'a1'));
+    editor.updateShape('a', { parentId: 'g' });
+    editor.updateShape('a', { x: 1 });
+    editor.updateShape('a', { x: 2 });
+    editor.updateShape('a', { parentId: 'g' });
+    expect(flags().hierarchy).toBe(true);
+
+    // One unparent must be enough to clear it — a count inflated by the writes
+    // above would leave the flag stuck on.
+    editor.updateShape('a', { parentId: null });
+    expect(flags().hierarchy).toBe(false);
+  });
+
+  it('clears when the only parented shape is deleted', () => {
+    editor.createShape(group('g'));
+    editor.createShape(rect('a', 'a1'));
+    editor.updateShape('a', { parentId: 'g' });
+    expect(flags().hierarchy).toBe(true);
+
+    editor.deleteShapes(['a']);
+    expect(flags().hierarchy).toBe(false);
+  });
+
+  it('survives undo and redo of a reparent', () => {
+    editor.createShape(group('g'));
+    editor.createShape(rect('a', 'a1'));
+    editor.updateShape('a', { parentId: 'g' });
+    expect(flags().hierarchy).toBe(true);
+
+    undo();
+    expect(flags().hierarchy).toBe(false);
+    redo();
+    expect(flags().hierarchy).toBe(true);
+  });
+
+  it('recomputes per page rather than leaking across a switch', () => {
+    editor.createShape(group('g'));
+    editor.createShape(rect('a', 'a1'));
+    editor.updateShape('a', { parentId: 'g' });
+    const first = useDocumentStore.getState().currentPageId;
+    expect(flags().hierarchy).toBe(true);
+
+    const second = createPage();
+    setCurrentPage(second);
+    expect(flags().hierarchy).toBe(false);
+
+    setCurrentPage(first);
+    expect(flags().hierarchy).toBe(true);
+  });
+
+  it('tracks equations independently of hierarchy', () => {
+    editor.createShape(rect('a', 'a1'));
+    expect(flags().equations).toBe(false);
+
+    editor.createShape(equation('eq', 'a2'));
+    expect(flags()).toEqual({ hierarchy: false, equations: true });
+
+    editor.deleteShapes(['eq']);
+    expect(flags().equations).toBe(false);
+  });
+});
+
 describe('ink points storage', () => {
   const N = 200;
 
@@ -347,5 +454,50 @@ describe('ink points storage', () => {
     expect(drawnPoints('s')).toEqual(stroke(300));
     // The object form measured ~12.6KB for this stroke.
     expect(bytes).toBeLessThan(9_000);
+  });
+});
+
+describe('the stroke the local pointer is drawing', () => {
+  afterEach(() => endLiveStroke());
+
+  it('reaches the document every frame without republishing the snapshot', () => {
+    editor.createShape(draw('live', stroke(2)));
+    beginLiveStroke('live');
+    const published = useDocumentStore.getState().shapes;
+
+    for (let n = 3; n <= 12; n++) {
+      editor.updateShape('live', { props: { points: stroke(n) } });
+      // The write is what peers watch, so it must land on every frame...
+      expect(drawnPoints('live')).toHaveLength(n);
+      // ...while locally the active-stroke layer is already drawing it, so
+      // rebuilding the page's derived state to say so would be pure cost.
+      expect(useDocumentStore.getState().shapes).toBe(published);
+    }
+  });
+
+  it('still publishes when anything else changes', () => {
+    editor.createShape(draw('live', stroke(2)));
+    beginLiveStroke('live');
+    const published = useDocumentStore.getState().shapes;
+
+    // A peer's edit, an arrow rerouting, an eraser — none of it may be held up
+    // behind somebody's pen.
+    editor.createShape(rect('other', 'a2'));
+    expect(useDocumentStore.getState().shapes).not.toBe(published);
+  });
+
+  it('publishes the settled stroke once the tool releases it', () => {
+    editor.createShape(draw('live', stroke(2)));
+    beginLiveStroke('live');
+    editor.updateShape('live', { props: { points: stroke(40) } });
+
+    // The tool clears the id first and writes the final points after, so that
+    // write publishes like any other and React shows the document copy and the
+    // unmounted layer in one commit.
+    endLiveStroke();
+    editor.updateShape('live', { props: { points: stroke(41) } });
+
+    const shape = useDocumentStore.getState().shapes.find((s) => s.id === 'live');
+    expect(shape?.type === 'draw' && shape.props.points).toHaveLength(41);
   });
 });

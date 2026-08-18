@@ -103,7 +103,7 @@ export function LaserLayer({ camera }: { camera: Camera }) {
   if (strokes.length === 0) return null;
 
   return (
-    <svg className="pointer-events-none absolute inset-0 h-full w-full">
+    <svg className="pointer-events-none absolute inset-0 z-[var(--z-canvas-indicator)] h-full w-full">
       <g transform={cameraToTransform(camera)}>
         {strokes.map((stroke) => {
           let opacity = 1;

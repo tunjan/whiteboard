@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import {
   ChevronDown,
   ChevronUp,
@@ -32,6 +32,7 @@ import { removeCustomSticker } from '@/canvas/use-document-store';
 import { useStyleStore } from '@/canvas/use-style-store';
 import { useToolLockStore } from '@/canvas/use-tool-lock-store';
 import { useToolStore } from '@/canvas/use-tool-store';
+import { EraserModeSelector } from '@/components/eraser-mode-selector';
 import { YouTubeDialog } from '@/components/youtube-dialog';
 import { Button, buttonVariants } from '@/components/ui/button';
 import {
@@ -638,8 +639,8 @@ export function Toolbar() {
     if (!tool) return null;
     const Icon = tool.icon;
     const active = tool.id === activeToolId;
-    return (
-      <Tooltip key={tool.id}>
+    const button = (
+      <Tooltip>
         <TooltipTrigger
           render={
             <Button
@@ -651,16 +652,11 @@ export function Toolbar() {
               aria-label={tool.label}
               aria-pressed={active}
               aria-keyshortcuts={tool.hotkey?.toUpperCase()}
-              className={cn(
-                toolButtonClass(active),
-                tool.id === 'draw' && 'pencil-draw-trigger',
-              )}
+              className={toolButtonClass(active)}
             />
           }
         >
-          {Icon ? (
-            <Icon className={cn(tool.id === 'draw' && 'pencil-draw-icon')} />
-          ) : null}
+          {Icon ? <Icon /> : null}
         </TooltipTrigger>
         <TooltipContent side="top">
           <span>{tool.label}</span>
@@ -670,6 +666,18 @@ export function Toolbar() {
         </TooltipContent>
       </Tooltip>
     );
+
+    // The eraser carries its mode switch above its own button. The wrapper is
+    // what that satellite positions against, so it has to hug the button.
+    if (tool.id === 'eraser') {
+      return (
+        <div key={tool.id} className="relative flex">
+          {button}
+          <EraserModeSelector active={active} />
+        </div>
+      );
+    }
+    return <Fragment key={tool.id}>{button}</Fragment>;
   };
 
   const group = (label: string, tools: string[]) => (
@@ -680,7 +688,7 @@ export function Toolbar() {
 
   return (
     <TooltipProvider delay={300}>
-      <div className="absolute bottom-[calc(0.75rem+env(safe-area-inset-bottom))] left-1/2 z-20 -translate-x-1/2">
+      <div className="absolute bottom-[calc(0.75rem+env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2">
         <Surface
           ref={toolbar.ref}
           mode="floating"

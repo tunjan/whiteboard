@@ -1,5 +1,5 @@
 import { useEffect, useId, useState } from 'react';
-import { getBoardNotes, saveBoardNotes } from '@/board/board-notes';
+import { type BoardNotes, getBoardNotes, saveBoardNotes } from '@/board/board-notes';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -10,7 +10,10 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
+
+const EMPTY: BoardNotes = { notes: '', errorLog: '' };
 
 export function BoardNotesDialog({
   boardId,
@@ -21,8 +24,10 @@ export function BoardNotesDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const inputId = useId();
-  const [value, setValue] = useState('');
+  const notesId = useId();
+  const errorLogId = useId();
+  const [value, setValue] = useState<BoardNotes>(EMPTY);
+  const [tab, setTab] = useState('notes');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -32,8 +37,8 @@ export function BoardNotesDialog({
     let cancelled = false;
     setLoading(true);
     void getBoardNotes(boardId)
-      .then((notes) => {
-        if (!cancelled) setValue(notes);
+      .then((next) => {
+        if (!cancelled) setValue(next);
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -68,24 +73,49 @@ export function BoardNotesDialog({
             Private to you — students never see these notes.
           </DialogDescription>
         </DialogHeader>
-        <FieldGroup>
-          <Field>
-            <FieldLabel htmlFor={inputId}>
-              Student Notes
-            </FieldLabel>
-            <Textarea
-              id={inputId}
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
-              disabled={loading}
-              placeholder={
-                loading ? 'Loading…' : 'Notes about this student…'
-              }
-              className="min-h-[12rem]"
-              autoFocus
-            />
-          </Field>
-        </FieldGroup>
+        <Tabs value={tab} onValueChange={(next) => setTab(next as string)}>
+          <TabsList aria-label="Student notes sections">
+            <TabsTrigger value="notes">Notes</TabsTrigger>
+            <TabsTrigger value="errors">Error Log</TabsTrigger>
+          </TabsList>
+          <TabsContent value="notes">
+            <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor={notesId}>Student Notes</FieldLabel>
+                <Textarea
+                  id={notesId}
+                  value={value.notes}
+                  onChange={(e) =>
+                    setValue((prev) => ({ ...prev, notes: e.target.value }))
+                  }
+                  disabled={loading}
+                  placeholder={loading ? 'Loading…' : 'Notes about this student…'}
+                  className="min-h-[12rem]"
+                  autoFocus
+                />
+              </Field>
+            </FieldGroup>
+          </TabsContent>
+          <TabsContent value="errors">
+            <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor={errorLogId}>Error Log</FieldLabel>
+                <Textarea
+                  id={errorLogId}
+                  value={value.errorLog}
+                  onChange={(e) =>
+                    setValue((prev) => ({ ...prev, errorLog: e.target.value }))
+                  }
+                  disabled={loading}
+                  placeholder={
+                    loading ? 'Loading…' : 'Mistakes to revisit with this student…'
+                  }
+                  className="min-h-[12rem]"
+                />
+              </Field>
+            </FieldGroup>
+          </TabsContent>
+        </Tabs>
         <DialogFooter>
           <Button
             variant="outline"

@@ -1,4 +1,5 @@
 import type { DrawPoint } from '@whiteboard/shared';
+import { CentiPixelPathWriter, toCenti } from './fmt';
 
 export interface FreehandEngineOptions {
   size: number;
@@ -10,12 +11,13 @@ export interface FreehandEngineOptions {
   startTaper: number | boolean;
   endTaper: number | boolean;
   easing?: (pressure: number) => number;
+  /** Use the current five-brush-width pressure initialization model. */
+  pressureWarmup?: boolean;
 }
 
 const MIN_PHYSICAL_PRESSURE = 0.025;
 const PRESSURE_RELAXATION = 0.275;
 const MIN_RADIUS = 0.01;
-const textDecoder = new TextDecoder();
 const linearEasing = (value: number): number => value;
 
 /**
@@ -38,11 +40,12 @@ const PRESSURE_RESPONSE_DISTANCE = 8;
 /**
  * Fraction of the brush width the decimated outline may deviate from the exact
  * one at `smoothing: 1`. Applied as a perpendicular error bound rather than a
- * minimum spacing, so straight runs collapse to their endpoints while a tight
- * curve keeps every point that carries it — the old spacing rule dropped
+ * minimum spacing, so straight runs coarsen into window-spaced anchors while a
+ * tight curve keeps every point that carries it — the old spacing rule dropped
  * detail in proportion to `size`, which cost thick brushes the most.
  */
-const TRACK_ERROR_LIMIT = 0.15;
+const TRACK_ERROR_LIMIT = 0.05;
+const SIMPLIFY_WINDOW = 8;
 
 /**
  * How much of each end of a stroke may be discarded as press/lift jitter, in
@@ -123,6 +126,19 @@ function onePoleWeight(distance: number, response: number): number {
   return 1 - Math.exp(-distance / response);
 }
 
+/**
+ * Length of a 2D vector.
+ *
+ * `Math.hypot` is the obvious spelling and measured ~5x slower here: it is
+ * variadic and rescales its arguments to survive intermediate overflow. That
+ * matters at 1e154, and these are canvas coordinates — the draw tool discards
+ * non-finite samples at ingestion, so the naive form is exact where it is used
+ * and the difference is the engine's single largest cost.
+ */
+export function vectorLength(dx: number, dy: number): number {
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
 /** Squared distance from a point to a segment, on scalars to stay allocation-free. */
 function segmentDistanceSquared(
   pointX: number,
@@ -145,143 +161,68 @@ function segmentDistanceSquared(
   return offsetX * offsetX + offsetY * offsetY;
 }
 
-function toCenti(value: number): number {
-  return Math.round(value * 100);
+/**
+ * Simplify the two outline tracks together over a bounded look-ahead window.
+ *
+ * Left and right points share an index because they are the two sides of the
+ * same centerline sample. A candidate chord is therefore accepted only when
+ * every skipped point on both sides stays inside the error bound. Compacting
+ * the arrays together preserves that correspondence for cap generation and
+ * for the reverse-track spline writer.
+ */
+function simplifyTracks(length: number, tolerance: number): number {
+  if (length <= 2 || tolerance <= 0) return length;
+
+  const toleranceSquared = tolerance * tolerance;
+  const lastIndex = length - 1;
+  let output = 1;
+  let anchor = 0;
+
+  while (anchor < lastIndex) {
+    let best = anchor + 1;
+    const windowEnd = Math.min(anchor + SIMPLIFY_WINDOW, lastIndex);
+
+    candidate: for (let target = anchor + 2; target <= windowEnd; target++) {
+      for (let point = anchor + 1; point < target; point++) {
+        if (
+          segmentDistanceSquared(
+            buffers.trackLeftX[point]!,
+            buffers.trackLeftY[point]!,
+            buffers.trackLeftX[anchor]!,
+            buffers.trackLeftY[anchor]!,
+            buffers.trackLeftX[target]!,
+            buffers.trackLeftY[target]!,
+          ) > toleranceSquared ||
+          segmentDistanceSquared(
+            buffers.trackRightX[point]!,
+            buffers.trackRightY[point]!,
+            buffers.trackRightX[anchor]!,
+            buffers.trackRightY[anchor]!,
+            buffers.trackRightX[target]!,
+            buffers.trackRightY[target]!,
+          ) > toleranceSquared
+        ) {
+          break candidate;
+        }
+      }
+      best = target;
+    }
+
+    buffers.trackLeftX[output] = buffers.trackLeftX[best]!;
+    buffers.trackLeftY[output] = buffers.trackLeftY[best]!;
+    buffers.trackRightX[output] = buffers.trackRightX[best]!;
+    buffers.trackRightY[output] = buffers.trackRightY[best]!;
+    output++;
+    anchor = best;
+  }
+
+  return output;
 }
 
 function nextCapacity(current: number, required: number): number {
   let capacity = Math.max(16, current);
   while (capacity < required) capacity *= 2;
   return capacity;
-}
-
-/**
- * Reusable ASCII writer for fixed-point SVG commands. The backing byte buffer
- * grows only when a larger stroke is encountered; a final JavaScript string is
- * the only unavoidable per-call serialization allocation.
- */
-class SvgByteWriter {
-  bytes = new Uint8Array(1_024);
-  length = 0;
-  currentX = 0;
-  currentY = 0;
-
-  reset(estimatedBytes: number): void {
-    this.ensure(estimatedBytes);
-    this.length = 0;
-    this.currentX = 0;
-    this.currentY = 0;
-  }
-
-  ensure(required: number): void {
-    if (required <= this.bytes.length) return;
-    const replacement = new Uint8Array(
-      nextCapacity(this.bytes.length, required),
-    );
-    replacement.set(this.bytes.subarray(0, this.length));
-    this.bytes = replacement;
-  }
-
-  writeByte(byte: number): void {
-    if (this.length === this.bytes.length) {
-      this.ensure(this.bytes.length * 2);
-    }
-    this.bytes[this.length++] = byte;
-  }
-
-  writeLiteral(value: string): void {
-    this.ensure(this.length + value.length);
-    for (let i = 0; i < value.length; i++) {
-      this.bytes[this.length++] = value.charCodeAt(i);
-    }
-  }
-
-  writeUnsignedInteger(value: number): void {
-    if (value === 0) {
-      this.writeByte(48);
-      return;
-    }
-    let divisor = 1;
-    while (value >= divisor * 10) divisor *= 10;
-    while (divisor >= 1) {
-      const digit = Math.floor(value / divisor);
-      this.writeByte(48 + digit);
-      value -= digit * divisor;
-      divisor /= 10;
-    }
-  }
-
-  /** Write an integer count of hundredths as a compact decimal SVG number. */
-  writeFixed(value: number): void {
-    if (value < 0) {
-      this.writeByte(45);
-      value = -value;
-    }
-    const integer = Math.floor(value / 100);
-    const fraction = value % 100;
-    this.writeUnsignedInteger(integer);
-    if (fraction === 0) return;
-    this.writeByte(46);
-    this.writeByte(48 + Math.floor(fraction / 10));
-    if (fraction % 10 !== 0) this.writeByte(48 + (fraction % 10));
-  }
-
-  writePair(x: number, y: number): void {
-    this.writeFixed(x);
-    this.writeByte(32);
-    this.writeFixed(y);
-  }
-
-  moveTo(x: number, y: number): void {
-    if (this.length > 0) this.writeByte(32);
-    this.writeLiteral('M ');
-    this.writePair(x, y);
-    this.currentX = x;
-    this.currentY = y;
-  }
-
-  quadraticTo(
-    controlX: number,
-    controlY: number,
-    targetX: number,
-    targetY: number,
-  ): void {
-    this.writeLiteral(' q ');
-    this.writePair(
-      controlX - this.currentX,
-      controlY - this.currentY,
-    );
-    this.writeByte(32);
-    this.writePair(targetX - this.currentX, targetY - this.currentY);
-    this.currentX = targetX;
-    this.currentY = targetY;
-  }
-
-  smoothTo(targetX: number, targetY: number): void {
-    this.writeLiteral(' t ');
-    this.writePair(targetX - this.currentX, targetY - this.currentY);
-    this.currentX = targetX;
-    this.currentY = targetY;
-  }
-
-  arcTo(radius: number, targetX: number, targetY: number): void {
-    this.writeLiteral(' a ');
-    this.writeFixed(radius);
-    this.writeByte(32);
-    this.writeFixed(radius);
-    this.writeLiteral(' 0 0 1 ');
-    this.writePair(targetX - this.currentX, targetY - this.currentY);
-    this.currentX = targetX;
-    this.currentY = targetY;
-  }
-
-  close(): void {
-    this.writeLiteral(' Z');
-  }
-
-  finish(): string {
-    return textDecoder.decode(this.bytes.subarray(0, this.length));
-  }
 }
 
 /**
@@ -308,6 +249,10 @@ class InkBuffers {
   vectorX = new Float64Array(0);
   vectorY = new Float64Array(0);
 
+  /** The active partition's centerline, resolved once per point. */
+  sequenceX = new Float64Array(0);
+  sequenceY = new Float64Array(0);
+
   trackLeftX = new Float64Array(0);
   trackLeftY = new Float64Array(0);
   trackRightX = new Float64Array(0);
@@ -318,7 +263,7 @@ class InkBuffers {
   boundary = new Uint8Array(0);
   rawBoundary = new Uint8Array(0);
 
-  readonly writer = new SvgByteWriter();
+  readonly writer = new CentiPixelPathWriter();
 
   ensureCapacity(required: number): void {
     if (required <= this.capacity) return;
@@ -339,6 +284,9 @@ class InkBuffers {
     this.radius = new Float64Array(this.capacity);
     this.vectorX = new Float64Array(this.capacity);
     this.vectorY = new Float64Array(this.capacity);
+
+    this.sequenceX = new Float64Array(this.capacity);
+    this.sequenceY = new Float64Array(this.capacity);
 
     this.trackLeftX = new Float64Array(this.capacity);
     this.trackLeftY = new Float64Array(this.capacity);
@@ -397,8 +345,7 @@ function ingest(
   }
   if (count <= 1) return count;
 
-  const thresholdSquared =
-    Math.min(size / 3, ENDPOINT_JITTER_DISTANCE) ** 2;
+  const thresholdSquared = Math.min(size / 3, ENDPOINT_JITTER_DISTANCE) ** 2;
   const startX = buffers.stageX[0]!;
   const startY = buffers.stageY[0]!;
   let startPressure = buffers.stageZ[0]!;
@@ -480,14 +427,14 @@ function streamline(
     // Weight this step by how far the hand actually travelled, not by the fact
     // that a sample arrived. See `responseDistanceFor`.
     const weight = onePoleWeight(
-      Math.hypot(rawX - previousRawX, rawY - previousRawY),
+      vectorLength(rawX - previousRawX, rawY - previousRawY),
       response,
     );
     previousRawX = rawX;
     previousRawY = rawY;
     const x = pinToRaw ? rawX : previousX + (rawX - previousX) * weight;
     const y = pinToRaw ? rawY : previousY + (rawY - previousY) * weight;
-    const step = Math.hypot(x - previousX, y - previousY);
+    const step = vectorLength(x - previousX, y - previousY);
     totalLength += step;
     previousX = x;
     previousY = y;
@@ -523,10 +470,8 @@ function baseRadius(
   thinning: number,
   easing: (pressure: number) => number,
 ): number {
-  return Math.max(
-    MIN_RADIUS,
-    size * easing(0.5 - thinning * (0.5 - pressure)),
-  );
+  if (thinning === 0) return Math.max(MIN_RADIUS, size / 2);
+  return Math.max(MIN_RADIUS, size * easing(0.5 - thinning * (0.5 - pressure)));
 }
 
 /** Compute pressure, short-stroke fixup, radius, and compatibility tapers. */
@@ -538,6 +483,31 @@ function calculateDynamics(
   const thinning = clamp(options.thinning, -1, 1);
   const easing = options.easing ?? linearEasing;
   let pressure = clamp01(buffers.inputZ[0] ?? 0.5);
+  if (options.pressureWarmup) {
+    // A pointer-down sample has no velocity history and a stylus often reports
+    // its contact ramp. Average the opening response over five brush widths so
+    // that one reading cannot leave a heavy blob at the press point.
+    for (let i = 0; i < pointCount; i++) {
+      if (buffers.runLength[i]! > options.size * 5) break;
+      const stepRatio = clamp01(buffers.distance[i]! / options.size);
+      let target: number;
+      if (options.simulatePressure) {
+        const rawPressure = Math.min(1, 1 - stepRatio);
+        target = Math.min(
+          1,
+          pressure + (rawPressure - pressure) * stepRatio * PRESSURE_RELAXATION,
+        );
+      } else {
+        target = Math.min(
+          1,
+          pressure +
+            (Math.max(MIN_PHYSICAL_PRESSURE, buffers.inputZ[i]!) - pressure) *
+              0.5,
+        );
+      }
+      pressure += (target - pressure) * 0.5;
+    }
+  }
   let maximumPressure = pressure;
 
   for (let i = 0; i < pointCount; i++) {
@@ -556,14 +526,10 @@ function calculateDynamics(
         );
       } else {
         const target = Math.max(MIN_PHYSICAL_PRESSURE, buffers.inputZ[i]!);
-        pressure = clamp01(
-          pressure +
-            (target - pressure) *
-              onePoleWeight(
-                buffers.distance[i]!,
-                PRESSURE_RESPONSE_DISTANCE,
-              ),
-        );
+        const response = options.pressureWarmup
+          ? clamp01(buffers.distance[i]! / options.size) * PRESSURE_RELAXATION
+          : onePoleWeight(buffers.distance[i]!, PRESSURE_RESPONSE_DISTANCE);
+        pressure = clamp01(pressure + (target - pressure) * response);
       }
     }
     buffers.pressure[i] = pressure;
@@ -593,12 +559,9 @@ function calculateDynamics(
       easing,
     );
     const length = buffers.runLength[i]!;
-    const startRatio =
-      startTaper > 0 ? clamp01(length / startTaper) : 1;
+    const startRatio = startTaper > 0 ? clamp01(length / startTaper) : 1;
     const endRatio =
-      endTaper > 0
-        ? clamp01((totalLength - length) / endTaper)
-        : 1;
+      endTaper > 0 ? clamp01((totalLength - length) / endTaper) : 1;
     const startFactor = startRatio * (2 - startRatio);
     const endFactor = 1 - (1 - endRatio) ** 3;
     radius *= Math.min(startFactor, endFactor);
@@ -615,7 +578,7 @@ function calculateGlobalVectors(pointCount: number): void {
   for (let i = 1; i < pointCount; i++) {
     const dx = buffers.pointX[i - 1]! - buffers.pointX[i]!;
     const dy = buffers.pointY[i - 1]! - buffers.pointY[i]!;
-    const length = Math.hypot(dx, dy);
+    const length = vectorLength(dx, dy);
     buffers.vectorX[i] = length > 0 ? dx / length : 1;
     buffers.vectorY[i] = length > 0 ? dy / length : 1;
   }
@@ -723,8 +686,7 @@ function cleanupPartitionStart(start: number, end: number): number {
     const dx = boundaryX - buffers.pointX[innerStart]!;
     const dy = boundaryY - buffers.pointY[innerStart]!;
     const threshold =
-      ((buffers.radius[start]! + buffers.radius[innerStart]!) / 2) *
-      0.5;
+      ((buffers.radius[start]! + buffers.radius[innerStart]!) / 2) * 0.5;
     if (dx * dx + dy * dy >= threshold * threshold) break;
     innerStart++;
   }
@@ -741,38 +703,20 @@ function calculatePartitionTracks(
   const localCount = 1 + Math.max(0, end - innerStart + 1);
   if (localCount <= 1) return 1;
 
+  // Resolve the partition's centerline once. Both loops below read every point
+  // of it, and the vector loop reads each point twice, so asking `sequenceX`
+  // for it on demand answered the same boundary test six times per point.
+  const seqX = buffers.sequenceX;
+  const seqY = buffers.sequenceY;
+  for (let local = 0; local < localCount; local++) {
+    seqX[local] = sequenceX(local, localCount, start, end, innerStart);
+    seqY[local] = sequenceY(local, localCount, start, end, innerStart);
+  }
+
   for (let local = 1; local < localCount; local++) {
-    const previousX = sequenceX(
-      local - 1,
-      localCount,
-      start,
-      end,
-      innerStart,
-    );
-    const previousY = sequenceY(
-      local - 1,
-      localCount,
-      start,
-      end,
-      innerStart,
-    );
-    const currentX = sequenceX(
-      local,
-      localCount,
-      start,
-      end,
-      innerStart,
-    );
-    const currentY = sequenceY(
-      local,
-      localCount,
-      start,
-      end,
-      innerStart,
-    );
-    const dx = previousX - currentX;
-    const dy = previousY - currentY;
-    const length = Math.hypot(dx, dy);
+    const dx = seqX[local - 1]! - seqX[local]!;
+    const dy = seqY[local - 1]! - seqY[local]!;
+    const length = vectorLength(dx, dy);
     buffers.vectorX[local] = length > 0 ? dx / length : 1;
     buffers.vectorY[local] = length > 0 ? dy / length : 1;
   }
@@ -780,15 +724,14 @@ function calculatePartitionTracks(
   buffers.vectorX[0] = buffers.vectorX[1]!;
   buffers.vectorY[0] = buffers.vectorY[1]!;
   if (buffers.rawBoundary[start] === 1) {
-    const anchorIndex =
-      innerStart > start + 1 ? innerStart : start;
+    const anchorIndex = innerStart > start + 1 ? innerStart : start;
     const boundaryX = buffers.inputX[start]!;
     const boundaryY = buffers.inputY[start]!;
     const anchorX = buffers.pointX[anchorIndex]!;
     const anchorY = buffers.pointY[anchorIndex]!;
     const dx = boundaryX - anchorX;
     const dy = boundaryY - anchorY;
-    const length = Math.hypot(dx, dy);
+    const length = vectorLength(dx, dy);
     if (length > 0) {
       buffers.vectorX[0] = dx / length;
       buffers.vectorY[0] = dy / length;
@@ -796,39 +739,12 @@ function calculatePartitionTracks(
   }
 
   const errorLimit = clamp01(smoothing) * size * TRACK_ERROR_LIMIT;
-  const errorLimitSquared = errorLimit * errorLimit;
-  let trackCount = 0;
-  // Greedy chord simplification: a candidate is held back one step and dropped
-  // only if both tracks stay within `errorLimit` of the chord that would
-  // replace it. Dropping on spacing alone discarded points that carried real
-  // curvature whenever the brush was wide.
-  let keptLeftX = 0;
-  let keptLeftY = 0;
-  let keptRightX = 0;
-  let keptRightY = 0;
-  let pendingLeftX = 0;
-  let pendingLeftY = 0;
-  let pendingRightX = 0;
-  let pendingRightY = 0;
-  let hasPending = false;
 
   for (let local = 0; local < localCount; local++) {
     const index = sequenceIndex(local, start, innerStart);
-    const centerX = sequenceX(
-      local,
-      localCount,
-      start,
-      end,
-      innerStart,
-    );
-    const centerY = sequenceY(
-      local,
-      localCount,
-      start,
-      end,
-      innerStart,
-    );
-    const next = Math.min(local + 1, localCount - 1);
+    const centerX = seqX[local]!;
+    const centerY = seqY[local]!;
+    const next = local + 1 < localCount ? local + 1 : localCount - 1;
     const directionChange = clamp(
       buffers.vectorX[next]! * buffers.vectorX[local]! +
         buffers.vectorY[next]! * buffers.vectorY[local]!,
@@ -853,64 +769,13 @@ function calculatePartitionTracks(
     const leftY = centerY - offsetY;
     const rightX = centerX + offsetX;
     const rightY = centerY + offsetY;
-
-    if (local === 0) {
-      buffers.trackLeftX[0] = leftX;
-      buffers.trackLeftY[0] = leftY;
-      buffers.trackRightX[0] = rightX;
-      buffers.trackRightY[0] = rightY;
-      keptLeftX = leftX;
-      keptLeftY = leftY;
-      keptRightX = rightX;
-      keptRightY = rightY;
-      trackCount = 1;
-    } else {
-      if (
-        hasPending &&
-        (segmentDistanceSquared(
-          pendingLeftX,
-          pendingLeftY,
-          keptLeftX,
-          keptLeftY,
-          leftX,
-          leftY,
-        ) > errorLimitSquared ||
-          segmentDistanceSquared(
-            pendingRightX,
-            pendingRightY,
-            keptRightX,
-            keptRightY,
-            rightX,
-            rightY,
-          ) > errorLimitSquared)
-      ) {
-        buffers.trackLeftX[trackCount] = pendingLeftX;
-        buffers.trackLeftY[trackCount] = pendingLeftY;
-        buffers.trackRightX[trackCount] = pendingRightX;
-        buffers.trackRightY[trackCount] = pendingRightY;
-        keptLeftX = pendingLeftX;
-        keptLeftY = pendingLeftY;
-        keptRightX = pendingRightX;
-        keptRightY = pendingRightY;
-        trackCount++;
-      }
-      pendingLeftX = leftX;
-      pendingLeftY = leftY;
-      pendingRightX = rightX;
-      pendingRightY = rightY;
-      hasPending = true;
-    }
+    buffers.trackLeftX[local] = leftX;
+    buffers.trackLeftY[local] = leftY;
+    buffers.trackRightX[local] = rightX;
+    buffers.trackRightY[local] = rightY;
   }
 
-  // The tip is never a candidate for removal — it is where the stroke ends.
-  if (hasPending) {
-    buffers.trackLeftX[trackCount] = pendingLeftX;
-    buffers.trackLeftY[trackCount] = pendingLeftY;
-    buffers.trackRightX[trackCount] = pendingRightX;
-    buffers.trackRightY[trackCount] = pendingRightY;
-    trackCount++;
-  }
-  return trackCount;
+  return simplifyTracks(localCount, errorLimit);
 }
 
 function midpointCenti(a: number, b: number): number {
@@ -1084,6 +949,48 @@ export function buildInkCenterline(
   return centerlineView;
 }
 
+/**
+ * SVG path data for a conditioned centerline, drawn as quadratics through the
+ * midpoints of its samples.
+ *
+ * Shares the outline's byte writer rather than building the string with
+ * `toFixed` and concatenation. That is not a micro-optimization here: at 600
+ * samples the formatting was ~140µs against ~7µs for the centerline itself, so
+ * a dashed stroke cost several times what the solid one it traces does.
+ *
+ * The chained `t` commands are exactly the explicit quadratics they replace —
+ * reflecting control `p[i-1]` about endpoint `(p[i-1] + p[i]) / 2` gives
+ * `p[i]`, the control the next segment wants — and the closing `t` onto the
+ * final sample degenerates to the straight run to the lift position.
+ */
+export function getInkCenterlinePathData(line: InkCenterline): string {
+  const count = line.count;
+  if (count < 2) return '';
+  const writer = buffers.writer;
+  writer.reset(count * 24 + 64);
+  writer.moveTo(toCenti(line.x[0]!), toCenti(line.y[0]!));
+  if (count === 2) {
+    const targetX = toCenti(line.x[1]!);
+    const targetY = toCenti(line.y[1]!);
+    writer.quadraticTo(targetX, targetY, targetX, targetY);
+    return writer.finish();
+  }
+  writer.quadraticTo(
+    toCenti(line.x[1]!),
+    toCenti(line.y[1]!),
+    midpointCenti(line.x[1]!, line.x[2]!),
+    midpointCenti(line.y[1]!, line.y[2]!),
+  );
+  for (let i = 2; i < count - 1; i++) {
+    writer.smoothTo(
+      midpointCenti(line.x[i]!, line.x[i + 1]!),
+      midpointCenti(line.y[i]!, line.y[i + 1]!),
+    );
+  }
+  writer.smoothTo(toCenti(line.x[count - 1]!), toCenti(line.y[count - 1]!));
+  return writer.finish();
+}
+
 /** Run the complete non-reentrant ink pipeline and emit SVG path data. */
 export function getFreehandPathData(
   points: DrawPoint[],
@@ -1097,11 +1004,7 @@ export function getFreehandPathData(
     return '';
   }
 
-  const stagedCount = ingest(
-    points,
-    options.size,
-    options.simulatePressure,
-  );
+  const stagedCount = ingest(points, options.size, options.simulatePressure);
   const pointCount = streamline(
     stagedCount,
     options.size,

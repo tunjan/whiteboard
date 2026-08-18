@@ -9,11 +9,23 @@ export function requestEquationFocus(id: string): void {
   for (const listener of focusListeners) listener(id);
 }
 
-/** True once, for the shape that was just placed. */
-export function consumeEquationFocus(id: string): boolean {
-  if (pendingFocusId !== id) return false;
-  pendingFocusId = null;
-  return true;
+/**
+ * Whether `id` is still waiting for the caret. A peek, not a take: the request
+ * is only cleared by `resolveEquationFocus`, once focus has really landed.
+ *
+ * Clearing it at mount instead was the old behaviour, and it lost the focus
+ * outright under StrictMode — which mounts, tears down, and re-mounts every
+ * effect. The teardown cancelled the panel's pending focus frame, and the
+ * second mount found the request already spent, so nothing rescheduled it.
+ */
+export function hasEquationFocusRequest(id: string): boolean {
+  return pendingFocusId === id;
+}
+
+/** Retire the request for `id`: focus arrived, or the panel gave up chasing it.
+ * Either way it must not ambush a later, ordinary selection of the same shape. */
+export function resolveEquationFocus(id: string): void {
+  if (pendingFocusId === id) pendingFocusId = null;
 }
 
 /** Receive focus requests while an equation panel is already mounted. */

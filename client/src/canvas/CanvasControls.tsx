@@ -99,7 +99,7 @@ export function CanvasControls({
   return (
     <div
       data-ui-layer
-      className="absolute right-[env(safe-area-inset-right)] bottom-[env(safe-area-inset-bottom)] max-sm:bottom-[calc(4rem+env(safe-area-inset-bottom))] [@media(pointer:coarse)]:bottom-[calc(7rem+env(safe-area-inset-bottom))] select-none"
+      className="absolute right-[env(safe-area-inset-right)] bottom-[env(safe-area-inset-bottom)] z-[var(--z-canvas-hud)] max-sm:bottom-[calc(4rem+env(safe-area-inset-bottom))] [@media(pointer:coarse)]:bottom-[calc(7rem+env(safe-area-inset-bottom))] select-none"
     >
       <TooltipProvider delay={300}>
         <Surface
@@ -130,7 +130,7 @@ export function CanvasControls({
             label="Reset zoom to 100%"
             shortcut="Control+0"
             onClick={onZoomReset}
-            className="min-w-12 px-1.5 font-mono text-primary tabular-nums"
+            className="min-w-12 px-1.5 font-normal text-primary tabular-nums"
             disabled={disabled}
           >
             {Math.round(zoom * 100)}%

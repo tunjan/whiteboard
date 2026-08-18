@@ -1,31 +1,21 @@
-import type { MathDocument } from 'mathjax-full/js/core/MathDocument.js';
-import type { LiteAdaptor } from 'mathjax-full/js/adaptors/liteAdaptor.js';
-import type { LiteDocument } from 'mathjax-full/js/adaptors/lite/Document.js';
-import type { LiteElement } from 'mathjax-full/js/adaptors/lite/Element.js';
-import type { LiteText } from 'mathjax-full/js/adaptors/lite/Text.js';
+/**
+ * The main thread's view of typeset equations: a bounded cache that shape
+ * components can read synchronously during render, and a store that tells them
+ * when it changed.
+ *
+ * The conversion itself happens elsewhere (`equation-typeset-client`, normally
+ * on a worker thread). Only the cache lives here, because a React render body
+ * cannot await anything — `getEquationRender` has to answer immediately or not
+ * at all.
+ */
 import { create } from 'zustand';
+import type { EquationRender } from './equation-convert';
+import {
+  ensureTypesetEngine,
+  typesetOnce,
+} from './equation-typeset-client';
 
-const BASE_EM = 16;
-const BASE_EX = 8;
-
-export type EquationRender =
-  | {
-      svg: string;
-      width: number;
-      height: number;
-      error?: never;
-    }
-  | {
-      svg?: never;
-      width?: never;
-      height?: never;
-      error: string;
-    };
-
-interface MathJaxRuntime {
-  adaptor: LiteAdaptor;
-  document: MathDocument<LiteElement, LiteText, LiteDocument>;
-}
+export type { EquationRender };
 
 interface EquationRenderState {
   version: number;
@@ -36,8 +26,7 @@ let renderCacheBytes = 0;
 /**
  * Bound on typeset expressions held in memory.
  *
- * The equation panel typesets on every keystroke so one document patch can
- * carry both the source and its measured geometry — which means each abandoned
+ * The equation panel typesets on every keystroke, which means each abandoned
  * prefix of an expression being edited ("\fra", "\frac", "\frac{") leaves its
  * own multi-kilobyte SVG string behind. Unbounded, a long editing session grew
  * this without limit.
@@ -81,8 +70,6 @@ function evictFor(entryBytes: number): void {
     renderCache.delete(oldest);
   }
 }
-let runtime: MathJaxRuntime | null = null;
-let loadPromise: Promise<void> | null = null;
 
 export const useEquationRenderStore = create<EquationRenderState>(() => ({
   version: 0,
@@ -92,101 +79,6 @@ function publishCacheChange(): void {
   useEquationRenderStore.setState((state) => ({
     version: state.version + 1,
   }));
-}
-
-function errorMessage(error: unknown): string {
-  if (
-    typeof error === 'object' &&
-    error !== null &&
-    'message' in error &&
-    typeof error.message === 'string'
-  ) {
-    return error.message;
-  }
-  return error instanceof Error ? error.message : String(error);
-}
-
-function exLengthToPixels(value: unknown, attribute: string): number {
-  const raw = typeof value === 'string' ? value.trim() : '';
-  const match = /^(-?\d+(?:\.\d+)?)ex$/.exec(raw);
-  const ex = match?.[1] ? Number(match[1]) : Number.NaN;
-  if (!Number.isFinite(ex) || ex <= 0) {
-    throw new Error(`MathJax returned an invalid ${attribute}`);
-  }
-  return ex * BASE_EX;
-}
-
-function decodeMathJaxAttribute(value: string): string {
-  return value
-    .replaceAll('&quot;', '"')
-    .replaceAll('&#39;', "'")
-    .replaceAll('&lt;', '<')
-    .replaceAll('&gt;', '>')
-    .replaceAll('&amp;', '&');
-}
-
-/** MathJax represents some TeX failures (notably undefined commands) as an
- * inline merror node instead of throwing through `formatError`. Treat those as
- * real errors so the panel and assistive technology receive the same status as
- * they do for missing braces and environments. */
-function embeddedMathJaxError(svg: string): string | null {
-  const match = /data-mjx-error=(?:"([^"]*)"|'([^']*)')/.exec(svg);
-  const message = match?.[1] ?? match?.[2];
-  return message ? decodeMathJaxAttribute(message) : null;
-}
-
-async function loadMathJax(): Promise<void> {
-  const [
-    { mathjax },
-    { TeX },
-    { SVG },
-    { liteAdaptor },
-    { RegisterHTMLHandler },
-    { AllPackages },
-  ] = await Promise.all([
-    import('mathjax-full/js/mathjax.js'),
-    import('mathjax-full/js/input/tex.js'),
-    import('mathjax-full/js/output/svg.js'),
-    import('mathjax-full/js/adaptors/liteAdaptor.js'),
-    import('mathjax-full/js/handlers/html.js'),
-    import('mathjax-full/js/input/tex/AllPackages.js'),
-  ]);
-
-  const adaptor = liteAdaptor();
-  RegisterHTMLHandler(adaptor);
-  const input = new TeX({
-    packages: AllPackages.filter(
-      (name) =>
-        name !== 'require' &&
-        name !== 'autoload' &&
-        // `noundefined` intentionally paints unknown commands as red text.
-        // The editor needs a real error instead so it can explain, announce,
-        // and exclude invalid content consistently.
-        name !== 'noundefined',
-    ),
-    formatError: (_jax: unknown, error: unknown) => {
-      throw error;
-    },
-  });
-  const output = new SVG({ fontCache: 'none' });
-  const document = mathjax.document('', {
-    InputJax: input,
-    OutputJax: output,
-  }) as MathDocument<LiteElement, LiteText, LiteDocument>;
-
-  runtime = { adaptor, document };
-}
-
-/** Lazily initialize the MathJax SVG pipeline once. */
-export function ensureMathJax(): Promise<void> {
-  if (runtime) return Promise.resolve();
-  if (!loadPromise) {
-    loadPromise = loadMathJax().catch((error: unknown) => {
-      loadPromise = null;
-      throw error;
-    });
-  }
-  return loadPromise;
 }
 
 /**
@@ -204,59 +96,25 @@ export function getEquationRender(latex: string): EquationRender | undefined {
   return entry;
 }
 
-function convertAndCache(latex: string): EquationRender {
-  const cached = renderCache.get(latex);
-  if (cached) {
-    touch(latex, cached);
-    return cached;
+function cacheRender(latex: string, render: EquationRender): EquationRender {
+  const existing = renderCache.get(latex);
+  if (existing) {
+    touch(latex, existing);
+    return existing;
   }
-  if (!runtime) throw new Error('MathJax is not ready');
-
-  let entry: EquationRender;
-  try {
-    const container = runtime.document.convert(latex, {
-      display: true,
-      em: BASE_EM,
-      ex: BASE_EX,
-    }) as LiteElement;
-    const svg = runtime.adaptor.firstChild(container) as LiteElement;
-    const width = exLengthToPixels(
-      runtime.adaptor.getAttribute(svg, 'width'),
-      'width',
-    );
-    const height = exLengthToPixels(
-      runtime.adaptor.getAttribute(svg, 'height'),
-      'height',
-    );
-
-    // The shape renderer supplies a numeric viewport. Keeping MathJax's ex
-    // attributes here would make canvas size depend on the surrounding font.
-    runtime.adaptor.removeAttribute(svg, 'width');
-    runtime.adaptor.removeAttribute(svg, 'height');
-    const markup = runtime.adaptor.outerHTML(svg);
-    const embeddedError = embeddedMathJaxError(markup);
-    entry = embeddedError
-      ? { error: embeddedError }
-      : {
-          svg: markup,
-          width,
-          height,
-        };
-  } catch (error) {
-    entry = { error: errorMessage(error) };
-  }
-
-  const entryBytes = cacheEntryBytes(latex, entry);
+  const entryBytes = cacheEntryBytes(latex, render);
   evictFor(entryBytes);
-  renderCache.set(latex, entry);
+  renderCache.set(latex, render);
   renderCacheBytes += entryBytes;
   publishCacheChange();
-  return entry;
+  return render;
 }
 
 /**
- * Typeset and cache one expression. Once MathJax is ready, conversion and the
- * cache write happen synchronously before the returned promise resolves.
+ * Typeset and cache one expression.
+ *
+ * Concurrent callers asking for the same LaTeX — several shapes showing it, an
+ * export prewarming while the panel types — share one conversion.
  */
 export function typesetEquation(latex: string): Promise<EquationRender> {
   const cached = renderCache.get(latex);
@@ -264,8 +122,16 @@ export function typesetEquation(latex: string): Promise<EquationRender> {
     touch(latex, cached);
     return Promise.resolve(cached);
   }
-  if (runtime) return Promise.resolve(convertAndCache(latex));
-  return ensureMathJax().then(() => convertAndCache(latex));
+  const existing = inFlight.get(latex);
+  if (existing) return existing;
+
+  const request = typesetOnce(latex)
+    .then((render) => cacheRender(latex, render))
+    .finally(() => {
+      inFlight.delete(latex);
+    });
+  inFlight.set(latex, request);
+  return request;
 }
 
 /**
@@ -274,11 +140,12 @@ export function typesetEquation(latex: string): Promise<EquationRender> {
  */
 export function requestEquationTypeset(latex: string): void {
   if (renderCache.has(latex) || inFlight.has(latex)) return;
-  const pending = Promise.resolve()
+  void Promise.resolve()
     .then(() => typesetEquation(latex))
-    .finally(() => {
-      inFlight.delete(latex);
-    });
-  inFlight.set(latex, pending);
-  void pending.catch(() => undefined);
+    .catch(() => undefined);
+}
+
+/** Start the renderer, so it is warm before the first equation needs it. */
+export function ensureEquationRenderer(): Promise<void> {
+  return ensureTypesetEngine();
 }

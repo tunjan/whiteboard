@@ -6,16 +6,25 @@ export function childrenOf(shapes: Shape[], parentId: string): Shape[] {
   return shapes.filter((s) => s.parentId === parentId);
 }
 
-/** All descendants of `id` (children, grandchildren, …), excluding `id`. */
-export function descendantsOf(shapes: Shape[], id: string): Shape[] {
-  const byParent = new Map<string, Shape[]>();
+/**
+ * `parentId -> children`, the index every downward walk needs. Callers that
+ * walk more than one subtree build it once and reuse it: it costs a pass over
+ * the whole page, so rebuilding it per id made expanding a selection O(N·k).
+ */
+type ChildIndex = Map<string, Shape[]>;
+
+function childIndex(shapes: Shape[]): ChildIndex {
+  const byParent: ChildIndex = new Map();
   for (const s of shapes) {
-    if (s.parentId) {
-      const list = byParent.get(s.parentId) ?? [];
-      list.push(s);
-      byParent.set(s.parentId, list);
-    }
+    if (!s.parentId) continue;
+    const list = byParent.get(s.parentId);
+    if (list) list.push(s);
+    else byParent.set(s.parentId, [s]);
   }
+  return byParent;
+}
+
+function descendantsIn(byParent: ChildIndex, id: string): Shape[] {
   const out: Shape[] = [];
   const stack = [...(byParent.get(id) ?? [])];
   while (stack.length) {
@@ -25,6 +34,11 @@ export function descendantsOf(shapes: Shape[], id: string): Shape[] {
     if (kids) stack.push(...kids);
   }
   return out;
+}
+
+/** All descendants of `id` (children, grandchildren, …), excluding `id`. */
+export function descendantsOf(shapes: Shape[], id: string): Shape[] {
+  return descendantsIn(childIndex(shapes), id);
 }
 
 /** Non-container descendants (the leaves that carry real geometry). */
@@ -59,6 +73,79 @@ export function selectionTargetId(
   return target;
 }
 
+/** Ancestor ids of `id`, outermost first, excluding `id` itself. */
+function ancestorChain(
+  getShape: (id: string) => Shape | undefined,
+  id: string,
+): string[] {
+  const chain: string[] = [];
+  const guard = new Set<string>([id]);
+  let cur = getShape(id);
+  while (cur?.parentId && !guard.has(cur.parentId)) {
+    guard.add(cur.parentId);
+    const parent = getShape(cur.parentId);
+    if (!parent) break;
+    chain.unshift(parent.id);
+    cur = parent;
+  }
+  return chain;
+}
+
+/**
+ * The innermost container that contains every one of `ids`, or null when they
+ * share only the page. A new group is created there, so grouping two shapes
+ * that live inside a frame keeps the group — and therefore them — in the frame.
+ */
+export function findCommonAncestor(
+  getShape: (id: string) => Shape | undefined,
+  ids: readonly string[],
+): string | null {
+  if (ids.length === 0) return null;
+  let common = ancestorChain(getShape, ids[0]!);
+  for (let i = 1; i < ids.length && common.length > 0; i++) {
+    const chain = ancestorChain(getShape, ids[i]!);
+    let n = 0;
+    while (n < common.length && n < chain.length && common[n] === chain[n]) n++;
+    common = common.slice(0, n);
+  }
+  return common.length ? common[common.length - 1]! : null;
+}
+
+/**
+ * Innermost group/frame shared by all shapes. Unlike `findCommonAncestor`, a
+ * target that is itself a container participates in the chain; this is what an
+ * arrow bound to a frame and one of its descendants needs.
+ */
+export function findClosestCommonContainer(
+  getShape: (id: string) => Shape | undefined,
+  ids: readonly string[],
+): string | null {
+  if (!ids.length) return null;
+  const chainFor = (id: string): string[] => {
+    const shape = getShape(id);
+    const chain = ancestorChain(getShape, id).filter((ancestorId) => {
+      const ancestor = getShape(ancestorId);
+      return ancestor ? isContainerType(ancestor.type) : false;
+    });
+    if (shape && isContainerType(shape.type)) chain.push(shape.id);
+    return chain;
+  };
+  let common = chainFor(ids[0]!);
+  for (let index = 1; index < ids.length && common.length; index++) {
+    const chain = chainFor(ids[index]!);
+    let shared = 0;
+    while (
+      shared < common.length &&
+      shared < chain.length &&
+      common[shared] === chain[shared]
+    ) {
+      shared++;
+    }
+    common = common.slice(0, shared);
+  }
+  return common.length ? common[common.length - 1]! : null;
+}
+
 /** Union of the rotated world bounds of `id`'s leaf descendants, or null. */
 export function containerBounds(shapes: Shape[], id: string): Bounds | null {
   const leaves = leafDescendants(shapes, id);
@@ -86,18 +173,18 @@ export function containerBounds(shapes: Shape[], id: string): Bounds | null {
 export function moveTargetIds(shapes: Shape[], ids: string[]): string[] {
   const out = new Set<string>();
   const byId = new Map(shapes.map((s) => [s.id, s]));
+  const byParent = childIndex(shapes);
   for (const id of ids) {
     const s = byId.get(id);
     if (!s) continue;
     if (s.type === 'group') {
-      for (const d of leafDescendants(shapes, id)) out.add(d.id);
-      // Also move nested frames so their chrome follows.
-      for (const d of descendantsOf(shapes, id)) {
-        if (d.type === 'frame') out.add(d.id);
+      // Leaves carry the geometry; nested frames come too so their chrome follows.
+      for (const d of descendantsIn(byParent, id)) {
+        if (!isContainerType(d.type) || d.type === 'frame') out.add(d.id);
       }
     } else if (s.type === 'frame') {
       out.add(id);
-      for (const d of descendantsOf(shapes, id)) out.add(d.id);
+      for (const d of descendantsIn(byParent, id)) out.add(d.id);
     } else {
       out.add(id);
     }
@@ -108,9 +195,10 @@ export function moveTargetIds(shapes: Shape[], ids: string[]): string[] {
 /** Expand selected ids into everything that should be deleted (with children). */
 export function deleteTargetIds(shapes: Shape[], ids: string[]): string[] {
   const out = new Set<string>();
+  const byParent = childIndex(shapes);
   for (const id of ids) {
     out.add(id);
-    for (const d of descendantsOf(shapes, id)) out.add(d.id);
+    for (const d of descendantsIn(byParent, id)) out.add(d.id);
   }
   return [...out];
 }

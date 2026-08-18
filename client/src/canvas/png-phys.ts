@@ -3,9 +3,10 @@
  *
  * `canvas.toBlob('image/png')` writes no `pHYs` chunk, so every consumer falls
  * back to 72 DPI and treats the pixel grid as the logical size. Our exports are
- * rasterized at up to 2x, so a 2x image opened in Preview, Word, or Figma comes
- * out at twice the size it had on the board. Declaring the physical resolution
- * tells those consumers how to scale it back down.
+ * rasterized at the user's chosen resolution (see `pngExportScale`), so a 2x
+ * image opened in Preview, Word, or Figma comes out at twice the size it had on
+ * the board. Declaring the physical resolution tells those consumers how to
+ * scale it back down.
  *
  * Chromium re-encodes images during clipboard sanitization and drops ancillary
  * chunks, so this survives the clipboard on Safari and Firefox but generally not

@@ -121,32 +121,21 @@ function positiveAngle(angle: number): number {
 }
 
 /** Circle passing through endpoints and the user-facing bend apex. */
-export function circularArc(
-  a: Vec,
-  b: Vec,
-  bend: number,
-): CircularArc | null {
+export function circularArc(a: Vec, b: Vec, bend: number): CircularArc | null {
   if (Math.abs(bend) < BEND_EPSILON || distance(a, b) < BEND_EPSILON) {
     return null;
   }
   const c = curveApex(a, b, bend);
   const determinant =
-    2 *
-    (a.x * (b.y - c.y) +
-      b.x * (c.y - a.y) +
-      c.x * (a.y - b.y));
+    2 * (a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y));
   if (Math.abs(determinant) < 1e-8) return null;
 
   const aa = a.x * a.x + a.y * a.y;
   const bb = b.x * b.x + b.y * b.y;
   const cc = c.x * c.x + c.y * c.y;
   const center = {
-    x:
-      (aa * (b.y - c.y) + bb * (c.y - a.y) + cc * (a.y - b.y)) /
-      determinant,
-    y:
-      (aa * (c.x - b.x) + bb * (a.x - c.x) + cc * (b.x - a.x)) /
-      determinant,
+    x: (aa * (b.y - c.y) + bb * (c.y - a.y) + cc * (a.y - b.y)) / determinant,
+    y: (aa * (c.x - b.x) + bb * (a.x - c.x) + cc * (b.x - a.x)) / determinant,
   };
   const startAngle = Math.atan2(a.y - center.y, a.x - center.x);
   const endAngle = Math.atan2(b.y - center.y, b.x - center.x);
@@ -377,7 +366,10 @@ export function segmentMidpoint(
 }
 
 /** Arc-length midpoint and local tangent of a sampled path. */
-export function pathMidpoint(points: readonly Vec[]): { point: Vec; tangent: Vec } {
+export function pathMidpoint(points: readonly Vec[]): {
+  point: Vec;
+  tangent: Vec;
+} {
   const first = points[0] ?? { x: 0, y: 0 };
   if (points.length < 2) return { point: first, tangent: { x: 1, y: 0 } };
   const lengths: number[] = [];
@@ -437,11 +429,16 @@ export function arrowheadLength(size: number): number {
 }
 
 /** Generate an open arrowhead at to, oriented away from the interior point from. */
-export function arrowheadPath(
+export function arrowheadPath(from: Vec, to: Vec, size: number): string {
+  return polylinePath(arrowheadPoints(from, to, size));
+}
+
+/** Open arrowhead vertices, shared by exact and synthesized renderers. */
+export function arrowheadPoints(
   from: Vec,
   to: Vec,
   size: number,
-): string {
+): [Vec, Vec, Vec] {
   const dx = to.x - from.x;
   const dy = to.y - from.y;
   const magnitude = Math.hypot(dx, dy) || 1;
@@ -454,5 +451,5 @@ export function arrowheadPath(
   const wing = length * Math.sin(Math.PI / 6);
   const left = { x: back.x + nx * wing, y: back.y + ny * wing };
   const right = { x: back.x - nx * wing, y: back.y - ny * wing };
-  return `M ${left.x} ${left.y} L ${to.x} ${to.y} L ${right.x} ${right.y}`;
+  return [left, to, right];
 }

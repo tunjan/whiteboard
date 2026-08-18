@@ -88,6 +88,8 @@ function publishPeers(a: Awareness): void {
       parsedVoice.inCall === prev.voice.inCall &&
       parsedVoice.muted === prev.voice.muted &&
       parsedVoice.speaking === prev.voice.speaking &&
+      parsedVoice.camera === prev.voice.camera &&
+      parsedVoice.screen === prev.voice.screen &&
       parsedVoice.sessionId === prev.voice.sessionId
         ? prev.voice
         : parsedVoice;
@@ -142,17 +144,41 @@ export function setActiveAwareness(next: Awareness | null): void {
   }
   onChange = () => publishPeers(next);
   next.on('change', onChange);
-  if (localUser) next.setLocalStateField('user', localUser);
-  if (localPage) next.setLocalStateField('page', localPage);
-  next.setLocalStateField('following', localFollowing);
-  next.setLocalStateField('latencyMs', localLatencyMs);
-  next.setLocalStateField('textSelection', localTextSelection);
-  next.setLocalStateField('voice', localVoice);
-  next.setLocalStateField(
+  publishLocalState(next);
+  publishPeers(next);
+}
+
+/** Re-send every sticky local field. Cursor/viewport/laser are omitted on
+ *  purpose: they are momentary and republish themselves on the next move. */
+function publishLocalState(a: Awareness): void {
+  if (localUser) a.setLocalStateField('user', localUser);
+  if (localPage) a.setLocalStateField('page', localPage);
+  a.setLocalStateField('following', localFollowing);
+  a.setLocalStateField('latencyMs', localLatencyMs);
+  a.setLocalStateField('textSelection', localTextSelection);
+  a.setLocalStateField('voice', localVoice);
+  a.setLocalStateField(
     'selection',
     localSelection.length > 0 ? localSelection : null,
   );
-  publishPeers(next);
+}
+
+/**
+ * The collab provider drops our own awareness state on `pagehide`, so peers see
+ * us leave when the tab goes away. A bfcache restore — an app switch on mobile,
+ * or a back navigation — brings the page back without a reload, and yjs makes
+ * `setLocalStateField` a no-op while the local state is null. Without this the
+ * client stays invisible to peers for the rest of the page's life: no cursor,
+ * no page, and no voice membership, while its own UI still looks connected.
+ */
+export function restoreLocalPresence(): void {
+  if (!awareness || awareness.getLocalState() !== null) return;
+  awareness.setLocalState({});
+  publishLocalState(awareness);
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('pageshow', restoreLocalPresence);
 }
 
 export function setLocalUser(user: LocalUser): void {

@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_PENCIL_DYNAMICS,
+  STROKE_PROFILES,
   getInkCenterlinePath,
   getInkPathData,
+  pencilStabilizationToStreamline,
 } from './ink';
 import { buildInkCenterline } from './ink-engine';
 
@@ -204,6 +206,24 @@ describe('pencil outlines', () => {
     expect(path.endsWith(' Z')).toBe(true);
   });
 
+  it('bounds outline simplification to an eight-sample window', () => {
+    const points = Array.from({ length: 65 }, (_, index) => ({
+      x: index,
+      y: 0,
+      pressure: 0.5,
+    }));
+    const path = getInkPathData(points, 0.3, true, {
+      ...dynamics,
+      thinning: 0,
+      smoothing: 1,
+    });
+
+    // Each side of this 65-sample straight track keeps indices
+    // 0, 8, 16, ... 64. An unbounded greedy pass would collapse it to the two
+    // endpoints and emit no smooth quadratic segments at all.
+    expect(path.match(/\bt /g)).toHaveLength(14);
+  });
+
   it('uses the smoothing control as the track error bound', () => {
     const points = Array.from({ length: 40 }, (_, index) => ({
       x: index * 4,
@@ -298,12 +318,11 @@ describe('pencil outlines', () => {
       y: 9,
       pressure: 0,
     }));
-    const path = getInkPathData(
-      points,
-      6,
-      true,
-      { ...dynamics, startTaper: true, endTaper: true },
-    );
+    const path = getInkPathData(points, 6, true, {
+      ...dynamics,
+      startTaper: true,
+      endTaper: true,
+    });
     const untapered = getInkPathData(points, 6, true, dynamics);
 
     expect(path).toMatch(/^M /);
@@ -440,6 +459,66 @@ describe('pencil outlines', () => {
     expect(halfWidth(0.5) - halfWidth(0.25)).toBeGreaterThan(3);
   });
 
+  it('warms current-profile opening pressure over the first five brush widths', () => {
+    const points = Array.from({ length: 61 }, (_, index) => ({
+      x: index * 2,
+      y: 0,
+      pressure: index === 0 ? 1 : 0.1,
+    }));
+    const openingHalfWidth = (pressureWarmup: boolean) => {
+      const path = getInkPathData(points, 10, true, {
+        ...dynamics,
+        smoothing: 0,
+        pressureEasing: 'linear',
+        pressureWarmup,
+      });
+      const match = /^M\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)/.exec(path);
+      return Math.abs(Number(match?.[2]));
+    };
+
+    expect(openingHalfWidth(true)).toBeLessThan(openingHalfWidth(false));
+  });
+
+  it('publishes the canonical freehand profile matrix', () => {
+    const simulated = STROKE_PROFILES.simulatePressure(10);
+    expect(simulated).toMatchObject({
+      size: 10,
+      thinning: 0.5,
+      smoothing: 0.62,
+      simulatePressure: true,
+      pressureWarmup: true,
+    });
+    expect(simulated.easing?.(0.5)).toBeCloseTo(Math.SQRT1_2, 12);
+
+    const stylus = STROKE_PROFILES.realPressure(10);
+    expect(stylus).toMatchObject({
+      size: 13,
+      thinning: 0.62,
+      smoothing: 0.62,
+      streamline: 0.62,
+      simulatePressure: false,
+      pressureWarmup: true,
+    });
+    expect(stylus.easing?.(0.5)).toBeCloseTo(
+      0.5 * 0.65 + Math.SQRT1_2 * 0.35,
+      12,
+    );
+
+    expect(STROKE_PROFILES.solid(10)).toMatchObject({
+      size: 10,
+      thinning: 0,
+      smoothing: 0.62,
+    });
+    expect(STROKE_PROFILES.highlight(10)).toMatchObject({
+      size: 11,
+      last: false,
+      thinning: 0,
+      smoothing: 0.5,
+      streamline: 0.5,
+    });
+    expect(STROKE_PROFILES.highlight(10, true).last).toBe(true);
+  });
+
   it('defaults to a stable, round-capped pencil', () => {
     expect(DEFAULT_PENCIL_DYNAMICS.simulatePressure).toBe(false);
     expect(DEFAULT_PENCIL_DYNAMICS.endTaper).toBe(false);
@@ -474,6 +553,9 @@ function maxOverAllPathPoints(
   const tokens = d.match(/[MqtaZ]|-?\d+(?:\.\d+)?/g) ?? [];
   let x = 0;
   let y = 0;
+  let controlX = 0;
+  let controlY = 0;
+  let hasQuadraticControl = false;
   let greatest = Number.NEGATIVE_INFINITY;
   let i = 0;
   while (i < tokens.length) {
@@ -481,19 +563,26 @@ function maxOverAllPathPoints(
     if (command === 'M') {
       x = Number(tokens[i++]);
       y = Number(tokens[i++]);
+      hasQuadraticControl = false;
     } else if (command === 'q') {
-      const controlX = x + Number(tokens[i++]);
-      const controlY = y + Number(tokens[i++]);
+      controlX = x + Number(tokens[i++]);
+      controlY = y + Number(tokens[i++]);
       greatest = Math.max(greatest, measure(controlX, controlY));
       x += Number(tokens[i++]);
       y += Number(tokens[i++]);
+      hasQuadraticControl = true;
     } else if (command === 't') {
+      controlX = hasQuadraticControl ? 2 * x - controlX : x;
+      controlY = hasQuadraticControl ? 2 * y - controlY : y;
+      greatest = Math.max(greatest, measure(controlX, controlY));
       x += Number(tokens[i++]);
       y += Number(tokens[i++]);
+      hasQuadraticControl = true;
     } else if (command === 'a') {
       i += 5;
       x += Number(tokens[i++]);
       y += Number(tokens[i++]);
+      hasQuadraticControl = false;
     }
     greatest = Math.max(greatest, measure(x, y));
   }
@@ -501,7 +590,10 @@ function maxOverAllPathPoints(
 }
 
 /** Walk a path's command endpoints, returning the greatest `measure`. */
-function walkPath(d: string, measure: (x: number, y: number) => number): number {
+function walkPath(
+  d: string,
+  measure: (x: number, y: number) => number,
+): number {
   const tokens = d.match(/[MqtaZ]|-?\d+(?:\.\d+)?/g) ?? [];
   let x = 0;
   let y = 0;
@@ -581,8 +673,12 @@ describe('finished-stroke endpoint', () => {
     // Filtering once per sample rather than per unit travelled put the tip of
     // this 120-unit line at 107 when it was drawn slowly and at 55 when it was
     // drawn quickly — and rounded off fast corners to match.
-    const careful = maxPathX(getInkPathData(ramp(4, 120), 10, false, stabilized));
-    const quick = maxPathX(getInkPathData(ramp(20, 120), 10, false, stabilized));
+    const careful = maxPathX(
+      getInkPathData(ramp(4, 120), 10, false, stabilized),
+    );
+    const quick = maxPathX(
+      getInkPathData(ramp(20, 120), 10, false, stabilized),
+    );
 
     expect(Math.abs(quick - careful)).toBeLessThan(3);
   });
@@ -602,10 +698,38 @@ describe('dashed centerline', () => {
     { x: 20, y: 0, pressure: 0.5 },
   ];
 
+  /**
+   * Final absolute point of a centerline path. The engine's writer emits
+   * relative commands, so the endpoint is the running sum rather than the last
+   * pair of numbers in the string.
+   */
+  const pathEndpoint = (path: string): { x: number; y: number } => {
+    const tokens = path.split(' ');
+    let x = 0;
+    let y = 0;
+    let i = 0;
+    while (i < tokens.length) {
+      const command = tokens[i++]!;
+      if (command === 'M') {
+        x = Number(tokens[i++]);
+        y = Number(tokens[i++]);
+      } else if (command === 'q') {
+        i += 2; // control point
+        x += Number(tokens[i++]);
+        y += Number(tokens[i++]);
+      } else if (command === 't') {
+        x += Number(tokens[i++]);
+        y += Number(tokens[i++]);
+      }
+    }
+    return { x, y };
+  };
+
   it('follows the raw samples when stabilization is off', () => {
-    expect(getInkCenterlinePath(wobble, 6, 0)).toBe(
-      'M 0.00 0.00 Q 10.00 6.00 15.00 3.00 L 20.00 0.00',
-    );
+    // Relative commands through the sample midpoints: `q` ends at (15, 3) with
+    // control (10, 6), and the closing `t` reflects that control to (20, 0),
+    // which lands the segment on the lift point as a straight run.
+    expect(getInkCenterlinePath(wobble, 6, 0)).toBe('M 0 0 q 10 6 15 3 t 5 -3');
   });
 
   it('stabilizes dashed ink like the solid engine does', () => {
@@ -617,9 +741,10 @@ describe('dashed centerline', () => {
   });
 
   it('still ends on the raw lift point at any stabilization', () => {
-    expect(getInkCenterlinePath(wobble, 6, 0.9).endsWith('L 20.00 0.00')).toBe(
-      true,
-    );
+    expect(pathEndpoint(getInkCenterlinePath(wobble, 6, 0.9))).toEqual({
+      x: 20,
+      y: 0,
+    });
   });
 
   it('drops the same start jitter the solid outline does', () => {
@@ -631,5 +756,70 @@ describe('dashed centerline', () => {
     expect(getInkCenterlinePath(jittered, 6, 0.4)).toBe(
       getInkCenterlinePath([start, ...wobble.slice(1)], 6, 0.4),
     );
+  });
+});
+
+describe('stabilization against the camera', () => {
+  const sliders = [0, 0.2, 0.35, 0.5, 0.75, 1];
+
+  it('is unchanged at 1:1 and above', () => {
+    // The correction only ever adds smoothing. Applied symmetrically it would
+    // also strip it when zoomed in — at zoom 4 the 0.35 default falls to about
+    // 0.03, effectively no stabilization at all.
+    for (const slider of sliders) {
+      const atOne = pencilStabilizationToStreamline(slider);
+      expect(pencilStabilizationToStreamline(slider, 1)).toBe(atOne);
+      expect(pencilStabilizationToStreamline(slider, 4)).toBe(atOne);
+    }
+  });
+
+  it('steadies the line further the further out the camera is', () => {
+    // The engine filters in world units, so the same tremor in the hand covers
+    // more of them zoomed out and came back a visibly shakier line.
+    for (const slider of [0.2, 0.35, 0.5]) {
+      const half = pencilStabilizationToStreamline(slider, 0.5);
+      const quarter = pencilStabilizationToStreamline(slider, 0.25);
+      expect(half).toBeGreaterThan(pencilStabilizationToStreamline(slider, 1));
+      expect(quarter).toBeGreaterThan(half);
+      expect(quarter).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it('saturates rather than running off the end of the range', () => {
+    // `streamline` bottoms out at a raw weight of 0.15, so past roughly zoom
+    // 0.18 the filter is already as slow as the engine can make it.
+    expect(pencilStabilizationToStreamline(0.35, 0.01)).toBe(1);
+    expect(pencilStabilizationToStreamline(0.35, 0)).toBe(
+      pencilStabilizationToStreamline(0.35),
+    );
+  });
+
+  it('actually smooths more, measured on a stroke', () => {
+    // A slider value only matters through what the engine does with it, and at
+    // `streamline: 0` the filter is the identity — a difference the settings
+    // produce has to show up in the ink to count.
+    const jitter = Array.from({ length: 60 }, (_, i) => ({
+      x: i,
+      y: i % 2 === 0 ? 0 : 2,
+      pressure: 0.5,
+    }));
+    // Total vertical travel of the conditioned centerline. The raw zig-zag
+    // covers 2 units per sample; the more the filter absorbs, the less is left.
+    // (Not peak deviation: the filter starts pinned to the raw first point, so
+    // that one sample's error is the same however slow the filter is.)
+    const wobble = (zoom: number): number => {
+      const line = buildInkCenterline(
+        jitter,
+        4,
+        pencilStabilizationToStreamline(0.35, zoom),
+        true,
+      );
+      let total = 0;
+      for (let i = 1; i < line.count; i++) {
+        total += Math.abs(line.y[i]! - line.y[i - 1]!);
+      }
+      return total;
+    };
+    expect(wobble(0.25)).toBeLessThan(wobble(1));
   });
 });

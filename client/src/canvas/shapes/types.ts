@@ -39,12 +39,16 @@ export interface HandleDragResult<T extends ShapeType> {
  * The renderer must be **pure** (no hooks, no side effects) so the same code
  * can render headlessly for PNG/PDF export later.
  */
-export interface ShapeUtil<T extends ShapeType = ShapeType>
-  extends ShapeDefinition<T> {
+export interface ShapeUtil<
+  T extends ShapeType = ShapeType,
+> extends ShapeDefinition<T> {
   Component: (props: ShapeComponentProps<T>) => ReactElement | null;
 
   /** Whether this geometry may be used as a snap target. Defaults to true. */
   readonly canSnap?: boolean;
+
+  /** Optional page-space feature points for bounds alignment snapping. */
+  getBoundsSnapPoints?(shape: ShapeMap[T]): Point[];
 
   /**
    * Custom drag handles (in world space). When present, the selection tool

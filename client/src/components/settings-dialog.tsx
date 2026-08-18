@@ -1,5 +1,8 @@
 import { toolRegistry } from '@/canvas/tools/tool-registry';
-import { useCanvasUiStore } from '@/canvas/use-canvas-ui-store';
+import {
+  PNG_EXPORT_SCALES,
+  useCanvasUiStore,
+} from '@/canvas/use-canvas-ui-store';
 import { ConnectionIndicator } from '@/components/connection-indicator';
 import { useVoiceStore } from '@/collab/voice/use-voice-store';
 import { Button } from '@/components/ui/button';
@@ -185,6 +188,11 @@ function GeneralSettings() {
   const themeLabelId = useId();
   const snappingId = useId();
   const voiceSoundsId = useId();
+  const pngScaleLabelId = useId();
+  const pngExportScale = useCanvasUiStore((state) => state.pngExportScale);
+  const setPngExportScale = useCanvasUiStore(
+    (state) => state.setPngExportScale,
+  );
   const theme = useThemeStore((state) => state.theme);
   const setTheme = useThemeStore((state) => state.setTheme);
   const snappingEnabled = useCanvasUiStore((state) => state.snappingEnabled);
@@ -229,6 +237,31 @@ function GeneralSettings() {
           checked={snappingEnabled}
           onCheckedChange={setSnappingEnabled}
         />
+      </PreferenceRow>
+
+      <PreferenceRow
+        label="PNG Resolution"
+        description="Detail in exported and copied images. PNG is lossless, so a higher setting means a sharper, larger file — not less compression. Very large boards are capped automatically."
+        id={pngScaleLabelId}
+      >
+        <ToggleGroup
+          aria-labelledby={pngScaleLabelId}
+          className="w-full max-w-56"
+          value={[String(pngExportScale)]}
+          onValueChange={(value) =>
+            value[0] && setPngExportScale(Number(value[0]))
+          }
+        >
+          {PNG_EXPORT_SCALES.map((scale) => (
+            <ToggleGroupItem
+              key={scale}
+              value={String(scale)}
+              className="max-sm:h-11"
+            >
+              {scale}×
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
       </PreferenceRow>
 
       <PreferenceRow
@@ -337,7 +370,7 @@ function PencilSettings() {
         min={0}
         max={1}
         step={0.01}
-        onChange={pencilSmoothing ? setPencilSmoothing : () => {}}
+        onChange={setPencilSmoothing}
       />
       <SliderField
         label="Start Taper"

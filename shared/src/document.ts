@@ -1,14 +1,17 @@
-import type { Shape } from './shapes/shapes';
-
 /**
- * A single page of a board. Shapes are keyed by id; their stacking order is
- * derived from each shape's fractional `index` (not array position) so it
- * survives concurrent CRDT edits.
+ * A single page of a board.
+ *
+ * Deliberately metadata only. A page's shapes used to hang here as a
+ * `Record<string, Shape>`, which meant the store had to copy every shape on the
+ * page into a fresh object on every mutation just to publish a snapshot —
+ * O(n) per frame of every drag, to serve consumers that only ever looked one
+ * shape up by id. The store exposes `shapesById` for that, and z-order comes
+ * from each shape's fractional `index` (not array position) so it survives
+ * concurrent CRDT edits.
  */
 export interface Page {
   id: string;
   name: string;
-  shapes: Record<string, Shape>;
 }
 
 /**

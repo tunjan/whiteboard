@@ -6,10 +6,20 @@ import {
   DEFAULT_PENCIL_STABILIZATION,
 } from './shapes/ink';
 
+/**
+ * How the eraser treats what it sweeps over. `object` removes a whole shape the
+ * moment the swipe touches it; `precision` cuts pen strokes and lines where the
+ * swipe actually crosses them and keeps the surviving pieces. Shapes that have no
+ * meaningful half — boxes, text, arrows, polygons — are removed whole in both.
+ */
+export type EraserMode = 'object' | 'precision';
+
 interface CanvasUiStore {
   background: BackgroundType;
   /** Whether shape alignment, spacing, resize, and handle snapping is active. */
   snappingEnabled: boolean;
+  /** Whether the eraser removes whole shapes or cuts through ink. */
+  eraserMode: EraserMode;
   /** Pencil stabilization strength from 0..1 for newly drawn strokes. */
   pencilStabilization: number;
   /** Pressure-to-width multiplier (-1..1) for newly drawn strokes. */
@@ -27,8 +37,15 @@ interface CanvasUiStore {
   pencilEndTaper: boolean;
   /** Whether the on-canvas performance overlay (FPS/frame time) is shown. */
   debugPerformance: boolean;
+  /**
+   * Resolution multiplier for exported and copied PNGs, in raster pixels per
+   * board unit. PNG is lossless, so this — not a compression quality — is the
+   * only thing that trades file size against sharpness.
+   */
+  pngExportScale: number;
   setBackground: (background: BackgroundType) => void;
   setSnappingEnabled: (snappingEnabled: boolean) => void;
+  setEraserMode: (eraserMode: EraserMode) => void;
   setPencilStabilization: (pencilStabilization: number) => void;
   setPencilThinning: (pencilThinning: number) => void;
   setPencilSmoothing: (pencilSmoothing: number) => void;
@@ -36,8 +53,14 @@ interface CanvasUiStore {
   setPencilStartTaper: (pencilStartTaper: number) => void;
   setPencilEndTaper: (pencilEndTaper: boolean) => void;
   setDebugPerformance: (debugPerformance: boolean) => void;
+  setPngExportScale: (pngExportScale: number) => void;
   resetPencil: () => void;
 }
+
+/** Offered PNG export resolutions, as a multiplier of the board's own units. */
+export const PNG_EXPORT_SCALES = [1, 2, 3, 4] as const;
+/** Matches the 2x cap the export used to derive from `devicePixelRatio`. */
+export const DEFAULT_PNG_EXPORT_SCALE = 2;
 
 const PENCIL_DEFAULTS = {
   pencilStabilization: DEFAULT_PENCIL_STABILIZATION,
@@ -83,10 +106,13 @@ export const useCanvasUiStore = create<CanvasUiStore>()(
     (set) => ({
       background: 'graph',
       snappingEnabled: true,
+      eraserMode: 'object',
       debugPerformance: false,
+      pngExportScale: DEFAULT_PNG_EXPORT_SCALE,
       ...PENCIL_DEFAULTS,
       setBackground: (background) => set({ background }),
       setSnappingEnabled: (snappingEnabled) => set({ snappingEnabled }),
+      setEraserMode: (eraserMode) => set({ eraserMode }),
       setPencilStabilization: (pencilStabilization) =>
         set({ pencilStabilization }),
       setPencilThinning: (pencilThinning) => set({ pencilThinning }),
@@ -96,6 +122,7 @@ export const useCanvasUiStore = create<CanvasUiStore>()(
       setPencilStartTaper: (pencilStartTaper) => set({ pencilStartTaper }),
       setPencilEndTaper: (pencilEndTaper) => set({ pencilEndTaper }),
       setDebugPerformance: (debugPerformance) => set({ debugPerformance }),
+      setPngExportScale: (pngExportScale) => set({ pngExportScale }),
       resetPencil: () => set({ ...PENCIL_DEFAULTS }),
     }),
     {

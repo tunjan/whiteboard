@@ -111,7 +111,7 @@ function CommentComposer({
   return (
     <div
       data-ui-layer
-      className="pointer-events-auto absolute z-20 origin-top-left ease-[var(--ease-out-expo)] motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95 motion-safe:duration-200"
+      className="pointer-events-auto absolute z-[var(--z-canvas-front)] origin-top-left ease-[var(--ease-out-expo)] motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95 motion-safe:duration-200"
       style={{ left: screen.x, top: screen.y + 16 }}
       onPointerDown={(e) => e.stopPropagation()}
       onKeyDown={(e) => {
@@ -188,7 +188,7 @@ function ThreadPopup({
   return (
     <div
       data-ui-layer
-      className="pointer-events-auto absolute z-20 flex origin-top-left flex-col overflow-hidden rounded-md border border-border bg-surface shadow-hover ease-[var(--ease-out-expo)] motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95 motion-safe:duration-200"
+      className="pointer-events-auto absolute z-[var(--z-canvas-front)] flex origin-top-left flex-col overflow-hidden rounded-md border border-border bg-surface shadow-hover ease-[var(--ease-out-expo)] motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95 motion-safe:duration-200"
       style={{ left, top, width: POPUP_WIDTH }}
       onPointerDown={(e) => e.stopPropagation()}
       onKeyDown={(e) => {

@@ -13,6 +13,17 @@ describe('rewriting MathJax errors', () => {
     );
   });
 
+  // Deep enough nesting overflows the converter before MathJax can judge the
+  // TeX, and the raw text describes our renderer rather than the equation.
+  it('explains an engine failure in terms of the expression', () => {
+    expect(readableError('Maximum call stack size exceeded')).toBe(
+      'This expression is nested too deeply to render — try splitting it into separate equations.',
+    );
+    expect(readableError('InternalError: too much recursion')).toBe(
+      'This expression is nested too deeply to render — try splitting it into separate equations.',
+    );
+  });
+
   it('passes through messages it has nothing better to say about', () => {
     expect(readableError('Misplaced alignment tab character &')).toBe(
       'Misplaced alignment tab character &',

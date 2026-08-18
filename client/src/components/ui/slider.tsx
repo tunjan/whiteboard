@@ -10,11 +10,17 @@ function Slider({
   max = 100,
   ...props
 }: SliderPrimitive.Root.Props) {
-  const _values = Array.isArray(value)
-    ? value
-    : Array.isArray(defaultValue)
-      ? defaultValue
-      : [min, max]
+  // How many thumbs to render. Base UI takes a single value as a bare number,
+  // and every slider in this app is a single value, so falling back to
+  // `[min, max]` drew a second thumb pinned to the maximum on all of them —
+  // and that stray thumb is the one that ends up on top at the right-hand end
+  // of the track, so grabbing it there did nothing.
+  const _values =
+    value !== undefined
+      ? toValues(value)
+      : defaultValue !== undefined
+        ? toValues(defaultValue)
+        : [min, max]
 
   return (
     <SliderPrimitive.Root
@@ -47,6 +53,10 @@ function Slider({
       </SliderPrimitive.Control>
     </SliderPrimitive.Root>
   )
+}
+
+function toValues(value: number | readonly number[]): readonly number[] {
+  return Array.isArray(value) ? value : [value as number]
 }
 
 export { Slider }

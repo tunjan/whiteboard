@@ -9,7 +9,9 @@ import {
   polylineTransform,
   resizePolyline,
 } from './line-geometry';
-import { strokeDashArray } from './render-style';
+import { polylineLength } from './perfect-dash';
+import { dashProps, DrawnOutline } from './render-style';
+import { useLodDash } from '../lod';
 import type { ShapeUtil } from './types';
 
 export const lineUtil: ShapeUtil<'line'> = {
@@ -29,7 +31,10 @@ export const lineUtil: ShapeUtil<'line'> = {
   getBounds: (s) => {
     const fontSize = Math.max(12, s.props.size * 3);
     const labelPad = s.props.label?.trim()
-      ? Math.max(s.props.size / 2, s.props.label.trim().length * fontSize * 0.3 + fontSize)
+      ? Math.max(
+          s.props.size / 2,
+          s.props.label.trim().length * fontSize * 0.3 + fontSize,
+        )
       : s.props.size / 2;
     return polylineBounds(
       s.x,
@@ -67,7 +72,11 @@ export const lineUtil: ShapeUtil<'line'> = {
     return {
       x,
       y,
-      props: { ...initial.props, points, bend: (initial.props.bend ?? 0) * scale },
+      props: {
+        ...initial.props,
+        points,
+        bend: (initial.props.bend ?? 0) * scale,
+      },
     };
   },
 
@@ -76,7 +85,8 @@ export const lineUtil: ShapeUtil<'line'> = {
     lineHandleDrag(s, handleId, point, opts),
 
   Component: ({ shape }) => {
-    const { points, color, size, dash, bend, spline, label } = shape.props;
+    const { points, color, size, bend, spline, label } = shape.props;
+    const dash = useLodDash(shape.props.dash, size);
     if (points.length < 2) return null;
     const pts = curvePoints(points, bend ?? 0, spline ?? 'linear');
     const middle = pathMidpoint(pts);
@@ -87,15 +97,24 @@ export const lineUtil: ShapeUtil<'line'> = {
     };
     return (
       <g transform={polylineTransform(shape.x, shape.y, pts, shape.rotation)}>
-        <path
-          d={curvePath(points, bend ?? 0, spline ?? 'linear')}
-          fill="none"
-          stroke={color}
-          strokeWidth={size}
-          strokeDasharray={strokeDashArray(dash, size)}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
+        {dash === 'draw' ? (
+          <DrawnOutline
+            points={pts}
+            seed={shape.id}
+            color={color}
+            size={size}
+          />
+        ) : (
+          <path
+            d={curvePath(points, bend ?? 0, spline ?? 'linear')}
+            fill="none"
+            stroke={color}
+            strokeWidth={size}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            {...dashProps(dash, size, polylineLength(pts))}
+          />
+        )}
         {label?.trim() ? (
           <text
             x={labelPoint.x}

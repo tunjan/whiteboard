@@ -17,8 +17,8 @@ import {
 import { MindBlown, Skull } from './sticker-icons';
 
 /**
- * The app's accent language: the Vibrant palette's dark row (L 0.70 / C 0.15)
- * from `use-style-store.ts`, listed in hue order. Sticker artwork keeps one
+ * The app's accent language: one evenly spaced hue wheel at a shared lightness
+ * and chroma (L 0.70 / C 0.15), listed in hue order. Sticker artwork keeps one
  * fixed color across a theme switch and through the PNG export, so this stays
  * a literal hex set rather than a theme-aware CSS variable.
  */

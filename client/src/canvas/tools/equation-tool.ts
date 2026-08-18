@@ -7,7 +7,7 @@ import {
   type Shape,
 } from '@whiteboard/shared';
 import { requestEquationFocus } from '../equation-focus';
-import { ensureMathJax } from '../equation-render';
+import { ensureEquationRenderer } from '../equation-render';
 import { getTopIndex } from '../order';
 import { shapeRegistry } from '../shapes/shape-registry';
 import { useSelectionStore } from '../use-selection-store';
@@ -37,7 +37,7 @@ function placeEquation(point: Point, ctx: ToolContext): void {
   ctx.editor.createShape(shape);
   useSelectionStore.getState().setSelection([id]);
   requestEquationFocus(id);
-  void ensureMathJax().catch(() => undefined);
+  void ensureEquationRenderer().catch(() => undefined);
   ctx.complete();
 }
 
@@ -52,7 +52,7 @@ export function createEquationTool(): Tool {
     // Start the (lazy, sizeable) MathJax load when the tool is picked, so the
     // renderer is usually warm by the time the first equation is placed.
     onEnter() {
-      void ensureMathJax().catch(() => undefined);
+      void ensureEquationRenderer().catch(() => undefined);
     },
 
     onPointerDown(info: ToolPointerInfo, ctx: ToolContext) {

@@ -6,7 +6,7 @@ export function BrandMark({ className }: { className?: string }) {
       src="/best-whiteboard-brandmark.png"
       alt=""
       aria-hidden="true"
-      className={cn('size-9 rounded-full', className)}
+      className={cn('size-9 rounded-lg', className)}
     />
   );
 }

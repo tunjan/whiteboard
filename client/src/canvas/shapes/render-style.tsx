@@ -1,26 +1,111 @@
 import type { ReactElement } from 'react';
-import type { FillStyle, StrokeDash } from '@whiteboard/shared';
+import type { FillStyle, StrokeDash, Vec } from '@whiteboard/shared';
+import {
+  getPerfectDashProps,
+  type DashProps,
+  type PerfectDashOptions,
+} from './perfect-dash';
+import { synthesizeDrawPaths } from './geometry-synthesis';
 
 /**
- * strokeDasharray for a dash style at a given stroke width (or undefined).
+ * Dash attributes for a stroke of `length`, distributed so both of its ends
+ * land on a whole dash. See {@link getPerfectDashProps}.
  *
- * `dotLength` overrides the zero length a dot normally has; see
- * {@link useDotLength}. It defaults to 0, so callers that don't pass one keep
- * the plain round dot.
+ * `length` is the arc length of the path being stroked, in the same units as
+ * `size` — every caller already has to flatten its geometry for hit-testing, so
+ * this is measured from that same polyline rather than a second approximation
+ * of the shape.
  */
-export function strokeDashArray(
+export function dashProps(
   dash: StrokeDash,
   size: number,
-  dotLength = 0,
-): string | undefined {
-  if (dash === 'dashed') return `${size * 2.5} ${size * 2}`;
-  // dot = zero-length dash with round linecaps.
-  if (dash === 'dotted') return `${dotLength} ${size * 1.8}`;
-  return undefined;
+  length: number,
+  opts: PerfectDashOptions = {},
+): DashProps {
+  return getPerfectDashProps(length, size, { ...opts, style: dash });
 }
 
 export function strokeLineCap(dash: StrokeDash): 'round' | undefined {
   return dash === 'dotted' ? 'round' : undefined;
+}
+
+/**
+ * The outline of a closed straight-edged shape, with each edge dashed on its
+ * own arc length rather than the whole perimeter's.
+ *
+ * Dashing a perimeter in one pass lets a dash straddle a corner and puts the
+ * pattern's phase at each corner at the mercy of the lengths of the edges
+ * before it, so two sides of the same rectangle disagree about where their
+ * dashes sit. Per-edge, every corner is the centre of a dash: each edge
+ * overhangs its ends by half a dash, and the two halves meeting at a vertex
+ * read as the single dash that turns the corner.
+ */
+export function DashedOutline({
+  points,
+  dash,
+  color,
+  size,
+}: {
+  points: readonly Vec[];
+  dash: Extract<StrokeDash, 'dashed' | 'dotted'>;
+  color: string;
+  size: number;
+}): ReactElement {
+  return (
+    <>
+      {points.map((from, i) => {
+        const to = points[(i + 1) % points.length]!;
+        const length = Math.hypot(to.x - from.x, to.y - from.y);
+        return (
+          <line
+            key={i}
+            x1={from.x}
+            y1={from.y}
+            x2={to.x}
+            y2={to.y}
+            stroke={color}
+            strokeWidth={size}
+            // Round, so the half-dashes arriving at a vertex from either side
+            // close over the corner instead of leaving a wedge of it unpainted.
+            strokeLinecap="round"
+            {...dashProps(dash, size, length)}
+          />
+        );
+      })}
+    </>
+  );
+}
+
+/** Deterministic two-pass outline used by the `draw` stroke style. */
+export function DrawnOutline({
+  points,
+  seed,
+  color,
+  size,
+  closed = false,
+}: {
+  points: readonly Vec[];
+  seed: string;
+  color: string;
+  size: number;
+  closed?: boolean;
+}): ReactElement {
+  const paths = synthesizeDrawPaths(points, { seed, size, closed });
+  return (
+    <>
+      {paths.map((d, pass) => (
+        <path
+          key={pass}
+          d={d}
+          fill="none"
+          stroke={color}
+          strokeWidth={size}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      ))}
+    </>
+  );
 }
 
 export interface FillResult {
@@ -67,7 +152,11 @@ export function fillFor(
     return {
       fill: `url(#${pid})`,
       pattern: (
-        <HatchPattern id={pid} color={color} crosshatch={fillStyle === 'crosshatch'} />
+        <HatchPattern
+          id={pid}
+          color={color}
+          crosshatch={fillStyle === 'crosshatch'}
+        />
       ),
     };
   }

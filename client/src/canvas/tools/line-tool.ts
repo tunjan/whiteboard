@@ -94,6 +94,8 @@ export function createLineTool(opts: LineToolOptions): Tool {
       snapTargets = snapTargetShapes(
         ctx.editor,
         new Set(),
+        // The line is created at the page root, so that is the snap scope.
+        null,
         snapRegion(ctx, {
           minX: info.point.x,
           minY: info.point.y,

@@ -4,33 +4,27 @@ import {
   type Shape,
   boundsCenter,
   boundsContainsPoint,
-  distanceToSegment,
   pointInPolygon,
   pointsBounds,
   rotatePoint,
+  segmentsIntersect,
+  segmentToSegmentDistance,
 } from '@whiteboard/shared';
 import { containerBounds } from './hierarchy';
 import { shapeRotatedBounds } from './shape-bounds';
-import { arrowPoints, curvePoints, tangentAnchor } from './shapes/line-geometry';
+import {
+  arrowPoints,
+  curvePoints,
+  tangentAnchor,
+} from './shapes/line-geometry';
 import { normalizedPolygonPoints } from './shapes/polygon-geometry';
 import { shapeRegistry } from './shapes/shape-registry';
 import type { ShapeHandle } from './shapes/types';
 
 export { shapeRotatedBounds };
 
-export type ResizeHandleId =
-  | 'nw'
-  | 'n'
-  | 'ne'
-  | 'e'
-  | 'se'
-  | 's'
-  | 'sw'
-  | 'w';
-export type CornerHandleId = Extract<
-  ResizeHandleId,
-  'nw' | 'ne' | 'se' | 'sw'
->;
+export type ResizeHandleId = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
+export type CornerHandleId = Extract<ResizeHandleId, 'nw' | 'ne' | 'se' | 'sw'>;
 export type RotationHandleId = `rotate-${CornerHandleId}`;
 export type MarqueeMode = 'intersect' | 'wrap';
 
@@ -84,7 +78,7 @@ export interface SelectionInfo {
 }
 
 function pageRotation(shape: Shape): number {
-  if (shape.type === 'group' || shape.type === 'frame') return 0;
+  if (shape.type === 'group') return 0;
   return Math.atan2(Math.sin(shape.rotation), Math.cos(shape.rotation));
 }
 
@@ -187,9 +181,11 @@ export function getSelectionInfo(
     };
     // Groups show a box but move-only (no handles). Locked shapes likewise show
     // a box with no editing affordances. Connectors own their custom handles and
-    // suppress the generic box. Frames resize but don't rotate.
+    // suppress the generic box. Frames use the same oriented box mechanics as
+    // other rectangular shapes; their descendants are expanded by the select
+    // tool so a frame rotation carries its whole subtree.
     const noHandles = shape.locked || isGroup;
-    const customHandles = noHandles ? null : util.getHandles?.(shape) ?? null;
+    const customHandles = noHandles ? null : (util.getHandles?.(shape) ?? null);
 
     let handles: { id: ResizeHandleId; point: Point }[] = [];
     let rotationHandles: SelectionInfo['rotationHandles'] = [];
@@ -203,15 +199,13 @@ export function getSelectionInfo(
           ? (['nw', 'ne', 'e', 'se', 'sw', 'w'] as ResizeHandleId[])
           : RESIZE_HANDLES;
       handles = resizeHandles.map((id) => ({ id, point: handlePts[id] }));
-      if (shape.type !== 'frame') {
-        const d = ROTATE_CORNER_OFFSET / zoom;
-        rotationHandles = [
-          { id: 'rotate-nw', point: rot(minX - d, minY - d) },
-          { id: 'rotate-ne', point: rot(maxX + d, minY - d) },
-          { id: 'rotate-se', point: rot(maxX + d, maxY + d) },
-          { id: 'rotate-sw', point: rot(minX - d, maxY + d) },
-        ];
-      }
+      const d = ROTATE_CORNER_OFFSET / zoom;
+      rotationHandles = [
+        { id: 'rotate-nw', point: rot(minX - d, minY - d) },
+        { id: 'rotate-ne', point: rot(maxX + d, minY - d) },
+        { id: 'rotate-se', point: rot(maxX + d, maxY + d) },
+        { id: 'rotate-sw', point: rot(minX - d, maxY + d) },
+      ];
     }
 
     return {
@@ -270,8 +264,7 @@ export function getSelectionInfo(
   const bounds = pointsBounds(Object.values(corners));
   const center = fromAligned(midX, midY);
   const canRotateAll = selected.every(
-    (shape) =>
-      !shape.locked && shape.type !== 'group' && shape.type !== 'frame',
+    (shape) => !shape.locked && shape.type !== 'group',
   );
   const d = ROTATE_CORNER_OFFSET / zoom;
   return {
@@ -283,9 +276,10 @@ export function getSelectionInfo(
     // The existing group resize math is page-axis-aligned. Keep those handles
     // off an oriented controller until that separate gesture can preserve the
     // shared axis without distorting children.
-    handles: selected.some((shape) => !shape.locked) && rotation === 0
-      ? RESIZE_HANDLES.map((id) => ({ id, point: groupPts[id] }))
-      : [],
+    handles:
+      selected.some((shape) => !shape.locked) && rotation === 0
+        ? RESIZE_HANDLES.map((id) => ({ id, point: groupPts[id] }))
+        : [],
     rotationHandles: canRotateAll
       ? [
           { id: 'rotate-nw', point: fromAligned(minX - d, minY - d) },
@@ -451,6 +445,7 @@ function marqueeGeometry(shape: Shape): MarqueeGeometry | null {
     case 'image':
     case 'sticker':
     case 'video':
+    case 'bookmark':
     case 'graph':
     case 'equation':
     case 'frame':
@@ -580,12 +575,21 @@ function arrowHeadSegments(from: Point, to: Point, size: number): Segment[] {
     x: to.x - length * Math.cos(angle + spread),
     y: to.y - length * Math.sin(angle + spread),
   };
-  return [[a, to], [to, b]];
+  return [
+    [a, to],
+    [to, b],
+  ];
 }
 
-function geometryIsContained(geometry: MarqueeGeometry, bounds: Bounds): boolean {
+function geometryIsContained(
+  geometry: MarqueeGeometry,
+  bounds: Bounds,
+): boolean {
   if (geometry.kind === 'region') {
-    return geometry.outline.length > 0 && geometry.outline.every((point) => boundsContainsPoint(bounds, point));
+    return (
+      geometry.outline.length > 0 &&
+      geometry.outline.every((point) => boundsContainsPoint(bounds, point))
+    );
   }
   const inset = {
     minX: bounds.minX + geometry.radius,
@@ -597,14 +601,19 @@ function geometryIsContained(geometry: MarqueeGeometry, bounds: Bounds): boolean
     inset.minX <= inset.maxX &&
     inset.minY <= inset.maxY &&
     geometry.segments.length > 0 &&
-    geometry.segments.every(([a, b]) =>
-      boundsContainsPoint(inset, a) && boundsContainsPoint(inset, b),
+    geometry.segments.every(
+      ([a, b]) =>
+        boundsContainsPoint(inset, a) && boundsContainsPoint(inset, b),
     )
   );
 }
 
-function geometryTouchesBounds(geometry: MarqueeGeometry, bounds: Bounds): boolean {
-  if (geometry.kind === 'region') return polygonTouchesBounds(geometry.outline, bounds);
+function geometryTouchesBounds(
+  geometry: MarqueeGeometry,
+  bounds: Bounds,
+): boolean {
+  if (geometry.kind === 'region')
+    return polygonTouchesBounds(geometry.outline, bounds);
   // The marquee's own edges are the same for every segment; a freehand stroke
   // has one segment per point, so rebuilding them inside the loop allocated
   // 8 objects per point on each drag frame.
@@ -614,7 +623,10 @@ function geometryTouchesBounds(geometry: MarqueeGeometry, bounds: Bounds): boole
   );
 }
 
-function polygonTouchesBounds(polygon: readonly Point[], bounds: Bounds): boolean {
+function polygonTouchesBounds(
+  polygon: readonly Point[],
+  bounds: Bounds,
+): boolean {
   if (polygon.length === 0) return false;
   if (polygon.some((point) => boundsContainsPoint(bounds, point))) return true;
   const corners = boxOutline(bounds);
@@ -634,43 +646,7 @@ function strokeTouchesBounds(
   edges: Segment[],
 ): boolean {
   const [a, b] = segment;
-  if (boundsContainsPoint(bounds, a) || boundsContainsPoint(bounds, b)) return true;
-  return edges.some(([c, d]) => segmentDistance(a, b, c, d) <= radius);
-}
-
-function segmentDistance(a: Point, b: Point, c: Point, d: Point): number {
-  if (segmentsIntersect(a, b, c, d)) return 0;
-  return Math.min(
-    distanceToSegment(a, c, d),
-    distanceToSegment(b, c, d),
-    distanceToSegment(c, a, b),
-    distanceToSegment(d, a, b),
-  );
-}
-
-function segmentsIntersect(a: Point, b: Point, c: Point, d: Point): boolean {
-  const ab = cross(a, b, c);
-  const ac = cross(a, b, d);
-  const cd = cross(c, d, a);
-  const ce = cross(c, d, b);
-  if ((ab > 0) !== (ac > 0) && (cd > 0) !== (ce > 0)) return true;
-  return (
-    (Math.abs(ab) < 1e-8 && pointOnSegment(c, a, b)) ||
-    (Math.abs(ac) < 1e-8 && pointOnSegment(d, a, b)) ||
-    (Math.abs(cd) < 1e-8 && pointOnSegment(a, c, d)) ||
-    (Math.abs(ce) < 1e-8 && pointOnSegment(b, c, d))
-  );
-}
-
-function cross(a: Point, b: Point, p: Point): number {
-  return (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
-}
-
-function pointOnSegment(point: Point, a: Point, b: Point): boolean {
-  return (
-    point.x >= Math.min(a.x, b.x) - 1e-8 &&
-    point.x <= Math.max(a.x, b.x) + 1e-8 &&
-    point.y >= Math.min(a.y, b.y) - 1e-8 &&
-    point.y <= Math.max(a.y, b.y) + 1e-8
-  );
+  if (boundsContainsPoint(bounds, a) || boundsContainsPoint(bounds, b))
+    return true;
+  return edges.some(([c, d]) => segmentToSegmentDistance(a, b, c, d) <= radius);
 }

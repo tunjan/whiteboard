@@ -139,24 +139,22 @@ export function CursorsLayer({
 }) {
   const peers = usePresenceStore((s) => s.peers);
   const currentPageId = useDocumentStore((s) => s.currentPageId);
-  // Only the shapes peers have a text selection in — usually none. Subscribing
-  // to the whole page record instead re-rendered every peer cursor once per
-  // frame of every stroke, since that record is rebuilt on each mutation.
+  // Only the shapes peers have a text selection in — usually none. Extracting
+  // them by id keeps this off the per-mutation path: depending on a whole-page
+  // object re-rendered every peer cursor once per frame of every stroke.
   const shapes = useDocumentStore(
     useShallow((s) => {
-      const record = s.doc.pages[s.currentPageId]?.shapes;
       const out: Record<string, Shape> = {};
-      if (!record) return out;
       for (const p of peers) {
         const id = p.textSelection?.shapeId;
-        const shape = id ? record[id] : undefined;
+        const shape = id ? s.shapesById.get(id) : undefined;
         if (id && shape) out[id] = shape;
       }
       return out;
     }),
   );
   return (
-    <div className="pointer-events-none absolute inset-0 overflow-hidden">
+    <div className="pointer-events-none absolute inset-0 z-[var(--z-canvas-collaborator)] overflow-hidden">
       {peers.map((p) => {
         // Only show cursors of peers viewing the same page.
         if (p.page && p.page !== currentPageId) return null;

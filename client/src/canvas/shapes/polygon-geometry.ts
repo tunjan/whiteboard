@@ -39,6 +39,20 @@ export function normalizedPolygonPoints(kind: PolygonKind): Vec[] {
   }
 }
 
+/** Polygon vertices placed in a world-space box. */
+export function polygonVerticesForBox(
+  kind: PolygonKind,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+): Vec[] {
+  return normalizedPolygonPoints(kind).map((p) => ({
+    x: x + p.x * w,
+    y: y + p.y * h,
+  }));
+}
+
 /** SVG `points` attribute for a polygon placed in a world-space box. */
 export function polygonPointsForBox(
   kind: PolygonKind,
@@ -47,7 +61,7 @@ export function polygonPointsForBox(
   w: number,
   h: number,
 ): string {
-  return normalizedPolygonPoints(kind)
-    .map((p) => `${x + p.x * w},${y + p.y * h}`)
+  return polygonVerticesForBox(kind, x, y, w, h)
+    .map((p) => `${p.x},${p.y}`)
     .join(' ');
 }

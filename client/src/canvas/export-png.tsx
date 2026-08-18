@@ -4,7 +4,12 @@ import { type Bounds, type Shape, unionBounds } from '@whiteboard/shared';
 import { descendantsOf } from './hierarchy';
 import { getEquationRender, typesetEquation } from './equation-render';
 import { shapeRotatedBounds } from './shape-bounds';
-import { compareIndex, editor, spatialIndex } from './use-document-store';
+import {
+  DEFAULT_PNG_EXPORT_SCALE,
+  PNG_EXPORT_SCALES,
+  useCanvasUiStore,
+} from './use-canvas-ui-store';
+import { compareIndex, editor } from './use-document-store';
 import { shapeRegistry } from './shapes/shape-registry';
 import { FrameView } from './shapes/frame';
 import { withPhysChunk } from './png-phys';
@@ -19,6 +24,8 @@ const MAX_DIM = 8192;
 interface Scene {
   tree: ReactNode;
   bounds: Bounds;
+  /** World padding around bounds (zero for a frame export boundary). */
+  padding: number;
   /** Non-empty equations excluded because they don't typeset. */
   invalidEquations: number;
 }
@@ -32,15 +39,56 @@ interface Scene {
  * fonts, and `/api/blobs` images — then rasterize it to PNG.
  */
 async function boardScene(): Promise<Scene | null> {
-  const bounds = spatialIndex.totalBounds();
-  if (!bounds) return null; // empty board: nothing to export
   const shapes = editor.getShapes();
   await prewarmEquationRenders(shapes);
+  const byId = new Map(shapes.map((shape) => [shape.id, shape]));
+  let bounds: Bounds | null = null;
+  for (const shape of shapes) {
+    if (shape.type === 'group' || !isExportable(shape)) continue;
+    const visible = maskedExportBounds(shape, byId);
+    if (visible) bounds = bounds ? unionBounds(bounds, visible) : visible;
+  }
+  if (!bounds) return null; // empty board: nothing to export
   return {
     tree: renderTree(),
     bounds,
+    padding: PADDING,
     invalidEquations: countInvalidEquations(shapes),
   };
+}
+
+function intersectBounds(a: Bounds, b: Bounds): Bounds | null {
+  const intersection = {
+    minX: Math.max(a.minX, b.minX),
+    minY: Math.max(a.minY, b.minY),
+    maxX: Math.min(a.maxX, b.maxX),
+    maxY: Math.min(a.maxY, b.maxY),
+  };
+  return intersection.minX <= intersection.maxX &&
+    intersection.minY <= intersection.maxY
+    ? intersection
+    : null;
+}
+
+/** Conservative page bounds after every ancestor frame mask is applied. */
+function maskedExportBounds(
+  shape: Shape,
+  byId: ReadonlyMap<string, Shape>,
+): Bounds | null {
+  let bounds = shapeRotatedBounds(shape);
+  if (shape.type === 'arrow') return bounds;
+  let parent = shape.parentId ? byId.get(shape.parentId) : undefined;
+  const seen = new Set<string>();
+  while (parent && !seen.has(parent.id)) {
+    seen.add(parent.id);
+    if (parent.type === 'frame') {
+      const clipped = intersectBounds(bounds, shapeRotatedBounds(parent));
+      if (!clipped) return null;
+      bounds = clipped;
+    }
+    parent = parent.parentId ? byId.get(parent.parentId) : undefined;
+  }
+  return bounds;
 }
 
 /**
@@ -50,6 +98,10 @@ async function boardScene(): Promise<Scene | null> {
 async function selectionScene(ids: string[]): Promise<Scene | null> {
   if (!ids.length) return null;
   const shapes = editor.getShapes();
+  const singleFrame =
+    ids.length === 1 && editor.getShape(ids[0]!)?.type === 'frame'
+      ? (editor.getShape(ids[0]!) as Extract<Shape, { type: 'frame' }>)
+      : null;
   const renderSet = new Set<string>();
   for (const id of ids) {
     renderSet.add(id);
@@ -60,18 +112,23 @@ async function selectionScene(ids: string[]): Promise<Scene | null> {
   await prewarmEquationRenders(shapes, renderSet);
   // Bounds = union of the rotated world bounds of every rendered shape with its
   // own geometry (groups carry none, so they're skipped).
-  let bounds: Bounds | null = null;
-  for (const s of shapes) {
-    if (!renderSet.has(s.id) || s.type === 'group' || !isExportable(s)) {
-      continue;
+  let bounds: Bounds | null = singleFrame
+    ? shapeRotatedBounds(singleFrame)
+    : null;
+  if (!singleFrame) {
+    for (const s of shapes) {
+      if (!renderSet.has(s.id) || s.type === 'group' || !isExportable(s)) {
+        continue;
+      }
+      const b = shapeRotatedBounds(s);
+      bounds = bounds ? unionBounds(bounds, b) : b;
     }
-    const b = shapeRotatedBounds(s);
-    bounds = bounds ? unionBounds(bounds, b) : b;
   }
   if (!bounds) return null;
   return {
-    tree: renderTree(renderSet),
+    tree: renderTree(renderSet, singleFrame?.id),
     bounds,
+    padding: singleFrame ? 0 : PADDING,
     invalidEquations: countInvalidEquations(shapes, renderSet),
   };
 }
@@ -178,30 +235,41 @@ async function prewarmEquationRenders(
 ): Promise<void> {
   const latexes = new Set<string>();
   for (const shape of shapes) {
-    if (
-      shape.type !== 'equation' ||
-      (renderSet && !renderSet.has(shape.id))
-    ) {
+    if (shape.type !== 'equation' || (renderSet && !renderSet.has(shape.id))) {
       continue;
     }
     const latex = shape.props.latex.trim();
     if (latex) latexes.add(latex);
   }
   await Promise.all(
-    [...latexes].map((latex) =>
-      typesetEquation(latex).catch(() => undefined),
-    ),
+    [...latexes].map((latex) => typesetEquation(latex).catch(() => undefined)),
   );
 }
 
-/** Rasterize a scene to a PNG blob at the largest scale the caps allow. */
-async function renderPngBlob({ tree, bounds }: Scene): Promise<Blob> {
-  const minX = bounds.minX - PADDING;
-  const minY = bounds.minY - PADDING;
-  const w = bounds.maxX - bounds.minX + PADDING * 2;
-  const h = bounds.maxY - bounds.minY + PADDING * 2;
+/**
+ * The persisted export resolution, sanitized. `localStorage` is user-writable
+ * and a non-finite value here would propagate into the canvas dimensions and
+ * produce a blank or failed export rather than an obviously wrong one.
+ */
+function exportScale(): number {
+  const scale = useCanvasUiStore.getState().pngExportScale;
+  if (!Number.isFinite(scale) || scale <= 0) return DEFAULT_PNG_EXPORT_SCALE;
+  return Math.min(scale, Math.max(...PNG_EXPORT_SCALES));
+}
 
-  let scale = Math.min(window.devicePixelRatio || 1, 2);
+/** Rasterize a scene to a PNG blob at the largest scale the caps allow. */
+async function renderPngBlob({ tree, bounds, padding }: Scene): Promise<Blob> {
+  const minX = bounds.minX - padding;
+  const minY = bounds.minY - padding;
+  const w = bounds.maxX - bounds.minX + padding * 2;
+  const h = bounds.maxY - bounds.minY + padding * 2;
+
+  // The user's chosen resolution (Settings → General → PNG Resolution). This
+  // used to be `min(devicePixelRatio, 2)`, which made the same board export at
+  // a different size depending on the monitor it happened to be opened on.
+  let scale = exportScale();
+  // `MAX_DIM` still wins: a sprawling board at 4x would otherwise allocate a
+  // canvas large enough to fail, so the request is silently reduced to fit.
   scale = Math.min(scale, MAX_DIM / w, MAX_DIM / h);
   scale = Math.max(scale, 0.1);
   const outW = Math.ceil(w * scale);
@@ -238,7 +306,7 @@ async function renderPngBlob({ tree, bounds }: Scene): Promise<Blob> {
  * Pass `renderSet` to restrict output to those shapes (used by the selection
  * export); omit it to render the whole page.
  */
-function renderTree(renderSet?: Set<string>): ReactNode {
+function renderTree(renderSet?: Set<string>, rootFrameId?: string): ReactNode {
   const shapes = editor.getShapes();
   const byId = new Map(shapes.map((s) => [s.id, s]));
   const inSet = (id: string) => {
@@ -251,6 +319,7 @@ function renderTree(renderSet?: Set<string>): ReactNode {
   // itself part of the output — otherwise a shape inside an unselected frame
   // would never render during a selection export.
   const hasRenderedFrameAncestor = (s: Shape): boolean => {
+    if (s.type === 'arrow') return false;
     let cur = s.parentId ? byId.get(s.parentId) : undefined;
     const seen = new Set<string>();
     while (cur && !seen.has(cur.id)) {
@@ -266,11 +335,27 @@ function renderTree(renderSet?: Set<string>): ReactNode {
       .filter((s) => s.parentId === parentId && inSet(s.id))
       .sort(compareIndex);
 
-  const render = (shape: Shape): ReactNode => {
+  const render = (shape: Shape, insideFrame = false): ReactNode => {
+    if (shape.type === 'group') {
+      return insideFrame ? (
+        <g key={shape.id}>
+          {childrenOf(shape.id)
+            .filter((child) => child.type !== 'arrow')
+            .map((child) => render(child, true))}
+        </g>
+      ) : null;
+    }
     if (shape.type === 'frame') {
       return (
-        <FrameView key={shape.id} frame={shape}>
-          {childrenOf(shape.id).map(render)}
+        <FrameView
+          key={shape.id}
+          frame={shape}
+          showBorder={shape.id !== rootFrameId}
+          showTitle={shape.id !== rootFrameId}
+        >
+          {childrenOf(shape.id)
+            .filter((child) => child.type !== 'arrow')
+            .map((child) => render(child, true))}
         </FrameView>
       );
     }
@@ -281,7 +366,7 @@ function renderTree(renderSet?: Set<string>): ReactNode {
   const topLevel = [...shapes]
     .sort(compareIndex)
     .filter((s) => inSet(s.id) && !hasRenderedFrameAncestor(s));
-  return <>{topLevel.map(render)}</>;
+  return <>{topLevel.map((shape) => render(shape, false))}</>;
 }
 
 /**
@@ -316,9 +401,9 @@ function resolveCssVars(input: string): string {
 async function inlineBlobImages(svg: string): Promise<string> {
   const urls = [
     ...new Set(
-      [...svg.matchAll(/\/api\/blobs\/[a-f0-9]{64}\.(?:png|jpg|webp|gif)/g)].map(
-        (m) => m[0],
-      ),
+      [
+        ...svg.matchAll(/\/api\/blobs\/[a-f0-9]{64}\.(?:png|jpg|webp|gif)/g),
+      ].map((m) => m[0]),
     ),
   ];
   let out = svg;
@@ -362,7 +447,9 @@ async function webFontFace(match: RegExp, familyName: string): Promise<string> {
       if (url) break;
     }
     if (!url) return '';
-    const buf = await (await fetch(url, { credentials: 'include' })).arrayBuffer();
+    const buf = await (
+      await fetch(url, { credentials: 'include' })
+    ).arrayBuffer();
     return (
       `@font-face{font-family:'${familyName}';font-style:normal;` +
       `font-weight:100 900;font-display:block;` +

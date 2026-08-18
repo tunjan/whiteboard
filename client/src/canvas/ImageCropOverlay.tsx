@@ -177,7 +177,7 @@ export function ImageCropOverlay({
 
   return (
     <div
-      className="absolute inset-0 z-30"
+      className="absolute inset-0 z-[var(--z-canvas-front)]"
       style={{ cursor: 'default' }}
       onPointerDown={commit}
     >

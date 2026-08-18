@@ -13,5 +13,6 @@ export * from './board-repository';
 export * from './music';
 export * from './documents';
 export * from './stickers';
+export * from './links';
 export * from './latency';
 export * from './voice';

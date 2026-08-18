@@ -15,12 +15,17 @@
     "build": "concurrently -n client,server -c blue,green \"npm run build -w client\" \"npm run build -w server\"",
     "start": "npm run start -w server",
     "typecheck": "npm run typecheck -w shared && npm run typecheck -w client && npm run typecheck -w server",
+    "test": "npm run test -w client && npm run test -w server",
+    "check": "npm run typecheck && npm run test",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "db:up": "docker compose up -d",
     "db:down": "docker compose down",
     "db:push": "npm run db:push -w server"
   },
   "devDependencies": {
     "concurrently": "^9.1.0",
+    "prettier": "^3.9.6",
     "typescript": "^7.0.2"
   }
 }

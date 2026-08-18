@@ -19,6 +19,9 @@ export const boards = pgTable('boards', {
   // Tutor-only notes about the student. Never exposed to student clients or the
   // Yjs doc — only served via the requireTutor-gated /notes endpoints.
   privateNotes: text('private_notes').notNull().default(''),
+  // Tutor-only log of the student's recurring mistakes. Same gating as
+  // privateNotes — served only by the requireTutor /notes endpoints.
+  errorLog: text('error_log').notNull().default(''),
   createdAt: timestamp('created_at', { withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -35,6 +38,12 @@ export const boards = pgTable('boards', {
 export const boardDocuments = pgTable('board_documents', {
   boardId: text('board_id').primaryKey(),
   data: bytea('data').notNull(),
+  // Which Yjs update encoding `data` holds. V1 keeps every superseded map write
+  // at full width, so a board's row grows with edit *history* rather than with
+  // its contents — a 50-shape page dragged for 600 frames encodes to ~593 KB in
+  // V1 and ~6 KB in V2, and the gap widens without bound. New writes are always
+  // 'v2'; the column exists so rows written before this change still load.
+  format: text('format').notNull().default('v1'),
   updatedAt: timestamp('updated_at', { withTimezone: true })
     .notNull()
     .defaultNow(),

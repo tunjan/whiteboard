@@ -2,6 +2,11 @@
 // BoardRepository / the boards-cache: these notes must never be persisted on a
 // shared or student machine, so we fetch on demand and never cache them.
 
+export type BoardNotes = {
+  notes: string;
+  errorLog: string;
+};
+
 function api(path: string, init?: RequestInit): Promise<Response> {
   return fetch(`/api/boards${path}`, {
     credentials: 'include',
@@ -10,16 +15,23 @@ function api(path: string, init?: RequestInit): Promise<Response> {
   });
 }
 
-export async function getBoardNotes(id: string): Promise<string> {
-  const res = await api(`/${encodeURIComponent(id)}/notes`);
-  if (!res.ok) return '';
-  const body = (await res.json()) as { notes?: string };
-  return typeof body.notes === 'string' ? body.notes : '';
+function asString(value: unknown): string {
+  return typeof value === 'string' ? value : '';
 }
 
-export async function saveBoardNotes(id: string, notes: string): Promise<void> {
+export async function getBoardNotes(id: string): Promise<BoardNotes> {
+  const res = await api(`/${encodeURIComponent(id)}/notes`);
+  if (!res.ok) return { notes: '', errorLog: '' };
+  const body = (await res.json()) as { notes?: string; errorLog?: string };
+  return { notes: asString(body.notes), errorLog: asString(body.errorLog) };
+}
+
+export async function saveBoardNotes(
+  id: string,
+  value: BoardNotes,
+): Promise<void> {
   await api(`/${encodeURIComponent(id)}/notes`, {
     method: 'PUT',
-    body: JSON.stringify({ notes }),
+    body: JSON.stringify(value),
   });
 }

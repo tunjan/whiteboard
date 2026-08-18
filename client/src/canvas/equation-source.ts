@@ -10,6 +10,14 @@
 const UNKNOWN_COMMAND = /undefined control sequence:?\s*(\\[a-zA-Z@]+)/i;
 const UNBALANCED_BRACES = /(missing|extra).*(brace|\{|\})/i;
 const UNBALANCED_DELIMITERS = /missing.*\\(right|left)|extra.*\\(right|left)/i;
+/**
+ * A failure of the JavaScript engine rather than of the TeX the user typed —
+ * deep enough nesting overflows the converter's recursion before MathJax has an
+ * opinion about the source. The raw text ("Maximum call stack size exceeded")
+ * describes our renderer, not their equation, so it says nothing actionable.
+ */
+const TOO_COMPLEX =
+  /maximum call stack|too much recursion|stack overflow|out of memory/i;
 
 /** A range of the source, as an offset and a length in characters. */
 export interface SourceSpan {
@@ -22,6 +30,9 @@ export interface SourceSpan {
  * whiteboard user actually hits; pass anything else through.
  */
 export function readableError(message: string): string {
+  if (TOO_COMPLEX.test(message)) {
+    return 'This expression is nested too deeply to render — try splitting it into separate equations.';
+  }
   const unknown = UNKNOWN_COMMAND.exec(message);
   if (unknown) return `Unknown command ${unknown[1]} — check the spelling.`;
   if (UNBALANCED_BRACES.test(message)) {

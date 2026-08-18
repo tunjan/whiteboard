@@ -16,6 +16,8 @@ const NO_SHAPES: Shape[] = [];
 
 const ACCENT = 'var(--color-focus)';
 const SNAP = '#e5484d';
+/** Half-length of a snap indicator's tick marks, in screen px. */
+const SNAP_TICK = 3;
 const HANDLE = 7;
 
 interface SelectionLayerProps {
@@ -32,16 +34,14 @@ export function SelectionLayer({ camera }: SelectionLayerProps) {
   const selectedIds = useSelectionStore((s) => s.selectedIds);
   const marquee = useSelectionStore((s) => s.marquee);
   const snapGuides = useSelectionStore((s) => s.snapGuides);
-  // Only the selected shapes. The page shapes record is a fresh object on every
-  // mutation, so subscribing to it invalidated this layer once per stroke frame
-  // even when the selection was untouched.
+  // Only the selected shapes, pulled out of the live cache by id. Depending on
+  // a whole-page object invalidated this layer once per stroke frame even when
+  // the selection was untouched.
   const shapesRecord = useDocumentStore(
     useShallow((s) => {
-      const record = s.doc.pages[s.currentPageId]?.shapes;
       const out: Record<string, Shape> = {};
-      if (!record) return out;
       for (const id of selectedIds) {
-        const shape = record[id];
+        const shape = s.shapesById.get(id);
         if (shape) out[id] = shape;
       }
       return out;
@@ -61,11 +61,15 @@ export function SelectionLayer({ camera }: SelectionLayerProps) {
   );
   const single = info?.isSingle ? shapesRecord?.[info.ids[0]!] : undefined;
   const locked = !!single?.locked;
+  // A group's box bounds shapes rather than being one, so it is dashed to tell
+  // the two apart. This layer draws in screen space, so the dash keeps its size
+  // at any zoom without rescaling the array.
+  const isGroup = single?.type === 'group';
 
   const toScreen = (p: { x: number; y: number }) => worldToScreen(p, camera);
 
   return (
-    <svg className="pointer-events-none absolute inset-0 h-full w-full">
+    <svg className="pointer-events-none absolute inset-0 z-[var(--z-canvas-indicator)] h-full w-full">
       {/* Per-shape outlines for multi-selection (so membership is visible). */}
       {info && !info.isSingle &&
         selectedIds.map((id) => {
@@ -102,7 +106,7 @@ export function SelectionLayer({ camera }: SelectionLayerProps) {
               fill="none"
               stroke={locked ? 'var(--color-muted-foreground)' : ACCENT}
               strokeWidth={1.5}
-              strokeDasharray={locked ? '4 3' : undefined}
+              strokeDasharray={locked ? '4 3' : isGroup ? '6 4' : undefined}
             />
             {info.rotationHandles.map((handle) => {
               const p = toScreen(handle.point);
@@ -205,15 +209,14 @@ export function SelectionLayer({ camera }: SelectionLayerProps) {
 
       {snapGuides.map((g, i) => {
         if (g.kind === 'point') {
-          const point = toScreen({ x: g.at, y: g.from });
+          const p = toScreen({ x: g.at, y: g.from });
+          const l = SNAP_TICK + 1;
           return (
-            <circle
+            <path
               // eslint-disable-next-line react/no-array-index-key -- transient guides
               key={i}
-              cx={point.x}
-              cy={point.y}
-              r={4}
-              fill="var(--color-background)"
+              d={`M ${p.x - l} ${p.y - l} L ${p.x + l} ${p.y + l} M ${p.x - l} ${p.y + l} L ${p.x + l} ${p.y - l}`}
+              fill="none"
               stroke={SNAP}
               strokeWidth={1.5}
             />
@@ -226,6 +229,10 @@ export function SelectionLayer({ camera }: SelectionLayerProps) {
           const b = g.axis === 'x'
             ? toScreen({ x: g.to, y: g.at })
             : toScreen({ x: g.at, y: g.to });
+          // End ticks bound the measured span; the midpoint tick marks the
+          // spacing itself, so equal gaps read as a series at a glance.
+          const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+          const t = SNAP_TICK;
           return (
             <g
               // eslint-disable-next-line react/no-array-index-key -- transient guides
@@ -236,13 +243,15 @@ export function SelectionLayer({ camera }: SelectionLayerProps) {
               <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} />
               {g.axis === 'x' ? (
                 <>
-                  <line x1={a.x} y1={a.y - 3} x2={a.x} y2={a.y + 3} />
-                  <line x1={b.x} y1={b.y - 3} x2={b.x} y2={b.y + 3} />
+                  <line x1={a.x} y1={a.y - t} x2={a.x} y2={a.y + t} />
+                  <line x1={b.x} y1={b.y - t} x2={b.x} y2={b.y + t} />
+                  <line x1={mid.x} y1={mid.y - t} x2={mid.x} y2={mid.y + t} />
                 </>
               ) : (
                 <>
-                  <line x1={a.x - 3} y1={a.y} x2={a.x + 3} y2={a.y} />
-                  <line x1={b.x - 3} y1={b.y} x2={b.x + 3} y2={b.y} />
+                  <line x1={a.x - t} y1={a.y} x2={a.x + t} y2={a.y} />
+                  <line x1={b.x - t} y1={b.y} x2={b.x + t} y2={b.y} />
+                  <line x1={mid.x - t} y1={mid.y} x2={mid.x + t} y2={mid.y} />
                 </>
               )}
             </g>

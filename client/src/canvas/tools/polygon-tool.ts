@@ -1,10 +1,15 @@
 import { Shapes } from 'lucide-react';
-import { genId, type PolygonProps, type Shape } from '@whiteboard/shared';
+import {
+  type Bounds,
+  genId,
+  type PolygonProps,
+  type Shape,
+} from '@whiteboard/shared';
 import { getTopIndex } from '../order';
 import { shapeRegistry } from '../shapes/shape-registry';
 import { useSelectionStore } from '../use-selection-store';
 import { useStyleStore } from '../use-style-store';
-import { boxFromDrag } from './drag-box';
+import { dragBoxSnapTargets, snappedBoxFromDrag } from './drag-box';
 import type { Tool, ToolContext, ToolPointerInfo } from './types';
 
 const CLICK_THRESHOLD = 4;
@@ -17,6 +22,7 @@ const DEFAULT_SIZE = 100;
 export function createPolygonTool(): Tool {
   let creatingId: string | null = null;
   let start = { x: 0, y: 0 };
+  let snapTargets: Bounds[] = [];
 
   return {
     id: 'polygon',
@@ -53,11 +59,12 @@ export function createPolygonTool(): Tool {
         index: getTopIndex(ctx.editor.getShapes()),
         props,
       } as Shape);
+      snapTargets = dragBoxSnapTargets(ctx, id, info.point);
     },
 
     onPointerMove(info: ToolPointerInfo, ctx: ToolContext) {
       if (!creatingId) return;
-      const b = boxFromDrag(start, info.point, info.shiftKey);
+      const b = snappedBoxFromDrag(start, info, snapTargets);
       ctx.editor.updateShape(creatingId, {
         x: b.x,
         y: b.y,
@@ -68,6 +75,8 @@ export function createPolygonTool(): Tool {
     onPointerUp(_info: ToolPointerInfo, ctx: ToolContext) {
       const id = creatingId;
       creatingId = null;
+      snapTargets = [];
+      useSelectionStore.getState().setSnapGuides([]);
       if (!id) return;
       const shape = ctx.editor.getShape(id);
       if (shape?.type !== 'polygon') return;
@@ -86,6 +95,8 @@ export function createPolygonTool(): Tool {
     onCancel(ctx: ToolContext) {
       const id = creatingId;
       creatingId = null;
+      snapTargets = [];
+      useSelectionStore.getState().setSnapGuides([]);
       if (id) ctx.editor.deleteShapes([id]);
     },
   };

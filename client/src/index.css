@@ -60,7 +60,7 @@
     --fg:            #0C0A09;
     --fg-secondary:  #44403C;
     --fg-muted:      #57534E;
-    --fg-subtle:     #A8A29E;
+    --fg-subtle:     #78716C;
     --fg-inverse:    #FAFAF9;
 
     --border:        #E7E5E4;
@@ -148,7 +148,7 @@
     --fg:           #FAFAF9;
     --fg-secondary: #D6D3D1;
     --fg-muted:     #A8A29E;
-    --fg-subtle:    #78716C;
+    --fg-subtle:    #A8A29E;
     --fg-inverse:   #1C1917;
 
     --border:        #292524;
@@ -577,23 +577,6 @@
     }
 }
 
-@keyframes pencil-draw {
-    0%,
-    100% {
-        transform: translate3d(0, 0, 0) rotate(0deg);
-    }
-
-    50% {
-        transform: translate3d(-1px, 1px, 0) rotate(-7deg);
-    }
-}
-
-@media (hover: hover) and (prefers-reduced-motion: no-preference) {
-    .pencil-draw-trigger:hover .pencil-draw-icon {
-        animation: pencil-draw 300ms cubic-bezier(0.45, 0, 0.55, 1);
-        transform-origin: 30% 70%;
-    }
-}
 
 /* A stamped sticker lands with a slight overshoot, the way a stamp presses
    down and settles. Applied only to the sticker the local user just placed
@@ -667,6 +650,31 @@
     --placeholder-color: var(--color-secondary);
 }
 
+/* The graph panel treats each expression as the primary object, so the math
+   gets a roomier authoring line than the compact equation controls elsewhere.
+   Keep the host block-level: flex makes MathLive's shadow container use the
+   formula's intrinsic width and paint over the row actions. */
+.graph-math-field.graph-expression-field {
+    display: block;
+    align-content: center;
+    min-height: 3rem;
+    padding-inline: 0.25rem;
+    font-size: 1.125rem;
+}
+
+/* Keep long formulas horizontally scrollable without letting scrollbar chrome
+   take vertical space away from the expression's centerline. */
+.graph-expression-field::part(content) {
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+}
+
+.graph-expression-field::part(content)::-webkit-scrollbar {
+    display: none;
+}
+
 /* Focus indication comes from the expression row highlight, not the field. */
 .graph-math-field:focus,
 .graph-math-field:focus-within,
@@ -710,6 +718,74 @@
     width: auto;
     max-width: none;
     height: 3rem;
+}
+
+/* ==========================================================================
+ * 7. Board stacking layers
+ *
+ * Overlays name the plane they belong to instead of picking a number. There
+ * are three independent scales because each root below opens its own stacking
+ * context, so a value only ever competes with its siblings:
+ *
+ *   .wb-board          isolate         canvas vs. UI shell
+ *   .wb-canvas-surface contain: strict the canvas's own overlays
+ *   .wb-ui-layer       z-index         the floating panels
+ *
+ * Ties inside a band fall back to DOM order, which is the ordering the layers
+ * already relied on. Portaled surfaces — dialogs, popovers, menus, tooltips,
+ * toasts — mount on `document.body`, outside `.wb-board` entirely, so they
+ * always paint above the board and are deliberately not part of these scales.
+ * ========================================================================== */
+
+:root {
+    /* Board root. */
+    --z-canvas: 100;
+    --z-ui: 300;
+
+    /* Inside the canvas surface. */
+    --z-canvas-background: 10;
+    --z-canvas-shapes: 20;
+    --z-canvas-blocker: 30;
+    --z-canvas-indicator: 40;
+    --z-canvas-collaborator: 50;
+    --z-canvas-front: 60;
+    --z-canvas-hud: 70;
+
+    /* Inside the UI shell. Panels are unset (DOM order); only the audio-blocked
+       banner is raised, because it shares the bottom-center slot with the
+       toolbar and has to stay readable on top of it. */
+    --z-ui-alert: 40;
+}
+
+/* The board root. Isolating it means a stray z-index elsewhere on the page can
+   never interleave itself with a canvas overlay. */
+.wb-board {
+    isolation: isolate;
+}
+
+/* The canvas surface. `contain: strict` is size + layout + paint + style
+   containment: committing a shape frame inside the canvas can no longer force
+   the surrounding chrome to re-layout, and the surface becomes its own
+   stacking context so the canvas scale above stays self-contained. Size
+   containment is safe here only because the surface is sized by its `inset-0`
+   containing block and never by its contents. */
+.wb-canvas-surface {
+    contain: strict;
+}
+
+/* The UI shell: a full-bleed, click-through plane holding the floating panels.
+   It covers the whole board, so it must not swallow board input — it drops
+   pointer events and hands them back to each panel it holds. `:where()` pins
+   that reset at zero specificity so a panel managing its own pointer-events
+   (`.t-panel-slide` while closed) still wins. */
+.wb-ui-layer {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+}
+
+:where(.wb-ui-layer) > * {
+    pointer-events: auto;
 }
 
 @theme inline {

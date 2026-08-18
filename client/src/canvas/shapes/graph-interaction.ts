@@ -8,7 +8,21 @@ export interface PlotArea {
   h: number;
 }
 
-/** Inverse of `graphToScreen`: world point inside `area` → math coordinates. */
+/** Math coordinates → world point inside the plot rectangle. */
+export function graphToScreen(
+  point: { x: number; y: number },
+  viewport: GraphViewport,
+  area: PlotArea,
+): { x: number; y: number } {
+  const xRange = viewport.xMax - viewport.xMin || 1;
+  const yRange = viewport.yMax - viewport.yMin || 1;
+  return {
+    x: area.x + ((point.x - viewport.xMin) / xRange) * area.w,
+    y: area.y + ((viewport.yMax - point.y) / yRange) * area.h,
+  };
+}
+
+/** Inverse of {@link graphToScreen}: world point inside `area` → math coordinates. */
 export function screenToGraph(
   point: { x: number; y: number },
   viewport: GraphViewport,

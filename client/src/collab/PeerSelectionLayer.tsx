@@ -16,18 +16,15 @@ const NO_SHAPES: Shape[] = [];
 export function PeerSelectionLayer({ camera }: { camera: Camera }) {
   const peers = usePresenceStore((s) => s.peers);
   const currentPageId = useDocumentStore((s) => s.currentPageId);
-  // Only the shapes peers actually have selected — usually a handful. The page
-  // shapes record is rebuilt on every mutation, so subscribing to it directly
-  // would re-render this layer once per frame of every stroke.
+  // Only the shapes peers actually have selected — usually a handful.
+  // Extracting them by id keeps this layer off the per-mutation path.
   const shapes = useDocumentStore(
     useShallow((s) => {
-      const record = s.doc.pages[s.currentPageId]?.shapes;
       const out: Record<string, Shape> = {};
-      if (!record) return out;
       for (const peer of peers) {
         if (peer.page && peer.page !== currentPageId) continue;
         for (const id of peer.selection ?? []) {
-          const shape = record[id];
+          const shape = s.shapesById.get(id);
           if (shape) out[id] = shape;
         }
       }
@@ -37,7 +34,7 @@ export function PeerSelectionLayer({ camera }: { camera: Camera }) {
 
   const getShape = (id: string) => shapes[id];
   return (
-    <svg className="pointer-events-none absolute inset-0 h-full w-full">
+    <svg className="pointer-events-none absolute inset-0 z-[var(--z-canvas-indicator)] h-full w-full">
       <g transform={cameraToTransform(camera)}>
         {peers.map((peer) => {
           if (peer.page && peer.page !== currentPageId) return null;

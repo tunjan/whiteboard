@@ -5,11 +5,18 @@ export const MAX_VOICE_SDP_LENGTH = 32_768;
 export const MAX_VOICE_ICE_CANDIDATE_LENGTH = 4_096;
 export const MAX_VOICE_SESSION_ID_LENGTH = 128;
 
+/** The two video slots every peer connection carries. */
+export type VideoKind = 'camera' | 'screen';
+
 export interface VoicePresence {
   inCall: boolean;
   muted: boolean;
   speaking: boolean;
   sessionId: string;
+  /** Publishing a camera track. Peer connections carry a video slot either way. */
+  camera: boolean;
+  /** Publishing a screen-share track. */
+  screen: boolean;
 }
 
 /**
@@ -31,7 +38,7 @@ export type VoiceSignal = {
 } & (
   | { kind: 'offer' | 'answer'; sdp: string }
   | { kind: 'ice'; candidate: VoiceIceCandidate }
-  | { kind: 'bye' }
+  | { kind: 'bye' | 'retry' }
 );
 
 export function encodeVoiceSignal(signal: VoiceSignal): string {
@@ -68,8 +75,8 @@ export function decodeVoiceSignal(payload: string): VoiceSignal | null {
       toSessionId: value.toSessionId,
     };
 
-    if (value.kind === 'bye') {
-      return { ...addressing, kind: 'bye' };
+    if (value.kind === 'bye' || value.kind === 'retry') {
+      return { ...addressing, kind: value.kind };
     }
 
     if (
@@ -105,6 +112,8 @@ export function parseVoicePresence(value: unknown): VoicePresence | null {
     value.inCall !== true ||
     typeof value.muted !== 'boolean' ||
     typeof value.speaking !== 'boolean' ||
+    typeof value.camera !== 'boolean' ||
+    typeof value.screen !== 'boolean' ||
     !isVoiceSessionId(value.sessionId)
   ) {
     return null;

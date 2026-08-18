@@ -1,8 +1,9 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import type { DrawPoint, DrawShape } from '@whiteboard/shared';
-import { drawUtil } from './draw';
+import type { DrawPoint, DrawProps, DrawShape } from '@whiteboard/shared';
+import { buildInkRender, drawUtil } from './draw';
+import { getInkCenterlinePath } from './ink';
 
 /**
  * A right-angle turn, sampled at the ~1-unit spacing a deliberate stroke
@@ -106,9 +107,7 @@ describe('closed strokes', () => {
 
   /** Render the shape the way the PNG export does, off the DOM. */
   function markup(shape: DrawShape): string {
-    return renderToStaticMarkup(
-      createElement(drawUtil.Component, { shape }),
-    );
+    return renderToStaticMarkup(createElement(drawUtil.Component, { shape }));
   }
 
   it('paints the interior under the ink', () => {
@@ -134,5 +133,107 @@ describe('closed strokes', () => {
     expect(drawUtil.hitTest(open, middle, 0)).toBe(false);
     // The ink itself still takes hits.
     expect(drawUtil.hitTest(open, { x: 20, y: 0 }, 0)).toBe(true);
+  });
+});
+
+describe('the shared ink geometry', () => {
+  // Two renderers draw a stroke: this util, for everything the document holds,
+  // and the active-stroke layer, for the one the local pointer is making —
+  // which writes SVG attributes directly, off the React path, to get the ink
+  // down before the frame it belongs to is painted. They agree because they
+  // call the same function, and this is the test that says so.
+  const variants: Array<[string, Partial<DrawShape['props']>]> = [
+    ['solid', { dash: 'solid' }],
+    ['dashed', { dash: 'dashed' }],
+    ['dotted', { dash: 'dotted' }],
+    ['hand-drawn', { dash: 'draw' }],
+    ['tapered', { dash: 'solid', startTaper: 12, endTaper: true }],
+    ['thinned', { dash: 'solid', thinning: -0.4 }],
+  ];
+
+  for (const [name, overrides] of variants) {
+    it(`renders a ${name} stroke from the same paths the layer draws`, () => {
+      const shape = stroke(0.5);
+      shape.props = { ...shape.props, ...overrides };
+      const svg = renderToStaticMarkup(
+        createElement(drawUtil.Component, { shape }),
+      );
+      const render = buildInkRender(shape.props, corner, false, 0);
+
+      expect(svg).toContain(`d="${render.d}"`);
+      if (render.dash?.strokeDasharray) {
+        expect(svg).toContain(
+          `stroke-dasharray="${render.dash.strokeDasharray}"`,
+        );
+        expect(svg).toContain(
+          `stroke-dashoffset="${render.dash.strokeDashoffset}"`,
+        );
+      }
+    });
+  }
+});
+
+/**
+ * A long, genuinely curved stroke at the ~1-unit sampling a deliberate hand
+ * produces. The two-straight-runs `corner` fixture is the wrong shape to judge
+ * the fallback by: its ribbon simplifies almost to nothing, while a real
+ * stroke's cannot.
+ */
+function spiral(n: number): DrawPoint[] {
+  const points: DrawPoint[] = [];
+  let angle = 0;
+  for (let i = 0; i < n; i++) {
+    const radius = 20 + i * 0.25;
+    angle += 1 / (1 + radius * 0.08);
+    points.push({
+      x: Math.cos(angle) * radius + Math.sin(i * 0.7) * 0.35,
+      y: Math.sin(angle) * radius + Math.cos(i * 0.9) * 0.35,
+      pressure: 0.5 + Math.sin(i * 0.05) * 0.2,
+    });
+  }
+  return points;
+}
+
+describe('ink level-of-detail fallback', () => {
+  it('strokes the conditioned centerline instead of filling the outline', () => {
+    const props = stroke(0.5).props;
+    const simplified = buildInkRender(props, corner, false, 0, true);
+
+    expect(simplified.stroked).toBe(true);
+    expect(simplified.dash).toBeNull();
+    // The very curve a dashed stroke of the same shape traces, so the fallback
+    // follows the ink it replaces rather than approximating it separately.
+    expect(simplified.d).toBe(getInkCenterlinePath(corner, props.size, 0.5));
+    expect(buildInkRender(props, corner, false, 0).stroked).toBe(false);
+  });
+
+  it('is cheaper than the outline it replaces', () => {
+    const points = spiral(600);
+    const props = stroke(0.5).props;
+    const ribbon = buildInkRender(props, points, false, 0);
+    const simplified = buildInkRender(props, points, false, 0, true);
+    // Roughly half the path data on a realistic stroke. The whole point of the
+    // fallback is that it is cheaper, so a change that inverted this would be
+    // taking the visual cost without the saving.
+    expect(simplified.d.length).toBeLessThan(ribbon.d.length * 0.75);
+  });
+
+  it('keeps a dot, which has no centerline to stroke', () => {
+    const props = stroke(0.5).props;
+    const render = buildInkRender(props, [{ x: 0, y: 0, pressure: 0.5 }], false, 0, true);
+    // Falling through to the outline is what keeps it visible; a stroked path
+    // of one point would draw nothing at all.
+    expect(render.stroked).toBe(false);
+    expect(render.d).not.toBe('');
+  });
+
+  it('still paints the fill of a closed stroke', () => {
+    const props: DrawProps = {
+      ...stroke(0.5).props,
+      isClosed: true,
+      fillStyle: 'solid',
+    };
+    const render = buildInkRender(props, corner, false, 0, true);
+    expect(render.fillPath).toBe(`${render.d} Z`);
   });
 });

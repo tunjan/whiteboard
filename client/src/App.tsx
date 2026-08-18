@@ -11,28 +11,20 @@ export function App() {
     applyTheme(useThemeStore.getState().theme);
   }, []);
 
-  // Keep the active pen color on the matching swatch when the palette or theme
-  // changes, so flipping to dark mode (or another palette) moves the pen to the
-  // counterpart color rather than stranding it on an off-theme hex.
+  // Keep the active pen color on the matching swatch when the theme changes, so
+  // flipping to dark mode moves the pen to the counterpart color rather than
+  // stranding it on an off-theme hex.
   useEffect(() => {
-    let prev = paletteColors(
-      useStyleStore.getState().paletteId,
-      useThemeStore.getState().theme,
-    );
+    let prev = paletteColors(useThemeStore.getState().theme);
     const remap = () => {
-      const { paletteId, color, setColor } = useStyleStore.getState();
-      const next = paletteColors(paletteId, useThemeStore.getState().theme);
+      const { color, setColor } = useStyleStore.getState();
+      const next = paletteColors(useThemeStore.getState().theme);
       if (next === prev) return;
       const i = prev.findIndex((c) => c.value === color);
       if (i !== -1 && next[i]) setColor(next[i].value);
       prev = next;
     };
-    const unsubTheme = useThemeStore.subscribe(remap);
-    const unsubStyle = useStyleStore.subscribe(remap);
-    return () => {
-      unsubTheme();
-      unsubStyle();
-    };
+    return useThemeStore.subscribe(remap);
   }, []);
 
   const path = usePathname();

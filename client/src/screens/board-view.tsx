@@ -16,11 +16,13 @@ import { setLocalUser } from '@/collab/presence';
 import { VoiceAudioSinks } from '@/collab/voice/VoiceAudioSinks';
 import { BoardChrome } from '@/components/board-chrome';
 import { BoardTitleDialog } from '@/components/board-title-dialog';
+import { BoardUiLayer } from '@/components/board-ui-layer';
 import { CanvasContextMenu } from '@/components/canvas-context-menu';
 import { LatencyWarningToast } from '@/components/latency-warning-toast';
 import { NameDialog } from '@/components/name-dialog';
 import { StylePanel } from '@/components/style-panel';
 import { Toolbar } from '@/components/toolbar';
+import { VideoPanel } from '@/components/video-panel';
 import { navigate } from '@/router';
 
 // These panels pull in MathLive and its KaTeX assets. Keep them outside the
@@ -100,28 +102,32 @@ export function BoardView({ boardId }: { boardId: string }) {
   }, [identity]);
 
   return (
-    <div className="relative h-dvh w-screen overflow-hidden overscroll-none bg-muted text-primary">
+    <div className="wb-board relative h-dvh w-screen overflow-hidden overscroll-none bg-muted text-primary">
       <CanvasContextMenu>
         <Canvas />
       </CanvasContextMenu>
-      <BoardChrome
-        boardId={boardId}
-        title={name}
-        onBack={() => navigate('/')}
-        onRenameTitle={
-          identity?.isTutor ? () => setRenamingBoard(true) : undefined
-        }
-        onEditIdentity={identity ? () => setEditingIdentity(true) : undefined}
-        identity={identity}
-      />
+      <BoardUiLayer>
+        <BoardChrome
+          boardId={boardId}
+          title={name}
+          onBack={() => navigate('/')}
+          onRenameTitle={
+            identity?.isTutor ? () => setRenamingBoard(true) : undefined
+          }
+          onEditIdentity={identity ? () => setEditingIdentity(true) : undefined}
+          identity={identity}
+        />
+        <VoiceAudioSinks />
+        <Toolbar />
+        <Suspense fallback={null}>
+          <GraphPanel />
+          <EquationPanel />
+        </Suspense>
+        <StylePanel />
+        {/* Last, so a maximized call paints over the toolbar and side panels. */}
+        <VideoPanel identity={identity} />
+      </BoardUiLayer>
       <LatencyWarningToast />
-      <VoiceAudioSinks />
-      <Toolbar />
-      <Suspense fallback={null}>
-        <GraphPanel />
-        <EquationPanel />
-      </Suspense>
-      <StylePanel />
 
       <NameDialog
         open={needsName || editingIdentity}

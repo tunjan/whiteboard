@@ -114,7 +114,7 @@ export function ToolPanelPresence({
       data-phase={phase}
       aria-hidden={!visible}
       inert={!visible}
-      className="t-panel-slide tool-panel-presence absolute top-[calc(6.5rem+env(safe-area-inset-top))] right-[calc(1rem+env(safe-area-inset-right))] z-20 sm:top-[calc(3.75rem+env(safe-area-inset-top))] [&_[data-slot=surface]]:border-strong [&_[data-slot=surface]]:shadow-md"
+      className="t-panel-slide tool-panel-presence absolute top-[calc(6.5rem+env(safe-area-inset-top))] right-[calc(1rem+env(safe-area-inset-right))] sm:top-[calc(3.75rem+env(safe-area-inset-top))] [&_[data-slot=surface]]:border-strong [&_[data-slot=surface]]:shadow-md"
     >
       {lastVisibleChild.current}
     </div>

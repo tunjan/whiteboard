@@ -1,10 +1,16 @@
 import { Frame } from 'lucide-react';
-import { genId, type FrameProps, type Shape } from '@whiteboard/shared';
+import {
+  type Bounds,
+  genId,
+  type FrameProps,
+  type Shape,
+} from '@whiteboard/shared';
 import { getBottomIndex } from '../order';
+import { captureEnclosedShapes, topFrameAtPoint } from '../frame-operations';
 import { shapeRegistry } from '../shapes/shape-registry';
 import { useSelectionStore } from '../use-selection-store';
 import { useStyleStore } from '../use-style-store';
-import { boxFromDrag } from './drag-box';
+import { dragBoxSnapTargets, snappedBoxFromDrag } from './drag-box';
 import type { Tool, ToolContext, ToolPointerInfo } from './types';
 
 const CLICK_THRESHOLD = 8;
@@ -19,6 +25,7 @@ const DEFAULT_H = 240;
 export function createFrameTool(): Tool {
   let creatingId: string | null = null;
   let start = { x: 0, y: 0 };
+  let snapTargets: Bounds[] = [];
 
   return {
     id: 'frame',
@@ -34,29 +41,41 @@ export function createFrameTool(): Tool {
       start = info.point;
       const id = genId();
       creatingId = id;
-      const count = ctx.editor.getShapes().filter((s) => s.type === 'frame').length;
+      const shapes = ctx.editor.getShapes();
+      const parentId = topFrameAtPoint(shapes, info.point)?.id ?? null;
+      const count = shapes.filter((s) => s.type === 'frame').length;
+      const style = useStyleStore.getState();
       const props: FrameProps = {
         ...(util.getDefaultProps() as FrameProps),
         w: 0,
         h: 0,
         name: `Frame ${count + 1}`,
+        color: style.color,
       };
       const shape = {
         id,
         type: 'frame',
+        parentId,
         x: info.point.x,
         y: info.point.y,
         rotation: 0,
-        opacity: useStyleStore.getState().opacity,
-        index: getBottomIndex(ctx.editor.getShapes()),
+        opacity: style.opacity,
+        // The background begins below its siblings; captured shapes keep their
+        // indices and therefore remain above it inside the new frame.
+        index: getBottomIndex(
+          shapes.filter(
+            (candidate) => (candidate.parentId ?? null) === parentId,
+          ),
+        ),
         props,
       } as Shape;
       ctx.editor.createShape(shape);
+      snapTargets = dragBoxSnapTargets(ctx, id, info.point);
     },
 
     onPointerMove(info: ToolPointerInfo, ctx: ToolContext) {
       if (!creatingId) return;
-      const b = boxFromDrag(start, info.point, info.shiftKey);
+      const b = snappedBoxFromDrag(start, info, snapTargets);
       ctx.editor.updateShape(creatingId, {
         x: b.x,
         y: b.y,
@@ -67,6 +86,8 @@ export function createFrameTool(): Tool {
     onPointerUp(_info: ToolPointerInfo, ctx: ToolContext) {
       const id = creatingId;
       creatingId = null;
+      snapTargets = [];
+      useSelectionStore.getState().setSnapGuides([]);
       if (!id) return;
       const frame = ctx.editor.getShape(id);
       if (!frame || frame.type !== 'frame') return;
@@ -79,32 +100,9 @@ export function createFrameTool(): Tool {
         });
       }
 
-      // Capture top-level shapes fully inside the frame.
-      const fr = ctx.editor.getShape(id);
-      if (fr && fr.type === 'frame') {
-        const rect = {
-          minX: fr.x,
-          minY: fr.y,
-          maxX: fr.x + fr.props.w,
-          maxY: fr.y + fr.props.h,
-        };
-        for (const s of ctx.editor.getShapes()) {
-          if (s.id === id || s.parentId || s.type === 'frame' || s.type === 'group') {
-            continue;
-          }
-          const util = shapeRegistry.getFor(s);
-          if (!util) continue;
-          const b = util.getBounds(s);
-          if (
-            b.minX >= rect.minX &&
-            b.maxX <= rect.maxX &&
-            b.minY >= rect.minY &&
-            b.maxY <= rect.maxY
-          ) {
-            ctx.editor.updateShape(s.id, { parentId: id });
-          }
-        }
-      }
+      // Capture every unlocked sibling root completely enclosed by the final
+      // viewport, including groups and existing frames (nested frames).
+      captureEnclosedShapes(ctx.editor, id);
 
       useSelectionStore.getState().setSelection([id]);
       ctx.complete();
@@ -114,6 +112,8 @@ export function createFrameTool(): Tool {
     onCancel(ctx: ToolContext) {
       const id = creatingId;
       creatingId = null;
+      snapTargets = [];
+      useSelectionStore.getState().setSnapGuides([]);
       if (id) ctx.editor.deleteShapes([id]);
     },
   };

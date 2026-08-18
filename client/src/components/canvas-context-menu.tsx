@@ -13,6 +13,7 @@ import {
 import { alignShapes, distributeShapes } from '@/canvas/align';
 import { copyShapes, hasClipboard, pasteShapes } from '@/canvas/clipboard';
 import {
+  deleteShapesWithCleanup,
   duplicateShapes,
   groupShapes,
   ungroupShapes,
@@ -82,7 +83,10 @@ export function CanvasContextMenu({ children }: { children: ReactNode }) {
             const unlocked = selectedIds.filter(
               (id) => !editor.getShape(id)?.locked,
             );
-            editor.deleteShapes(deleteTargetIds(editor.getShapes(), unlocked));
+            deleteShapesWithCleanup(
+              editor,
+              deleteTargetIds(editor.getShapes(), unlocked),
+            );
             useSelectionStore.getState().clear();
           }}
         >

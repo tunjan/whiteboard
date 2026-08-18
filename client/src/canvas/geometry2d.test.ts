@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import { closestPointOnSegment, segmentsIntersect } from '@whiteboard/shared';
 import {
   Circle2d,
+  Ellipse2d,
   Polygon2d,
   Polyline2d,
   Rectangle2d,
-  nearestPointOnSegment,
   polygonsIntersect,
-  segmentsIntersect,
 } from './geometry2d';
 
 const rect = (x: number, y: number, w: number, h: number) => [
@@ -16,18 +16,18 @@ const rect = (x: number, y: number, w: number, h: number) => [
   { x, y: y + h },
 ];
 
-describe('nearestPointOnSegment', () => {
+describe('closestPointOnSegment', () => {
   it('clamps to the segment endpoints', () => {
     const a = { x: 0, y: 0 };
     const b = { x: 10, y: 0 };
-    expect(nearestPointOnSegment({ x: -5, y: 3 }, a, b)).toEqual({ x: 0, y: 0 });
-    expect(nearestPointOnSegment({ x: 50, y: 3 }, a, b)).toEqual({ x: 10, y: 0 });
-    expect(nearestPointOnSegment({ x: 4, y: 9 }, a, b)).toEqual({ x: 4, y: 0 });
+    expect(closestPointOnSegment({ x: -5, y: 3 }, a, b)).toEqual({ x: 0, y: 0 });
+    expect(closestPointOnSegment({ x: 50, y: 3 }, a, b)).toEqual({ x: 10, y: 0 });
+    expect(closestPointOnSegment({ x: 4, y: 9 }, a, b)).toEqual({ x: 4, y: 0 });
   });
 
   it('handles a degenerate zero-length segment', () => {
     const a = { x: 2, y: 2 };
-    expect(nearestPointOnSegment({ x: 9, y: 9 }, a, a)).toEqual({ x: 2, y: 2 });
+    expect(closestPointOnSegment({ x: 9, y: 9 }, a, a)).toEqual({ x: 2, y: 2 });
   });
 });
 
@@ -140,6 +140,57 @@ describe('Circle2d', () => {
 
   it('measures distance to the boundary from outside', () => {
     expect(new Circle2d(0, 0, 5, { isFilled: true }).distanceToPoint({ x: 9, y: 0 })).toBeCloseTo(4);
+  });
+});
+
+describe('Ellipse2d', () => {
+  it('treats the interior as inside only when filled', () => {
+    const center = { x: 0, y: 0 };
+    expect(new Ellipse2d(0, 0, 10, 5, { isFilled: true }).distanceToPoint(center)).toBe(0);
+    expect(new Ellipse2d(0, 0, 10, 5).distanceToPoint(center)).toBeCloseTo(5);
+  });
+
+  it('excludes the corners of its bounding box', () => {
+    // The whole point of the class: (10, 5) is the box corner, and on nothing.
+    const e = new Ellipse2d(0, 0, 10, 5, { isFilled: true });
+    expect(e.hitTestPoint({ x: 10, y: 5 })).toBe(false);
+    expect(e.hitTestPoint({ x: 0, y: 0 })).toBe(true);
+  });
+
+  it('respects the minor axis rather than treating the shape as round', () => {
+    const e = new Ellipse2d(0, 0, 100, 5, { isFilled: true });
+    expect(e.hitTestPoint({ x: 0, y: 4 })).toBe(true);
+    expect(e.hitTestPoint({ x: 0, y: 20 })).toBe(false);
+  });
+
+  it('counts a point just inside the edge as inside, despite the flattening', () => {
+    // The inscribed polygon cuts inside the true outline between its vertices;
+    // the interior test has to be exact or this sliver reads as a miss.
+    const e = new Ellipse2d(0, 0, 200, 200, { isFilled: true });
+    const theta = Math.PI / 48; // mid-chord, where the approximation is worst
+    const almostEdge = {
+      x: Math.cos(theta) * 199.9,
+      y: Math.sin(theta) * 199.9,
+    };
+    expect(e.containsPoint(almostEdge)).toBe(true);
+    expect(e.distanceToPoint(almostEdge)).toBe(0);
+  });
+
+  it('measures distance to the boundary from outside', () => {
+    expect(new Ellipse2d(0, 0, 10, 10).distanceToPoint({ x: 14, y: 0 })).toBeCloseTo(4);
+  });
+
+  it('uses exact bounds, not the polygonal approximation', () => {
+    expect(new Ellipse2d(10, 20, 5, 8).getBounds()).toEqual({
+      minX: 5,
+      minY: 12,
+      maxX: 15,
+      maxY: 28,
+    });
+  });
+
+  it('reports a degenerate ellipse as containing nothing', () => {
+    expect(new Ellipse2d(0, 0, 0, 5, { isFilled: true }).containsPoint({ x: 0, y: 0 })).toBe(false);
   });
 });
 

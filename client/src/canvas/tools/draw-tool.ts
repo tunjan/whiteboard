@@ -3,15 +3,21 @@ import {
   genId,
   type DrawPoint,
   type DrawProps,
+  type DrawShape,
   type Point,
   type Shape,
 } from '@whiteboard/shared';
 import { getTopIndex } from '../order';
+import { InputsManager, isPenOrStylus } from '../inputs-manager';
 import { pencilStabilizationToStreamline } from '../shapes/ink';
 import { NOMINAL_SAMPLE_SPACING } from '../shapes/ink-engine';
 import { shapeRegistry } from '../shapes/shape-registry';
 import { useCanvasUiStore } from '../use-canvas-ui-store';
-import { useStrokePredictionStore } from '../use-stroke-prediction-store';
+import {
+  beginLiveStroke,
+  endLiveStroke,
+  publishLiveStroke,
+} from '../use-live-stroke-store';
 import { useStyleStore } from '../use-style-store';
 import type { Tool, ToolContext, ToolPointerInfo } from './types';
 
@@ -50,6 +56,17 @@ const SPEED_AT_MIN_WIDTH = 1.5;
 const PREDICTION_HORIZON_MS = 16;
 
 /**
+ * How long a predicted tail may go un-refreshed before it is taken back down.
+ *
+ * Deliberately longer than the horizon, and so than the interval moves arrive
+ * at: a deadline at the horizon itself would keep expiring in the gaps between
+ * the moves of an ordinary 60 Hz stroke, blanking the tip for a frame at a
+ * time. One frame past it distinguishes "the next sample is a moment late" from
+ * "there is no next sample, because the hand has stopped".
+ */
+const TAIL_STALE_MS = PREDICTION_HORIZON_MS * 2;
+
+/**
  * Points after which a continuous stroke is committed and continued in a new
  * shape.
  *
@@ -60,6 +77,25 @@ const PREDICTION_HORIZON_MS = 16;
  * leaves no visible seam.
  */
 const MAX_POINTS_PER_SHAPE = 600;
+
+/**
+ * Screen distance the pointer must travel after Shift is pressed or released
+ * before the stroke actually changes mode, squared.
+ *
+ * Pressing a modifier is not by itself a statement about the ink: a hand
+ * reaching for Shift mid-stroke frequently taps it, and switching on the
+ * keystroke alone replaced whatever had just been drawn with a straight
+ * segment the moment the key went down. Requiring a few pixels of travel makes
+ * the switch something the hand does rather than something the keyboard does,
+ * and gives the same hysteresis on the way back to freehand.
+ */
+const MODE_SWITCH_SCREEN_DISTANCE_SQUARED = 16;
+
+/**
+ * How near an existing stroke's free end a Shift-click must land to continue it
+ * rather than begin a new one, in screen pixels.
+ */
+const EXTEND_SCREEN_RADIUS = 12;
 
 /**
  * Zoom at which the camera term of the closure tolerance is half its maximum.
@@ -112,15 +148,22 @@ export function createDrawTool(): Tool {
   // store so visible ink reaches the predicted pointer position; NEVER written
   // to the document — peers only ever receive real samples.
   let predicted: DrawPoint[] = [];
+  // A zero-stabilisation pencil is a literal input mode. Browser prediction is
+  // extrapolation rather than a hardware sample, so letting it extend that
+  // stroke made the tip bend or retract despite stabilization being disabled.
+  let predictionEnabled = true;
+  // Screen position whose motion produced the current predicted tail. Some
+  // browsers repeat an identical pointermove and prediction after the hand has
+  // stopped; that repetition must not make the extrapolation fresh again.
+  let predictionAnchorScreen: Point | null = null;
+  // Once a tail expires, suppress that same prediction until the real pointer
+  // advances. Otherwise the next repeated stationary event resurrects it.
+  let stalePredictionAnchorScreen: Point | null = null;
   // Derive this stroke's pressure from pointer velocity (mouse/touch with the
   // simulation setting on). Pen strokes carry hardware pressure instead.
   let velocityPressure = false;
-  // Previous raw hardware sample, for the velocity measurement. Tracked
-  // separately from `points` because the spacing gate below drops samples, and
-  // a dropped sample must not make the pointer look like it moved further in
-  // the same time than it did.
-  let lastSampleScreen: { x: number; y: number } | null = null;
-  let lastSampleTime = 0;
+  const inputs = new InputsManager();
+  let stylusInput = false;
   let lastVelocityPressure = NEUTRAL_PRESSURE;
   // Whether the first real velocity reading has been folded back into the
   // stroke's opening point. See `pressureFromVelocity`.
@@ -133,20 +176,63 @@ export function createDrawTool(): Tool {
   // once at pointer-down so a chunk split cannot pick up a different color or
   // brush partway through a single stroke.
   let strokeProps: DrawProps | null = null;
+  // Likewise the opacity, which the active-stroke layer has to reproduce for
+  // the live stroke to look like the shape it is writing.
+  let strokeOpacity = 1;
   // Whether the point cap has already split this gesture. See isClosedStroke.
   let chunked = false;
+  // Index in `points` the current straight segment is drawn from, or null when
+  // the stroke is freehand. Everything past it is the segment's single moving
+  // endpoint, so leaving straight mode simply stops rewriting that endpoint and
+  // resumes appending after it.
+  let straightAnchor: number | null = null;
+  // A mode change Shift has asked for but that has not yet travelled far enough
+  // to take effect, and the screen position it was asked at.
+  // See MODE_SWITCH_SCREEN_DISTANCE_SQUARED.
+  let pendingMode: 'straight' | 'free' | null = null;
+  let pendingModeScreen: Point | null = null;
+  // Points the adopted shape held before this gesture began appending to it,
+  // or null when the gesture created its own shape. A cancelled stroke is
+  // discarded by deleting the shape it made — but an extension did not make
+  // one, and deleting it would take the ink that was already there with it.
+  let extendedFrom: DrawPoint[] | null = null;
   // Pending rAF for the live stroke write. Pointer Events can deliver many
   // coalesced samples per frame; without this each sample fired its own Yjs
   // transaction → full document-snapshot rebuild → React commit. Coalescing the
   // writes to one per frame keeps every accumulated point (so the curve is
   // unchanged) while collapsing N pipeline runs per move into one per frame.
   let rafId: number | null = null;
+  // Pending deadline for dropping a stale tail. See `scheduleTailExpiry`.
+  let tailExpiry: ReturnType<typeof setTimeout> | null = null;
 
-  const cancelPendingFlush = (): void => {
+  const cancelPendingWork = (): void => {
     if (rafId !== null) {
       cancelAnimationFrame(rafId);
       rafId = null;
     }
+    if (tailExpiry !== null) {
+      clearTimeout(tailExpiry);
+      tailExpiry = null;
+    }
+  };
+
+  /**
+   * Hand the current stroke to the active-stroke layer, which draws it.
+   *
+   * Called from inside the rAF below, so the ink is in the DOM before the
+   * browser paints that frame. Publishing it through the document instead
+   * would schedule a React render that can land after the paint it was meant
+   * for — the delay the predicted tail exists to hide.
+   */
+  const publishFrame = (): void => {
+    if (!strokeProps) return;
+    publishLiveStroke({
+      origin,
+      props: strokeProps,
+      opacity: strokeOpacity,
+      points,
+      predicted,
+    });
   };
 
   const scheduleFlush = (ctx: ToolContext): void => {
@@ -154,11 +240,43 @@ export function createDrawTool(): Tool {
     rafId = requestAnimationFrame(() => {
       rafId = null;
       if (!id) return;
+      // Peers still receive every frame of the stroke: the document write is
+      // unchanged, and is what makes them watch it being drawn.
       ctx.editor.updateShape(id, { props: { points: points.slice() } });
       // Same frame as the document write, so the rendered stroke and its
       // predicted tail always advance together.
-      useStrokePredictionStore.getState().setPrediction(id, predicted);
+      publishFrame();
     });
+  };
+
+  /**
+   * Drop the tail once no move has arrived to re-derive it for long enough that
+   * it has stopped describing anything.
+   *
+   * A tail says where the pointer is about to be, so it is worth drawing for
+   * about the horizon it was extrapolated over and no longer. While the hand
+   * travels this deadline never fires: advancing positions arrive faster than
+   * it, and each one pushes it back. But a hand finishing a stroke *stops*.
+   * Some browsers then emit nothing; others repeat the same last move and
+   * prediction. Neither is fresh motion, so the tail has to expire from the
+   * last position that really advanced or it stays past the hand until
+   * pointer-up clears it — ink overshooting and then snapping back on release.
+   *
+   * Expiring is local-only: the tail was never in the document, so this
+   * republishes the live frame and writes nothing.
+   */
+  const scheduleTailExpiry = (): void => {
+    if (tailExpiry !== null) clearTimeout(tailExpiry);
+    tailExpiry = setTimeout(() => {
+      tailExpiry = null;
+      if (!id) return;
+      stalePredictionAnchorScreen = predictionAnchorScreen
+        ? { ...predictionAnchorScreen }
+        : null;
+      if (predicted.length === 0) return;
+      predicted = [];
+      publishFrame();
+    }, TAIL_STALE_MS);
   };
 
   /**
@@ -187,10 +305,17 @@ export function createDrawTool(): Tool {
   // Commit the accumulated points to the shape and end the stroke. Shared by
   // pointer-up (normal finish), commit (OS reclaimed the pointer mid-stroke),
   // and the chunk split, which ends one shape to continue in the next.
-  const finalize = (ctx: ToolContext): void => {
-    cancelPendingFlush();
+  //
+  // `continuing` says the hand is still down and the stroke carries on in the
+  // next chunk, so this end is a cut and not a lift: it keeps its round cap
+  // instead of tapering to a point at a place nobody stopped.
+  const finalize = (ctx: ToolContext, continuing = false): void => {
+    cancelPendingWork();
     predicted = [];
-    useStrokePredictionStore.getState().clearPrediction();
+    // Before the write below, so that write publishes a snapshot like any
+    // other. React then commits the un-filtered document copy and the unmounted
+    // layer together, and the ink is never missing from both for a frame.
+    endLiveStroke();
     const sid = id;
     id = null;
     if (!sid) return;
@@ -199,15 +324,30 @@ export function createDrawTool(): Tool {
     // hand took, and thinning them here would cut corners off the stroke the
     // moment the pointer lifts.
     ctx.editor.updateShape(sid, {
-      props: { points: points.slice(), isClosed: isClosedStroke() },
+      props: {
+        points: points.slice(),
+        isClosed: isClosedStroke(),
+        ...(continuing ? { endTaper: false } : {}),
+      },
     });
     points = [];
+    if (!continuing) {
+      extendedFrom = null;
+      straightAnchor = null;
+      pendingMode = null;
+      pendingModeScreen = null;
+    }
   };
 
   // Create the shape the gesture is currently drawing into, seeded with its
   // first point. Used at pointer-down and again at each chunk split.
-  const beginShape = (ctx: ToolContext, worldOrigin: Point, seed: DrawPoint) => {
+  const beginShape = (
+    ctx: ToolContext,
+    worldOrigin: Point,
+    seed: DrawPoint,
+  ) => {
     if (!strokeProps) return;
+    extendedFrom = null;
     origin = worldOrigin;
     points = [seed];
     const sid = genId();
@@ -218,10 +358,14 @@ export function createDrawTool(): Tool {
       x: worldOrigin.x,
       y: worldOrigin.y,
       rotation: 0,
-      opacity: useStyleStore.getState().opacity,
+      opacity: strokeOpacity,
       index: getTopIndex(ctx.editor.getShapes()),
       props: { ...strokeProps, points: points.slice() },
     } as Shape);
+    beginLiveStroke(sid);
+    // A press that never moves still leaves a dot, so publish the seed rather
+    // than waiting for a pointer move the hand may never make.
+    publishFrame();
   };
 
   /**
@@ -229,12 +373,20 @@ export function createDrawTool(): Tool {
    * the point cap is reached. See {@link MAX_POINTS_PER_SHAPE}.
    */
   const splitIfFull = (ctx: ToolContext): void => {
-    if (points.length < MAX_POINTS_PER_SHAPE) return;
+    if (points.length < MAX_POINTS_PER_SHAPE || !strokeProps) return;
     const last = points[points.length - 1]!;
     const worldOrigin = { x: origin.x + last.x, y: origin.y + last.y };
     chunked = true;
-    finalize(ctx);
+    finalize(ctx, true);
+    // The continuation begins where the last chunk was cut, not where the hand
+    // pressed, so it must not open with the start taper again — that would pinch
+    // the line to nothing in the middle of an unbroken stroke.
+    strokeProps = { ...strokeProps, startTaper: 0 };
     beginShape(ctx, worldOrigin, { x: 0, y: 0, pressure: last.pressure });
+    // The anchor indexed the chunk that just closed. The seed is the same
+    // position under a new index, so a straight segment in progress continues
+    // from it rather than from a point that is no longer in this array.
+    if (straightAnchor !== null) straightAnchor = 0;
   };
 
   // Minimum spacing between recorded samples, in world units. See `appendPoint`.
@@ -251,19 +403,8 @@ export function createDrawTool(): Tool {
    * incoming sample, in order.
    */
   const pressureFromVelocity = (info: ToolPointerInfo): number => {
-    const previousScreen = lastSampleScreen;
-    const elapsed = info.timestamp - lastSampleTime;
-    lastSampleScreen = info.screenPoint;
-    lastSampleTime = info.timestamp;
-    // Nothing to measure against yet, or two samples share a timestamp: hold
-    // the last reading rather than reporting an infinite speed.
-    if (!previousScreen) return lastVelocityPressure;
-    if (!(elapsed > 0)) return lastVelocityPressure;
-    const speed =
-      Math.hypot(
-        info.screenPoint.x - previousScreen.x,
-        info.screenPoint.y - previousScreen.y,
-      ) / elapsed;
+    const velocity = inputs.update(info.screenPoint, info.timestamp);
+    const speed = Math.hypot(velocity.x, velocity.y);
     lastVelocityPressure = clamp01(1 - speed / SPEED_AT_MIN_WIDTH);
     // Pointer-down has nothing to measure against, so the stroke opens at the
     // neutral default and the engine then spends several world units easing
@@ -284,14 +425,12 @@ export function createDrawTool(): Tool {
   // velocity-derived pressure, which is why the engine's own simulation stays
   // off for new strokes. Everything else stores the neutral default.
   const pressureFor = (info: ToolPointerInfo): number => {
-    if (info.pointerType === 'pen') return stylusPressure(info.pressure);
+    if (stylusInput) return stylusPressure(info.pressure);
     if (velocityPressure) return pressureFromVelocity(info);
     return NEUTRAL_PRESSURE;
   };
 
-  const snapToAngle = (point: DrawPoint): DrawPoint => {
-    const start = points[0];
-    if (!start) return point;
+  const snapToAngle = (point: DrawPoint, start: DrawPoint): DrawPoint => {
     const dx = point.x - start.x;
     const dy = point.y - start.y;
     const length = Math.hypot(dx, dy);
@@ -306,18 +445,102 @@ export function createDrawTool(): Tool {
     };
   };
 
-  const appendPoint = (info: ToolPointerInfo): boolean => {
+  /**
+   * Advance the freehand/straight state machine for this move.
+   *
+   * A mode change is armed by the modifier and committed by travel, so a Shift
+   * tap that the hand does not follow through on leaves the stroke alone. The
+   * anchor is taken where the threshold is crossed rather than where the key
+   * went down: the few pixels in between were drawn freehand and are the
+   * stroke, not an artifact to be discarded.
+   */
+  const updateMode = (info: ToolPointerInfo): void => {
+    const wanted = info.shiftKey ? 'straight' : 'free';
+    const current = straightAnchor === null ? 'free' : 'straight';
+    if (wanted === current) {
+      pendingMode = null;
+      pendingModeScreen = null;
+      return;
+    }
+    if (pendingMode !== wanted || !pendingModeScreen) {
+      pendingMode = wanted;
+      pendingModeScreen = { ...info.screenPoint };
+      return;
+    }
+    const dx = info.screenPoint.x - pendingModeScreen.x;
+    const dy = info.screenPoint.y - pendingModeScreen.y;
+    if (dx * dx + dy * dy < MODE_SWITCH_SCREEN_DISTANCE_SQUARED) return;
+    pendingMode = null;
+    pendingModeScreen = null;
+    straightAnchor = wanted === 'straight' ? points.length - 1 : null;
+  };
+
+  /**
+   * The draw shape whose free end is close enough to `point` for a Shift-click
+   * to continue it, if there is one.
+   *
+   * Rotated strokes are excluded. Appending to one would mean inverse-rotating
+   * every sample into its local frame, and because a draw shape rotates about
+   * the centre of its own bounds, each appended point would move the pivot the
+   * rest of the stroke is drawn around.
+   */
+  const extendableAt = (ctx: ToolContext, info: ToolPointerInfo) => {
+    const radius = EXTEND_SCREEN_RADIUS / Math.max(info.zoom, 1e-6);
+    let best: { shape: DrawShape; distance: number } | null = null;
+    for (const shape of ctx.editor.getShapes()) {
+      if (shape.type !== 'draw' || shape.locked || shape.rotation) continue;
+      const last = shape.props.points[shape.props.points.length - 1];
+      if (!last) continue;
+      const distance = Math.hypot(
+        shape.x + last.x - info.point.x,
+        shape.y + last.y - info.point.y,
+      );
+      if (distance > radius) continue;
+      if (!best || distance < best.distance) best = { shape, distance };
+    }
+    return best?.shape ?? null;
+  };
+
+  /**
+   * Continue an existing stroke instead of starting a new one: the gesture
+   * opens in straight mode anchored on that stroke's free end, and every
+   * appended point lands in the same shape record.
+   */
+  const extendShape = (shape: DrawShape): void => {
+    extendedFrom = shape.props.points.slice();
+    // `points[0]` is the adopted stroke's opening point, drawn long ago. The
+    // seeding in `pressureFromVelocity` exists to give a stroke's own first
+    // sample a real velocity reading; letting it run here would reach back and
+    // rewrite the width at the far end of ink this gesture never touched.
+    velocitySeeded = true;
+    strokeProps = { ...shape.props };
+    strokeOpacity = shape.opacity ?? 1;
+    origin = { x: shape.x, y: shape.y };
+    points = shape.props.points.slice();
+    id = shape.id;
+    straightAnchor = points.length - 1;
+    beginLiveStroke(shape.id);
+    publishFrame();
+  };
+
+  const appendPoint = (
+    info: ToolPointerInfo,
+    pressureOverride?: number,
+  ): boolean => {
     let local: DrawPoint = {
       x: info.point.x - origin.x,
       y: info.point.y - origin.y,
-      pressure: pressureFor(info),
+      pressure: pressureOverride ?? pressureFor(info),
     };
-    if (info.shiftKey) {
-      local = snapToAngle(local);
-      const start = points[0];
-      const currentEnd = points[1];
+    const anchor = straightAnchor === null ? null : points[straightAnchor];
+    if (anchor) {
+      // Only the modifier snaps the angle. While a release is still waiting out
+      // its travel threshold the segment stays straight but follows the pointer
+      // freely, so the ink is already heading where the freehand stroke will
+      // continue from by the time the mode actually changes.
+      if (info.shiftKey) local = snapToAngle(local, anchor);
+      const currentEnd = points[straightAnchor! + 1];
       if (
-        start &&
         currentEnd &&
         currentEnd.x === local.x &&
         currentEnd.y === local.y &&
@@ -325,27 +548,28 @@ export function createDrawTool(): Tool {
       ) {
         return false;
       }
-      points = start ? [start, local] : [local];
+      points = [...points.slice(0, straightAnchor! + 1), local];
       return true;
     }
 
     const last = points[points.length - 1];
     if (last) {
-      // Gate on world distance, not screen distance: a zoom-scaled gate made
-      // the recorded path a function of the camera. The same gesture came out
-      // ~36% of a brush width apart drawn at zoom 4 vs zoom 1, and zoomed out
-      // the gate was wide enough (20 world units at zoom 0.05) to throw away
-      // real pointer samples. One world unit is what a zoom-1 stroke already
-      // captured, so feel there is unchanged and every other zoom now matches
-      // it — and it is the spacing the engine calibrates its filters at.
-      // Pressure is still merged so slow stationary strokes retain their
-      // thickness response.
-      if (Math.hypot(last.x - local.x, last.y - local.y) < MIN_SAMPLE_DISTANCE) {
-        if (last.pressure === local.pressure) return false;
+      // Pen digitizers report densely enough to include sub-pixel jitter. One
+      // screen pixel (`1 / zoom` world units) is the stable sampling floor;
+      // mouse and touch keep every reported position. Pressure is still merged
+      // so a slow or stationary pen retains its strongest contact reading.
+      const minSampleDistance = stylusInput ? 1 / Math.max(info.zoom, 1e-6) : 0;
+      const distanceFromLast = Math.hypot(last.x - local.x, last.y - local.y);
+      if (distanceFromLast === 0 || distanceFromLast < minSampleDistance) {
+        const pressure = Math.max(
+          last.pressure ?? NEUTRAL_PRESSURE,
+          local.pressure ?? NEUTRAL_PRESSURE,
+        );
+        if (last.pressure === pressure) return false;
         // Replace (don't mutate): the previous object was already handed to Yjs
         // by an earlier flush's `points.slice()`, so mutating it in place would
         // desync the stored value from the document.
-        points[points.length - 1] = { ...last, pressure: local.pressure };
+        points[points.length - 1] = { ...last, pressure };
         return true;
       }
     }
@@ -356,7 +580,16 @@ export function createDrawTool(): Tool {
   // Shape-local predicted tail for this move. Straight-line (shift) mode snaps
   // the whole stroke to two points, so prediction is meaningless there.
   const predictedFor = (info: ToolPointerInfo): DrawPoint[] => {
-    if (info.shiftKey || !info.predicted?.length) return [];
+    if (
+      !predictionEnabled ||
+      straightAnchor !== null ||
+      !info.predicted?.length ||
+      (stalePredictionAnchorScreen !== null &&
+        stalePredictionAnchorScreen.x === info.screenPoint.x &&
+        stalePredictionAnchorScreen.y === info.screenPoint.y)
+    ) {
+      return [];
+    }
     const anchor = points[points.length - 1];
     // Where the stroke is currently heading. Prediction that folds back on
     // this is the browser overshooting a direction change; carrying it would
@@ -372,12 +605,11 @@ export function createDrawTool(): Tool {
     // The tail's pressure is held at the last real sample's: a predicted point
     // has no measurable velocity and no hardware reading, so anything else
     // would change the stroke's width at the junction.
-    const pressure =
-      info.pointerType === 'pen'
-        ? stylusPressure(info.pressure)
-        : velocityPressure
-          ? lastVelocityPressure
-          : NEUTRAL_PRESSURE;
+    const pressure = stylusInput
+      ? stylusPressure(info.pressure)
+      : velocityPressure
+        ? lastVelocityPressure
+        : NEUTRAL_PRESSURE;
     const tail: DrawPoint[] = [];
     for (const p of info.predicted) {
       if (p.t - info.timestamp > PREDICTION_HORIZON_MS) break;
@@ -430,15 +662,31 @@ export function createDrawTool(): Tool {
       const pencil = useCanvasUiStore.getState();
       // Real pens carry hardware pressure; only mouse/touch fall back to the
       // user's velocity-based simulation preference.
-      velocityPressure =
-        info.pointerType !== 'pen' && pencil.pencilSimulatePressure;
-      lastSampleScreen = null;
-      lastSampleTime = info.timestamp;
+      stylusInput = isPenOrStylus(info.pointerType, info.pressure);
+      velocityPressure = !stylusInput && pencil.pencilSimulatePressure;
+      predictionEnabled = pencil.pencilStabilization > 0;
+      predictionAnchorScreen = null;
+      stalePredictionAnchorScreen = null;
+      inputs.reset(info.screenPoint, info.timestamp);
       lastVelocityPressure = NEUTRAL_PRESSURE;
       velocitySeeded = false;
       chunked = false;
+      straightAnchor = null;
+      pendingMode = null;
+      pendingModeScreen = null;
       zoomOnEnter = info.zoom;
+      // Shift-clicking an existing stroke's free end continues that stroke.
+      // Checked before any style is read: the appended segment belongs to the
+      // shape it joins and must keep that shape's colour and brush.
+      if (info.shiftKey) {
+        const extending = extendableAt(ctx, info);
+        if (extending) {
+          extendShape(extending);
+          return;
+        }
+      }
       const style = useStyleStore.getState();
+      strokeOpacity = style.opacity;
       strokeProps = {
         ...(util.getDefaultProps() as DrawProps),
         points: [],
@@ -453,34 +701,80 @@ export function createDrawTool(): Tool {
         // spacing. The flag stays in the schema for strokes saved before
         // that was true.
         simulatePressure: false,
+        pressureEasing: stylusInput
+          ? 'stylus'
+          : velocityPressure
+            ? 'ease-out-sine'
+            : 'linear',
+        pressureWarmup: stylusInput || velocityPressure,
         thinning: pencil.pencilThinning,
         smoothing: pencil.pencilSmoothing,
-        streamline: pencilStabilizationToStreamline(pencil.pencilStabilization),
+        // Quoted against the camera the stroke is being drawn at, so the hand
+        // gets the same steadying zoomed out as it does at 1:1. Baked in here,
+        // not read at render time — the shape must look the same at every zoom
+        // once it exists.
+        streamline: pencilStabilizationToStreamline(
+          pencil.pencilStabilization,
+          zoomOnEnter,
+        ),
         startTaper: pencil.pencilStartTaper,
         endTaper: pencil.pencilEndTaper,
       };
       beginShape(ctx, info.point, {
         x: 0,
         y: 0,
-        pressure: pressureFor(info),
+        // Velocity has no meaningful value until the first moved sample. Seed
+        // at neutral without consuming the filter; that first reading will be
+        // folded back into this opening point by `pressureFromVelocity`.
+        pressure: stylusInput
+          ? stylusPressure(info.pressure)
+          : NEUTRAL_PRESSURE,
       });
     },
 
     onPointerMove(info: ToolPointerInfo, ctx: ToolContext) {
       if (!id) return;
+      updateMode(info);
       const appended = appendPoint(info);
       if (appended) splitIfFull(ctx);
+      if (
+        stalePredictionAnchorScreen !== null &&
+        (stalePredictionAnchorScreen.x !== info.screenPoint.x ||
+          stalePredictionAnchorScreen.y !== info.screenPoint.y)
+      ) {
+        stalePredictionAnchorScreen = null;
+      }
       // A held-still pointer can still emit predictions every frame. Flushing
       // on those would run the mutate → snapshot → reconcile pipeline once a
       // frame to redraw an identical stroke, so only a real change schedules.
       const nextPredicted = predictedFor(info);
       const tailChanged = !sameTail(predicted, nextPredicted);
       predicted = nextPredicted;
+      // This move is the sample the tail extrapolates from, so the staleness
+      // deadline runs from here. Only an advancing real position pushes it
+      // back; repeated stationary events are the stale-tail case itself.
+      const predictionAdvanced =
+        predicted.length > 0 &&
+        (predictionAnchorScreen === null ||
+          predictionAnchorScreen.x !== info.screenPoint.x ||
+          predictionAnchorScreen.y !== info.screenPoint.y);
+      if (predictionAdvanced) {
+        predictionAnchorScreen = { ...info.screenPoint };
+        scheduleTailExpiry();
+      }
       if (appended || tailChanged) scheduleFlush(ctx);
     },
 
     onPointerUp(info: ToolPointerInfo, ctx: ToolContext) {
-      appendPoint(info);
+      // A pen reports its release after contact pressure has gone to zero. The
+      // normalized pointer-up fallback must not replace the last real pressure
+      // reading and reshape the tip at the instant the stroke settles. Keep
+      // that pressure while still accepting a final position the release event
+      // may carry. Mouse/touch velocity pressure continues to use the event.
+      const liftPressure = stylusInput
+        ? points[points.length - 1]?.pressure
+        : undefined;
+      appendPoint(info, liftPressure);
       finalize(ctx);
       // Stay in the draw tool; intentionally no selection of the new stroke.
     },
@@ -501,13 +795,23 @@ export function createDrawTool(): Tool {
 
     // A pinch (or tool switch) mid-stroke discards the partial stroke entirely.
     onCancel(ctx: ToolContext) {
-      cancelPendingFlush();
+      cancelPendingWork();
       predicted = [];
-      useStrokePredictionStore.getState().clearPrediction();
+      endLiveStroke();
       const sid = id;
+      const original = extendedFrom;
       id = null;
       points = [];
-      if (sid) ctx.editor.deleteShapes([sid]);
+      extendedFrom = null;
+      straightAnchor = null;
+      pendingMode = null;
+      pendingModeScreen = null;
+      if (!sid) return;
+      // Put an extended stroke back the way it was; delete one this gesture
+      // created outright.
+      if (original)
+        ctx.editor.updateShape(sid, { props: { points: original } });
+      else ctx.editor.deleteShapes([sid]);
     },
   };
 }

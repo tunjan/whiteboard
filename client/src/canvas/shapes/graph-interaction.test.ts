@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { GraphViewport } from '@whiteboard/shared';
 import {
   type PlotArea,
+  graphToScreen,
   panViewport,
   screenToGraph,
   zoomViewport,
@@ -22,6 +23,30 @@ describe('screenToGraph', () => {
     const p = screenToGraph({ x: 0, y: 0 }, viewport, area);
     expect(p.x).toBeCloseTo(-10);
     expect(p.y).toBeCloseTo(6);
+  });
+});
+
+describe('graphToScreen', () => {
+  it('maps the math center to the plot center', () => {
+    const p = graphToScreen({ x: 0, y: 0 }, viewport, area);
+    expect(p.x).toBeCloseTo(100);
+    expect(p.y).toBeCloseTo(60);
+  });
+
+  it('round-trips through screenToGraph', () => {
+    for (const point of [
+      { x: -7.5, y: 4 },
+      { x: 0, y: 0 },
+      { x: 9.9, y: -5.5 },
+    ]) {
+      const back = screenToGraph(
+        graphToScreen(point, viewport, area),
+        viewport,
+        area,
+      );
+      expect(back.x).toBeCloseTo(point.x);
+      expect(back.y).toBeCloseTo(point.y);
+    }
   });
 });
 

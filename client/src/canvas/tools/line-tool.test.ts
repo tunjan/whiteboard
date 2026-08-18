@@ -39,7 +39,15 @@ function target(): Shape {
     rotation: 0,
     opacity: 1,
     index: 'a1',
-    props: { w: 100, h: 100, color: 'black', size: 'm', dash: 'solid', fill: 'none', label: '' },
+    props: {
+      w: 100,
+      h: 100,
+      color: 'black',
+      size: 'm',
+      dash: 'solid',
+      fill: 'none',
+      label: '',
+    },
   } as unknown as Shape;
 }
 
@@ -60,7 +68,10 @@ function context(): { ctx: ToolContext; shapes: Map<string, Shape> } {
     deleteShapes: (ids: string[]) => ids.forEach((id) => shapes.delete(id)),
     transact: (fn: () => void) => fn(),
   } as unknown as Editor;
-  return { ctx: { editor, setTool: () => undefined, complete: () => undefined }, shapes };
+  return {
+    ctx: { editor, setTool: () => undefined, complete: () => undefined },
+    shapes,
+  };
 }
 
 function lineTool() {
@@ -111,10 +122,10 @@ describe('line tool snapping while creating', () => {
     const tool = lineTool();
 
     tool.onPointerDown?.(pointer(0, 0), ctx);
-    tool.onPointerMove?.(pointer(198, 205), ctx);
+    tool.onPointerMove?.(pointer(180, 205), ctx);
 
-    // Projected onto the rectangle's bottom edge, which is nearer than its corner.
-    expect(drawn(shapes)?.end).toEqual({ x: 198, y: 200 });
+    // No key point is in range here, so the handle projects to the outline.
+    expect(drawn(shapes)?.end).toEqual({ x: 180, y: 200 });
     expect(useSelectionStore.getState().snapGuides.length).toBeGreaterThan(0);
   });
 

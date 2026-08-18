@@ -11,7 +11,34 @@ import { normalizedPolygonPoints } from './shapes/polygon-geometry';
 import { shapeRegistry } from './shapes/shape-registry';
 
 function rotate(points: Point[], center: Point, angle: number): Point[] {
-  return angle ? points.map((point) => rotatePoint(point, center, angle)) : points;
+  return angle
+    ? points.map((point) => rotatePoint(point, center, angle))
+    : points;
+}
+
+/**
+ * Feature points used while translating / resizing a shape. Utilities may
+ * override them; otherwise the local bounds' four corners and center are
+ * transformed into page space with the shape's rotation.
+ */
+export function shapeBoundsSnapPoints(shape: Shape): Point[] | null {
+  const util = shapeRegistry.getFor(shape);
+  if (!util || util.canSnap === false || shape.type === 'group') return null;
+  const custom = util.getBoundsSnapPoints?.(shape as never);
+  if (custom) return custom;
+  const bounds = util.getBounds(shape as never);
+  const center = boundsCenter(bounds);
+  return rotate(
+    [
+      { x: bounds.minX, y: bounds.minY },
+      { x: bounds.maxX, y: bounds.minY },
+      { x: bounds.maxX, y: bounds.maxY },
+      { x: bounds.minX, y: bounds.maxY },
+      center,
+    ],
+    center,
+    shape.rotation,
+  );
 }
 
 function boxTarget(shape: Shape): PointSnapTarget | null {
@@ -43,7 +70,9 @@ function boxTarget(shape: Shape): PointSnapTarget | null {
   return { points, outline, closed: true };
 }
 
-function ellipseTarget(shape: Extract<Shape, { type: 'ellipse' }>): PointSnapTarget {
+function ellipseTarget(
+  shape: Extract<Shape, { type: 'ellipse' }>,
+): PointSnapTarget {
   const center = {
     x: shape.x + shape.props.w / 2,
     y: shape.y + shape.props.h / 2,
@@ -52,8 +81,8 @@ function ellipseTarget(shape: Extract<Shape, { type: 'ellipse' }>): PointSnapTar
   for (let i = 0; i < 64; i++) {
     const angle = (i / 64) * Math.PI * 2;
     outline.push({
-      x: center.x + Math.cos(angle) * shape.props.w / 2,
-      y: center.y + Math.sin(angle) * shape.props.h / 2,
+      x: center.x + (Math.cos(angle) * shape.props.w) / 2,
+      y: center.y + (Math.sin(angle) * shape.props.h) / 2,
     });
   }
   const rotated = rotate(outline, center, shape.rotation);
@@ -64,7 +93,9 @@ function ellipseTarget(shape: Extract<Shape, { type: 'ellipse' }>): PointSnapTar
   };
 }
 
-function polygonTarget(shape: Extract<Shape, { type: 'polygon' }>): PointSnapTarget {
+function polygonTarget(
+  shape: Extract<Shape, { type: 'polygon' }>,
+): PointSnapTarget {
   const center = {
     x: shape.x + shape.props.w / 2,
     y: shape.y + shape.props.h / 2,
@@ -106,9 +137,10 @@ function connectorTarget(
     center,
     shape.rotation,
   );
-  const points = outline.length > 1
-    ? [outline[0]!, outline[outline.length - 1]!]
-    : [...outline];
+  const points =
+    outline.length > 1
+      ? [outline[0]!, outline[outline.length - 1]!]
+      : [...outline];
   return { outline, points, closed: false };
 }
 
@@ -119,7 +151,10 @@ function connectorTarget(
  * handle to the segment it already sits on, and a live snapshot would let the
  * target chase the handle.
  */
-export function selfSnapTarget(shape: Shape, handleId: string): PointSnapTarget | null {
+export function selfSnapTarget(
+  shape: Shape,
+  handleId: string,
+): PointSnapTarget | null {
   if (shape.type !== 'line' && shape.type !== 'arrow') return null;
   const points = shape.props.points;
   if (points.length < 2) return null;
@@ -169,6 +204,7 @@ export function shapeSnapGeometry(shape: Shape): PointSnapTarget | null {
     case 'image':
     case 'sticker':
     case 'video':
+    case 'bookmark':
     case 'graph':
     case 'equation':
     case 'frame':

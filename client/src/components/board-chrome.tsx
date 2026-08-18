@@ -95,7 +95,7 @@ interface Participant {
   voice: VoiceDisplayState | null;
 }
 
-type VoiceDisplayState = Omit<VoicePresence, 'sessionId'>;
+type VoiceDisplayState = Pick<VoicePresence, 'inCall' | 'muted' | 'speaking'>;
 
 function peerLatencyLabel(peer: PeerPresence): string {
   return peer.latencyMs === null ? 'Measuring…' : `${peer.latencyMs} ms`;
@@ -413,7 +413,7 @@ export function BoardChrome({
         aria-label="Board navigation"
         mode="docked"
         chrome
-        className="absolute top-0 left-0 z-20 flex max-w-[calc(100vw-0.5rem)] items-center gap-0.5 rounded-none rounded-br-xl border-0 bg-surface p-1 pt-[calc(0.25rem+env(safe-area-inset-top))] pl-[calc(0.25rem+env(safe-area-inset-left))] [--chrome-hover:var(--color-panel)] md:max-w-[50vw]"
+        className="absolute top-0 left-0 flex max-w-[calc(100vw-0.5rem)] items-center gap-1 rounded-none rounded-br-xl border-0 bg-surface p-1.5 pt-[calc(0.5rem+env(safe-area-inset-top))] pl-[calc(0.5rem+env(safe-area-inset-left))] [--chrome-hover:var(--color-panel)] md:max-w-[50vw]"
       >
         {/* Back — tutor-only: students join via shared link and aren't authenticated */}
         {identity?.isTutor && (
@@ -547,7 +547,7 @@ export function BoardChrome({
       </Surface>
 
       {/* ── Top-right: floating presence cluster + docked session panel ──── */}
-      <div className="absolute top-[calc(2.5rem+env(safe-area-inset-top))] right-0 z-20 flex max-w-[calc(100vw-0.5rem)] items-start gap-2 [@media(pointer:coarse)]:top-[calc(3.25rem+env(safe-area-inset-top))] md:top-0 md:[@media(pointer:coarse)]:top-0">
+      <div className="absolute top-[calc(2.75rem+env(safe-area-inset-top))] right-0 flex max-w-[calc(100vw-0.5rem)] items-start gap-2 [@media(pointer:coarse)]:top-[calc(3.5rem+env(safe-area-inset-top))] md:top-0 md:[@media(pointer:coarse)]:top-0">
         {participants.length > 0 ? (
           <div
             ref={presenceToolbar.ref}
@@ -560,11 +560,10 @@ export function BoardChrome({
             // `touch-targets` is what the session panel's `chrome` used to give
             // these buttons — kept so coarse pointers still get 44px hit areas.
             //
-            // The top margin is now just the session panel's own `p-1`, and the
-            // row is a full 32px control square that centres the 24px discs, so
-            // the avatars line up with the controls beside them by construction
-            // rather than by a hand-tuned margin.
-            className="touch-targets mt-1 flex h-8 shrink-0 items-center md:mt-[calc(0.25rem+env(safe-area-inset-top))]"
+            // Match the session row's top padding at each breakpoint. The row
+            // is a full 32px control square that centres the 24px discs, so its
+            // centreline now matches the 32px controls beside it.
+            className="touch-targets mt-1.5 flex h-8 shrink-0 items-center md:mt-[calc(0.5rem+env(safe-area-inset-top))]"
           >
             <TooltipProvider delay={300}>
               <AvatarGroup
@@ -688,21 +687,25 @@ export function BoardChrome({
           </div>
         ) : null}
 
-        <Surface
+        {/* No shared panel here: each control below carries its own
+            `bg-surface` chip (see their `toolbarItem` styling) so this row
+            just spaces them apart rather than backing them as one piece. */}
+        <div
           ref={sessionToolbar.ref}
           role="toolbar"
           aria-label="Session controls"
           aria-orientation="horizontal"
-          mode="docked"
-          chrome
           onFocusCapture={sessionToolbar.onFocusCapture}
           onKeyDown={sessionToolbar.onKeyDown}
-          className="flex shrink-0 items-center gap-0.5 rounded-none rounded-bl-xl border-0 bg-surface p-1 pr-[calc(0.25rem+env(safe-area-inset-right))] [--chrome-hover:var(--color-panel)] md:pt-[calc(0.25rem+env(safe-area-inset-top))]"
+          className={cn(
+            CHROME_CONTROLS,
+            'flex shrink-0 items-center gap-1.5 p-1.5 pr-[calc(0.5rem+env(safe-area-inset-right))] [--chrome-hover:var(--color-panel)] md:pt-[calc(0.5rem+env(safe-area-inset-top))]',
+          )}
         >
-          <ConnectionIndicator />
+          <ConnectionIndicator toolbarItem />
           <SessionUtilities identity={identity} compact={isMobile} />
           <ShareButton />
-        </Surface>
+        </div>
       </div>
 
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />

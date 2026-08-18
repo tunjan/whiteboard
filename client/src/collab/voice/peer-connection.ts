@@ -1,8 +1,19 @@
-import type { VoiceIceCandidate, VoiceSignal } from '@whiteboard/shared';
+import type {
+  VideoKind,
+  VoiceIceCandidate,
+  VoiceSignal,
+} from '@whiteboard/shared';
 
 const ICE_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun.l.google.com:19302' },
 ];
+
+/**
+ * Bounds what one peer can make us buffer. Connectivity is established from the
+ * first few candidates, so a host that trickles more than this (many interfaces,
+ * VPN, IPv6) loses only redundant paths — never the connection itself.
+ */
+const MAX_REMOTE_ICE_CANDIDATES = 128;
 
 interface VoicePeerConnectionOptions {
   localClientId: number;
@@ -10,12 +21,30 @@ interface VoicePeerConnectionOptions {
   localSessionId: string;
   peerSessionId: string;
   localTrack: MediaStreamTrack;
+  /** Video already being published when this connection is built. */
+  cameraTrack: MediaStreamTrack | null;
+  screenTrack: MediaStreamTrack | null;
   sendSignal: (signal: VoiceSignal) => void;
   onRemoteStream: (stream: MediaStream) => void;
+  onRemoteVideoTrack: (kind: VideoKind, track: MediaStreamTrack) => void;
   onConnectionStateChange: (state: RTCPeerConnectionState) => void;
 }
 
-/** One static audio-only WebRTC connection in the room mesh. */
+/**
+ * One WebRTC connection in the room mesh: audio plus two video slots.
+ *
+ * Negotiation runs exactly once (see `start`), so the video m-lines are created
+ * up front and left empty; publishing later is a `replaceTrack`, which the spec
+ * guarantees never triggers renegotiation.
+ *
+ * Only the offering peer pre-adds the transceivers. Chrome does not match a
+ * remote offer's m-lines onto transceivers the answerer added itself — it
+ * creates fresh ones and answers `recvonly`, which silently leaves the answerer
+ * unable to send and its inbound video unattributable. So the answerer adopts
+ * whatever the offer produced and opts back into sending before answering (see
+ * `adoptVideoSlots`). Slots are addressed by m-line order rather than by object
+ * identity for the same reason.
+ */
 export class VoicePeerConnection {
   readonly peerClientId: number;
   readonly peerSessionId: string;
@@ -24,8 +53,14 @@ export class VoicePeerConnection {
   private readonly localSessionId: string;
   private readonly connection: RTCPeerConnection;
   private readonly sender: RTCRtpSender;
+  /** Desired video per slot, applied whenever the m-lines exist. */
+  private readonly videoTracks: Record<VideoKind, MediaStreamTrack | null>;
   private readonly sendSignal: (signal: VoiceSignal) => void;
   private readonly onRemoteStream: (stream: MediaStream) => void;
+  private readonly onRemoteVideoTrack: (
+    kind: VideoKind,
+    track: MediaStreamTrack,
+  ) => void;
   private readonly onConnectionStateChange: (
     state: RTCPeerConnectionState,
   ) => void;
@@ -47,8 +82,11 @@ export class VoicePeerConnection {
     localSessionId,
     peerSessionId,
     localTrack,
+    cameraTrack,
+    screenTrack,
     sendSignal,
     onRemoteStream,
+    onRemoteVideoTrack,
     onConnectionStateChange,
   }: VoicePeerConnectionOptions) {
     this.localClientId = localClientId;
@@ -57,6 +95,7 @@ export class VoicePeerConnection {
     this.peerSessionId = peerSessionId;
     this.sendSignal = sendSignal;
     this.onRemoteStream = onRemoteStream;
+    this.onRemoteVideoTrack = onRemoteVideoTrack;
     this.onConnectionStateChange = onConnectionStateChange;
     this.connection = new RTCPeerConnection({
       iceServers: ICE_SERVERS,
@@ -65,6 +104,13 @@ export class VoicePeerConnection {
       localTrack,
       new MediaStream([localTrack]),
     );
+    this.videoTracks = { camera: cameraTrack, screen: screenTrack };
+    if (localClientId < peerClientId) {
+      // Offering side: m-line order is audio, camera, screen.
+      this.connection.addTransceiver('video', { direction: 'sendrecv' });
+      this.connection.addTransceiver('video', { direction: 'sendrecv' });
+      this.applyVideoTracks();
+    }
 
     this.connection.onicecandidate = (event) => {
       if (!event.candidate) return;
@@ -79,6 +125,14 @@ export class VoicePeerConnection {
       });
     };
     this.connection.ontrack = (event) => {
+      // Empty transceivers carry no msid, so `event.streams` is empty for the
+      // video slots. Route on m-line order instead, before the audio path can
+      // fold both video tracks into one stream.
+      const slot = this.videoSlots().indexOf(event.transceiver);
+      if (slot === 0 || slot === 1) {
+        this.onRemoteVideoTrack(slot === 0 ? 'camera' : 'screen', event.track);
+        return;
+      }
       const stream = event.streams[0] ?? this.fallbackRemoteStream;
       if (event.streams.length === 0) {
         this.fallbackRemoteStream.addTrack(event.track);
@@ -143,9 +197,11 @@ export class VoicePeerConnection {
 
     if (signal.kind === 'ice') {
       const candidateKey = JSON.stringify(signal.candidate);
-      if (this.receivedIce.has(candidateKey)) return;
-      if (this.receivedIce.size >= 128) {
-        throw new Error('Too many voice ICE candidates');
+      if (
+        this.receivedIce.has(candidateKey) ||
+        this.receivedIce.size >= MAX_REMOTE_ICE_CANDIDATES
+      ) {
+        return;
       }
       this.receivedIce.add(candidateKey);
       if (!this.connection.remoteDescription) {
@@ -169,6 +225,7 @@ export class VoicePeerConnection {
         sdp: signal.sdp,
       });
       if (this.closed) return;
+      this.adoptVideoSlots();
       await this.flushPendingIce();
       if (this.closed) return;
       const answer = await this.connection.createAnswer();
@@ -181,7 +238,10 @@ export class VoicePeerConnection {
       return;
     }
 
+    // `retry` is handled by the session, which rebuilds the connection rather
+    // than routing the signal into an instance that is already failing.
     if (
+      signal.kind !== 'answer' ||
       this.localClientId > this.peerClientId ||
       this.negotiationState !== 'waiting-answer'
     ) {
@@ -198,6 +258,42 @@ export class VoicePeerConnection {
 
   replaceTrack(track: MediaStreamTrack): Promise<void> {
     return this.sender.replaceTrack(track);
+  }
+
+  /** Publish or clear one video slot. Never renegotiates. */
+  setVideoTrack(
+    kind: VideoKind,
+    track: MediaStreamTrack | null,
+  ): Promise<void> {
+    if (this.closed) return Promise.resolve();
+    this.videoTracks[kind] = track;
+    // Until this peer has answered an offer it has no video m-lines yet; the
+    // track is applied by `adoptVideoSlots` when they arrive.
+    const slot = this.videoSlots()[kind === 'camera' ? 0 : 1];
+    return slot ? slot.sender.replaceTrack(track) : Promise.resolve();
+  }
+
+  /** The video m-lines, in the order both peers agreed on: camera, screen. */
+  private videoSlots(): RTCRtpTransceiver[] {
+    return this.connection
+      .getTransceivers()
+      .filter((transceiver) => transceiver.receiver.track?.kind === 'video');
+  }
+
+  /**
+   * Take ownership of the video m-lines a remote offer just created. They
+   * arrive `recvonly`, so they have to be switched back to `sendrecv` before
+   * the answer is built or this peer can never publish.
+   */
+  private adoptVideoSlots(): void {
+    for (const slot of this.videoSlots()) slot.direction = 'sendrecv';
+    this.applyVideoTracks();
+  }
+
+  private applyVideoTracks(): void {
+    const slots = this.videoSlots();
+    void slots[0]?.sender.replaceTrack(this.videoTracks.camera);
+    void slots[1]?.sender.replaceTrack(this.videoTracks.screen);
   }
 
   close(): void {

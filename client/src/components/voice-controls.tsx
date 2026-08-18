@@ -33,7 +33,6 @@ import {
   usePresenceStore,
 } from '@/collab/use-presence-store';
 import { Button, buttonVariants } from '@/components/ui/button';
-import { PanelLabel } from '@/components/ui/panel-label';
 import {
   Popover,
   PopoverContent,
@@ -260,6 +259,7 @@ export const VoiceControls = memo(function VoiceControls({
                     size: showLabel ? 'sm' : 'icon-sm',
                   }),
                   'relative border',
+                  toolbarItem && 'bg-surface',
                   engaged && 'border-border bg-panel text-fg',
                   engaged &&
                     muted &&
@@ -438,7 +438,6 @@ export const VoiceControls = memo(function VoiceControls({
         </div>
 
         <div className="flex flex-col gap-4">
-          <PanelLabel>Input</PanelLabel>
 
           <SettingRow
             label="Noise cancellation"

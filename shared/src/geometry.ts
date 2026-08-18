@@ -102,6 +102,77 @@ export function distanceToSegment(p: Point, a: Point, b: Point): number {
   return distance(p, { x: a.x + t * dx, y: a.y + t * dy });
 }
 
+/** Point on segment `a`-`b` closest to `p`. Returns `a` for a degenerate segment. */
+export function closestPointOnSegment(p: Point, a: Point, b: Point): Point {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq === 0) return { x: a.x, y: a.y };
+  let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / lenSq;
+  t = Math.max(0, Math.min(1, t));
+  return { x: a.x + t * dx, y: a.y + t * dy };
+}
+
+/** Orientation sign of the triplet (a, b, p): >0 ccw, <0 cw, 0 collinear. */
+function orientation(a: Point, b: Point, p: Point): number {
+  return (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
+}
+
+/** Is `p` inside the bounding box of segment `a`-`b` (used for collinear cases)? */
+function withinSegmentBox(p: Point, a: Point, b: Point): boolean {
+  return (
+    p.x >= Math.min(a.x, b.x) - SEGMENT_EPS &&
+    p.x <= Math.max(a.x, b.x) + SEGMENT_EPS &&
+    p.y >= Math.min(a.y, b.y) - SEGMENT_EPS &&
+    p.y <= Math.max(a.y, b.y) + SEGMENT_EPS
+  );
+}
+
+const SEGMENT_EPS = 1e-8;
+
+/**
+ * Do segments `a`-`b` and `c`-`d` intersect? Proper crossings are detected by
+ * opposing orientations; collinear touches (an endpoint resting exactly on the
+ * other segment) are handled by the bounding-box checks.
+ *
+ * Callers that only need "do these overlap at all" — the marquee, the eraser —
+ * share this so the same two segments never get two different answers.
+ */
+export function segmentsIntersect(
+  a: Point,
+  b: Point,
+  c: Point,
+  d: Point,
+): boolean {
+  const abc = orientation(a, b, c);
+  const abd = orientation(a, b, d);
+  const cda = orientation(c, d, a);
+  const cdb = orientation(c, d, b);
+  if ((abc > 0) !== (abd > 0) && (cda > 0) !== (cdb > 0)) return true;
+  return (
+    (Math.abs(abc) < SEGMENT_EPS && withinSegmentBox(c, a, b)) ||
+    (Math.abs(abd) < SEGMENT_EPS && withinSegmentBox(d, a, b)) ||
+    (Math.abs(cda) < SEGMENT_EPS && withinSegmentBox(a, c, d)) ||
+    (Math.abs(cdb) < SEGMENT_EPS && withinSegmentBox(b, c, d))
+  );
+}
+
+/** Shortest distance between segments `a`-`b` and `c`-`d` (0 when they meet). */
+export function segmentToSegmentDistance(
+  a: Point,
+  b: Point,
+  c: Point,
+  d: Point,
+): number {
+  if (segmentsIntersect(a, b, c, d)) return 0;
+  return Math.min(
+    distanceToSegment(a, c, d),
+    distanceToSegment(b, c, d),
+    distanceToSegment(c, a, b),
+    distanceToSegment(d, a, b),
+  );
+}
+
 /**
  * Even-odd ray-cast point-in-polygon test. `polygon` is an ordered ring of
  * vertices (implicitly closed); returns true if `p` lies inside it.

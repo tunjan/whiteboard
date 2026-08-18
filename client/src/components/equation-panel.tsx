@@ -4,11 +4,12 @@ import { Check, Copy, Keyboard, Maximize2 } from 'lucide-react';
 import type { EquationShape } from '@whiteboard/shared';
 import { requestCanvasZoomToBounds } from '@/canvas/camera-requests';
 import {
-  consumeEquationFocus,
+  hasEquationFocusRequest,
+  resolveEquationFocus,
   subscribeEquationFocus,
 } from '@/canvas/equation-focus';
 import {
-  ensureMathJax,
+  ensureEquationRenderer,
   getEquationRender,
   typesetEquation,
   useEquationRenderStore,
@@ -51,8 +52,12 @@ const SECTION_LABEL = 'text-xs font-medium text-secondary';
 
 type EquationInputMode = 'visual' | 'source';
 
+// Frames the panel keeps re-asserting focus for (~200ms at 60fps): long enough
+// to outlast MathLive's own ~60ms focus transition and a lazily mounted tab
+// panel, short enough that it never fights a user who clicked elsewhere.
+const FOCUS_ATTEMPTS = 12;
+
 const LONG_EQUATION_SOURCE_LENGTH = 240;
-const LONG_EQUATION_RENDER_DELAY_MS = 120;
 const LONG_EQUATION_WARNING_WIDTH = 1200;
 
 function useDebouncedValue<T>(value: T, delay: number): T {
@@ -106,10 +111,10 @@ function patchEquationFromRender(
 }
 
 function EquationPanelContent({ shape }: { shape: EquationShape }) {
+  const shapeId = shape.id;
   const fieldRef = useRef<MathfieldElement | null>(null);
   const sourceRef = useRef<HTMLTextAreaElement | null>(null);
   const inputVersion = useRef(0);
-  const longRenderTimer = useRef<number | null>(null);
   const focusFrame = useRef(0);
   const copiedTimer = useRef<number | null>(null);
   const [ready, setReady] = useState(false);
@@ -120,7 +125,14 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
   useEquationRenderStore((state) => state.version);
 
   /**
-   * Focus the input for `mode`, retrying while its tab panel mounts.
+   * Focus the input for `mode`, retrying until the field reports that it took.
+   *
+   * "The element exists" is not enough to stop retrying: a MathLive field drops
+   * `focus()` on the floor while one of its own focus/blur transitions is still
+   * in flight, which is exactly the window a freshly placed equation lands in —
+   * the canvas surface takes DOM focus on the placing pointer-down, one frame
+   * before this runs. Retrying only until the element mounts left the caret on
+   * the canvas and the user typing into nothing.
    *
    * Without a `select` range the caret lands at the end of the expression, so
    * switching between visual and source picks up where the last one left off
@@ -133,39 +145,51 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
           const target = sourceRef.current;
           if (!target) return retry(tries);
           target.focus();
+          if (document.activeElement !== target) return retry(tries);
           const end = target.value.length;
           const from = select ? Math.min(select.index, end) : end;
           const to = select
             ? Math.min(select.index + select.length, end)
             : end;
           target.setSelectionRange(from, to);
-          return;
+          return settle();
         }
         const field = fieldRef.current;
         if (!field) return retry(tries);
         field.focus();
+        // MathLive moves real DOM focus into its shadow-root delegate on a
+        // ~60ms timer, and ignores `focus()` entirely while one of its own
+        // focus/blur transitions is in flight. Keep asking until the browser
+        // agrees the field has the keyboard — `focus()` is a no-op meanwhile.
+        if (document.activeElement !== field) return retry(tries);
         field.position = field.lastOffset;
         // Only touch-primary devices, where the math keyboard is the only way
         // to type.
         if (prefersVirtualKeyboard()) {
           window.mathVirtualKeyboard.show({ animate: true });
         }
+        settle();
       }
       function retry(tries: number): void {
-        if (tries <= 0) return;
+        // Out of frames: stop claiming the request, so it can't fire at a later
+        // ordinary selection of this shape instead.
+        if (tries <= 0) return settle();
         focusFrame.current = requestAnimationFrame(() => attempt(tries - 1));
       }
+      function settle(): void {
+        resolveEquationFocus(shapeId);
+      }
       cancelAnimationFrame(focusFrame.current);
-      focusFrame.current = requestAnimationFrame(() => attempt(5));
+      focusFrame.current = requestAnimationFrame(() => attempt(FOCUS_ATTEMPTS));
     },
-    [],
+    [shapeId],
   );
 
   useEffect(() => {
     let active = true;
     setReady(false);
     setLoadError(null);
-    void ensureMathJax()
+    void ensureEquationRenderer()
       .then(() => {
         if (active) setReady(true);
       })
@@ -182,25 +206,24 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
     };
   }, []);
 
-  // Focus both freshly placed and already-selected equations on request.
+  // Focus both freshly placed and already-selected equations on request. The
+  // request outlives this effect, so a re-run (StrictMode's second mount, an
+  // input-mode switch) picks up a focus that never landed and chases it again.
   useEffect(() => {
     const handleFocusRequest = (id: string) => {
-      if (id !== shape.id || !consumeEquationFocus(id)) return;
+      if (id !== shapeId) return;
       focusInput(inputMode);
     };
     const unsubscribe = subscribeEquationFocus(handleFocusRequest);
-    if (consumeEquationFocus(shape.id)) focusInput(inputMode);
+    if (hasEquationFocusRequest(shapeId)) focusInput(inputMode);
     return unsubscribe;
     // A pending focus frame deliberately outlives this effect: switching input
     // mode re-runs it, and cancelling here would kill the focus that the switch
     // itself just scheduled. Unmount cleanup below cancels it instead.
-  }, [focusInput, inputMode, shape.id]);
+  }, [focusInput, inputMode, shapeId]);
 
   useEffect(
     () => () => {
-      if (longRenderTimer.current !== null) {
-        window.clearTimeout(longRenderTimer.current);
-      }
       if (copiedTimer.current !== null) {
         window.clearTimeout(copiedTimer.current);
       }
@@ -259,13 +282,18 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
   const updateLatex = (latex: string) => {
     const version = ++inputVersion.current;
     const key = latex.trim();
-    if (longRenderTimer.current !== null) {
-      window.clearTimeout(longRenderTimer.current);
-      longRenderTimer.current = null;
-    }
     if (!key) {
+      // Re-read rather than centering off the captured prop: a collaborator can
+      // have moved or resized this shape since the render that made this
+      // handler, and every other path here already goes through the store.
+      const current = editor.getShape(shape.id);
+      if (current?.type !== 'equation') return;
       editor.updateShape(shape.id, {
-        ...centeredMove(shape, EQUATION_DEFAULT_SIZE.w, EQUATION_DEFAULT_SIZE.h),
+        ...centeredMove(
+          current,
+          EQUATION_DEFAULT_SIZE.w,
+          EQUATION_DEFAULT_SIZE.h,
+        ),
         props: {
           latex,
           w: EQUATION_DEFAULT_SIZE.w,
@@ -275,39 +303,33 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
       return;
     }
 
-    // Very long expressions can take longer than a frame to convert. Preserve
-    // the source immediately, but wait briefly for a pause before replacing the
-    // measured geometry. Ordinary equations keep the instant path below.
-    if (key.length >= LONG_EQUATION_SOURCE_LENGTH) {
-      editor.updateShape(shape.id, { props: { latex } });
-      longRenderTimer.current = window.setTimeout(() => {
-        longRenderTimer.current = null;
-        void typesetEquation(key).then((render) => {
-          if (version !== inputVersion.current) return;
-          const current = editor.getShape(shape.id);
-          if (current?.type !== 'equation' || current.props.latex.trim() !== key) {
-            return;
-          }
-          patchEquationFromRender(shape.id, latex, render);
-        });
-      }, LONG_EQUATION_RENDER_DELAY_MS);
+    // Anything already typeset still lands in a single document patch carrying
+    // both the source and its measured geometry — which covers backspacing
+    // back through an expression, since every prefix was converted on the way
+    // in.
+    const cached = getEquationRender(key);
+    if (cached) {
+      patchEquationFromRender(shape.id, latex, cached);
       return;
     }
 
-    // Once MathJax is warm this fills the cache synchronously, letting one
-    // document patch carry source and measured geometry per keystroke. Before
-    // then the field still accepts input and the shape catches up on load.
-    const pending = typesetEquation(key);
-    const immediate = getEquationRender(key);
-    if (immediate) {
-      patchEquationFromRender(shape.id, latex, immediate);
-      return;
-    }
-    void pending.then((render) => {
-      if (version === inputVersion.current) {
+    // Otherwise the source is saved on this keystroke and the geometry follows
+    // when the worker answers. Conversion is off the main thread, so there is
+    // no longer a warm path that could fill both at once — and equally no need
+    // for the old length-based throttle, since a slow expression no longer
+    // costs the typist a frame.
+    editor.updateShape(shape.id, { props: { latex } });
+    void typesetEquation(key)
+      .then((render) => {
+        // A later keystroke has already asked for its own geometry; letting
+        // this one land would size the shape to an expression that is no
+        // longer in the field.
+        if (version !== inputVersion.current) return;
         patchEquationFromRender(shape.id, latex, render);
-      }
-    });
+      })
+      // Only the renderer being unavailable rejects here, and the mount effect
+      // already reports that as `loadError`. The source is saved either way.
+      .catch(() => undefined);
   };
 
   /** Replace the textarea's selection with `text`, leaving the caret after it. */
@@ -463,6 +485,16 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
               </FieldLabel>
               <div
                 data-overflow={isLongEquation ? true : undefined}
+                // The whole bordered box reads as the input, but MathLive only
+                // listens on its own host — so a click in the shell's padding
+                // ring would land on nothing. Forward those to the field, caret
+                // at the end. Clicks on the field itself fall through, leaving
+                // MathLive to put the caret where the user actually aimed.
+                onPointerDown={(event) => {
+                  if (event.target !== event.currentTarget) return;
+                  event.preventDefault();
+                  focusInput('visual');
+                }}
                 className={cn(
                   'equation-field-shell rounded-md border border-control-border bg-surface px-0.5 py-1.5 transition-all duration-150 ease-out',
                   'focus-within:border-focus focus-within:ring-2 focus-within:ring-focus/20',
@@ -659,7 +691,7 @@ export function EquationPanel() {
   // same note in graph-panel.tsx.
   const selectedShape = useDocumentStore((state) =>
     selectedId
-      ? state.doc.pages[state.currentPageId]?.shapes[selectedId]
+      ? state.shapesById.get(selectedId)
       : undefined,
   );
   const equationShape =

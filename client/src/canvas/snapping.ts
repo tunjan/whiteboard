@@ -1,4 +1,8 @@
-import type { Bounds, Point } from '@whiteboard/shared';
+import {
+  type Bounds,
+  type Point,
+  closestPointOnSegment,
+} from '@whiteboard/shared';
 import { snapCoordinateToGrid } from './grid';
 
 /** A transient alignment indicator in world coordinates. */
@@ -24,6 +28,13 @@ export interface ResizeSnapResult extends SnapResult {
   bounds: Bounds;
 }
 
+/** Bounds used for gap calculations plus feature points used for alignment. */
+export interface BoundsSnapTarget extends Bounds {
+  points: Point[];
+}
+
+export type BoundsSnapTargetLike = Bounds | BoundsSnapTarget;
+
 /** Discrete points plus a sampled/linear outline used by connector handles. */
 export interface PointSnapTarget {
   /** Owning shape, when this target came from document geometry. */
@@ -39,32 +50,79 @@ export interface PointSnapResult {
   targetId?: string;
 }
 
-const EPS = 0.01;
+const SNAP_PRECISION = 1e8;
+const EPS = 1 / SNAP_PRECISION;
+const TAU = Math.PI * 2;
 
-function candidatesX(b: Bounds): number[] {
-  return [b.minX, (b.minX + b.maxX) / 2, b.maxX];
+/** Normalize comparison noise to the eight decimal places used by snapping. */
+function roundSnap(value: number): number {
+  return Math.round(value * SNAP_PRECISION) / SNAP_PRECISION;
 }
 
-function candidatesY(b: Bounds): number[] {
-  return [b.minY, (b.minY + b.maxY) / 2, b.maxY];
+function snapEqual(a: number, b: number): boolean {
+  return roundSnap(a) === roundSnap(b);
+}
+
+function snapLess(a: number, b: number): boolean {
+  return roundSnap(a) < roundSnap(b);
+}
+
+function withinSnapThreshold(distance: number, threshold: number): boolean {
+  return roundSnap(distance) <= roundSnap(threshold);
+}
+
+/** Default object snap geometry: four box corners and its center. */
+export function boundsSnapPoints(bounds: Bounds): Point[] {
+  const center = {
+    x: (bounds.minX + bounds.maxX) / 2,
+    y: (bounds.minY + bounds.maxY) / 2,
+  };
+  return [
+    { x: bounds.minX, y: bounds.minY },
+    { x: bounds.maxX, y: bounds.minY },
+    { x: bounds.maxX, y: bounds.maxY },
+    { x: bounds.minX, y: bounds.maxY },
+    center,
+  ];
+}
+
+function targetBounds(target: BoundsSnapTargetLike): Bounds {
+  return target;
+}
+
+function targetPoints(target: BoundsSnapTargetLike): Point[] {
+  return 'points' in target ? target.points : boundsSnapPoints(target);
+}
+
+function candidatesX(target: BoundsSnapTargetLike): number[] {
+  return targetPoints(target).map((point) => point.x);
+}
+
+function candidatesY(target: BoundsSnapTargetLike): number[] {
+  return targetPoints(target).map((point) => point.y);
 }
 
 interface Best {
   dist: number;
   offset: number;
-  target: number;
-  /** Bounds of the shape we snapped to (null for a grid snap). */
-  matched: Bounds | null;
 }
 
 function emptyBest(threshold: number): Best {
-  return { dist: threshold + 1, offset: 0, target: 0, matched: null };
+  return { dist: threshold + 1, offset: 0 };
 }
 
+function hasBest(best: Best, threshold: number): boolean {
+  return withinSnapThreshold(best.dist, threshold);
+}
+
+/**
+ * Pass 1: the smallest displacement along one axis that lands a moving
+ * coordinate on a target coordinate (or a grid line).
+ */
 function bestAlong(
   moving: number[],
-  others: Bounds[],
-  pick: (b: Bounds) => number[],
+  others: BoundsSnapTargetLike[],
+  pick: (target: BoundsSnapTargetLike) => number[],
   gridStep: number | null,
   threshold: number,
 ): Best {
@@ -73,9 +131,7 @@ function bestAlong(
     for (const target of pick(other)) {
       for (const value of moving) {
         const dist = Math.abs(target - value);
-        if (dist < best.dist) {
-          best = { dist, offset: target - value, target, matched: other };
-        }
+        if (snapLess(dist, best.dist)) best = { dist, offset: target - value };
       }
     }
   }
@@ -83,44 +139,58 @@ function bestAlong(
     for (const value of moving) {
       const target = snapCoordinateToGrid(value, gridStep);
       const dist = Math.abs(target - value);
-      if (dist < best.dist) {
-        best = { dist, offset: target - value, target, matched: null };
-      }
+      if (snapLess(dist, best.dist)) best = { dist, offset: target - value };
     }
   }
   return best;
 }
 
-function collectAligned(
-  others: Bounds[],
-  pick: (b: Bounds) => number[],
-  target: number,
-): Bounds[] {
-  return others.filter((other) =>
-    pick(other).some((value) => Math.abs(value - target) < EPS),
-  );
-}
-
-function alignmentGuide(
+/**
+ * Pass 2: every coordinate the settled box shares with a target, so a placement
+ * that lines up with several shapes at once — or with one shape on its edge and
+ * another on its centre — shows a guide for each rather than only for the pair
+ * that drove the nudge. `movingValues` restricts which of the box's own
+ * coordinates may align, so a resize only reports its dragged edge.
+ */
+function alignmentGuides(
   axis: 'x' | 'y',
-  best: Best,
+  movingValues: number[],
   moving: Bounds,
-  others: Bounds[],
-): SnapGuide | null {
-  if (!best.matched) return null;
+  others: BoundsSnapTargetLike[],
+): SnapGuide[] {
   const pick = axis === 'x' ? candidatesX : candidatesY;
-  const aligned = collectAligned(others, pick, best.target);
-  let from = axis === 'x' ? moving.minY : moving.minX;
-  let to = axis === 'x' ? moving.maxY : moving.maxX;
-  for (const other of aligned) {
-    from = Math.min(from, axis === 'x' ? other.minY : other.minX);
-    to = Math.max(to, axis === 'x' ? other.maxY : other.maxX);
+  const crossStart = (target: BoundsSnapTargetLike) => {
+    const bounds = targetBounds(target);
+    return axis === 'x' ? bounds.minY : bounds.minX;
+  };
+  const crossEnd = (target: BoundsSnapTargetLike) => {
+    const bounds = targetBounds(target);
+    return axis === 'x' ? bounds.maxY : bounds.maxX;
+  };
+  const spans = new Map<number, SnapGuide>();
+
+  for (const other of others) {
+    for (const target of pick(other)) {
+      if (!movingValues.some((value) => snapEqual(value, target))) continue;
+      const key = roundSnap(target);
+      const guide = spans.get(key) ?? {
+        kind: 'alignment' as const,
+        axis,
+        at: target,
+        from: crossStart(moving),
+        to: crossEnd(moving),
+      };
+      guide.from = Math.min(guide.from, crossStart(other));
+      guide.to = Math.max(guide.to, crossEnd(other));
+      spans.set(key, guide);
+    }
   }
-  return { kind: 'alignment', axis, at: best.target, from, to };
+  return [...spans.values()].sort((a, b) => a.at - b.at);
 }
 
 function overlaps(a0: number, a1: number, b0: number, b1: number): boolean {
-  return Math.max(a0, b0) <= Math.min(a1, b1);
+  // A shared boundary has no breadth, so it cannot form a row / column gap.
+  return snapLess(Math.max(a0, b0), Math.min(a1, b1));
 }
 
 interface GapCandidate {
@@ -167,7 +237,7 @@ function gapChainIntervals(
     const a = band[i]!;
     const b = band[i + 1]!;
     if (end(a) >= start(b)) continue;
-    if (Math.abs(start(b) - end(a) - gapLength) < EPS) {
+    if (snapEqual(start(b) - end(a), gapLength)) {
       intervals.push([end(a), start(b)]);
     }
   }
@@ -200,30 +270,31 @@ function bestGapAlong(
     intervals: Array<readonly [number, number]>,
   ) => {
     const dist = Math.abs(offset);
-    if (dist > threshold) return;
+    if (!withinSnapThreshold(dist, threshold)) return;
     const pairCross: readonly [number, number] = [
       Math.max(crossStart(pair[0]), crossStart(pair[1])),
       Math.min(crossEnd(pair[0]), crossEnd(pair[1])),
     ];
     if (best) {
-      if (dist > best.dist + EPS) return;
+      if (snapLess(best.dist, dist)) return;
       // Equally good placements: keep the tighter gap when the two candidates
       // share a band, so a nested run wins over the gap enclosing it.
-      if (Math.abs(dist - best.dist) <= EPS) {
+      if (snapEqual(dist, best.dist)) {
         const sameBand = overlaps(
           pairCross[0],
           pairCross[1],
           best.cross[0],
           best.cross[1],
         );
-        if (!sameBand || best.gapLength <= gapLength) return;
+        if (!sameBand || !snapLess(gapLength, best.gapLength)) return;
       }
     }
     const cross0 = Math.max(crossStart(moving), pairCross[0]);
     const cross1 = Math.min(crossEnd(moving), pairCross[1]);
-    const at = cross0 <= cross1
-      ? (cross0 + cross1) / 2
-      : (pairCross[0] + pairCross[1]) / 2;
+    const at =
+      cross0 <= cross1
+        ? (cross0 + cross1) / 2
+        : (pairCross[0] + pairCross[1]) / 2;
     best = {
       dist,
       offset,
@@ -242,8 +313,12 @@ function bestGapAlong(
       if (end(a) >= start(b)) continue;
       const pairCross0 = Math.max(crossStart(a), crossStart(b));
       const pairCross1 = Math.min(crossEnd(a), crossEnd(b));
-      if (pairCross0 > pairCross1) continue;
-      if (!overlaps(crossStart(moving), crossEnd(moving), pairCross0, pairCross1)) {
+      if (!overlaps(crossStart(a), crossEnd(a), crossStart(b), crossEnd(b))) {
+        continue;
+      }
+      if (
+        !overlaps(crossStart(moving), crossEnd(moving), pairCross0, pairCross1)
+      ) {
         continue;
       }
 
@@ -251,7 +326,7 @@ function bestGapAlong(
       const pair: readonly [Bounds, Bounds] = [a, b];
 
       // Center the moving box in the static gap.
-      if (movingSize <= gap + EPS) {
+      if (!snapLess(gap, movingSize)) {
         const desiredCenter = (end(a) + start(b)) / 2;
         const offset = desiredCenter - movingCenter;
         const movedStart = start(moving) + offset;
@@ -278,27 +353,33 @@ function bestGapAlong(
 
   if (!best) return null;
   const chosen: GapBest = best;
-  const snapped: Bounds = axis === 'x'
-    ? {
-        ...moving,
-        minX: moving.minX + chosen.offset,
-        maxX: moving.maxX + chosen.offset,
-      }
-    : {
-        ...moving,
-        minY: moving.minY + chosen.offset,
-        maxY: moving.maxY + chosen.offset,
-      };
+  const snapped: Bounds =
+    axis === 'x'
+      ? {
+          ...moving,
+          minX: moving.minX + chosen.offset,
+          maxX: moving.maxX + chosen.offset,
+        }
+      : {
+          ...moving,
+          minY: moving.minY + chosen.offset,
+          maxY: moving.maxY + chosen.offset,
+        };
   const intervals = [
     ...chosen.intervals,
-    ...gapChainIntervals(axis, [...others, snapped], chosen.gapLength, chosen.cross),
+    ...gapChainIntervals(
+      axis,
+      [...others, snapped],
+      chosen.gapLength,
+      chosen.cross,
+    ),
   ];
 
   const seen = new Set<string>();
   const guides: SnapGuide[] = [];
   for (const [from, to] of [...intervals].sort((a, b) => a[0] - b[0])) {
-    if (to - from <= EPS) continue;
-    const key = `${Math.round(from / EPS)}:${Math.round(to / EPS)}`;
+    if (!snapLess(0, to - from)) continue;
+    const key = `${roundSnap(from)}:${roundSnap(to)}`;
     if (seen.has(key)) continue;
     seen.add(key);
     guides.push({ kind: 'gap', axis, at: chosen.at, from, to });
@@ -312,36 +393,95 @@ function bestGapAlong(
  */
 export function snapBounds(
   moving: Bounds,
-  others: Bounds[],
+  others: BoundsSnapTargetLike[],
   gridStep: number | null,
   threshold: number,
+  options?: { points?: Point[]; axis?: 'x' | 'y' | null },
 ): SnapResult {
-  const bx = bestAlong(candidatesX(moving), others, candidatesX, gridStep, threshold);
-  const by = bestAlong(candidatesY(moving), others, candidatesY, gridStep, threshold);
-  const gapX = bestGapAlong('x', moving, others, threshold);
-  const gapY = bestGapAlong('y', moving, others, threshold);
+  const movingPoints = options?.points ?? boundsSnapPoints(moving);
+  const movingX = movingPoints.map((point) => point.x);
+  const movingY = movingPoints.map((point) => point.y);
+  const canSnapX = options?.axis !== 'y';
+  const canSnapY = options?.axis !== 'x';
+  const otherBounds = others.map(targetBounds);
+  // Resolve object / distribution snaps first. Grid snapping is a fallback for
+  // the whole gesture sample: once any object guide is active, the grid must
+  // not pull the unsnapped axis away from the pointer.
+  const bx = canSnapX
+    ? bestAlong(movingX, others, candidatesX, null, threshold)
+    : emptyBest(threshold);
+  const by = canSnapY
+    ? bestAlong(movingY, others, candidatesY, null, threshold)
+    : emptyBest(threshold);
+  const gapX = canSnapX
+    ? bestGapAlong('x', moving, otherBounds, threshold)
+    : null;
+  const gapY = canSnapY
+    ? bestGapAlong('y', moving, otherBounds, threshold)
+    : null;
 
-  const useGapX = !!gapX && gapX.dist < bx.dist;
-  const useGapY = !!gapY && gapY.dist < by.dist;
-  const dx = useGapX ? gapX.offset : bx.dist <= threshold ? bx.offset : 0;
-  const dy = useGapY ? gapY.offset : by.dist <= threshold ? by.offset : 0;
+  const useGapX =
+    !!gapX && (!hasBest(bx, threshold) || snapLess(gapX.dist, bx.dist));
+  const useGapY =
+    !!gapY && (!hasBest(by, threshold) || snapLess(gapY.dist, by.dist));
+  const hasObjectX = useGapX || hasBest(bx, threshold);
+  const hasObjectY = useGapY || hasBest(by, threshold);
+  const hasObjectSnap = hasObjectX || hasObjectY;
+  const gridX =
+    hasObjectSnap || !canSnapX
+      ? emptyBest(threshold)
+      : bestAlong(movingX, [], candidatesX, gridStep, threshold);
+  const gridY =
+    hasObjectSnap || !canSnapY
+      ? emptyBest(threshold)
+      : bestAlong(movingY, [], candidatesY, gridStep, threshold);
+  const dx = useGapX
+    ? gapX.offset
+    : hasBest(bx, threshold)
+      ? bx.offset
+      : hasBest(gridX, threshold)
+        ? gridX.offset
+        : 0;
+  const dy = useGapY
+    ? gapY.offset
+    : hasBest(by, threshold)
+      ? by.offset
+      : hasBest(gridY, threshold)
+        ? gridY.offset
+        : 0;
   const snappedMoving = {
     minX: moving.minX + dx,
     minY: moving.minY + dy,
     maxX: moving.maxX + dx,
     maxY: moving.maxY + dy,
   };
+  const snappedMovingPoints = movingPoints.map((point) => ({
+    x: point.x + dx,
+    y: point.y + dy,
+  }));
 
   const guides: SnapGuide[] = [];
   if (useGapX) guides.push(...gapX.guides);
-  else if (bx.dist <= threshold) {
-    const guide = alignmentGuide('x', bx, snappedMoving, others);
-    if (guide) guides.push(guide);
+  else if (hasBest(bx, threshold)) {
+    guides.push(
+      ...alignmentGuides(
+        'x',
+        snappedMovingPoints.map((point) => point.x),
+        snappedMoving,
+        others,
+      ),
+    );
   }
   if (useGapY) guides.push(...gapY.guides);
-  else if (by.dist <= threshold) {
-    const guide = alignmentGuide('y', by, snappedMoving, others);
-    if (guide) guides.push(guide);
+  else if (hasBest(by, threshold)) {
+    guides.push(
+      ...alignmentGuides(
+        'y',
+        snappedMovingPoints.map((point) => point.y),
+        snappedMoving,
+        others,
+      ),
+    );
   }
   return { dx, dy, guides };
 }
@@ -353,7 +493,7 @@ export function snapBounds(
 export function snapResizeBounds(
   moving: Bounds,
   handle: string,
-  others: Bounds[],
+  others: BoundsSnapTargetLike[],
   gridStep: number | null,
   threshold: number,
   lockAspect: boolean,
@@ -369,20 +509,37 @@ export function snapResizeBounds(
     : handle.includes('s')
       ? moving.maxY
       : null;
-  const bx = xValue === null
-    ? emptyBest(threshold)
-    : bestAlong([xValue], others, candidatesX, gridStep, threshold);
-  const by = yValue === null
-    ? emptyBest(threshold)
-    : bestAlong([yValue], others, candidatesY, gridStep, threshold);
-  const validX = xValue !== null && bx.dist <= threshold;
-  const validY = yValue !== null && by.dist <= threshold;
+  const objectX =
+    xValue === null
+      ? emptyBest(threshold)
+      : bestAlong([xValue], others, candidatesX, null, threshold);
+  const objectY =
+    yValue === null
+      ? emptyBest(threshold)
+      : bestAlong([yValue], others, candidatesY, null, threshold);
+  const hasObjectSnap =
+    (xValue !== null && hasBest(objectX, threshold)) ||
+    (yValue !== null && hasBest(objectY, threshold));
+  const bx =
+    hasObjectSnap || xValue === null
+      ? objectX
+      : bestAlong([xValue], [], candidatesX, gridStep, threshold);
+  const by =
+    hasObjectSnap || yValue === null
+      ? objectY
+      : bestAlong([yValue], [], candidatesY, gridStep, threshold);
+  const validX = xValue !== null && hasBest(bx, threshold);
+  const validY = yValue !== null && hasBest(by, threshold);
   const bounds = { ...moving };
   let useX = validX;
   let useY = validY;
 
   if (lockAspect && xValue !== null && yValue !== null && (validX || validY)) {
-    useX = validX && (!validY || bx.dist < by.dist);
+    // An axis already at zero displacement must not mask a useful snap on the
+    // other axis. Otherwise the smaller non-zero correction is dominant.
+    const movesX = validX && !snapEqual(bx.dist, 0);
+    const movesY = validY && !snapEqual(by.dist, 0);
+    useX = movesX ? !movesY || snapLess(bx.dist, by.dist) : !movesY && validX;
     useY = !useX && validY;
     const ratio = Math.max(EPS, aspectRatio);
     const anchorX = handle.includes('w') ? moving.maxX : moving.minX;
@@ -417,14 +574,16 @@ export function snapResizeBounds(
     }
   }
 
+  // Only the dragged edge is reported: a stationary edge that happens to line up
+  // with a target was not part of this snap.
   const guides: SnapGuide[] = [];
   if (useX) {
-    const guide = alignmentGuide('x', bx, bounds, others);
-    if (guide) guides.push(guide);
+    const edge = handle.includes('w') ? bounds.minX : bounds.maxX;
+    guides.push(...alignmentGuides('x', [edge], bounds, others));
   }
   if (useY) {
-    const guide = alignmentGuide('y', by, bounds, others);
-    if (guide) guides.push(guide);
+    const edge = handle.includes('n') ? bounds.minY : bounds.maxY;
+    guides.push(...alignmentGuides('y', [edge], bounds, others));
   }
   return {
     bounds,
@@ -432,18 +591,6 @@ export function snapResizeBounds(
     dy: bounds.minY - moving.minY + (bounds.maxY - moving.maxY),
     guides,
   };
-}
-
-function closestPointOnSegment(point: Point, a: Point, b: Point): Point {
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  const lengthSq = dx * dx + dy * dy;
-  if (lengthSq < EPS * EPS) return a;
-  const t = Math.max(
-    0,
-    Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / lengthSq),
-  );
-  return { x: a.x + t * dx, y: a.y + t * dy };
 }
 
 /** Snap a connector/control handle to the nearest discrete point or outline. */
@@ -458,7 +605,7 @@ export function snapPoint(
   let targetId: string | undefined;
   const consider = (candidate: Point, candidateTargetId?: string) => {
     const dist = Math.hypot(candidate.x - point.x, candidate.y - point.y);
-    if (dist < bestDistance) {
+    if (withinSnapThreshold(dist, threshold) && snapLess(dist, bestDistance)) {
       bestDistance = dist;
       bestPoint = candidate;
       found = true;
@@ -466,10 +613,28 @@ export function snapPoint(
     }
   };
 
-  // Discrete snap points win ties over outline projections.
+  // Discrete feature points have strict priority over outline projections,
+  // even when a nearby outline happens to be geometrically closer.
   for (const target of targets) {
     for (const candidate of target.points) consider(candidate, target.shapeId);
   }
+  if (found) {
+    return {
+      point: bestPoint,
+      targetId,
+      guides: [
+        {
+          kind: 'point',
+          axis: 'x',
+          at: bestPoint.x,
+          from: bestPoint.y,
+          to: bestPoint.y,
+        },
+      ],
+    };
+  }
+
+  bestDistance = threshold + 1;
   for (const target of targets) {
     const { outline } = target;
     const segmentCount = target.closed ? outline.length : outline.length - 1;
@@ -482,7 +647,7 @@ export function snapPoint(
     }
   }
 
-  if (!found || bestDistance > threshold) return alignPoint(point, targets, threshold);
+  if (!found) return alignPoint(point, targets, threshold);
   return {
     point: bestPoint,
     targetId,
@@ -513,36 +678,84 @@ function alignPoint(
   for (const target of targets) {
     for (const candidate of target.points) {
       const dx = Math.abs(candidate.x - point.x);
-      if (dx <= threshold && (!bestX || dx < bestX.dist)) {
+      if (
+        withinSnapThreshold(dx, threshold) &&
+        (!bestX || snapLess(dx, bestX.dist))
+      ) {
         bestX = { dist: dx, at: candidate.x, other: candidate.y };
       }
       const dy = Math.abs(candidate.y - point.y);
-      if (dy <= threshold && (!bestY || dy < bestY.dist)) {
+      if (
+        withinSnapThreshold(dy, threshold) &&
+        (!bestY || snapLess(dy, bestY.dist))
+      ) {
         bestY = { dist: dy, at: candidate.y, other: candidate.x };
       }
     }
   }
 
   if (!bestX && !bestY) return { point, guides: [] };
-  const snapped = { x: bestX ? bestX.at : point.x, y: bestY ? bestY.at : point.y };
+  const snapped = {
+    x: bestX ? bestX.at : point.x,
+    y: bestY ? bestY.at : point.y,
+  };
   const guides: SnapGuide[] = [];
   if (bestX) {
+    let from = snapped.y;
+    let to = snapped.y;
+    for (const target of targets) {
+      for (const candidate of target.points) {
+        if (!snapEqual(candidate.x, snapped.x)) continue;
+        from = Math.min(from, candidate.y);
+        to = Math.max(to, candidate.y);
+      }
+    }
     guides.push({
       kind: 'alignment',
       axis: 'x',
       at: snapped.x,
-      from: Math.min(snapped.y, bestX.other),
-      to: Math.max(snapped.y, bestX.other),
+      from,
+      to,
     });
   }
   if (bestY) {
+    let from = snapped.x;
+    let to = snapped.x;
+    for (const target of targets) {
+      for (const candidate of target.points) {
+        if (!snapEqual(candidate.y, snapped.y)) continue;
+        from = Math.min(from, candidate.x);
+        to = Math.max(to, candidate.x);
+      }
+    }
     guides.push({
       kind: 'alignment',
       axis: 'y',
       at: snapped.y,
-      from: Math.min(snapped.x, bestY.other),
-      to: Math.max(snapped.x, bestY.other),
+      from,
+      to,
     });
   }
   return { point: snapped, guides };
+}
+
+function clampRadians(angle: number): number {
+  return ((angle % TAU) + TAU) % TAU;
+}
+
+/** Quantize an angle into equal radial sectors and return it in [-pi, pi]. */
+export function snapAngle(angle: number, segments: number): number {
+  if (!Number.isFinite(angle) || !Number.isFinite(segments) || segments <= 0) {
+    return angle;
+  }
+  const segment = TAU / segments;
+  let snapped =
+    (Math.floor((clampRadians(angle) + segment / 2) / segment) * segment) % TAU;
+  if (snapped > Math.PI) snapped -= TAU;
+  return Object.is(snapped, -0) ? 0 : snapped;
+}
+
+/** Shortest signed angular displacement from `from` to `to`. */
+export function shortAngleDist(from: number, to: number): number {
+  return ((((to - from + Math.PI) % TAU) + TAU) % TAU) - Math.PI;
 }

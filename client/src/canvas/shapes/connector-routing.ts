@@ -6,11 +6,14 @@ import {
   type Shape,
   type Vec,
   boundsCenter,
+  closestPointOnSegment,
   distance,
   pointsBounds,
   rotatePoint,
 } from '@whiteboard/shared';
 import type { Editor } from '../editor';
+import { findClosestCommonContainer } from '../hierarchy';
+import { jitterKeyBetween } from '../order';
 import { shapeRotatedBounds } from '../shape-bounds';
 import { shapeRegistry } from './shape-registry';
 import { shapeSnapGeometry } from '../snap-geometry';
@@ -27,19 +30,12 @@ export function isBindableShape(shape: Shape): boolean {
   );
 }
 
-function closestPointOnSegment(point: Point, a: Point, b: Point): Point {
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  const lengthSq = dx * dx + dy * dy;
-  if (lengthSq < EPSILON) return a;
-  const t = Math.max(
-    0,
-    Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / lengthSq),
-  );
-  return { x: a.x + dx * t, y: a.y + dy * t };
-}
-
-function segmentIntersection(a: Point, b: Point, c: Point, d: Point): Point | null {
+function segmentIntersection(
+  a: Point,
+  b: Point,
+  c: Point,
+  d: Point,
+): Point | null {
   const abx = b.x - a.x;
   const aby = b.y - a.y;
   const cdx = d.x - c.x;
@@ -112,8 +108,14 @@ export function bindingForPoint(
     binding: {
       shapeId: target.id,
       anchor: {
-        x: Math.max(0.001, Math.min(0.999, (unrotated.x - bounds.minX) / width)),
-        y: Math.max(0.001, Math.min(0.999, (unrotated.y - bounds.minY) / height)),
+        x: Math.max(
+          0.001,
+          Math.min(0.999, (unrotated.x - bounds.minX) / width),
+        ),
+        y: Math.max(
+          0.001,
+          Math.min(0.999, (unrotated.y - bounds.minY) / height),
+        ),
       },
     },
     point,
@@ -121,7 +123,10 @@ export function bindingForPoint(
 }
 
 /** Resolve a normalized binding after its target moves, rotates, or resizes. */
-export function pointForBinding(binding: ConnectorBinding, target: Shape): Point | null {
+export function pointForBinding(
+  binding: ConnectorBinding,
+  target: Shape,
+): Point | null {
   const util = shapeRegistry.getFor(target);
   if (!util || !isBindableShape(target)) return null;
   const bounds = util.getBounds(target as never);
@@ -142,8 +147,11 @@ export function findBindableShapeAt(
 ): Shape | null {
   for (let i = shapes.length - 1; i >= 0; i--) {
     const shape = shapes[i]!;
-    if (shape.id === excludeId || shape.hidden || !isBindableShape(shape)) continue;
-    if (shapeRegistry.getFor(shape)?.hitTest(shape as never, point, tolerance)) {
+    if (shape.id === excludeId || shape.hidden || !isBindableShape(shape))
+      continue;
+    if (
+      shapeRegistry.getFor(shape)?.hitTest(shape as never, point, tolerance)
+    ) {
       return shape;
     }
   }
@@ -181,7 +189,11 @@ function pointInside(bounds: Bounds, point: Point): boolean {
   );
 }
 
-function segmentBlocked(a: Point, b: Point, obstacles: readonly Bounds[]): boolean {
+function segmentBlocked(
+  a: Point,
+  b: Point,
+  obstacles: readonly Bounds[],
+): boolean {
   for (const obstacle of obstacles) {
     if (Math.abs(a.x - b.x) < EPSILON) {
       if (
@@ -207,7 +219,8 @@ function segmentBlocked(a: Point, b: Point, obstacles: readonly Bounds[]): boole
 
 function simplifyRoute(points: readonly Vec[]): Vec[] {
   const deduped = points.filter(
-    (point, index) => index === 0 || distance(point, points[index - 1]!) > EPSILON,
+    (point, index) =>
+      index === 0 || distance(point, points[index - 1]!) > EPSILON,
   );
   const out: Vec[] = [];
   for (const point of deduped) {
@@ -309,10 +322,18 @@ export function orthogonalRoute(
   const startIndex = nodeIndex(startStub);
   const endIndex = nodeIndex(endStub);
   if (startIndex < 0 || endIndex < 0) {
-    return simplifyRoute([start, startStub, { x: endStub.x, y: startStub.y }, endStub, end]);
+    return simplifyRoute([
+      start,
+      startStub,
+      { x: endStub.x, y: startStub.y },
+      endStub,
+      end,
+    ]);
   }
 
-  const neighbors = nodes.map(() => [] as Array<{ node: number; direction: 'h' | 'v'; length: number }>);
+  const neighbors = nodes.map(
+    () => [] as Array<{ node: number; direction: 'h' | 'v'; length: number }>,
+  );
   for (let i = 0; i < nodes.length; i++) {
     for (let j = i + 1; j < nodes.length; j++) {
       const a = nodes[i]!;
@@ -330,7 +351,8 @@ export function orthogonalRoute(
     }
   }
 
-  const key = (node: number, direction: SearchState['direction']) => `${node}:${direction}`;
+  const key = (node: number, direction: SearchState['direction']) =>
+    `${node}:${direction}`;
   const queue: SearchState[] = [
     { node: startIndex, direction: 'none', cost: 0, previous: null },
   ];
@@ -340,14 +362,17 @@ export function orthogonalRoute(
   while (queue.length) {
     queue.sort((a, b) => a.cost - b.cost);
     const current = queue.shift()!;
-    if (best.get(key(current.node, current.direction))?.cost !== current.cost) continue;
+    if (best.get(key(current.node, current.direction))?.cost !== current.cost)
+      continue;
     if (current.node === endIndex) {
       winner = current;
       break;
     }
     for (const edge of neighbors[current.node]!) {
       const bendPenalty =
-        current.direction !== 'none' && current.direction !== edge.direction ? 80 : 0;
+        current.direction !== 'none' && current.direction !== edge.direction
+          ? 80
+          : 0;
       const next: SearchState = {
         node: edge.node,
         direction: edge.direction,
@@ -355,13 +380,20 @@ export function orthogonalRoute(
         previous: key(current.node, current.direction),
       };
       const nextKey = key(next.node, next.direction);
-      if ((best.get(nextKey)?.cost ?? Number.POSITIVE_INFINITY) <= next.cost) continue;
+      if ((best.get(nextKey)?.cost ?? Number.POSITIVE_INFINITY) <= next.cost)
+        continue;
       best.set(nextKey, next);
       queue.push(next);
     }
   }
   if (!winner) {
-    return simplifyRoute([start, startStub, { x: endStub.x, y: startStub.y }, endStub, end]);
+    return simplifyRoute([
+      start,
+      startStub,
+      { x: endStub.x, y: startStub.y },
+      endStub,
+      end,
+    ]);
   }
   const middle: Vec[] = [];
   let cursor: SearchState | undefined = winner;
@@ -456,6 +488,8 @@ export function syncBoundArrows(
     id: string;
     points: Vec[];
     bindings: ArrowShape['props']['bindings'];
+    parentId: string | null;
+    index: string;
   }> = [];
   for (const { shape, bindings: initialBindings } of candidates) {
     const current = shape.props.points;
@@ -465,7 +499,9 @@ export function syncBoundArrows(
     let start = first;
     let end = last;
     let bindings = initialBindings;
-    const startTarget = bindings.start ? byId.get(bindings.start.shapeId) : undefined;
+    const startTarget = bindings.start
+      ? byId.get(bindings.start.shapeId)
+      : undefined;
     const endTarget = bindings.end ? byId.get(bindings.end.shapeId) : undefined;
     if (bindings.start && startTarget) {
       const point = pointForBinding(bindings.start, startTarget);
@@ -479,24 +515,82 @@ export function syncBoundArrows(
     } else if (bindings.end && !endTarget) {
       bindings = { ...bindings, end: null };
     }
-    const topology = shape.props.topology ?? (Math.abs(shape.props.bend ?? 0) >= 0.5 ? 'arc' : 'straight');
+    const topology =
+      shape.props.topology ??
+      (Math.abs(shape.props.bend ?? 0) >= 0.5 ? 'arc' : 'straight');
     const points =
       topology === 'elbow'
         ? orthogonalRoute(start, end, {
-            startBounds: startTarget ? localTargetBounds(shape, startTarget) : undefined,
-            endBounds: endTarget ? localTargetBounds(shape, endTarget) : undefined,
-            startDirection: bindings.start ? bindingDirection(bindings.start) : undefined,
-            endDirection: bindings.end ? bindingDirection(bindings.end) : undefined,
+            startBounds: startTarget
+              ? localTargetBounds(shape, startTarget)
+              : undefined,
+            endBounds: endTarget
+              ? localTargetBounds(shape, endTarget)
+              : undefined,
+            startDirection: bindings.start
+              ? bindingDirection(bindings.start)
+              : undefined,
+            endDirection: bindings.end
+              ? bindingDirection(bindings.end)
+              : undefined,
           })
         : [start, end];
-    if (!pointsEqual(points, current) || bindings !== shape.props.bindings) {
-      updates.push({ id: shape.id, points, bindings });
+    const boundTargets = [startTarget, endTarget].filter(
+      (target): target is Shape => Boolean(target),
+    );
+    let parentId = shape.parentId ?? null;
+    if (startTarget && endTarget) {
+      parentId =
+        findClosestCommonContainer(
+          (id) => byId.get(id),
+          [startTarget.id, endTarget.id],
+        ) ?? null;
+    } else if (boundTargets[0]) {
+      const target = boundTargets[0];
+      parentId =
+        target.type === 'frame' || target.type === 'group'
+          ? target.id
+          : (target.parentId ?? null);
+    }
+
+    // Bound connectors render just above their highest target, but below the
+    // next non-arrow layer. This prevents a cross-frame arrow disappearing
+    // under the object it is visibly attached to.
+    let index = shape.index;
+    if (boundTargets.length) {
+      const highest = boundTargets.reduce((a, b) =>
+        a.index >= b.index ? a : b,
+      );
+      if (index <= highest.index) {
+        let above: string | null = null;
+        for (const sibling of shapes) {
+          if (
+            sibling.type === 'arrow' ||
+            sibling.index <= highest.index ||
+            (sibling.parentId ?? null) !== parentId
+          ) {
+            continue;
+          }
+          if (above === null || sibling.index < above) above = sibling.index;
+        }
+        index = jitterKeyBetween(highest.index, above);
+      }
+    }
+    if (
+      !pointsEqual(points, current) ||
+      bindings !== shape.props.bindings ||
+      parentId !== (shape.parentId ?? null) ||
+      index !== shape.index
+    ) {
+      updates.push({ id: shape.id, points, bindings, parentId, index });
     }
   }
   if (!updates.length) return;
   editor.transact(() => {
     for (const update of updates) {
       editor.updateShape(update.id, {
+        parentId: update.parentId,
+        index: update.index,
         props: { points: update.points, bindings: update.bindings },
       });
     }

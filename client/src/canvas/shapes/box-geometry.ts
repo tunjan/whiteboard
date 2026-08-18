@@ -22,6 +22,22 @@ export function rotationTransform(
   return `rotate(${(rotation * 180) / Math.PI} ${cx} ${cy})`;
 }
 
+/**
+ * `p` mapped into the shape's upright frame, so geometry expressed on an
+ * unrotated box can be queried with a world-space point.
+ */
+export function unrotatedPoint(
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  rotation: number,
+  p: Point,
+): Point {
+  if (!rotation) return p;
+  return rotatePoint(p, { x: x + w / 2, y: y + h / 2 }, -rotation);
+}
+
 /** Bounding-box hit test, accounting for the shape's rotation. */
 export function boxHitTest(
   x: number,
@@ -32,8 +48,7 @@ export function boxHitTest(
   p: Point,
   tolerance: number,
 ): boolean {
-  const center = { x: x + w / 2, y: y + h / 2 };
-  const local = rotation ? rotatePoint(p, center, -rotation) : p;
+  const local = unrotatedPoint(x, y, w, h, rotation, p);
   return (
     local.x >= x - tolerance &&
     local.x <= x + w + tolerance &&

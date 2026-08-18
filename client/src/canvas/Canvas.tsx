@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+} from 'react';
 import type {
   DragEvent as ReactDragEvent,
   MouseEvent as ReactMouseEvent,
@@ -8,20 +15,18 @@ import type {
 import { type Shape, pointInPolygon } from '@whiteboard/shared';
 import './shapes/register';
 import './tools/register';
+import { ActiveStrokeLayer } from './ActiveStrokeLayer';
 import { Background } from './Background';
 import { CanvasControls } from './CanvasControls';
 import { UndoControls } from './UndoControls';
-import {
-  cameraToTransform,
-  nextDiscreteZoom,
-  screenToWorld,
-} from './camera';
+import { cameraToTransform, nextDiscreteZoom, screenToWorld } from './camera';
 import { quantizedCullRegion, viewportWorldBounds } from './geometry';
 import { PerformanceOverlay } from '@/components/performance-overlay';
 import { CursorsLayer } from '@/collab/CursorsLayer';
 import { PeerSelectionLayer } from '@/collab/PeerSelectionLayer';
 import { CommentsLayer } from './CommentsLayer';
 import { DrawingCursor } from './DrawingCursor';
+import { EraserCursor } from './EraserCursor';
 import { LaserLayer } from './LaserLayer';
 import {
   getLocalUser,
@@ -41,11 +46,17 @@ import { panViewport, zoomViewport } from './shapes/graph-interaction';
 import { SelectionLayer } from './SelectionLayer';
 import { SelectionToolbar } from './SelectionToolbar';
 import { TextEditorOverlay } from './TextEditorOverlay';
+import { FrameTitleEditorOverlay } from './FrameTitleEditorOverlay';
 import { VideoPlayerOverlay } from './VideoPlayerOverlay';
 import { ImageCropOverlay } from './ImageCropOverlay';
 import { toolRegistry } from './tools/tool-registry';
 import type { ToolContext, ToolPointerInfo } from './tools/types';
-import { duplicateShapes, groupShapes, ungroupShapes } from './commands';
+import {
+  deleteShapesWithCleanup,
+  duplicateShapes,
+  groupShapes,
+  ungroupShapes,
+} from './commands';
 import {
   clipboardToken,
   copyShapes,
@@ -56,13 +67,16 @@ import {
 import { writeShapesToOsClipboard } from '@/board/clipboard-os';
 import { addFilesToRepository } from '@/board/documents';
 import { useDocumentsStore } from './use-documents-store';
-import { deleteTargetIds } from './hierarchy';
+import { deleteTargetIds, moveTargetIds } from './hierarchy';
+import { linkUrlsFromClipboard } from './link-url';
 import { placeImageFiles } from './place-image';
+import { placeLinkUrls } from './place-link';
 import { createYoutubeShape, parseYoutubeId } from './place-video';
 import { useEnteredGroupStore } from './use-entered-group-store';
 import {
   bindingGraph,
   breakUndoCapture,
+  compareIndex,
   editor,
   redo,
   setCurrentPage,
@@ -86,11 +100,14 @@ import { getSelectionInfo } from './selection-geometry';
 import { shapeRotatedBounds } from './shape-bounds';
 import { isSelectable } from './selectable';
 import { resolveOpacity } from './opacity';
+import { useEraserCutStore } from './use-eraser-cut-store';
 import { useEraserStore } from './use-eraser-store';
 import { useHiddenStore } from './use-hidden-store';
+import { useLiveStrokeShapeId } from './use-live-stroke-store';
 import { useSelectionStore } from './use-selection-store';
 import { useSpacePan } from './use-space-pan';
 import { useTextEditingStore } from './use-text-editing-store';
+import { useFrameEditingStore } from './use-frame-editing-store';
 import { requestEquationFocus } from './equation-focus';
 import { useVideoPlayingStore } from './use-video-playing-store';
 import { useImageCroppingStore } from './use-image-cropping-store';
@@ -133,6 +150,37 @@ function isTouchPointer(e: ReactPointerEvent): boolean {
 // A touch/pen that hasn't fired an event in this long is treated as released,
 // even without a pointerup/cancel — recovers from iOS dropping those events.
 const STALE_TOUCH_MS = 2000;
+
+// Shared empties for the page-wide derivations below, so a page with no
+// parenting and no equations reuses one object per frame instead of allocating
+// a fresh (always empty) Map, Set and array on every shape mutation. Returning
+// the same reference also keeps downstream memos from invalidating.
+const EMPTY_HIERARCHY: {
+  childrenByParent: Map<string, Shape[]>;
+  frameAncestorIds: Set<string>;
+} = { childrenByParent: new Map(), frameAncestorIds: new Set() };
+const EMPTY_EQUATION_ITEMS: { id: string; label: string; locked: boolean }[] =
+  [];
+
+/**
+ * Shapes the SVG tree should render. The three id checks exclude whichever
+ * shape an HTML overlay currently owns (text editor, video player, image
+ * cropper), which draws it in the canvas's place.
+ */
+function renderFilter(
+  editingId: string | null,
+  playingId: string | null,
+  croppingId: string | null,
+  liveStrokeId: string | null,
+  hidden: Record<string, boolean>,
+): (shape: Shape) => boolean {
+  return (shape) =>
+    shape.id !== editingId &&
+    shape.id !== playingId &&
+    shape.id !== croppingId &&
+    shape.id !== liveStrokeId &&
+    !hidden[shape.id];
+}
 
 function CanvasSelectionStatus() {
   const selectedIds = useSelectionStore((state) => state.selectedIds);
@@ -184,9 +232,9 @@ export function Canvas() {
   // timestamp. Drives single- vs multi-touch routing and the pinch math. iOS
   // routinely drops pointerup/cancel when the OS steals a gesture, so entries are
   // pruned by `reconcileStaleTouches` rather than trusted to clear themselves.
-  const activeTouches = useRef<Map<number, { x: number; y: number; t: number }>>(
-    new Map(),
-  );
+  const activeTouches = useRef<
+    Map<number, { x: number; y: number; t: number }>
+  >(new Map());
   // A pen (Apple Pencil) is down: finger touches are palm-rejected while it is.
   const penActive = useRef(false);
   // Last time any pen event was seen — lets a dropped pen-up self-heal.
@@ -232,45 +280,57 @@ export function Canvas() {
   );
 
   const editingId = useTextEditingStore((s) => s.editingId);
+  const frameEditingId = useFrameEditingStore((s) => s.editingId);
   const playingId = useVideoPlayingStore((s) => s.playingId);
   const croppingId = useImageCroppingStore((s) => s.croppingId);
+  // The stroke the local pointer is drawing, if any. `ActiveStrokeLayer` draws
+  // it instead of the tree below, so it is filtered out of both for as long as
+  // that lasts. Changes twice per stroke, not per frame.
+  const liveStrokeId = useLiveStrokeShapeId();
+  const hasHierarchy = useDocumentStore((s) => s.hasHierarchy);
+  const hasEquations = useDocumentStore((s) => s.hasEquations);
   const hidden = useHiddenStore((s) => s.hidden);
   const erasing = useEraserStore((s) => s.marked);
+  const cutFragments = useEraserCutStore((s) => s.fragments);
   const currentPageId = useDocumentStore((s) => s.currentPageId);
-  const liveShapesRecord = useDocumentStore(
-    (s) => s.doc.pages[s.currentPageId]?.shapes,
-  );
+  const shapesById = useDocumentStore((s) => s.shapesById);
   // Shared, pre-sorted array from the store (stable across camera-only renders).
-  const liveShapes = useDocumentStore((s) => s.shapes);
-  const shapes = liveShapes;
-  useEffect(() => {
+  const shapes = useDocumentStore((s) => s.shapes);
+  // Layout, not passive: this rewrites bound arrow geometry in a *second*
+  // transaction, after the one that moved the target. As a `useEffect` that
+  // landed after paint, so dragging a bound shape painted a frame with the
+  // shape in its new position and its arrow still routed to the old one — a
+  // visible tear every frame of the drag. Running before paint means React
+  // re-renders with the repaired geometry inside the same commit, so the torn
+  // state is never shown. Same work, same transaction count; only the timing.
+  useLayoutEffect(() => {
     // Only arrows bound to something that actually changed can need
     // re-resolving; `null` means "rescan everything" after a load or resync.
     const changed = takeBindingDirty();
     syncBoundArrows(
-      liveShapes,
+      shapes,
       editor,
       changed === null ? null : bindingGraph.expand(changed),
     );
-  }, [liveShapes]);
+  }, [shapes]);
   const equationItems = useMemo(
     () =>
-      shapes
-        .filter(
-          (shape): shape is Extract<Shape, { type: 'equation' }> =>
-            shape.type === 'equation' && !hidden[shape.id],
-        )
-        .map((shape) => ({
-          id: shape.id,
-          label:
-            shape.props.latex.trim().replace(/\s+/g, ' ') || 'Empty equation',
-          locked: Boolean(shape.locked),
-        })),
-    [hidden, shapes],
+      hasEquations
+        ? shapes
+            .filter(
+              (shape): shape is Extract<Shape, { type: 'equation' }> =>
+                shape.type === 'equation' && !hidden[shape.id],
+            )
+            .map((shape) => ({
+              id: shape.id,
+              label:
+                shape.props.latex.trim().replace(/\s+/g, ' ') ||
+                'Empty equation',
+              locked: Boolean(shape.locked),
+            }))
+        : EMPTY_EQUATION_ITEMS,
+    [hasEquations, hidden, shapes],
   );
-  const shapesRecord = useMemo<Record<string, Shape>>(() => {
-    return liveShapesRecord ?? {};
-  }, [liveShapesRecord]);
   const canUndo = useUndoStore((s) => s.canUndo);
   const canRedo = useUndoStore((s) => s.canRedo);
 
@@ -282,6 +342,10 @@ export function Canvas() {
   //  - `frameAncestorIds`: shapes that live under a frame, excluded from the
   //    flat top-level pass (they render inside their frame's clip).
   const { childrenByParent, frameAncestorIds } = useMemo(() => {
+    // Nothing on the page is parented, so both collections are empty by
+    // construction — skip the two page-wide walks rather than allocate a Map
+    // and a Set per frame to prove it.
+    if (!hasHierarchy) return EMPTY_HIERARCHY;
     const childrenByParent = new Map<string, Shape[]>();
     for (const s of shapes) {
       if (!s.parentId) continue;
@@ -291,21 +355,26 @@ export function Canvas() {
     }
     const frameAncestorIds = new Set<string>();
     for (const s of shapes) {
-      let cur = s.parentId ? shapesRecord?.[s.parentId] : undefined;
+      let cur = s.parentId ? shapesById.get(s.parentId) : undefined;
       // Most shapes have no parent — skip the per-shape Set until a walk starts.
       if (!cur) continue;
       const seen = new Set<string>();
       while (cur && !seen.has(cur.id)) {
         if (cur.type === 'frame') {
-          frameAncestorIds.add(s.id);
+          // Connectors deliberately escape every frame mask. They remain in
+          // the flat pass even when their logical parent is nested.
+          if (s.type !== 'arrow') frameAncestorIds.add(s.id);
           break;
         }
         seen.add(cur.id);
-        cur = cur.parentId ? shapesRecord?.[cur.parentId] : undefined;
+        cur = cur.parentId ? shapesById.get(cur.parentId) : undefined;
       }
     }
     return { childrenByParent, frameAncestorIds };
-  }, [shapes, shapesRecord]);
+    // `shapesById` is the live cache: a stable reference whose contents move
+    // with `shapes`, so `shapes` is the honest dependency here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shapes, hasHierarchy]);
 
   // Viewport culling. The search region is overscanned past the viewport and
   // snapped to a coarse grid (see `quantizedCullRegion`), so panning within a
@@ -325,19 +394,34 @@ export function Canvas() {
   const visibleShapes = useMemo(() => {
     let base = shapes;
     if (cullRegion) {
-      const ids = new Set(spatialIndex.search(cullRegion));
-      base = shapes.filter((s) => ids.has(s.id));
+      const ids = spatialIndex.search(cullRegion);
+      // Zoomed in, the hit list is a small fraction of the page: resolving those
+      // ids and sorting just them (O(V log V)) beats scanning all N shapes. That
+      // flips when the viewport holds most of the board — then the sort costs
+      // more than the scan it replaces — so keep the filter for that case.
+      if (ids.length * 4 < shapes.length) {
+        const hits: Shape[] = [];
+        for (const id of ids) {
+          const shape = shapesById.get(id);
+          if (shape) hits.push(shape);
+        }
+        // `shapes` is z-sorted and the render tree depends on that; the spatial
+        // index returns hits in tree order, so this sort is required, not
+        // cosmetic.
+        base = hits.sort(compareIndex);
+      } else {
+        const idSet = new Set(ids);
+        base = shapes.filter((s) => idSet.has(s.id));
+      }
     }
     return base.filter(
-      (s) =>
-        s.id !== editingId &&
-        s.id !== playingId &&
-        s.id !== croppingId &&
-        !hidden[s.id],
+      renderFilter(editingId, playingId, croppingId, liveStrokeId, hidden),
     );
     // `cullKey` stands in for `cullRegion` (stable across sub-cell pans).
+    // `shapesById` is the live cache — a stable reference that moves with
+    // `shapes`, which is the honest dependency.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cullKey, shapes, editingId, playingId, croppingId, hidden]);
+  }, [cullKey, shapes, editingId, playingId, croppingId, liveStrokeId, hidden]);
 
   const topLevelShapes = useMemo(
     () => visibleShapes.filter((s) => !frameAncestorIds.has(s.id)),
@@ -357,24 +441,54 @@ export function Canvas() {
   // Every dependency below is stable across camera-only renders, so panning
   // still reuses this array and ShapeView's memo still holds.
   const renderedShapes = useMemo(() => {
-    const getShape = (id: string) => shapesRecord?.[id];
+    const isRenderable = renderFilter(
+      editingId,
+      playingId,
+      croppingId,
+      liveStrokeId,
+      hidden,
+    );
+    const getShape = (id: string) => shapesById.get(id);
     const isMarked = (id: string) => !!erasing[id];
-    const renderShape = (shape: Shape): ReactNode =>
-      shape.type === 'frame' ? (
+    const renderShape = (shape: Shape, insideFrame = false): ReactNode => {
+      // Mid-cut under the precision eraser: the document still holds the whole
+      // shape, but what the user should see is the ink that survived so far.
+      // Rendering the fragments in the original's slot keeps them in z-order and
+      // reuses its own renderer, and an empty list reads as fully erased.
+      const fragments = cutFragments[shape.id];
+      if (fragments) {
+        const alpha = resolveOpacity(shape, getShape, isMarked);
+        return (
+          <Fragment key={shape.id}>
+            {fragments.map((piece) => (
+              <ShapeView key={piece.id} shape={piece} opacity={alpha} />
+            ))}
+          </Fragment>
+        );
+      }
+      if (shape.type === 'group') {
+        // Groups are flat on the page, but once a group itself is a frame child
+        // its descendants must recurse through this clipped branch. Arrows are
+        // hoisted to the flat pass so they can cross frame boundaries.
+        return insideFrame ? (
+          <Fragment key={shape.id}>
+            {(childrenByParent.get(shape.id) ?? [])
+              .filter((child) => isRenderable(child) && child.type !== 'arrow')
+              .map((child) => renderShape(child, true))}
+          </Fragment>
+        ) : null;
+      }
+      return shape.type === 'frame' ? (
         <FrameView
           key={shape.id}
           frame={shape}
           opacity={resolveOpacity(shape, getShape, isMarked)}
+          zoom={camera.z}
+          showTitle={frameEditingId !== shape.id}
         >
           {(childrenByParent.get(shape.id) ?? [])
-            .filter(
-              (s) =>
-                s.id !== editingId &&
-                s.id !== playingId &&
-                s.id !== croppingId &&
-                !hidden[s.id],
-            )
-            .map(renderShape)}
+            .filter((child) => isRenderable(child) && child.type !== 'arrow')
+            .map((child) => renderShape(child, true))}
         </FrameView>
       ) : (
         <ShapeView
@@ -383,21 +497,32 @@ export function Canvas() {
           opacity={resolveOpacity(shape, getShape, isMarked)}
         />
       );
-    return topLevelShapes.map(renderShape);
+    };
+    return topLevelShapes.map((shape) => renderShape(shape, false));
+    // `shapesById` is read through `getShape` but is a stable reference; the
+    // per-mutation signal arrives via `topLevelShapes`, which is rebuilt from
+    // the `shapes` array every time the document changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     topLevelShapes,
     childrenByParent,
-    shapesRecord,
     erasing,
+    cutFragments,
     editingId,
     playingId,
     croppingId,
+    liveStrokeId,
+    frameEditingId,
     hidden,
+    camera.z,
   ]);
 
-  const editingShape = editingId ? shapesRecord?.[editingId] : undefined;
-  const playingShape = playingId ? shapesRecord?.[playingId] : undefined;
-  const croppingShape = croppingId ? shapesRecord?.[croppingId] : undefined;
+  const editingShape = editingId ? shapesById.get(editingId) : undefined;
+  const frameEditingShape = frameEditingId
+    ? shapesById.get(frameEditingId)
+    : undefined;
+  const playingShape = playingId ? shapesById.get(playingId) : undefined;
+  const croppingShape = croppingId ? shapesById.get(croppingId) : undefined;
   // Select only the tutor peer. publishPeers keeps unchanged peer objects
   // reference-stable, so this selector holds (no Canvas re-render) while other
   // peers' cursors stream in — only the tutor's own updates flow through.
@@ -449,7 +574,8 @@ export function Canvas() {
     [containerRef],
   );
 
-  const activeTool = () => toolRegistry.get(useToolStore.getState().activeToolId);
+  const activeTool = () =>
+    toolRegistry.get(useToolStore.getState().activeToolId);
 
   // True only for events that originate on the canvas DOM surface — excludes
   // in-canvas floating UI (data-ui-layer) and portaled popups/dialogs, whose
@@ -506,7 +632,10 @@ export function Canvas() {
   const screenPointOf = useCallback(
     (e: { clientX: number; clientY: number }) => {
       const rect = containerRef.current?.getBoundingClientRect();
-      return { x: e.clientX - (rect?.left ?? 0), y: e.clientY - (rect?.top ?? 0) };
+      return {
+        x: e.clientX - (rect?.left ?? 0),
+        y: e.clientY - (rect?.top ?? 0),
+      };
     },
     [containerRef],
   );
@@ -691,7 +820,10 @@ export function Canvas() {
         // stroke's pointerup/lostpointercapture was dropped (common on Wacom
         // tablets, which bump the pointerId each stroke); commit that finished
         // stroke, don't delete it.
-        if (gesture.current === 'tool' && toolPointerId.current !== e.pointerId) {
+        if (
+          gesture.current === 'tool' &&
+          toolPointerId.current !== e.pointerId
+        ) {
           const priorWasTouch =
             toolPointerId.current !== null &&
             activeTouches.current.has(toolPointerId.current);
@@ -724,7 +856,10 @@ export function Canvas() {
       if (isTouchPointer(e) && penActive.current) return;
       const rect = containerRef.current?.getBoundingClientRect();
       if (rect) {
-        pointerRef.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+        pointerRef.current = {
+          x: e.clientX - rect.left,
+          y: e.clientY - rect.top,
+        };
       }
       // Skip the presence cursor while pinching (two fingers, jittery midpoint).
       if (rect && !(isTouchPointer(e) && pinchLatch.current)) {
@@ -808,7 +943,7 @@ export function Canvas() {
         const tool = activeTool();
         if (!tool?.onPointerMove) return;
         const coalesced = tool.wantsCoalescedSamples
-          ? e.nativeEvent.getCoalescedEvents?.() ?? []
+          ? (e.nativeEvent.getCoalescedEvents?.() ?? [])
           : [];
         if (coalesced.length) {
           for (const sample of coalesced) {
@@ -835,34 +970,33 @@ export function Canvas() {
         tool.onPointerMove(info, ctx);
       }
     },
-    [
-      pan,
-      toInfo,
-      ctx,
-      containerRef,
-      clearLongPress,
-      publishCursorPosition,
-    ],
+    [pan, toInfo, ctx, containerRef, clearLongPress, publishCursorPosition],
   );
+
+  // Forget a pointer that is no longer on the glass. Called from every path a
+  // touch/pen can end through — pointerup, pointercancel, and lostpointercapture
+  // — so it must stay idempotent.
+  const releaseTouchTracking = useCallback((e: ReactPointerEvent) => {
+    if (e.pointerType === 'pen') penActive.current = false;
+    if (!isTouchPointer(e)) return;
+    activeTouches.current.delete(e.pointerId);
+    if (activeTouches.current.size < 2) {
+      pinch.current = null;
+      if (pinchGraphId.current) {
+        // End the capture window so the whole pinch is one undo step.
+        breakUndoCapture();
+        pinchGraphId.current = null;
+      }
+    }
+    if (activeTouches.current.size === 0) pinchLatch.current = false;
+  }, []);
 
   const releaseTouch = useCallback(
     (e: ReactPointerEvent) => {
       clearLongPress();
-      if (e.pointerType === 'pen') penActive.current = false;
-      if (isTouchPointer(e)) {
-        activeTouches.current.delete(e.pointerId);
-        if (activeTouches.current.size < 2) {
-          pinch.current = null;
-          if (pinchGraphId.current) {
-            // End the capture window so the whole pinch is one undo step.
-            breakUndoCapture();
-            pinchGraphId.current = null;
-          }
-        }
-        if (activeTouches.current.size === 0) pinchLatch.current = false;
-      }
+      releaseTouchTracking(e);
     },
-    [clearLongPress],
+    [clearLongPress, releaseTouchTracking],
   );
 
   const onPointerUp = useCallback(
@@ -898,7 +1032,10 @@ export function Canvas() {
         // A pen/mouse cancel is almost always a spurious OS event, not a real
         // gesture takeover — keep the in-progress stroke/drag. Touch keeps
         // discarding (a genuine pinch is interrupting a one-finger gesture).
-        endToolGesture(e.currentTarget, isTouchPointer(e) ? 'cancel' : 'commit');
+        endToolGesture(
+          e.currentTarget,
+          isTouchPointer(e) ? 'cancel' : 'commit',
+        );
       }
     },
     [pan, releaseTouch, endToolGesture],
@@ -906,32 +1043,24 @@ export function Canvas() {
 
   // Capture being lost (the OS reclaiming the pointer) is a second signal that a
   // touch/pen has gone, in case its pointerup/cancel was dropped. Cleaning up here
-  // too keeps the latch from outliving the gesture. Idempotent with releaseTouch.
+  // too keeps the latch from outliving the gesture.
   const onLostPointerCapture = useCallback(
     (e: ReactPointerEvent) => {
-      if (e.pointerType === 'pen') penActive.current = false;
-      if (isTouchPointer(e)) {
-        activeTouches.current.delete(e.pointerId);
-        if (activeTouches.current.size < 2) {
-          pinch.current = null;
-          if (pinchGraphId.current) {
-            breakUndoCapture();
-            pinchGraphId.current = null;
-          }
-        }
-        if (activeTouches.current.size === 0) pinchLatch.current = false;
-      }
+      releaseTouchTracking(e);
       if (e.pointerId === toolPointerId.current) {
         // Same rationale as onPointerCancel: a pen/mouse losing capture is a
         // spurious OS event, so keep the stroke/drag; touch still discards.
         if (gesture.current === 'tool') {
-          endToolGesture(e.currentTarget, isTouchPointer(e) ? 'cancel' : 'commit');
+          endToolGesture(
+            e.currentTarget,
+            isTouchPointer(e) ? 'cancel' : 'commit',
+          );
         }
         gesture.current = null;
         toolPointerId.current = null;
       }
     },
-    [endToolGesture],
+    [endToolGesture, releaseTouchTracking],
   );
 
   const onDoubleClick = useCallback(
@@ -984,7 +1113,7 @@ export function Canvas() {
     [toInfo, isSurfaceEvent],
   );
 
-  // Clear selection whenever we leave the select tool.
+  // Publish our viewport so peers following us can mirror it.
   useEffect(() => {
     if (size.width <= 0 || size.height <= 0) return;
     setLocalViewport(camera, size);
@@ -1065,6 +1194,7 @@ export function Canvas() {
     size.height,
   ]);
 
+  // Clear selection whenever we leave the select tool.
   useEffect(() => {
     if (activeToolId !== 'select') useSelectionStore.getState().clear();
   }, [activeToolId]);
@@ -1128,17 +1258,20 @@ export function Canvas() {
       if (mod && (e.key === 'd' || e.key === 'D')) {
         e.preventDefault();
         if (ids.length) {
-          useSelectionStore.getState().setSelection(duplicateShapes(editor, ids));
+          useSelectionStore
+            .getState()
+            .setSelection(duplicateShapes(editor, ids));
         }
         return;
       }
       if (mod && e.key === 'a') {
         e.preventDefault();
-        useSelectionStore
-          .getState()
-          .setSelection(
-            editor.getShapes().filter(isSelectable).map((s) => s.id),
-          );
+        useSelectionStore.getState().setSelection(
+          editor
+            .getShapes()
+            .filter(isSelectable)
+            .map((s) => s.id),
+        );
         return;
       }
       if (mod && (e.key === 'g' || e.key === 'G')) {
@@ -1190,7 +1323,7 @@ export function Canvas() {
           copyShapes(editor, ids);
           void writeShapesToOsClipboard(editor, ids, clipboardToken());
           const cut = ids.filter((id) => !editor.getShape(id)?.locked);
-          editor.deleteShapes(cut);
+          deleteShapesWithCleanup(editor, cut);
           useSelectionStore.getState().clear();
         }
         return;
@@ -1228,12 +1361,19 @@ export function Canvas() {
         if (!ids.length) return;
         e.preventDefault();
         const step = e.shiftKey ? 10 : 1;
-        const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
-        const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
+        const dx =
+          e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
+        const dy =
+          e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
+        const moveIds = moveTargetIds(editor.getShapes(), ids);
         editor.transact(() => {
-          for (const id of ids) {
+          for (const id of moveIds) {
             const s = editor.getShape(id);
-            if (s && !s.locked) editor.updateShape(id, { x: s.x + dx, y: s.y + dy });
+            // Locked descendants still follow an unlocked selected container;
+            // locking protects direct edits, not the parent's transform.
+            if (s && (!s.locked || !ids.includes(id))) {
+              editor.updateShape(id, { x: s.x + dx, y: s.y + dy });
+            }
           }
         });
         return;
@@ -1245,21 +1385,24 @@ export function Canvas() {
         const deletable = deleteTargetIds(editor.getShapes(), unlocked);
         if (deletable.length) {
           e.preventDefault();
-          editor.deleteShapes(deletable);
+          deleteShapesWithCleanup(editor, deletable);
           useSelectionStore.getState().clear();
         }
         return;
       }
-      if (e.key === 'Enter' && ids.length === 1) {
+      if ((e.key === 'Enter' || e.key === 'F2') && ids.length === 1) {
         const shape = editor.getShape(ids[0]!);
+        if (shape?.type === 'frame' && !shape.locked) {
+          e.preventDefault();
+          useFrameEditingStore.getState().start(shape.id);
+          return;
+        }
         if (shape?.type === 'text' && !shape.locked) {
           e.preventDefault();
-          useTextEditingStore
-            .getState()
-            .start(shape.id, {
-              anchor: shape.props.text.length,
-              head: shape.props.text.length,
-            });
+          useTextEditingStore.getState().start(shape.id, {
+            anchor: shape.props.text.length,
+            head: shape.props.text.length,
+          });
           return;
         }
         if (shape?.type === 'equation' && !shape.locked) {
@@ -1282,7 +1425,8 @@ export function Canvas() {
         if (ids.length) {
           const allLocked = ids.every((id) => editor.getShape(id)?.locked);
           editor.transact(() => {
-            for (const id of ids) editor.updateShape(id, { locked: !allLocked });
+            for (const id of ids)
+              editor.updateShape(id, { locked: !allLocked });
           });
         }
         return;
@@ -1302,9 +1446,7 @@ export function Canvas() {
     const onKeyUp = (e: KeyboardEvent) => {
       if (isTypingTarget(e.target)) return;
       if (e.key !== 'Shift' && e.key !== 'Control' && e.key !== 'Meta') return;
-      toolRegistry
-        .get(useToolStore.getState().activeToolId)
-        ?.onKeyUp?.(e, ctx);
+      toolRegistry.get(useToolStore.getState().activeToolId)?.onKeyUp?.(e, ctx);
     };
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
@@ -1322,7 +1464,8 @@ export function Canvas() {
       if (isTypingTarget(e.target)) return;
       const dt = e.clipboardData;
       const ours =
-        hasClipboard() && wbClipToken(dt?.getData('text/html') ?? '') === clipboardToken();
+        hasClipboard() &&
+        wbClipToken(dt?.getData('text/html') ?? '') === clipboardToken();
 
       const files: File[] = [];
       if (dt?.items) {
@@ -1356,7 +1499,18 @@ export function Canvas() {
         void placeImageFiles(files, world).then(selectPasted);
         return;
       }
-      const youtubeId = parseYoutubeId(dt?.getData('text/plain') ?? '');
+      const text = dt?.getData('text/plain') ?? '';
+      // Pasted links become preview cards. `breakUndoCapture` makes the paste
+      // its own undo step, so Ctrl+Z removes exactly what was just pasted.
+      const urls = linkUrlsFromClipboard(text, dt?.getData('text/html') ?? '');
+      if (urls) {
+        e.preventDefault();
+        breakUndoCapture();
+        selectPasted(placeLinkUrls(urls, world));
+        return;
+      }
+      // A bare video id is not a URL, so it never matches the link path above.
+      const youtubeId = parseYoutubeId(text);
       if (youtubeId) {
         e.preventDefault();
         selectPasted([createYoutubeShape(youtubeId, world)]);
@@ -1455,13 +1609,15 @@ export function Canvas() {
   const toolCursor = toolRegistry.get(activeToolId)?.cursor ?? 'default';
   const rotationCursor = useSelectionStore((state) => state.rotationCursor);
   const showDrawingCursor = activeToolId === 'draw' && !pan.isSpaceDown;
-  const cursor = pan.isPanning || handDragging
-    ? 'grabbing'
-    : pan.isSpaceDown
-      ? 'grab'
-      : showDrawingCursor
-        ? 'none'
-        : rotationCursor ?? toolCursor;
+  const showEraserCursor = activeToolId === 'eraser' && !pan.isSpaceDown;
+  const cursor =
+    pan.isPanning || handDragging
+      ? 'grabbing'
+      : pan.isSpaceDown
+        ? 'grab'
+        : showDrawingCursor || showEraserCursor
+          ? 'none'
+          : (rotationCursor ?? toolCursor);
 
   return (
     <div
@@ -1471,7 +1627,7 @@ export function Canvas() {
       aria-label="Whiteboard canvas"
       aria-describedby="canvas-keyboard-help"
       tabIndex={0}
-      className="absolute inset-0 overflow-hidden bg-surface"
+      className="wb-canvas-surface absolute inset-0 z-[var(--z-canvas)] overflow-hidden bg-surface"
       style={{ touchAction: 'none', cursor }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
@@ -1500,9 +1656,8 @@ export function Canvas() {
       }}
     >
       <span id="canvas-keyboard-help" className="sr-only">
-        Use the toolbars or single-key tool shortcuts to work on the board.
-        Open Board actions, then Keyboard shortcuts, for the complete
-        reference.
+        Use the toolbars or single-key tool shortcuts to work on the board. Open
+        Board actions, then Keyboard shortcuts, for the complete reference.
       </span>
       <CanvasSelectionStatus />
       <Background
@@ -1512,29 +1667,42 @@ export function Canvas() {
         height={size.height}
       />
 
-      <svg className="absolute inset-0 h-full w-full">
-        <g transform={cameraToTransform(camera)}>
-          {renderedShapes}
-        </g>
+      <svg className="absolute inset-0 z-[var(--z-canvas-shapes)] h-full w-full">
+        <g transform={cameraToTransform(camera)}>{renderedShapes}</g>
       </svg>
+
+      {/* Mounted only while the local pointer is drawing, and paired with the
+          `liveStrokeId` filter above so exactly one of the two draws that
+          stroke. Its own element, so a stroke's per-frame churn never dirties
+          the raster of the page-sized SVG behind it. */}
+      {liveStrokeId && <ActiveStrokeLayer camera={camera} />}
 
       {/* While the camera moves, an invisible blocker captures pointer hit-tests
           so the browser doesn't walk the SVG shape tree every frame. Pointer and
           wheel events still bubble to the container's handlers below it. */}
-      {cameraMoving && <div className="absolute inset-0" />}
+      {cameraMoving && (
+        <div className="absolute inset-0 z-[var(--z-canvas-blocker)]" />
+      )}
 
       <PeerSelectionLayer camera={camera} />
-      {!editingShape && <SelectionLayer camera={camera} />}
-      {!editingShape && <SelectionToolbar camera={camera} />}
+      {!editingShape && !frameEditingShape && (
+        <SelectionLayer camera={camera} />
+      )}
+      {!editingShape && !frameEditingShape && (
+        <SelectionToolbar camera={camera} />
+      )}
       <CursorsLayer camera={camera} viewportSize={size} />
       <LaserLayer camera={camera} />
       <CommentsLayer camera={camera} />
-      {showDrawingCursor && (
-        <DrawingCursor camera={camera} containerRef={containerRef} />
-      )}
+      {showDrawingCursor && <DrawingCursor containerRef={containerRef} />}
+      {showEraserCursor && <EraserCursor containerRef={containerRef} />}
 
       {editingShape?.type === 'text' && (
         <TextEditorOverlay shape={editingShape} camera={camera} />
+      )}
+
+      {frameEditingShape?.type === 'frame' && (
+        <FrameTitleEditorOverlay shape={frameEditingShape} camera={camera} />
       )}
 
       {playingShape?.type === 'video' && (

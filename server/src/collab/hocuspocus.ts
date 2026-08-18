@@ -1,5 +1,5 @@
 import { Hocuspocus } from '@hocuspocus/server';
-import { Database } from '@hocuspocus/extension-database';
+import * as Y from 'yjs';
 import { LATENCY_MESSAGE_PREFIX } from '@whiteboard/shared';
 import { eq } from 'drizzle-orm';
 import { db } from '../db/client';
@@ -31,26 +31,35 @@ export const hocuspocus = new Hocuspocus({
       routeVoiceSignal({ connection, document, payload });
     }
   },
-  extensions: [
-    new Database({
-      fetch: async ({ documentName }) => {
-        const rows = await db
-          .select()
-          .from(boardDocuments)
-          .where(eq(boardDocuments.boardId, documentName))
-          .limit(1);
-        return rows[0]?.data ?? null;
-      },
-      store: async ({ documentName, state }) => {
-        const data = Buffer.from(state);
-        await db
-          .insert(boardDocuments)
-          .values({ boardId: documentName, data, updatedAt: new Date() })
-          .onConflictDoUpdate({
-            target: boardDocuments.boardId,
-            set: { data, updatedAt: new Date() },
-          });
-      },
-    }),
-  ],
+  // These replace the Database extension, which hardcodes V1 on both sides
+  // (`Y.applyUpdate` on load, `Y.encodeStateAsUpdate` on store) and so gives no
+  // way to pick the encoding. Hocuspocus debounces `onStoreDocument` itself, so
+  // moving off the extension keeps the same 2s/10s write cadence.
+  onLoadDocument: async ({ documentName, document }) => {
+    const rows = await db
+      .select()
+      .from(boardDocuments)
+      .where(eq(boardDocuments.boardId, documentName))
+      .limit(1);
+    const row = rows[0];
+    if (!row) return;
+    // A v1 row is read once and then written back as v2 by the next store.
+    if (row.format === 'v2') Y.applyUpdateV2(document, row.data);
+    else Y.applyUpdate(document, row.data);
+  },
+  onStoreDocument: async ({ documentName, document }) => {
+    const data = Buffer.from(Y.encodeStateAsUpdateV2(document));
+    await db
+      .insert(boardDocuments)
+      .values({
+        boardId: documentName,
+        data,
+        format: 'v2',
+        updatedAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: boardDocuments.boardId,
+        set: { data, format: 'v2', updatedAt: new Date() },
+      });
+  },
 });

@@ -50,7 +50,11 @@ describe('connector binding and elbow routing', () => {
       { x: 200, y: 150 },
       { x: 0, y: 150 },
     )!;
-    const moved = rectangle({ x: 300, y: 250, props: { ...initial.props, w: 300 } });
+    const moved = rectangle({
+      x: 300,
+      y: 250,
+      props: { ...initial.props, w: 300 },
+    });
     const point = pointForBinding(result.binding, moved)!;
     expect(point.x).toBeCloseTo(300.3, 4);
     expect(point.y).toBeCloseTo(300, 4);
@@ -71,7 +75,9 @@ describe('connector binding and elbow routing', () => {
     for (let index = 0; index < route.length - 1; index++) {
       const a = route[index]!;
       const b = route[index + 1]!;
-      expect(Math.abs(a.x - b.x) < 1e-6 || Math.abs(a.y - b.y) < 1e-6).toBe(true);
+      expect(Math.abs(a.x - b.x) < 1e-6 || Math.abs(a.y - b.y) < 1e-6).toBe(
+        true,
+      );
     }
   });
 
@@ -107,7 +113,11 @@ function recordingEditor(): Editor & { updated: string[] } {
   };
 }
 
-function boundArrow(id: string, targetId: string, points: ArrowShape['props']['points']): ArrowShape {
+function boundArrow(
+  id: string,
+  targetId: string,
+  points: ArrowShape['props']['points'],
+): ArrowShape {
   return {
     id,
     type: 'arrow',
@@ -178,7 +188,10 @@ describe('syncBoundArrows dirty-set narrowing', () => {
     )!;
     const settled: Shape[] = [
       box,
-      boundArrow('arrow', 'box', [{ x: -50, y: 0 }, anchored]),
+      {
+        ...boundArrow('arrow', 'box', [{ x: -50, y: 0 }, anchored]),
+        index: 'a1',
+      },
     ];
     syncBoundArrows(settled, editor, null);
     expect(editor.updated).toEqual([]);

@@ -2,7 +2,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Shape } from '@whiteboard/shared';
 import '../shapes/register';
 import type { Editor } from '../editor';
-import { consumeEquationFocus } from '../equation-focus';
+import {
+  hasEquationFocusRequest,
+  resolveEquationFocus,
+} from '../equation-focus';
 import { useSelectionStore } from '../use-selection-store';
 import { useStyleStore } from '../use-style-store';
 import { createEquationTool } from './equation-tool';
@@ -84,7 +87,8 @@ describe('equation tool placement', () => {
 
     const shape = placedEquation(shapes);
     expect(useSelectionStore.getState().selectedIds).toEqual([shape.id]);
-    expect(consumeEquationFocus(shape.id)).toBe(true);
+    expect(hasEquationFocusRequest(shape.id)).toBe(true);
+    resolveEquationFocus(shape.id);
   });
 
   it('ignores non-primary buttons', () => {

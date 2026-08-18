@@ -1,5 +1,6 @@
 import type { ComponentType } from 'react';
 import {
+  type Bounds,
   genId,
   type RectangleProps,
   type Shape,
@@ -8,7 +9,7 @@ import { getTopIndex } from '../order';
 import { shapeRegistry } from '../shapes/shape-registry';
 import { useSelectionStore } from '../use-selection-store';
 import { useStyleStore } from '../use-style-store';
-import { boxFromDrag } from './drag-box';
+import { dragBoxSnapTargets, snappedBoxFromDrag } from './drag-box';
 import type { Tool, ToolContext, ToolPointerInfo } from './types';
 
 // Below this drag size (world units), a press is treated as a click and the
@@ -31,6 +32,7 @@ interface BoxToolOptions {
 export function createBoxTool(opts: BoxToolOptions): Tool {
   let creatingId: string | null = null;
   let start = { x: 0, y: 0 };
+  let snapTargets: Bounds[] = [];
 
   // Finish the in-flight shape, keeping it. Shared by pointer-up (normal finish)
   // and commit (OS reclaimed the pointer mid-create — keep what was drawn rather
@@ -38,6 +40,8 @@ export function createBoxTool(opts: BoxToolOptions): Tool {
   function finalize(ctx: ToolContext): void {
     const id = creatingId;
     creatingId = null;
+    snapTargets = [];
+    useSelectionStore.getState().setSnapGuides([]);
     if (!id) return;
     const shape = ctx.editor.getShape(id);
     if (!shape || (shape.type !== 'rectangle' && shape.type !== 'ellipse')) {
@@ -89,11 +93,12 @@ export function createBoxTool(opts: BoxToolOptions): Tool {
         props,
       } as Shape;
       ctx.editor.createShape(shape);
+      snapTargets = dragBoxSnapTargets(ctx, id, info.point);
     },
 
     onPointerMove(info: ToolPointerInfo, ctx: ToolContext) {
       if (!creatingId) return;
-      const b = boxFromDrag(start, info.point, info.shiftKey);
+      const b = snappedBoxFromDrag(start, info, snapTargets);
       ctx.editor.updateShape(creatingId, {
         x: b.x,
         y: b.y,
@@ -115,6 +120,8 @@ export function createBoxTool(opts: BoxToolOptions): Tool {
     onCancel(ctx: ToolContext) {
       const id = creatingId;
       creatingId = null;
+      snapTargets = [];
+      useSelectionStore.getState().setSnapGuides([]);
       if (id) ctx.editor.deleteShapes([id]);
     },
   };

@@ -8,6 +8,7 @@ import {
   pointInPolygon,
   pointsBounds,
   rotatePoint,
+  segmentToSegmentDistance,
 } from '@whiteboard/shared';
 import { curvePoints } from '../shapes/line-geometry';
 import { normalizedPolygonPoints } from '../shapes/polygon-geometry';
@@ -18,34 +19,6 @@ import type { ShapeUtil } from '../shapes/types';
 // into each candidate shape's local, unrotated frame so the geometry below can
 // treat the shape as upright. The narrow tests are reused across the whole erase
 // stroke, so they stay allocation-light.
-
-/** Orientation sign of the triplet (a, b, c): >0 ccw, <0 cw, 0 collinear. */
-function cross(a: Point, b: Point, c: Point): number {
-  return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
-}
-
-/** Do segments a-b and c-d properly intersect (or touch)? */
-function segmentsIntersect(a: Point, b: Point, c: Point, d: Point): boolean {
-  const d1 = cross(c, d, a);
-  const d2 = cross(c, d, b);
-  const d3 = cross(a, b, c);
-  const d4 = cross(a, b, d);
-  if (((d1 > 0) !== (d2 > 0)) && ((d3 > 0) !== (d4 > 0))) return true;
-  // Collinear-touch cases are rare here and handled well enough by the
-  // endpoint-distance fallback in segSegDistance; skip the on-segment checks.
-  return false;
-}
-
-/** Shortest distance between segments a-b and c-d (0 when they cross). */
-function segSegDistance(a: Point, b: Point, c: Point, d: Point): number {
-  if (segmentsIntersect(a, b, c, d)) return 0;
-  return Math.min(
-    distanceToSegment(a, c, d),
-    distanceToSegment(b, c, d),
-    distanceToSegment(c, a, b),
-    distanceToSegment(d, a, b),
-  );
-}
 
 /**
  * Shortest distance from segment a-b to a polyline. `closed` adds the edge that
@@ -63,7 +36,7 @@ function segPolylineDistance(
   let min = Infinity;
   const edges = closed ? n : n - 1;
   for (let i = 0; i < edges; i++) {
-    const d = segSegDistance(a, b, pts[i]!, pts[(i + 1) % n]!);
+    const d = segmentToSegmentDistance(a, b, pts[i]!, pts[(i + 1) % n]!);
     if (d < min) min = d;
     if (min === 0) return 0;
   }

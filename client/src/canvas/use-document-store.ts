@@ -10,6 +10,7 @@ import {
   type BoardDocumentMeta,
   type CustomStickerMeta,
   type DrawPoint,
+  type GraphExpression,
   type MusicPlaybackState,
   type MusicPlaybackStatus,
   type Page,
@@ -24,6 +25,12 @@ import {
   readPoints,
   syncYPoints,
 } from './shapes/ink-points';
+import {
+  encodeGraphExpressionsForStorage,
+  ensureGraphExpressionsArray,
+  readGraphExpressions,
+  syncYGraphExpressions,
+} from './shapes/graph-storage';
 import { shapeRegistry } from './shapes/shape-registry';
 import { shapeRotatedBounds } from './shape-bounds';
 import { BindingGraph } from './binding-graph';
@@ -32,6 +39,7 @@ import { useCameraStore } from './use-camera-store';
 import { type CommentMessage, useCommentsStore } from './use-comments-store';
 import { useCustomStickersStore } from './use-custom-stickers-store';
 import { useDocumentsStore } from './use-documents-store';
+import { getLiveStrokeShapeId } from './use-live-stroke-store';
 import { useConnectionStore } from '@/collab/use-connection-store';
 import { startLatencyMonitor } from '@/collab/latency';
 import { bindVoiceProvider } from '@/collab/voice/voice-session';
@@ -210,8 +218,17 @@ function shapeToY(shape: Shape): YShape {
     // Y.Array the live path appends only the new points: O(n) for the stroke.
     const { points, ...props } = shape.props;
     m.set('props', props);
-    // Flat number triples: see ink-points.ts for the encoding rationale.
+    // Base64 Float32-anchor / Float16-delta chunks: see ink-points.ts.
     m.set('points', Y.Array.from(encodePointsForStorage(points)));
+  } else if (shape.type === 'graph') {
+    // One Y.Map per curve, so collaborators editing different rows of the same
+    // plot don't overwrite each other. See graph-storage.ts.
+    const { expressions, ...props } = shape.props;
+    m.set('props', props);
+    m.set(
+      'expressions',
+      Y.Array.from(encodeGraphExpressionsForStorage(expressions)),
+    );
   } else {
     m.set('props', shape.props);
   }
@@ -220,7 +237,8 @@ function shapeToY(shape: Shape): YShape {
 
 function yToShape(m: YShape): Shape {
   const type = m.get('type');
-  const storedProps = (m.get('props') as Record<string, unknown> | undefined) ?? {};
+  const storedProps =
+    (m.get('props') as Record<string, unknown> | undefined) ?? {};
   const props =
     type === 'text'
       ? {
@@ -233,8 +251,16 @@ function yToShape(m: YShape): Shape {
                 : '',
         }
       : type === 'draw'
-        ? { ...storedProps, points: readPoints(m, storedProps) }
-        : storedProps;
+        ? // Shared and grown in place as the stroke does, like `getShapes()`'s
+          // sorted view — read it, don't mutate or retain it. Copying here would
+          // put back the per-frame O(n) decode that made drawing quadratic.
+          { ...storedProps, points: readPoints(m, storedProps) }
+        : type === 'graph'
+          ? {
+              ...storedProps,
+              expressions: readGraphExpressions(m, storedProps),
+            }
+          : storedProps;
   return {
     id: m.get('id'),
     type,
@@ -303,6 +329,13 @@ function applyPatchToY(m: YShape, patch: ShapePatch): void {
       syncYPoints(ensurePointsArray(m), nextProps.points as DrawPoint[]);
       delete nextProps.points;
     }
+    if (m.get('type') === 'graph' && Array.isArray(nextProps.expressions)) {
+      syncYGraphExpressions(
+        ensureGraphExpressionsArray(m),
+        nextProps.expressions as GraphExpression[],
+      );
+      delete nextProps.expressions;
+    }
     if (Object.keys(nextProps).length > 0) {
       const current =
         (m.get('props') as Record<string, unknown> | undefined) ?? {};
@@ -315,6 +348,12 @@ function applyPatchToY(m: YShape, patch: ShapePatch): void {
       // recolor, say) would write the superseded point array back into `props`.
       if (m.get('type') === 'draw' && m.get('points') instanceof Y.Array) {
         delete merged.points;
+      }
+      if (
+        m.get('type') === 'graph' &&
+        m.get('expressions') instanceof Y.Array
+      ) {
+        delete merged.expressions;
       }
       m.set('props', merged);
     }
@@ -368,22 +407,67 @@ const shapeCache = new Map<string, Shape>();
 // treat it as read-only (none mutate it in place).
 let sortedShapesCache: Shape[] | null = null;
 
+// Each id's slot in `sortedShapesCache`, so the same-order update path in
+// `applyAffected` can overwrite changed entries by position. Only a re-sort
+// invalidates it — the positional copy carries it forward untouched, which is
+// the whole point: it must survive the array identity changing every frame.
+let sortedPositionById: Map<string, number> | null = null;
+
+// How many shapes on the current page make the Canvas's per-frame hierarchy and
+// equation derivations worth running at all. Maintained here beside the spatial
+// and binding indexes, for the same reason they are: a stroke publishes a new
+// `shapes` array every frame, and on a page with no parented shape the walks
+// that rebuild `childrenByParent`/`frameAncestorIds` produce two empty
+// collections at O(page) cost per frame. Almost every real page is that page.
+let parentedCount = 0;
+let equationCount = 0;
+
 /** Current page's shapes, z-sorted. One shared array for `getShapes()` and the
  *  store snapshot, so consumers never re-sort the document themselves. */
 function currentSortedShapes(): Shape[] {
   if (!sortedShapesCache) {
     sortedShapesCache = [...shapeCache.values()].sort(compareIndex);
+    // Rebuilt lazily against the new order, on the first frame that needs it.
+    sortedPositionById = null;
   }
   return sortedShapesCache;
 }
 
 interface DocStore {
   boardId: string;
+  /**
+   * Page metadata and order. Identity is stable across shape mutations — only
+   * a change to the page registry rebuilds it — so the page menu and the board
+   * chrome no longer re-render once per frame of every drag.
+   */
   doc: WhiteboardDocument;
   /** Current page's shapes, z-sorted. Reference is stable until a shape
    *  mutates, so camera-only renders don't invalidate consumers' memos and no
    *  component re-derives `Object.values(...).sort(...)` per render. */
   shapes: Shape[];
+  /**
+   * The live shape cache, for consumers that look one shape up by id.
+   *
+   * Its identity never changes: the map is mutated in place, and every reader
+   * is a zustand selector, which re-runs on every store write anyway. That is
+   * the whole point — publishing lookups as a fresh `Record` copied the entire
+   * page on every mutation, which is O(n) per frame of a drag and allocates a
+   * hash entry per shape, to answer questions of the form `get(oneId)`.
+   *
+   * Read-only to consumers.
+   */
+  shapesById: ReadonlyMap<string, Shape>;
+  /**
+   * Whether the current page contains any parented shape / any equation.
+   *
+   * The Canvas rebuilds `childrenByParent`, `frameAncestorIds` and its equation
+   * list from `shapes`, which gets a new identity on every mutation — so once
+   * per frame for the whole of a stroke or drag. On a page with no parenting
+   * all of that work yields empty collections, and most pages have none. These
+   * flags let those memos return shared empties instead of walking the page.
+   */
+  hasHierarchy: boolean;
+  hasEquations: boolean;
   currentPageId: string;
 }
 
@@ -393,6 +477,9 @@ export const useDocumentStore = create<DocStore>(() => ({
   boardId: '',
   doc: EMPTY_SNAPSHOT,
   shapes: [],
+  shapesById: shapeCache,
+  hasHierarchy: false,
+  hasEquations: false,
   currentPageId: DEFAULT_PAGE_ID,
 }));
 
@@ -419,10 +506,12 @@ function bindUndoState(manager: Y.UndoManager): () => void {
   };
 }
 
-// Cached page skeleton (ids, names, order) with empty shape maps. Rebuilt only
-// when the pages registry actually changes — shape-only mutations (draw/drag)
-// reuse it instead of re-reading the registry and re-sorting the page order on
-// every frame. The current page's live shapes are injected in `rebuildSnapshot`.
+// Cached page metadata (ids, names, order), rebuilt only when the pages
+// registry actually changes. Shape-only mutations (draw/drag) republish this
+// object as-is rather than re-reading the registry and re-sorting the page
+// order, so a subscriber to `doc` or `doc.pages` sees a stable reference right
+// through a gesture and never re-renders for it.
+let cachedDoc: WhiteboardDocument = EMPTY_SNAPSHOT;
 let cachedPages: Record<string, Page> = {};
 let cachedPageOrder: string[] = [];
 
@@ -432,12 +521,13 @@ function rebuildPagesCache(): void {
   if (!session) {
     cachedPages = {};
     cachedPageOrder = [];
+    cachedDoc = EMPTY_SNAPSHOT;
     return;
   }
   const metas = readPages(session.pages);
   const pages: Record<string, Page> = {};
   for (const meta of metas) {
-    pages[meta.id] = { id: meta.id, name: meta.name, shapes: {} };
+    pages[meta.id] = { id: meta.id, name: meta.name };
   }
   // Before the registry is seeded (legacy/new board), still present the current
   // page so the canvas + page menu have something to render.
@@ -445,7 +535,6 @@ function rebuildPagesCache(): void {
     pages[session.currentPageId] = {
       id: session.currentPageId,
       name: DEFAULT_PAGE_NAME,
-      shapes: {},
     };
   }
   cachedPages = pages;
@@ -458,28 +547,19 @@ function rebuildPagesCache(): void {
   cachedPageOrder = metas.some((m) => m.id === currentPageId)
     ? ordered
     : [currentPageId, ...ordered];
+  cachedDoc = { pages: cachedPages, pageOrder: cachedPageOrder };
 }
 
 function rebuildSnapshot(): void {
   if (!session) return;
-  const shapes: Record<string, Shape> = {};
-  for (const [id, shape] of shapeCache) shapes[id] = shape;
-
-  // Reuse the cached skeleton, swapping the live shapes into the current page
-  // only. Other pages keep their stable (empty) entries, so page order and
-  // metadata identities don't churn on shape mutations.
-  const pages: Record<string, Page> = {};
-  for (const id in cachedPages) {
-    const p = cachedPages[id]!;
-    pages[id] =
-      id === session.currentPageId
-        ? { id: p.id, name: p.name, shapes }
-        : p;
-  }
-
+  // Nothing here is proportional to the number of shapes on the page. The
+  // sorted array is maintained incrementally by `applyAffected`, page metadata
+  // is republished by reference, and lookups are served from the live cache.
   useDocumentStore.setState({
-    doc: { pages, pageOrder: cachedPageOrder },
+    doc: cachedDoc,
     shapes: currentSortedShapes(),
+    hasHierarchy: parentedCount > 0,
+    hasEquations: equationCount > 0,
     currentPageId: session.currentPageId,
   });
 }
@@ -579,9 +659,16 @@ function applyAffected(ids: Set<string>): void {
       if (util && shape.type !== 'group')
         spatialIndex.insert(id, shapeRotatedBounds(shape));
       bindingGraph.update(shape);
+      parentedCount += (shape.parentId ? 1 : 0) - (prev?.parentId ? 1 : 0);
+      equationCount +=
+        (shape.type === 'equation' ? 1 : 0) -
+        (prev?.type === 'equation' ? 1 : 0);
       if (!prev || prev.index !== shape.index) orderChanged = true;
       else updated.set(id, shape);
     } else {
+      const prev = shapeCache.get(id);
+      if (prev?.parentId) parentedCount--;
+      if (prev?.type === 'equation') equationCount--;
       shapeCache.delete(id);
       spatialIndex.remove(id);
       bindingGraph.remove(id);
@@ -592,9 +679,30 @@ function applyAffected(ids: Set<string>): void {
   if (orderChanged || !sortedShapesCache) {
     sortedShapesCache = null;
   } else {
-    // Same membership and order — replace just the changed shapes by id.
-    sortedShapesCache = sortedShapesCache.map((s) => updated.get(s.id) ?? s);
+    // Same membership and order — copy the array and overwrite only the changed
+    // slots. Mapping over it instead cost a closure call and a Map lookup for
+    // every shape on the page to replace the one or two a drag frame touches.
+    const sorted = sortedShapesCache;
+    sortedPositionById ??= new Map(sorted.map((s, i) => [s.id, i]));
+    const next = sorted.slice();
+    for (const [id, shape] of updated) {
+      const i = sortedPositionById.get(id);
+      if (i !== undefined) next[i] = shape;
+    }
+    sortedShapesCache = next;
   }
+  // A frame of the stroke the local pointer is drawing, and nothing else. The
+  // active-stroke layer has already put that frame on screen — straight to the
+  // DOM, before the paint it was computed for — so a snapshot here would buy a
+  // Canvas re-render and the whole page's worth of derived state to move a path
+  // that is already where it belongs. The write itself still happened, so peers
+  // watch the stroke appear exactly as before, and everything above still ran,
+  // so `getShape`, hit-testing and the spatial index stay current.
+  //
+  // Any other id in the batch — a peer's edit, an arrow rerouting — publishes as
+  // usual, so remote work is never held up behind a local gesture.
+  const live = getLiveStrokeShapeId();
+  if (live !== null && ids.size === 1 && ids.has(live)) return;
   rebuildSnapshot();
 }
 
@@ -605,6 +713,8 @@ function fullResync(): void {
   spatialIndex.clear();
   bindingGraph.clear();
   pendingBindingDirty = null;
+  parentedCount = 0;
+  equationCount = 0;
   for (const [id, m] of session.currentShapes) {
     const shape = yToShape(m);
     shapeCache.set(id, shape);
@@ -613,6 +723,8 @@ function fullResync(): void {
     if (util && shape.type !== 'group')
       spatialIndex.insert(id, shapeRotatedBounds(shape));
     bindingGraph.update(shape);
+    if (shape.parentId) parentedCount++;
+    if (shape.type === 'equation') equationCount++;
   }
   rebuildPagesCache();
   rebuildSnapshot();
@@ -668,12 +780,18 @@ export function loadBoard(
   spatialIndex.clear();
   bindingGraph.clear();
   pendingBindingDirty = null;
+  parentedCount = 0;
+  equationCount = 0;
   cachedPages = {};
   cachedPageOrder = [];
+  cachedDoc = EMPTY_SNAPSHOT;
   useDocumentStore.setState({
     boardId,
     doc: EMPTY_SNAPSHOT,
     shapes: [],
+    shapesById: shapeCache,
+    hasHierarchy: false,
+    hasEquations: false,
     currentPageId: DEFAULT_PAGE_ID,
   });
   useMusicPlaybackStore.getState().reset();
@@ -893,11 +1011,7 @@ function cleanupDeletedPageState(pageId: string): void {
   deletePageInteractionState(pageId);
 }
 
-type PageSwitchSource =
-  | 'user'
-  | 'follow'
-  | 'restore'
-  | 'integrity';
+type PageSwitchSource = 'user' | 'follow' | 'restore' | 'integrity';
 
 /** Switch the active page as one coordinated interaction-state handoff. */
 function switchToPageInternal(
@@ -1033,14 +1147,12 @@ export function movePage(id: string, direction: 'up' | 'down'): void {
 
 // --- Music playback API ---
 
-export function setMusicPlayback(
-  update: {
-    trackId?: string | null;
-    status?: MusicPlaybackStatus;
-    position?: number;
-    requestedBy?: string;
-  },
-): void {
+export function setMusicPlayback(update: {
+  trackId?: string | null;
+  status?: MusicPlaybackStatus;
+  position?: number;
+  requestedBy?: string;
+}): void {
   if (!session) return;
   const current = readMusicPlayback();
   const nextTrackId =
@@ -1055,7 +1167,10 @@ export function setMusicPlayback(
   session.doc.transact(() => {
     session?.music.set('trackId', nextTrackId);
     session?.music.set('status', nextStatus);
-    session?.music.set('position', Number.isFinite(nextPosition) ? nextPosition : 0);
+    session?.music.set(
+      'position',
+      Number.isFinite(nextPosition) ? nextPosition : 0,
+    );
     session?.music.set('updatedAt', Date.now());
     session?.music.set('version', nextVersion);
     if (update.requestedBy?.trim()) {

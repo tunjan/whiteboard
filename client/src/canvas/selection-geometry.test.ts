@@ -3,7 +3,9 @@ import type { Shape } from '@whiteboard/shared';
 import './shapes/register';
 import { getSelectionInfo, matchesMarquee } from './selection-geometry';
 
-function rectangle(overrides: Partial<Extract<Shape, { type: 'rectangle' }>> = {}) {
+function rectangle(
+  overrides: Partial<Extract<Shape, { type: 'rectangle' }>> = {},
+) {
   return {
     id: 'rectangle',
     type: 'rectangle' as const,
@@ -50,7 +52,11 @@ describe('rectangle selection geometry', () => {
     const shape = rectangle({ rotation: Math.PI / 4 });
 
     expect(
-      matchesMarquee(shape, { minX: -20, minY: -30, maxX: 120, maxY: 100 }, 'wrap'),
+      matchesMarquee(
+        shape,
+        { minX: -20, minY: -30, maxX: 120, maxY: 100 },
+        'wrap',
+      ),
     ).toBe(true);
     expect(
       matchesMarquee(shape, { minX: 0, minY: 0, maxX: 100, maxY: 60 }, 'wrap'),
@@ -66,10 +72,18 @@ describe('rectangle selection geometry', () => {
     });
 
     expect(
-      matchesMarquee(shape, { minX: 40, minY: 20, maxX: 60, maxY: 40 }, 'intersect'),
+      matchesMarquee(
+        shape,
+        { minX: 40, minY: 20, maxX: 60, maxY: 40 },
+        'intersect',
+      ),
     ).toBe(false);
     expect(
-      matchesMarquee(shape, { minX: -2, minY: 20, maxX: 4, maxY: 40 }, 'intersect'),
+      matchesMarquee(
+        shape,
+        { minX: -2, minY: 20, maxX: 4, maxY: 40 },
+        'intersect',
+      ),
     ).toBe(true);
   });
 
@@ -77,7 +91,11 @@ describe('rectangle selection geometry', () => {
     const shape = line();
 
     expect(
-      matchesMarquee(shape, { minX: 40, minY: -3, maxX: 60, maxY: 3 }, 'intersect'),
+      matchesMarquee(
+        shape,
+        { minX: 40, minY: -3, maxX: 60, maxY: 3 },
+        'intersect',
+      ),
     ).toBe(true);
     expect(
       matchesMarquee(shape, { minX: -3, minY: -3, maxX: 103, maxY: 3 }, 'wrap'),
@@ -129,6 +147,27 @@ describe('selection controls', () => {
     ]);
   });
 
+  it('offers the same oriented rotation controls for frame containers', () => {
+    const shape: Extract<Shape, { type: 'frame' }> = {
+      id: 'frame',
+      type: 'frame',
+      x: 10,
+      y: 20,
+      rotation: Math.PI / 4,
+      index: 'a0',
+      props: { w: 120, h: 80, name: 'Frame', color: '#475569' },
+    };
+    const info = getSelectionInfo([shape], [shape.id], 1);
+
+    expect(info?.rotation).toBeCloseTo(Math.PI / 4);
+    expect(info?.rotationHandles.map((handle) => handle.id)).toEqual([
+      'rotate-nw',
+      'rotate-ne',
+      'rotate-se',
+      'rotate-sw',
+    ]);
+  });
+
   it('preserves a shared multi-selection rotation with an oriented box', () => {
     const first = rectangle({ id: 'first', rotation: Math.PI / 2 });
     const second = rectangle({
@@ -136,11 +175,7 @@ describe('selection controls', () => {
       x: 120,
       rotation: Math.PI / 2,
     });
-    const info = getSelectionInfo(
-      [first, second],
-      [first.id, second.id],
-      1,
-    )!;
+    const info = getSelectionInfo([first, second], [first.id, second.id], 1)!;
 
     expect(info.rotation).toBeCloseTo(Math.PI / 2);
     expect(info.center).toEqual({ x: 110, y: 30 });
@@ -159,11 +194,7 @@ describe('selection controls', () => {
       x: 120,
       rotation: Math.PI / 2,
     });
-    const info = getSelectionInfo(
-      [first, second],
-      [first.id, second.id],
-      1,
-    )!;
+    const info = getSelectionInfo([first, second], [first.id, second.id], 1)!;
 
     expect(info.rotation).toBe(0);
     expect(info.center.x).toBeCloseTo(100);

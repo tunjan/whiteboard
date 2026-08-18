@@ -259,8 +259,9 @@ export function MusicPlayer({
           Playing takes the chrome's pressed idiom (hairline + recessed fill)
           rather than a coloured one — colour is reserved for status (P1), and
           "currently playing" is an on/off state, not semantic status (§3.2 R4).
-          No shadow: this chip sits inside a flat docked panel that casts none
-          itself, so a raised control there implied a depth that isn't real. */}
+          As a toolbar item it carries its own `bg-surface` chip, since the
+          session row no longer backs its controls as one shared panel; in the
+          compact popover grid (`showLabel`) it stays flat, already on a card. */}
       <Popover>
         <PopoverTrigger
           render={
@@ -273,6 +274,7 @@ export function MusicPlayer({
               aria-label="Open music player"
               className={cn(
                 'rounded-md border',
+                toolbarItem && 'bg-surface',
                 isPlaying && 'border-border bg-panel text-primary',
               )}
             />

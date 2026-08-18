@@ -15,6 +15,12 @@ export default defineConfig({
       ),
     },
   },
+  // The equation worker is spawned as a module worker. Without this Vite emits
+  // workers as IIFE, which inlines MathJax into the worker bundle instead of
+  // sharing the same lazy chunks the rest of the app resolves it from.
+  worker: {
+    format: 'es',
+  },
   server: {
     port: 5173,
     // Listen on 0.0.0.0 so a real iPad/phone on the LAN can load the dev app.

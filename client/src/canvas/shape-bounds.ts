@@ -10,18 +10,23 @@ import { shapeRegistry } from './shapes/shape-registry';
 /** Rotated world AABB of one shape (its bounds rotated about its center). */
 export function shapeRotatedBounds(shape: Shape): Bounds {
   const util = shapeRegistry.getFor(shape);
-  if (!util) return { minX: shape.x, minY: shape.y, maxX: shape.x, maxY: shape.y };
+  if (!util)
+    return { minX: shape.x, minY: shape.y, maxX: shape.x, maxY: shape.y };
   const raw = util.getBounds(shape);
   // Registry bounds describe the model geometry. Expand the box-like outlines
   // here so the spatial index remains a conservative broad phase for the
   // pixels that users can actually select at the edge of a stroke.
   const strokeRadius =
-    shape.type === 'rectangle' || shape.type === 'ellipse' || shape.type === 'polygon'
+    shape.type === 'rectangle' ||
+    shape.type === 'ellipse' ||
+    shape.type === 'polygon'
       ? shape.props.size / 2
       : 0;
   const b = {
     minX: raw.minX - strokeRadius,
-    minY: raw.minY - strokeRadius - (shape.type === 'frame' ? 20 : 0),
+    // Frame headings are view-adaptive labels, explicitly excluded from model
+    // bounds so they never distort snapping, alignment, culling or export.
+    minY: raw.minY - strokeRadius,
     maxX: raw.maxX + strokeRadius,
     maxY: raw.maxY + strokeRadius,
   };

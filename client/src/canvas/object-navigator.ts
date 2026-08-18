@@ -1,4 +1,5 @@
 import type { Shape } from '@whiteboard/shared';
+import { linkHostname } from './link-url';
 
 function conciseText(value: string, fallback: string): string {
   const text = value.trim().replace(/\s+/g, ' ');
@@ -43,6 +44,9 @@ export function canvasObjectLabel(shape: Shape, ordinal: number): string {
       return `Image ${ordinal + 1}`;
     case 'video':
       return `Video ${ordinal + 1}`;
+    case 'bookmark':
+      // Read out the site, not the full URL: a query string is unlistenable.
+      return `Link ${ordinal + 1}: ${linkHostname(shape.props.url)}`;
     case 'group':
       return `Group ${ordinal + 1}`;
   }

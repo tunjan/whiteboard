@@ -97,6 +97,8 @@ export function sanitizeVoiceAwareness<
             muted: voice.muted,
             speaking: voice.speaking,
             sessionId: voice.sessionId,
+            camera: voice.camera,
+            screen: voice.screen,
           }
         : null;
     }

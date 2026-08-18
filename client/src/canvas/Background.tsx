@@ -51,7 +51,7 @@ export const Background = memo(function Background({
 
   return (
     <svg
-      className="pointer-events-none absolute inset-0 h-full w-full [contain:strict]"
+      className="pointer-events-none absolute inset-0 z-[var(--z-canvas-background)] h-full w-full [contain:strict]"
       aria-hidden="true"
       // Dots are round, so let them antialias; rules stay on crisp pixels.
       shapeRendering={type === 'dot' ? 'auto' : 'crispEdges'}

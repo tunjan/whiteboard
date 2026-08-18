@@ -7,7 +7,7 @@ import {
   FileImage,
   FileSpreadsheet,
   FileText,
-  Files,
+  Folder,
   Presentation,
   RefreshCw,
   Trash2,
@@ -328,7 +328,7 @@ function UploadRow({
 function EmptyState() {
   return (
     <div className="flex flex-col items-center py-8 text-center">
-      <Files
+      <Folder
         size={20}
         strokeWidth={1.5}
         className="mb-2 text-tertiary"
@@ -418,10 +418,11 @@ export function DocumentsPanel({
               data-toolbar-item={toolbarItem || undefined}
               tabIndex={toolbarItem ? -1 : undefined}
               aria-label={`Documents${fileCount ? ` (${fileCount})` : ''}`}
+              className={toolbarItem ? 'bg-surface' : undefined}
             />
           }
         >
-          <Files />
+          <Folder />
           {showLabel ? <span>Documents</span> : null}
         </PopoverTrigger>
 

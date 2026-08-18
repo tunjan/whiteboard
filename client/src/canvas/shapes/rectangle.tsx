@@ -1,6 +1,7 @@
 import { DEFAULT_SHAPE_STYLE } from './style';
 import { boxBounds, boxHitTest, rotationTransform } from './box-geometry';
-import { fillFor, strokeDashArray, strokeLineCap } from './render-style';
+import { DashedOutline, DrawnOutline, fillFor } from './render-style';
+import { useLodDash } from '../lod';
 import type { ShapeUtil } from './types';
 
 export const rectangleUtil: ShapeUtil<'rectangle'> = {
@@ -32,8 +33,15 @@ export const rectangleUtil: ShapeUtil<'rectangle'> = {
   }),
 
   Component: ({ shape }) => {
-    const { w, h, color, fillStyle, dash, size } = shape.props;
+    const { w, h, color, fillStyle, size } = shape.props;
+    const dash = useLodDash(shape.props.dash, size);
     const f = fillFor(shape.id, color, fillStyle);
+    const points = [
+      { x: shape.x, y: shape.y },
+      { x: shape.x + w, y: shape.y },
+      { x: shape.x + w, y: shape.y + h },
+      { x: shape.x, y: shape.y + h },
+    ];
     return (
       <g transform={rotationTransform(shape.x, shape.y, w, h, shape.rotation)}>
         {f.pattern ? <defs>{f.pattern}</defs> : null}
@@ -44,12 +52,26 @@ export const rectangleUtil: ShapeUtil<'rectangle'> = {
           height={h}
           fill={f.fill}
           fillOpacity={f.fillOpacity}
-          stroke={color}
+          stroke={dash === 'solid' ? color : 'none'}
           strokeWidth={size}
-          strokeDasharray={strokeDashArray(dash, size)}
-          strokeLinecap={strokeLineCap(dash)}
           strokeLinejoin="round"
         />
+        {dash === 'draw' ? (
+          <DrawnOutline
+            points={points}
+            seed={shape.id}
+            color={color}
+            size={size}
+            closed
+          />
+        ) : dash === 'dashed' || dash === 'dotted' ? (
+          <DashedOutline
+            points={points}
+            dash={dash}
+            color={color}
+            size={size}
+          />
+        ) : null}
       </g>
     );
   },

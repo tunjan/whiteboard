@@ -1,27 +1,51 @@
 // Analytical 2D geometry used for hit-testing, marquee selection, and distance
 // queries. Each shape's geometry is expressed in that shape's LOCAL space; the
-// caller maps a world point into local space (via `Mat.invert()`) before
-// querying, so rotation and scale never have to be baked into these classes.
+// caller un-rotates a world point into local space (see `unrotatedPoint` in
+// shapes/box-geometry) before querying, so rotation never has to be baked into
+// these classes.
 //
 // Built on the primitives in @whiteboard/shared rather than re-deriving them.
 
 import {
   type Bounds,
   type Vec,
+  closestPointOnSegment,
   distance,
   pointInPolygon,
   pointsBounds,
+  segmentsIntersect,
 } from '@whiteboard/shared';
 
-/** Nearest point to `p` on the segment `a`-`b` (clamped to the segment). */
-export function nearestPointOnSegment(p: Vec, a: Vec, b: Vec): Vec {
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  const lenSq = dx * dx + dy * dy;
-  if (lenSq === 0) return { x: a.x, y: a.y };
-  let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / lenSq;
-  t = t < 0 ? 0 : t > 1 ? 1 : t;
-  return { x: a.x + t * dx, y: a.y + t * dy };
+/**
+ * Closest point to `p` on the polyline through `vertices`. `closed` includes
+ * the edge from the last vertex back to the first, which is what turns an open
+ * chain into a ring — the only difference between every outline walk here.
+ */
+function nearestPointOnPath(
+  p: Vec,
+  vertices: readonly Vec[],
+  closed: boolean,
+): Vec {
+  const first = vertices[0];
+  if (!first) return { x: p.x, y: p.y };
+  if (vertices.length === 1) return first;
+
+  let best: Vec = first;
+  let bestDist = Infinity;
+  const edges = closed ? vertices.length : vertices.length - 1;
+  for (let i = 0; i < edges; i++) {
+    const candidate = closestPointOnSegment(
+      p,
+      vertices[i]!,
+      vertices[(i + 1) % vertices.length]!,
+    );
+    const d = distance(p, candidate);
+    if (d < bestDist) {
+      bestDist = d;
+      best = candidate;
+    }
+  }
+  return best;
 }
 
 /**
@@ -65,33 +89,6 @@ export function polygonsIntersect(a: readonly Vec[], b: readonly Vec[]): boolean
     }
   }
   return true;
-}
-
-/** True if segment `a`-`b` intersects segment `c`-`d` (proper or touching). */
-export function segmentsIntersect(a: Vec, b: Vec, c: Vec, d: Vec): boolean {
-  const cross = (p: Vec, q: Vec, r: Vec) =>
-    (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
-  const d1 = cross(c, d, a);
-  const d2 = cross(c, d, b);
-  const d3 = cross(a, b, c);
-  const d4 = cross(a, b, d);
-
-  if (((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))) {
-    return true;
-  }
-
-  // Collinear touching cases.
-  const onSegment = (p: Vec, q: Vec, r: Vec) =>
-    Math.min(p.x, q.x) <= r.x &&
-    r.x <= Math.max(p.x, q.x) &&
-    Math.min(p.y, q.y) <= r.y &&
-    r.y <= Math.max(p.y, q.y);
-
-  if (d1 === 0 && onSegment(c, d, a)) return true;
-  if (d2 === 0 && onSegment(c, d, b)) return true;
-  if (d3 === 0 && onSegment(a, b, c)) return true;
-  if (d4 === 0 && onSegment(a, b, d)) return true;
-  return false;
 }
 
 export interface Geometry2dOptions {
@@ -194,22 +191,7 @@ export class Rectangle2d extends Geometry2d {
   }
 
   nearestPoint(point: Vec): Vec {
-    const vertices = this.getVertices();
-    let best: Vec | undefined;
-    let bestDist = Infinity;
-    for (let i = 0; i < vertices.length; i++) {
-      const candidate = nearestPointOnSegment(
-        point,
-        vertices[i]!,
-        vertices[(i + 1) % vertices.length]!,
-      );
-      const d = distance(point, candidate);
-      if (d < bestDist) {
-        bestDist = d;
-        best = candidate;
-      }
-    }
-    return best ?? { x: this.x, y: this.y };
+    return nearestPointOnPath(point, this.getVertices(), true);
   }
 }
 
@@ -268,6 +250,70 @@ export class Circle2d extends Geometry2d {
   }
 }
 
+/** Axis-aligned ellipse centered at (x, y) with radii rx and ry. */
+export class Ellipse2d extends Geometry2d {
+  readonly isClosed = true;
+
+  /**
+   * Matches the step count `selection-geometry` flattens an ellipse with, so
+   * that a click and a marquee agree about where the shape's edge runs.
+   */
+  private static readonly SEGMENTS = 48;
+
+  constructor(
+    readonly x: number,
+    readonly y: number,
+    readonly rx: number,
+    readonly ry: number,
+    options: Geometry2dOptions = {},
+  ) {
+    super(options);
+  }
+
+  protected computeVertices(): Vec[] {
+    const out: Vec[] = [];
+    for (let i = 0; i < Ellipse2d.SEGMENTS; i++) {
+      const theta = (i / Ellipse2d.SEGMENTS) * Math.PI * 2;
+      out.push({
+        x: this.x + Math.cos(theta) * this.rx,
+        y: this.y + Math.sin(theta) * this.ry,
+      });
+    }
+    return out;
+  }
+
+  nearestPoint(point: Vec): Vec {
+    return nearestPointOnPath(point, this.getVertices(), true);
+  }
+
+  /** True when `point` lies within the true ellipse, not its approximation. */
+  containsPoint(point: Vec): boolean {
+    if (this.rx === 0 || this.ry === 0) return false;
+    const dx = (point.x - this.x) / this.rx;
+    const dy = (point.y - this.y) / this.ry;
+    return dx * dx + dy * dy <= 1;
+  }
+
+  /**
+   * The interior test is exact rather than going through `getVertices()`: the
+   * inscribed polygon cuts inside the true outline along every one of its
+   * chords, so a point in that sliver would read as outside a filled shape.
+   */
+  override distanceToPoint(point: Vec): number {
+    if (this.isFilled && this.containsPoint(point)) return 0;
+    return distance(point, this.nearestPoint(point));
+  }
+
+  override getBounds(): Bounds {
+    return {
+      minX: this.x - this.rx,
+      minY: this.y - this.ry,
+      maxX: this.x + this.rx,
+      maxY: this.y + this.ry,
+    };
+  }
+}
+
 /** Closed ring of vertices — convex or not. */
 export class Polygon2d extends Geometry2d {
   readonly isClosed = true;
@@ -284,27 +330,7 @@ export class Polygon2d extends Geometry2d {
   }
 
   nearestPoint(point: Vec): Vec {
-    const vertices = this.getVertices();
-    const first = vertices[0];
-    if (!first) return { x: point.x, y: point.y };
-    if (vertices.length === 1) return first;
-
-    let best = first;
-    let bestDist = Infinity;
-    // The closing edge (last -> first) is what makes this a ring.
-    for (let i = 0; i < vertices.length; i++) {
-      const candidate = nearestPointOnSegment(
-        point,
-        vertices[i]!,
-        vertices[(i + 1) % vertices.length]!,
-      );
-      const d = distance(point, candidate);
-      if (d < bestDist) {
-        bestDist = d;
-        best = candidate;
-      }
-    }
-    return best;
+    return nearestPointOnPath(point, this.getVertices(), true);
   }
 }
 
@@ -322,21 +348,6 @@ export class Polyline2d extends Geometry2d {
   }
 
   nearestPoint(point: Vec): Vec {
-    const vertices = this.getVertices();
-    const first = vertices[0];
-    if (!first) return { x: point.x, y: point.y };
-    if (vertices.length === 1) return first;
-
-    let best = first;
-    let bestDist = Infinity;
-    for (let i = 0; i < vertices.length - 1; i++) {
-      const candidate = nearestPointOnSegment(point, vertices[i]!, vertices[i + 1]!);
-      const d = distance(point, candidate);
-      if (d < bestDist) {
-        bestDist = d;
-        best = candidate;
-      }
-    }
-    return best;
+    return nearestPointOnPath(point, this.getVertices(), false);
   }
 }

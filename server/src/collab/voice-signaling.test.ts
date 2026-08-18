@@ -19,8 +19,19 @@ class FakeConnection implements VoiceSignalConnection {
   sendStateless = vi.fn();
 }
 
-function voice(sessionId: string): VoicePresence {
-  return { inCall: true, muted: true, speaking: false, sessionId };
+function voice(
+  sessionId: string,
+  overrides: Partial<VoicePresence> = {},
+): VoicePresence {
+  return {
+    inCall: true,
+    muted: true,
+    speaking: false,
+    camera: false,
+    screen: false,
+    sessionId,
+    ...overrides,
+  };
 }
 
 function signal(overrides: Partial<VoiceSignal> = {}): VoiceSignal {
@@ -148,6 +159,34 @@ describe('voice awareness ownership', () => {
 
     expect(states.has(999)).toBe(false);
     expect(states.get(1)?.voice).toEqual(voice(SOURCE_SESSION));
+  });
+
+  it('preserves camera and screen through the rewrite', () => {
+    const { source, document } = room();
+    const states = new Map<number, Record<string, unknown>>([
+      [
+        1,
+        { voice: voice(SOURCE_SESSION, { camera: true, screen: true }) },
+      ],
+    ]);
+
+    sanitizeVoiceAwareness({ connection: source, document, states });
+
+    expect(states.get(1)?.voice).toEqual(
+      voice(SOURCE_SESSION, { camera: true, screen: true }),
+    );
+  });
+
+  it('nulls voice presence that predates the camera and screen fields', () => {
+    const { source, document } = room();
+    const { camera, screen, ...legacy } = voice(SOURCE_SESSION);
+    const states = new Map<number, Record<string, unknown>>([
+      [1, { voice: legacy }],
+    ]);
+
+    sanitizeVoiceAwareness({ connection: source, document, states });
+
+    expect(states.get(1)?.voice).toBeNull();
   });
 
   it('drops awareness ids owned by another connection or extra local ids', () => {

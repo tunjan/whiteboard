@@ -3,6 +3,7 @@ import { DEFAULT_SHAPE_STYLE } from './style';
 import {
   arrowheadLength,
   arrowheadPath,
+  arrowheadPoints,
   arrowPath,
   arrowPoints,
   pathMidpoint,
@@ -12,7 +13,9 @@ import {
   resizePolyline,
   tangentAnchor,
 } from './line-geometry';
-import { strokeDashArray } from './render-style';
+import { polylineLength } from './perfect-dash';
+import { dashProps, DrawnOutline } from './render-style';
+import { useLodDash } from '../lod';
 import type { ShapeUtil } from './types';
 
 export const arrowUtil: ShapeUtil<'arrow'> = {
@@ -76,7 +79,11 @@ export const arrowUtil: ShapeUtil<'arrow'> = {
     return {
       x,
       y,
-      props: { ...initial.props, points, bend: (initial.props.bend ?? 0) * scale },
+      props: {
+        ...initial.props,
+        points,
+        bend: (initial.props.bend ?? 0) * scale,
+      },
     };
   },
 
@@ -85,16 +92,9 @@ export const arrowUtil: ShapeUtil<'arrow'> = {
     arrowHandleDrag(s, handleId, point, opts),
 
   Component: ({ shape }) => {
-    const {
-      points,
-      color,
-      size,
-      dash,
-      arrowStart,
-      arrowEnd,
-      bend,
-      label,
-    } = shape.props;
+    const { points, color, size, arrowStart, arrowEnd, bend, label } =
+      shape.props;
+    const dash = useLodDash(shape.props.dash, size);
     if (points.length < 2) return null;
     const topology =
       shape.props.topology ?? (Math.abs(bend ?? 0) >= 0.5 ? 'arc' : 'straight');
@@ -129,14 +129,51 @@ export const arrowUtil: ShapeUtil<'arrow'> = {
           shape.rotation,
         )}
       >
-        <path
-          d={arrowPath(points, topology, bend ?? 0)}
-          {...stroke}
-          strokeDasharray={strokeDashArray(dash, size)}
-        />
-        {startHead || endHead ? (
-          <path d={`${startHead} ${endHead}`.trim()} {...stroke} />
-        ) : null}
+        {dash === 'draw' ? (
+          <>
+            <DrawnOutline
+              points={bodyPoints}
+              seed={`${shape.id}:body`}
+              color={color}
+              size={size}
+            />
+            {arrowStart ? (
+              <DrawnOutline
+                points={arrowheadPoints(
+                  tangentAnchor(bodyPoints, true),
+                  first,
+                  size,
+                )}
+                seed={`${shape.id}:start`}
+                color={color}
+                size={size}
+              />
+            ) : null}
+            {arrowEnd ? (
+              <DrawnOutline
+                points={arrowheadPoints(
+                  tangentAnchor(bodyPoints, false),
+                  last,
+                  size,
+                )}
+                seed={`${shape.id}:end`}
+                color={color}
+                size={size}
+              />
+            ) : null}
+          </>
+        ) : (
+          <>
+            <path
+              d={arrowPath(points, topology, bend ?? 0)}
+              {...stroke}
+              {...dashProps(dash, size, polylineLength(bodyPoints))}
+            />
+            {startHead || endHead ? (
+              <path d={`${startHead} ${endHead}`.trim()} {...stroke} />
+            ) : null}
+          </>
+        )}
         {label?.trim() ? (
           <text
             x={labelPoint.x}

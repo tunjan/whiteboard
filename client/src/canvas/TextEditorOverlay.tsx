@@ -3,6 +3,7 @@ import type { TextShape } from '@whiteboard/shared';
 import { setLocalTextSelection } from '@/collab/presence';
 import type { Camera } from './camera';
 import { worldToScreen } from './camera';
+import { deleteShapesWithCleanup } from './commands';
 import {
   fontStack,
   fontWeight,
@@ -88,7 +89,7 @@ export function TextEditorOverlay({
     const value = ref.current?.value ?? shape.props.text;
     setLocalTextSelection(null);
     if (value.trim() === '') {
-      editor.deleteShapes([shape.id]);
+      deleteShapesWithCleanup(editor, [shape.id]);
       useSelectionStore.getState().clear();
     } else {
       editor.updateShape(shape.id, { props: { text: value } });
@@ -143,7 +144,7 @@ export function TextEditorOverlay({
         }
       }}
       onPointerDown={(event) => event.stopPropagation()}
-      className="absolute m-0 block resize-none overflow-hidden border-0 bg-transparent p-0 outline-none"
+      className="absolute z-[var(--z-canvas-front)] m-0 block resize-none overflow-hidden border-0 bg-transparent p-0 outline-none"
       style={{
         left: screen.x,
         top: screen.y,
