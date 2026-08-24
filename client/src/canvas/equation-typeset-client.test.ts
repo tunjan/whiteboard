@@ -80,10 +80,24 @@ describe('typesetting on a worker thread', () => {
     const render = { svg: '<svg />', width: 10, height: 5 };
 
     const pending = typesetOnce('x^2');
-    expect(only().posted).toEqual([{ id: expect.any(Number), latex: 'x^2' }]);
+    expect(only().posted).toEqual([
+      { id: expect.any(Number), latex: 'x^2', inline: false },
+    ]);
 
     only().reply(only().posted[0]!.id, render);
     await expect(pending).resolves.toEqual(render);
+  });
+
+  // The style is half of what identifies a render, so it has to survive the
+  // trip: a worker told only the source would answer every request in display
+  // style and the caller would cache the answer under the style it asked for.
+  it('sends the requested style across with the source', async () => {
+    const { typesetOnce } = await loadClient();
+
+    void typesetOnce('x^2', true);
+    expect(only().posted).toEqual([
+      { id: expect.any(Number), latex: 'x^2', inline: true },
+    ]);
   });
 
   it('keeps concurrent requests apart', async () => {

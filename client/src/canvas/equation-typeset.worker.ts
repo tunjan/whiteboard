@@ -14,6 +14,8 @@ import {
 export interface TypesetRequest {
   id: number;
   latex: string;
+  /** Text style rather than display style. See `convertEquation`. */
+  inline: boolean;
 }
 
 export interface TypesetResponse {
@@ -38,9 +40,9 @@ interface WorkerScope {
 const scope = self as unknown as WorkerScope;
 
 scope.addEventListener('message', (event: MessageEvent<TypesetRequest>) => {
-  const { id, latex } = event.data;
+  const { id, latex, inline } = event.data;
   void ensureConverter()
-    .then(() => convertEquation(latex))
+    .then(() => convertEquation(latex, inline))
     // Only the MathJax load itself can reject; a TeX failure is already an
     // `error` entry. Reporting it as one keeps the client's protocol total —
     // every request gets exactly one response.

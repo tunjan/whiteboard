@@ -10,13 +10,19 @@ import {
   setThreadResolved,
   useDocumentStore,
 } from '@/canvas/use-document-store';
-import { type CommentMessage, useCommentsStore } from '@/canvas/use-comments-store';
+import {
+  type CommentMessage,
+  useCommentsStore,
+} from '@/canvas/use-comments-store';
+import { CommentText } from '@/canvas/CommentText';
 import { buttonVariants } from '@/components/ui/button';
 import { Surface } from '@/components/ui/surface';
 import { cn } from '@/lib/utils';
 
 const FALLBACK_AUTHOR = { name: 'Anonymous', color: '#2563EB' };
-const POPUP_WIDTH = 288;
+const POPUP_WIDTH = 320;
+/** Roughly the popup at its tallest, used only to keep it inside the viewport. */
+const POPUP_MAX_HEIGHT = 380;
 
 function localAuthor(): { name: string; color: string } {
   const user = getLocalUser();
@@ -40,8 +46,13 @@ function relativeTime(ts: number): string {
 const iconButtonClass = cn(
   buttonVariants({ variant: 'ghost', size: 'icon-xs' }),
 );
+// The reply row's primary action, sized against the 34px field rather than the
+// 24px header controls.
+const sendButtonClass = cn(
+  buttonVariants({ variant: 'ghost', size: 'icon-sm' }),
+);
 const textareaClass =
-  'w-full resize-none rounded-md border border-border bg-muted px-2 py-1.5 text-sm text-primary placeholder:text-faint-foreground focus-visible:border-strong';
+  'w-full resize-none rounded-control border border-border bg-panel px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus-visible:border-strong';
 
 function CommentPin({
   message,
@@ -67,13 +78,25 @@ function CommentPin({
         // pop-in zoom composes with (never overrides) the centering. The pin
         // stays mounted across camera pans (keyed by message id; only left/top
         // change), so the entrance plays once on mount, not per frame.
-        'pointer-events-auto absolute flex size-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-surface text-2xs font-semibold text-inverse shadow-hover transition-transform duration-200 ease-[var(--ease-out-expo)] hover:scale-110 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-50 motion-reduce:transition-none',
-        open && 'scale-110 ring-2 ring-strong',
+        'pointer-events-auto absolute flex size-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 bg-surface text-2xs font-semibold text-fg transition-[transform,box-shadow] duration-200 ease-[var(--ease-out-expo)] hover:scale-110 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-50 motion-reduce:transition-none',
+        open && 'scale-110',
       )}
       style={{
         left: screen.x,
         top: screen.y,
-        backgroundColor: message.authorColor,
+        // The identity colour rings a surface-coloured disc instead of filling
+        // it. A solid fill spends the pin's whole area on the hue, and the one
+        // saturated entry in the palette — TUTOR_COLOR — reads as a hazard dot
+        // against the dark canvas at that size. Same treatment as the cursor
+        // name tag: neutral chip, colour as the accent. It also keeps the
+        // initial on `text-fg`, which is legible in both themes, where ink
+        // reversed out of the raw colour was not.
+        borderColor: message.authorColor,
+        // The open halo is the pin's own colour at low alpha rather than a grey
+        // `ring`, which read as a bullseye against the border.
+        boxShadow: open
+          ? `0 0 0 4px color-mix(in oklab, ${message.authorColor} 22%, transparent), var(--shadow-hover)`
+          : 'var(--shadow-hover)',
       }}
     >
       {initial(message.authorName)}
@@ -102,7 +125,13 @@ function CommentComposer({
   const submit = () => {
     const trimmed = text.trim();
     if (!trimmed) return;
-    addComment({ pageId, x: point.x, y: point.y, text: trimmed, author: localAuthor() });
+    addComment({
+      pageId,
+      x: point.x,
+      y: point.y,
+      text: trimmed,
+      author: localAuthor(),
+    });
     onDone();
   };
 
@@ -122,7 +151,7 @@ function CommentComposer({
         }
       }}
     >
-      <Surface className="flex w-64 flex-col gap-2 p-2 shadow-hover">
+      <Surface className="flex w-72 flex-col gap-2.5 p-3 shadow-hover">
         <textarea
           ref={ref}
           value={text}
@@ -183,12 +212,18 @@ function ThreadPopup({
     Math.max(screen.x + 20, 8),
     window.innerWidth - POPUP_WIDTH - 8,
   );
-  const top = Math.min(Math.max(screen.y - 12, 8), window.innerHeight - 320);
+  const top = Math.max(
+    Math.min(
+      Math.max(screen.y - 12, 8),
+      window.innerHeight - POPUP_MAX_HEIGHT,
+    ),
+    8,
+  );
 
   return (
     <div
       data-ui-layer
-      className="pointer-events-auto absolute z-[var(--z-canvas-front)] flex origin-top-left flex-col overflow-hidden rounded-md border border-border bg-surface shadow-hover ease-[var(--ease-out-expo)] motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95 motion-safe:duration-200"
+      className="pointer-events-auto absolute z-[var(--z-canvas-front)] flex origin-top-left flex-col overflow-hidden rounded-panel border border-border bg-surface shadow-hover ease-[var(--ease-out-expo)] motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95 motion-safe:duration-200"
       style={{ left, top, width: POPUP_WIDTH }}
       onPointerDown={(e) => e.stopPropagation()}
       onKeyDown={(e) => {
@@ -199,8 +234,8 @@ function ThreadPopup({
         }
       }}
     >
-      <div className="flex items-center justify-between gap-1 border-b border-border px-3 py-2">
-        <span className="text-xs font-medium text-tertiary">Thread</span>
+      <div className="flex items-center justify-between gap-1 px-4 pt-4 pb-1">
+        <span className="text-xs font-medium text-fg-muted">Thread</span>
         <div className="flex items-center gap-1">
           <button
             type="button"
@@ -235,31 +270,31 @@ function ThreadPopup({
         </div>
       </div>
 
-      <div className="flex max-h-64 flex-col gap-3 overflow-y-auto px-3 py-2">
+      <div className="flex max-h-64 flex-col gap-4 overflow-y-auto px-4 py-3">
         {[root, ...replies].map((m) => (
-          <div key={m.id} className="flex flex-col gap-0.5">
-            <div className="flex items-center gap-1.5">
+          <div key={m.id} className="flex flex-col gap-1">
+            <div className="flex items-center gap-2">
+              {/* The name is right next to it, so the disc has no work to do
+                  beyond identifying the author by colour — same 6px dot the
+                  cursor name tag uses. */}
               <span
-                className="flex size-4 shrink-0 items-center justify-center rounded-full text-2xs font-semibold text-inverse"
+                aria-hidden="true"
+                className="size-1.5 shrink-0 rounded-full"
                 style={{ backgroundColor: m.authorColor }}
-              >
-                {initial(m.authorName)}
-              </span>
-              <span className="text-xs font-medium text-primary">
+              />
+              <span className="text-xs font-medium text-fg">
                 {m.authorName}
               </span>
-              <span className="text-2xs text-tertiary">
+              <span className="text-2xs text-fg-muted">
                 {relativeTime(m.createdAt)}
               </span>
             </div>
-            <p className="whitespace-pre-wrap break-words text-sm text-primary">
-              {m.text}
-            </p>
+            <CommentText text={m.text} className="text-sm text-fg" />
           </div>
         ))}
       </div>
 
-      <div className="flex items-end gap-1.5 border-t border-border p-2">
+      <div className="flex items-center gap-2 px-4 pt-1 pb-4">
         <textarea
           value={reply}
           onChange={(e) => setReply(e.target.value)}
@@ -277,7 +312,7 @@ function ThreadPopup({
           type="button"
           aria-label="Send reply"
           onClick={submitReply}
-          className={iconButtonClass}
+          className={sendButtonClass}
         >
           <Send className="size-3.5" />
         </button>
@@ -314,7 +349,7 @@ export function CommentsLayer({ camera }: { camera: Camera }) {
     : [];
 
   return (
-    <div className="pointer-events-none absolute inset-0 overflow-hidden">
+    <div className="pointer-events-none absolute inset-0 z-[var(--z-canvas-front)] overflow-hidden">
       {roots.map((root) => (
         <CommentPin
           key={root.id}

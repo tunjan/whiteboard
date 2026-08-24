@@ -41,7 +41,7 @@ function LatencyWarningList() {
     <Toast.Root
       key={toast.id}
       toast={toast}
-      className="pointer-events-auto w-full rounded-md bg-warning-bg text-primary border border-warning-border shadow-md transition-all duration-200 ease-out data-ending-style:-translate-y-1 data-ending-style:opacity-0 data-starting-style:-translate-y-2 data-starting-style:opacity-0"
+      className="pointer-events-auto w-full rounded-md bg-warning-bg text-fg border border-warning-border shadow-md transition-all duration-200 ease-out data-ending-style:-translate-y-1 data-ending-style:opacity-0 data-starting-style:-translate-y-2 data-starting-style:opacity-0"
     >
       <Toast.Content className="flex items-start gap-3 p-3.5">
         <span
@@ -52,7 +52,7 @@ function LatencyWarningList() {
         </span>
         <div className="flex min-w-0 flex-1 flex-col gap-0.5 pt-0.5">
           <Toast.Title className="text-xs font-semibold text-warning" />
-          <Toast.Description className="text-xs text-secondary leading-relaxed" />
+          <Toast.Description className="text-xs text-fg-secondary leading-relaxed" />
         </div>
         <Toast.Action
           onClick={() => close(toast.id)}
@@ -61,7 +61,7 @@ function LatencyWarningList() {
               variant="ghost"
               size="icon-xs"
               aria-label="Dismiss slow connection warning"
-              className="-mt-1 -mr-1 text-secondary hover:text-primary"
+              className="-mt-1 -mr-1 text-fg-secondary hover:text-fg"
             />
           }
         >

@@ -1,20 +1,5 @@
 import { type CSSProperties, useState } from 'react';
-import {
-  ArrowLeft,
-  ClipboardCopy,
-  Download,
-  EllipsisVertical,
-  Keyboard,
-  Moon,
-  NotebookPen,
-  Settings,
-  SlidersHorizontal,
-  Sun,
-} from 'lucide-react';
-import {
-  copyBoardToPngClipboard,
-  exportBoardToPng,
-} from '@/canvas/export-png';
+import { ArrowLeft, SlidersHorizontal } from 'lucide-react';
 import { type Identity } from '@/collab/identity';
 import { jumpToPeerViewport } from '@/collab/presence';
 import {
@@ -23,6 +8,7 @@ import {
   usePresenceStore,
 } from '@/collab/use-presence-store';
 import { useVoiceStore } from '@/collab/voice/use-voice-store';
+import { BoardActionsMenu } from '@/components/board-actions-menu';
 import { BoardNotesDialog } from '@/components/board-notes-dialog';
 import { ConnectionIndicator } from '@/components/connection-indicator';
 import { DocumentsPanel } from '@/components/documents-panel';
@@ -30,7 +16,6 @@ import { FollowControls } from '@/components/follow-controls';
 import { KeyboardShortcutsDialog } from '@/components/keyboard-shortcuts-dialog';
 import { MusicPlayer } from '@/music/music-player';
 import { PageMenu } from '@/components/page-menu';
-import { SettingsDialog } from '@/components/settings-dialog';
 import { ShareButton } from '@/components/share-button';
 import { VoiceControls } from '@/components/voice-controls';
 import {
@@ -41,14 +26,6 @@ import {
   AvatarGroupCount,
 } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import {
   Popover,
   PopoverContent,
@@ -67,7 +44,6 @@ import {
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useRovingToolbar } from '@/hooks/use-roving-toolbar';
 import { cn } from '@/lib/utils';
-import { useThemeStore } from '@/use-theme-store';
 
 const MAX_VISIBLE_PARTICIPANTS = 4;
 
@@ -339,8 +315,6 @@ export function BoardChrome({
   onEditIdentity?: () => void;
   identity: Identity | null;
 }) {
-  const theme = useThemeStore((s) => s.theme);
-  const toggle = useThemeStore((s) => s.toggle);
   const isMobile = useIsMobile();
   const sessionToolbar = useRovingToolbar<HTMLDivElement>();
   const presenceToolbar = useRovingToolbar<HTMLDivElement>();
@@ -386,27 +360,16 @@ export function BoardChrome({
   // Highest z-index goes to the leftmost avatar and descends rightward, so the
   // overflow count (rendered last) ends up underneath everything at 0.
   const stackDepth = visibleParticipants.length;
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [notesOpen, setNotesOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
-  const [exporting, setExporting] = useState(false);
   const renameTitle = identity?.isTutor ? onRenameTitle : undefined;
-
-  const onExport = async () => {
-    setExporting(true);
-    try {
-      await exportBoardToPng(title);
-    } finally {
-      setExporting(false);
-    }
-  };
 
   return (
     <>
       {/* ── Top-left: board navigation ──────────────────────────────────────
           Breadcrumb layout (§12.8): Back → Board title → / → Current page → ⋯
-          Board title is the "ancestor" (text-secondary, muted).
-          Current page name is handled by PageMenu (text-primary, full weight).
+          Board title is the "ancestor" (text-fg-secondary, muted).
+          Current page name is handled by PageMenu (text-fg, full weight).
           Separator is a slash. */}
       <Surface
         role="navigation"
@@ -437,7 +400,7 @@ export function BoardChrome({
         )}
 
         {/* Board title — ancestor node of the breadcrumb.
-            Muted (text-secondary) because it is context, not the current location.
+            Muted (text-fg-secondary) because it is context, not the current location.
             Tutors can click to rename; students see a read-only label. */}
         {renameTitle ? (
           <TooltipProvider delay={300}>
@@ -458,7 +421,7 @@ export function BoardChrome({
                     // No `cursor-text`: this opens a rename dialog rather than
                     // editing in place, and a caret cursor promised an inline
                     // field that never appears.
-                    className="max-w-[clamp(5rem,20vw,12.5rem)] px-2 font-medium text-secondary"
+                    className="max-w-[clamp(5rem,20vw,12.5rem)] px-2 font-medium text-fg-secondary"
                   />
                 }
               >
@@ -468,7 +431,7 @@ export function BoardChrome({
             </Tooltip>
           </TooltipProvider>
         ) : (
-          <span className="flex h-8 max-w-[clamp(5rem,20vw,12.5rem)] items-center truncate px-2 text-sm font-medium text-secondary">
+          <span className="flex h-8 max-w-[clamp(5rem,20vw,12.5rem)] items-center truncate px-2 text-sm font-medium text-fg-secondary">
             {title}
           </span>
         )}
@@ -479,71 +442,16 @@ export function BoardChrome({
           /
         </span>
 
-        {/* Current page — full-weight, text-primary; opens the page picker */}
+        {/* Current page — full-weight, text-fg; opens the page picker */}
         <PageMenu />
 
-        {/* Overflow — settings, notes, theme toggle, export */}
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label="Board actions"
-              />
-            }
-          >
-            <EllipsisVertical />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent
-            align="start"
-            sideOffset={8}
-            className="w-44"
-          >
-            <DropdownMenuGroup>
-              <DropdownMenuItem onClick={() => setSettingsOpen(true)}>
-                <Settings />
-                Settings
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setShortcutsOpen(true)}>
-                <Keyboard />
-                Keyboard shortcuts
-              </DropdownMenuItem>
-              {identity?.isTutor && (
-                <DropdownMenuItem onClick={() => setNotesOpen(true)}>
-                  <NotebookPen />
-                  Student notes
-                </DropdownMenuItem>
-              )}
-            </DropdownMenuGroup>
-            <DropdownMenuSeparator />
-            <DropdownMenuGroup>
-              <DropdownMenuItem onClick={toggle}>
-                {theme === 'dark' ? <Sun /> : <Moon />}
-                {theme === 'dark' ? 'Light mode' : 'Dark mode'}
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                // Not awaited: the clipboard write has to be issued while this
-                // click is still the current task (see `writePngToClipboard`).
-                onClick={() => {
-                  copyBoardToPngClipboard().catch((err: unknown) =>
-                    console.error('[clipboard] copy as PNG failed', err),
-                  );
-                }}
-              >
-                <ClipboardCopy />
-                Copy PNG
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => void onExport()}
-                disabled={exporting}
-              >
-                <Download />
-                Export PNG
-              </DropdownMenuItem>
-            </DropdownMenuGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        {/* Overflow — board dialogs, image output, preferences */}
+        <BoardActionsMenu
+          title={title}
+          isTutor={identity?.isTutor === true}
+          onOpenNotes={() => setNotesOpen(true)}
+          onOpenShortcuts={() => setShortcutsOpen(true)}
+        />
       </Surface>
 
       {/* ── Top-right: floating presence cluster + docked session panel ──── */}
@@ -708,7 +616,6 @@ export function BoardChrome({
         </div>
       </div>
 
-      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
       <KeyboardShortcutsDialog
         open={shortcutsOpen}
         onOpenChange={setShortcutsOpen}

@@ -1,7 +1,7 @@
-import * as React from "react"
-import { cva, type VariantProps } from "class-variance-authority"
+import * as React from 'react';
+import { cva, type VariantProps } from 'class-variance-authority';
 
-import { cn } from "@/lib/utils"
+import { cn } from '@/lib/utils';
 
 /**
  * Conventions every chrome control follows, wherever it is rendered: coarse
@@ -13,15 +13,15 @@ import { cn } from "@/lib/utils"
  * Restating the rule at that call site is how the two drifted apart.
  */
 export const CHROME_CONTROLS =
-  "touch-targets [&_svg:not([data-slot=avatar-fallback]_svg)]:stroke-[1.5]"
+  'touch-targets [&_svg:not([data-slot=avatar-fallback]_svg)]:stroke-[1.5]';
 
 const surfaceVariants = cva(
-  "select-none rounded-panel border border-border text-fg",
+  'select-none rounded-panel border border-border bg-surface text-fg',
   {
     variants: {
       shape: {
-        panel: "rounded-panel",
-        pill: "rounded-full",
+        panel: 'rounded-panel',
+        pill: 'rounded-full',
       },
       mode: {
         // `--chrome-hover` is the fill a ghost control takes on hover. It has
@@ -29,30 +29,30 @@ const surfaceVariants = cva(
         // sit on different surfaces: a floating panel is `surface`, so its
         // controls darken to `panel`; a docked panel already *is* `panel`, so
         // its controls have to go the other way, up to `surface`.
-        floating: "bg-surface shadow-e5 [--chrome-hover:var(--color-panel)]",
-        docked: "bg-panel shadow-none [--chrome-hover:var(--color-surface)]",
+        floating: 'shadow-panel [--chrome-hover:var(--color-panel)]',
+        docked: 'bg-panel shadow-none [--chrome-hover:var(--color-surface)]',
       },
       chrome: {
         true: CHROME_CONTROLS,
-        false: "",
+        false: '',
       },
     },
     defaultVariants: {
-      shape: "panel",
-      mode: "floating",
+      shape: 'panel',
+      mode: 'floating',
       chrome: false,
     },
-  }
-)
+  },
+);
 
 /** Shared surface. Board chrome opts into compact geometry with `chrome`. */
 function Surface({
   className,
-  shape = "panel",
-  mode = "floating",
+  shape = 'panel',
+  mode = 'floating',
   chrome = false,
   ...props
-}: React.ComponentProps<"div"> & VariantProps<typeof surfaceVariants>) {
+}: React.ComponentProps<'div'> & VariantProps<typeof surfaceVariants>) {
   return (
     <div
       data-slot="surface"
@@ -61,7 +61,7 @@ function Surface({
       className={cn(surfaceVariants({ shape, mode, chrome }), className)}
       {...props}
     />
-  )
+  );
 }
 
-export { Surface, surfaceVariants }
+export { Surface, surfaceVariants };

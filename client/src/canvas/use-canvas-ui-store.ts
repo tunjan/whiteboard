@@ -35,6 +35,18 @@ interface CanvasUiStore {
   pencilStartTaper: number;
   /** Whether newly drawn strokes taper to a point at the end. */
   pencilEndTaper: boolean;
+  /**
+   * Whether the live stroke is drawn out to the browser's predicted pointer
+   * position, ahead of the last real sample.
+   *
+   * Off by default. Prediction is extrapolation: it buys back about a frame of
+   * the latency between the hand and the ink, and pays for it with a tip that
+   * can lead the hand into a turn and then correct itself. Which of the two is
+   * more distracting is a matter of taste and of hardware, so it is a choice
+   * rather than a default. Local render only — the tail is never written to the
+   * document, so this preference cannot change what peers or the board receive.
+   */
+  pencilPrediction: boolean;
   /** Whether the on-canvas performance overlay (FPS/frame time) is shown. */
   debugPerformance: boolean;
   /**
@@ -52,6 +64,7 @@ interface CanvasUiStore {
   setPencilSimulatePressure: (pencilSimulatePressure: boolean) => void;
   setPencilStartTaper: (pencilStartTaper: number) => void;
   setPencilEndTaper: (pencilEndTaper: boolean) => void;
+  setPencilPrediction: (pencilPrediction: boolean) => void;
   setDebugPerformance: (debugPerformance: boolean) => void;
   setPngExportScale: (pngExportScale: number) => void;
   resetPencil: () => void;
@@ -69,6 +82,7 @@ const PENCIL_DEFAULTS = {
   pencilSimulatePressure: DEFAULT_PENCIL_DYNAMICS.simulatePressure,
   pencilStartTaper: 0,
   pencilEndTaper: DEFAULT_PENCIL_DYNAMICS.endTaper,
+  pencilPrediction: false,
 } as const;
 
 // The previous release made every mouse/touch stroke behave like a pressure
@@ -121,6 +135,7 @@ export const useCanvasUiStore = create<CanvasUiStore>()(
         set({ pencilSimulatePressure }),
       setPencilStartTaper: (pencilStartTaper) => set({ pencilStartTaper }),
       setPencilEndTaper: (pencilEndTaper) => set({ pencilEndTaper }),
+      setPencilPrediction: (pencilPrediction) => set({ pencilPrediction }),
       setDebugPerformance: (debugPerformance) => set({ debugPerformance }),
       setPngExportScale: (pngExportScale) => set({ pngExportScale }),
       resetPencil: () => set({ ...PENCIL_DEFAULTS }),

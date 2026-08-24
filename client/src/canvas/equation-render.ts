@@ -1,24 +1,30 @@
 /**
  * The main thread's view of typeset equations: a bounded cache that shape
- * components can read synchronously during render, and a store that tells them
- * when it changed.
+ * components can read synchronously during render, and a per-expression
+ * subscription that tells them when their own entry changed.
  *
  * The conversion itself happens elsewhere (`equation-typeset-client`, normally
  * on a worker thread). Only the cache lives here, because a React render body
  * cannot await anything — `getEquationRender` has to answer immediately or not
  * at all.
  */
-import { create } from 'zustand';
+import { useCallback, useSyncExternalStore } from 'react';
 import type { EquationRender } from './equation-convert';
-import {
-  ensureTypesetEngine,
-  typesetOnce,
-} from './equation-typeset-client';
+import { ensureTypesetEngine, typesetOnce } from './equation-typeset-client';
 
 export type { EquationRender };
 
-interface EquationRenderState {
-  version: number;
+/**
+ * What one cached render is of: an expression *and* the style it was typeset
+ * in, since the same source produces different geometry in each.
+ *
+ * Display math keeps the bare source as its key. It is what an equation is
+ * unless someone asked otherwise, and this key is rebuilt on every render of
+ * every equation on the board — so the common case allocates nothing, and only
+ * the exception carries a prefix.
+ */
+function renderKey(latex: string, inline: boolean): string {
+  return inline ? `\u0000inline\u0000${latex}` : latex;
 }
 
 const renderCache = new Map<string, EquationRender>();
@@ -45,16 +51,16 @@ const RENDER_CACHE_MAX = 512;
 const RENDER_CACHE_MAX_BYTES = 16 * 1024 * 1024;
 const inFlight = new Map<string, Promise<EquationRender>>();
 
-function cacheEntryBytes(latex: string, entry: EquationRender): number {
+function cacheEntryBytes(key: string, entry: EquationRender): number {
   const content = entry.error ?? entry.svg ?? '';
-  return (latex.length + content.length) * 2;
+  return (key.length + content.length) * 2;
 }
 
-/** Mark `latex` as most recently used. Map iterates in insertion order, so
+/** Mark `key` as most recently used. Map iterates in insertion order, so
  *  re-inserting moves it to the back of the eviction queue. */
-function touch(latex: string, entry: EquationRender): void {
-  renderCache.delete(latex);
-  renderCache.set(latex, entry);
+function touch(key: string, entry: EquationRender): void {
+  renderCache.delete(key);
+  renderCache.set(key, entry);
 }
 
 function evictFor(entryBytes: number): void {
@@ -68,17 +74,43 @@ function evictFor(entryBytes: number): void {
     const entry = renderCache.get(oldest);
     if (entry) renderCacheBytes -= cacheEntryBytes(oldest, entry);
     renderCache.delete(oldest);
+    // A shape still showing this expression has to hear about it, or it would
+    // keep the evicted render on screen until something else re-rendered it.
+    notify(oldest);
   }
 }
 
-export const useEquationRenderStore = create<EquationRenderState>(() => ({
-  version: 0,
-}));
+/**
+ * Who to tell when one expression's cache entry changes, keyed by that
+ * expression.
+ *
+ * A single version counter would be less code, but the panel caches a new
+ * render on *every keystroke* — one per abandoned prefix — and a shared counter
+ * turns each of those into a re-render of every equation on the board. On a
+ * dense document that is what makes typing LaTeX feel sluggish, so a shape
+ * subscribes to its own expression and nothing else.
+ */
+const listeners = new Map<string, Set<() => void>>();
 
-function publishCacheChange(): void {
-  useEquationRenderStore.setState((state) => ({
-    version: state.version + 1,
-  }));
+function notify(key: string): void {
+  const subscribers = listeners.get(key);
+  if (!subscribers) return;
+  for (const listener of [...subscribers]) listener();
+}
+
+function subscribe(key: string, listener: () => void): () => void {
+  let subscribers = listeners.get(key);
+  if (!subscribers) {
+    subscribers = new Set();
+    listeners.set(key, subscribers);
+  }
+  subscribers.add(listener);
+  return () => {
+    const current = listeners.get(key);
+    if (!current) return;
+    current.delete(listener);
+    if (current.size === 0) listeners.delete(key);
+  };
 }
 
 /**
@@ -87,26 +119,61 @@ function publishCacheChange(): void {
  * Reading also refreshes the entry's recency, which is what keeps the
  * expressions currently on screen (re-read on every render) ahead of abandoned
  * editing prefixes in the eviction order. This mutates only the cache's
- * internal ordering — never the entry, and never the store version that drives
+ * internal ordering — never the entry, and never the subscribers that drive
  * re-rendering — so it stays safe to call from a component body.
  */
-export function getEquationRender(latex: string): EquationRender | undefined {
-  const entry = renderCache.get(latex);
-  if (entry) touch(latex, entry);
+export function getEquationRender(
+  latex: string,
+  inline = false,
+): EquationRender | undefined {
+  const key = renderKey(latex, inline);
+  const entry = renderCache.get(key);
+  if (entry) touch(key, entry);
   return entry;
 }
 
-function cacheRender(latex: string, render: EquationRender): EquationRender {
-  const existing = renderCache.get(latex);
+/**
+ * The cache entry for one expression, re-rendering the caller when *that*
+ * expression's entry appears or is evicted — and never for anyone else's.
+ *
+ * Reading through the hook also refreshes recency, the same way
+ * `getEquationRender` does, so expressions on screen stay ahead of abandoned
+ * editing prefixes in the eviction order. An empty `latex` is a legal argument
+ * (it never has an entry), so a caller with nothing to show still calls the
+ * hook unconditionally.
+ */
+export function useEquationRender(
+  latex: string,
+  inline = false,
+): EquationRender | undefined {
+  const key = renderKey(latex, inline);
+  // The same read serves as the server snapshot. Without one React throws
+  // under `renderToStaticMarkup` — which is how PNG export draws every shape,
+  // equations included — and the cache is a plain module-level Map that reads
+  // identically on either path.
+  const read = useCallback(() => renderCache.get(key), [key]);
+  const entry = useSyncExternalStore(
+    useCallback((onChange: () => void) => subscribe(key, onChange), [key]),
+    // A cache entry is immutable, so its identity is the snapshot: React can
+    // compare it across calls without anything being re-created per render.
+    read,
+    read,
+  );
+  if (entry) touch(key, entry);
+  return entry;
+}
+
+function cacheRender(key: string, render: EquationRender): EquationRender {
+  const existing = renderCache.get(key);
   if (existing) {
-    touch(latex, existing);
+    touch(key, existing);
     return existing;
   }
-  const entryBytes = cacheEntryBytes(latex, render);
+  const entryBytes = cacheEntryBytes(key, render);
   evictFor(entryBytes);
-  renderCache.set(latex, render);
+  renderCache.set(key, render);
   renderCacheBytes += entryBytes;
-  publishCacheChange();
+  notify(key);
   return render;
 }
 
@@ -116,21 +183,25 @@ function cacheRender(latex: string, render: EquationRender): EquationRender {
  * Concurrent callers asking for the same LaTeX — several shapes showing it, an
  * export prewarming while the panel types — share one conversion.
  */
-export function typesetEquation(latex: string): Promise<EquationRender> {
-  const cached = renderCache.get(latex);
+export function typesetEquation(
+  latex: string,
+  inline = false,
+): Promise<EquationRender> {
+  const key = renderKey(latex, inline);
+  const cached = renderCache.get(key);
   if (cached) {
-    touch(latex, cached);
+    touch(key, cached);
     return Promise.resolve(cached);
   }
-  const existing = inFlight.get(latex);
+  const existing = inFlight.get(key);
   if (existing) return existing;
 
-  const request = typesetOnce(latex)
-    .then((render) => cacheRender(latex, render))
+  const request = typesetOnce(latex, inline)
+    .then((render) => cacheRender(key, render))
     .finally(() => {
-      inFlight.delete(latex);
+      inFlight.delete(key);
     });
-  inFlight.set(latex, request);
+  inFlight.set(key, request);
   return request;
 }
 
@@ -138,10 +209,11 @@ export function typesetEquation(latex: string): Promise<EquationRender> {
  * Schedule a cache fill without updating a zustand store during React render.
  * Multiple mounted shapes requesting the same LaTeX share one conversion.
  */
-export function requestEquationTypeset(latex: string): void {
-  if (renderCache.has(latex) || inFlight.has(latex)) return;
+export function requestEquationTypeset(latex: string, inline = false): void {
+  const key = renderKey(latex, inline);
+  if (renderCache.has(key) || inFlight.has(key)) return;
   void Promise.resolve()
-    .then(() => typesetEquation(latex))
+    .then(() => typesetEquation(latex, inline))
     .catch(() => undefined);
 }
 

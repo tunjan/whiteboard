@@ -1,10 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { MathfieldElement } from 'mathlive';
-import { Check, Copy, Keyboard, Maximize2 } from 'lucide-react';
-import type { EquationShape } from '@whiteboard/shared';
-import { requestCanvasZoomToBounds } from '@/canvas/camera-requests';
+import type { KeyboardEvent } from 'react';
+import { AlertCircle, Check, Copy, CornerDownLeft } from 'lucide-react';
+import {
+  genId,
+  type EquationProps,
+  type EquationShape,
+  type Shape,
+} from '@whiteboard/shared';
+import {
+  applyLatexCompletion,
+  latexTokenAt,
+  matchLatexCompletions,
+  type LatexCompletion,
+} from '@/canvas/equation-complete';
 import {
   hasEquationFocusRequest,
+  requestEquationFocus,
   resolveEquationFocus,
   subscribeEquationFocus,
 } from '@/canvas/equation-focus';
@@ -12,53 +23,88 @@ import {
   ensureEquationRenderer,
   getEquationRender,
   typesetEquation,
-  useEquationRenderStore,
+  useEquationRender,
   type EquationRender,
 } from '@/canvas/equation-render';
+import {
+  editReplacement,
+  environmentNewline,
+  openBracket,
+  skipClosingBracket,
+  tabEdit,
+  type SourceEdit,
+} from '@/canvas/equation-shortcuts';
 import {
   locateLatexError,
   normalizePastedLatex,
   readableError,
-  sourcePosition,
+  sourceExcerpt,
+  sourceProblem,
+  wrapMathLatex,
   type SourceSpan,
 } from '@/canvas/equation-source';
+import { getTopIndex } from '@/canvas/order';
 import {
   EQUATION_DEFAULT_SIZE,
   EQUATION_SETTLE_MS,
 } from '@/canvas/shapes/equation';
-import { shapeRotatedBounds } from '@/canvas/shape-bounds';
 import { editor, useDocumentStore } from '@/canvas/use-document-store';
 import { useSelectionStore } from '@/canvas/use-selection-store';
+import { paletteColors } from '@/canvas/use-style-store';
 import { ToolPanelPresence } from '@/components/tool-panel-presence';
 import { Button } from '@/components/ui/button';
-import {
-  Field,
-  FieldDescription,
-  FieldError,
-  FieldGroup,
-  FieldLabel,
-} from '@/components/ui/field';
-import { MathField } from '@/components/ui/math-field';
 import { Kbd } from '@/components/ui/kbd';
-import { PanelLabel } from '@/components/ui/panel-label';
 import { Surface } from '@/components/ui/surface';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
-import { cn } from '@/lib/utils';
+import { useThemeStore } from '@/use-theme-store';
+import { cn, swatchBorder } from '@/lib/utils';
 
-// Every heading below the panel title sits at one weight, so the eye ranks
-// title → tabs → sections instead of treating field labels as a second title.
-const SECTION_LABEL = 'text-xs font-medium text-secondary';
-
-type EquationInputMode = 'visual' | 'source';
+type TypesetRender = Extract<EquationRender, { svg: string }>;
 
 // Frames the panel keeps re-asserting focus for (~200ms at 60fps): long enough
-// to outlast MathLive's own ~60ms focus transition and a lazily mounted tab
-// panel, short enough that it never fights a user who clicked elsewhere.
+// to outlast a lazily mounted panel, short enough that it never fights a user
+// who clicked elsewhere.
 const FOCUS_ATTEMPTS = 12;
 
-const LONG_EQUATION_SOURCE_LENGTH = 240;
-const LONG_EQUATION_WARNING_WIDTH = 1200;
+/** The sizes on offer, in the shape's own `fontSize` units. */
+const FONT_SIZES = [16, 22, 28, 40];
+
+/**
+ * The two ways TeX sets the same expression, named for what they are used for
+ * rather than for the internal style they select.
+ */
+const STYLES = [
+  {
+    inline: false,
+    label: 'Display',
+    hint: 'Set as its own line: limits above ∑, full-size fractions',
+  },
+  {
+    inline: true,
+    label: 'Inline',
+    hint: 'Set to sit in a line of text: limits beside ∑, smaller fractions',
+  },
+] as const;
+
+/**
+ * Space between one line of a derivation and the next, as a fraction of the
+ * font size — so the lines of a 40pt derivation are spaced like a 40pt one
+ * rather than like a 16pt one that happens to be bigger.
+ */
+const LINE_GAP_EM = 0.5;
+
+/** Completions the list shows at once, before the caret has to do the work. */
+const SUGGESTION_LIMIT = 7;
+
+/**
+ * How long the source holds still before a structural fault is worth pointing
+ * at. Reading the source is instant, but a `{` is unbalanced for as long as it
+ * takes to type its contents — and a `\begin` has no `\end` until it does — so
+ * reacting to every keystroke would flash a warning through most of normal
+ * typing. Well under `EQUATION_SETTLE_MS`: the whole point is to name the
+ * problem before MathJax gets a chance to.
+ */
+const PROBLEM_HINT_MS = 180;
 
 function useDebouncedValue<T>(value: T, delay: number): T {
   const [debounced, setDebounced] = useState(value);
@@ -69,9 +115,43 @@ function useDebouncedValue<T>(value: T, delay: number): T {
   return debounced;
 }
 
-/** A touch/pen-primary device, where a math keyboard is the only way to type. */
-function prefersVirtualKeyboard(): boolean {
-  return window.matchMedia('(pointer: coarse)').matches;
+/**
+ * Whether the element `resolve` finds is scrolling content its box can't show,
+ * re-measured when `key` changes and whenever the box is resized.
+ *
+ * Measured rather than guessed: a content heuristic ("this many characters")
+ * misses `\int_{-\infty}^{\infty} e^{-x^2}\,dx`, which runs past the preview
+ * in about thirty, and fires on long expressions that happen to fit.
+ */
+function useOverflowing(resolve: () => Element | null, key: unknown): boolean {
+  const [overflowing, setOverflowing] = useState(false);
+  const resolveRef = useRef(resolve);
+  resolveRef.current = resolve;
+
+  useEffect(() => {
+    const element = resolveRef.current();
+    if (!element) {
+      setOverflowing(false);
+      return;
+    }
+    const measure = () => {
+      setOverflowing(element.scrollWidth - element.clientWidth > 1);
+    };
+    // MathJax lays out after the value lands, so the first read waits a frame
+    // rather than measuring a box that is still empty.
+    const frame = requestAnimationFrame(measure);
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+    // `resolve` is read through a ref so a fresh closure each render doesn't
+    // tear the observer down and rebuild it on every keystroke.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+
+  return overflowing;
 }
 
 /**
@@ -90,15 +170,23 @@ function centeredMove(
   };
 }
 
+/**
+ * Commit whichever props produced `render`, together with the size it measures.
+ *
+ * The two travel as one update because the box is a cache of the render: a
+ * source or a style committed on its own would leave every collaborator's
+ * canvas drawing the new content inside the old box until a second update
+ * arrived, and would leave it there for good if that update never did.
+ */
 function patchEquationFromRender(
   shapeId: string,
-  latex: string,
+  props: { latex?: string; inline?: boolean },
   render: EquationRender,
 ): void {
   const current = editor.getShape(shapeId);
   if (!current || current.type !== 'equation') return;
   if ('error' in render) {
-    editor.updateShape(shapeId, { props: { latex } });
+    editor.updateShape(shapeId, { props });
     return;
   }
   const scale = current.props.fontSize / 16;
@@ -106,73 +194,86 @@ function patchEquationFromRender(
   const h = render.height * scale;
   editor.updateShape(shapeId, {
     ...centeredMove(current, w, h),
-    props: { latex, w, h },
+    props: { ...props, w, h },
   });
+}
+
+/**
+ * Write `value` into the field the way a keypress would, so the browser's own
+ * undo history keeps the change.
+ *
+ * The field is controlled by the shape, so committing a rewrite through state
+ * makes React assign `textarea.value` — and an assignment wipes the field's
+ * undo stack. Ctrl+Z inside a text field belongs to the browser (the canvas
+ * handler ignores typing targets, see `isTypingTarget` in Canvas.tsx), so that
+ * stack is the only undo the source field has: without this, expanding `fr`
+ * into `\frac{}{}` and pressing Ctrl+Z lost the whole equation rather than the
+ * expansion.
+ *
+ * `execCommand` is deprecated and has no replacement that records undo — where
+ * it is missing or declines the edit (jsdom, a hidden field), this reports
+ * failure and the caller falls back to a plain state write.
+ */
+function writeThroughUndoStack(
+  field: HTMLTextAreaElement,
+  value: string,
+): boolean {
+  const replacement = editReplacement(field.value, value);
+  // A rule that only moved the caret has nothing to write.
+  if (!replacement) return true;
+  try {
+    field.setSelectionRange(replacement.start, replacement.end);
+    // `insertText` with an empty string is not a delete in every engine.
+    const wrote = replacement.text
+      ? document.execCommand('insertText', false, replacement.text)
+      : document.execCommand('delete');
+    if (!wrote) return false;
+  } catch {
+    return false;
+  }
+  return field.value === value;
 }
 
 function EquationPanelContent({ shape }: { shape: EquationShape }) {
   const shapeId = shape.id;
-  const fieldRef = useRef<MathfieldElement | null>(null);
+  const inline = shape.props.inline ?? false;
   const sourceRef = useRef<HTMLTextAreaElement | null>(null);
+  const previewRef = useRef<HTMLDivElement | null>(null);
   const inputVersion = useRef(0);
   const focusFrame = useRef(0);
   const copiedTimer = useRef<number | null>(null);
+  const pendingWrap = useRef<{ index: number; text: string } | null>(null);
   const [ready, setReady] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [keyboardOpen, setKeyboardOpen] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [inputMode, setInputMode] = useState<EquationInputMode>('visual');
-  useEquationRenderStore((state) => state.version);
+  const [suggestions, setSuggestions] = useState<LatexCompletion[]>([]);
+  const [activeSuggestion, setActiveSuggestion] = useState(0);
+  const theme = useThemeStore((state) => state.theme);
 
-  /**
-   * Focus the input for `mode`, retrying until the field reports that it took.
-   *
-   * "The element exists" is not enough to stop retrying: a MathLive field drops
-   * `focus()` on the floor while one of its own focus/blur transitions is still
-   * in flight, which is exactly the window a freshly placed equation lands in —
-   * the canvas surface takes DOM focus on the placing pointer-down, one frame
-   * before this runs. Retrying only until the element mounts left the caret on
-   * the canvas and the user typing into nothing.
-   *
-   * Without a `select` range the caret lands at the end of the expression, so
-   * switching between visual and source picks up where the last one left off
-   * rather than dropping the user at character zero.
-   */
+  // Always include the equation's own color: a shape can carry a value the
+  // current theme's palette doesn't hold, and a grid with nothing selected
+  // reads as "no color set".
+  const colors = paletteColors(theme);
+  const swatches = colors.some((c) => c.value === shape.props.color)
+    ? colors
+    : [...colors, { name: 'Current color', value: shape.props.color }];
+  const swatchRefs = useRef<(HTMLButtonElement | null)[]>([]);
+
+  /** Focus the source field, retrying until it reports that the focus took. */
   const focusInput = useCallback(
-    (mode: EquationInputMode, select?: SourceSpan) => {
+    (select?: SourceSpan) => {
       function attempt(tries: number): void {
-        if (mode === 'source') {
-          const target = sourceRef.current;
-          if (!target) return retry(tries);
-          target.focus();
-          if (document.activeElement !== target) return retry(tries);
-          const end = target.value.length;
-          const from = select ? Math.min(select.index, end) : end;
-          const to = select
-            ? Math.min(select.index + select.length, end)
-            : end;
-          target.setSelectionRange(from, to);
-          return settle();
-        }
-        const field = fieldRef.current;
-        if (!field) return retry(tries);
-        field.focus();
-        // MathLive moves real DOM focus into its shadow-root delegate on a
-        // ~60ms timer, and ignores `focus()` entirely while one of its own
-        // focus/blur transitions is in flight. Keep asking until the browser
-        // agrees the field has the keyboard — `focus()` is a no-op meanwhile.
-        if (document.activeElement !== field) return retry(tries);
-        field.position = field.lastOffset;
-        // Only touch-primary devices, where the math keyboard is the only way
-        // to type.
-        if (prefersVirtualKeyboard()) {
-          window.mathVirtualKeyboard.show({ animate: true });
-        }
+        const target = sourceRef.current;
+        if (!target) return retry(tries);
+        target.focus();
+        if (document.activeElement !== target) return retry(tries);
+        const end = target.value.length;
+        const from = select ? Math.min(select.index, end) : end;
+        const to = select ? Math.min(select.index + select.length, end) : end;
+        target.setSelectionRange(from, to);
         settle();
       }
       function retry(tries: number): void {
-        // Out of frames: stop claiming the request, so it can't fire at a later
-        // ordinary selection of this shape instead.
         if (tries <= 0) return settle();
         focusFrame.current = requestAnimationFrame(() => attempt(tries - 1));
       }
@@ -206,21 +307,15 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
     };
   }, []);
 
-  // Focus both freshly placed and already-selected equations on request. The
-  // request outlives this effect, so a re-run (StrictMode's second mount, an
-  // input-mode switch) picks up a focus that never landed and chases it again.
   useEffect(() => {
     const handleFocusRequest = (id: string) => {
       if (id !== shapeId) return;
-      focusInput(inputMode);
+      focusInput();
     };
     const unsubscribe = subscribeEquationFocus(handleFocusRequest);
-    if (hasEquationFocusRequest(shapeId)) focusInput(inputMode);
+    if (hasEquationFocusRequest(shapeId)) focusInput();
     return unsubscribe;
-    // A pending focus frame deliberately outlives this effect: switching input
-    // mode re-runs it, and cancelling here would kill the focus that the switch
-    // itself just scheduled. Unmount cleanup below cancels it instead.
-  }, [focusInput, inputMode, shapeId]);
+  }, [focusInput, shapeId]);
 
   useEffect(
     () => () => {
@@ -232,60 +327,59 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
     [],
   );
 
-  // Track the keyboard's real visibility (it can also be dismissed from its own
-  // close button) and make sure it never outlives the panel.
-  useEffect(() => {
-    const keyboard = window.mathVirtualKeyboard;
-    const sync = () => setKeyboardOpen(keyboard.visible);
-    sync();
-    // The interface is an EventTarget at runtime; its typings omit that.
-    const target = keyboard as unknown as EventTarget;
-    target.addEventListener('virtual-keyboard-toggle', sync);
-    return () => {
-      target.removeEventListener('virtual-keyboard-toggle', sync);
-      keyboard.hide({ animate: false });
-    };
-  }, []);
-
-  useEffect(() => {
-    if (inputMode === 'visual') return;
-    window.mathVirtualKeyboard.hide({ animate: true });
-    setKeyboardOpen(false);
-  }, [inputMode]);
-
   const settledLatex = useDebouncedValue(shape.props.latex, EQUATION_SETTLE_MS);
   const settledKey = settledLatex.trim();
-  const settledRender = settledKey
-    ? getEquationRender(settledKey)
-    : undefined;
-  const renderError =
-    settledLatex === shape.props.latex ? settledRender?.error : undefined;
+  // Two subscriptions, each to one expression: the panel re-renders for the
+  // equation being edited, and every other equation on the board sits still.
+  const settledRender = useEquationRender(settledKey, inline);
+  const sourceSettled = settledLatex === shape.props.latex;
+  const renderError = sourceSettled ? settledRender?.error : undefined;
   const rawError = loadError ?? renderError ?? null;
   const error = rawError ? readableError(rawError) : null;
-  // Only a typeset failure has a place in the source; a renderer that failed to
-  // load says nothing about what the user typed.
   const errorSpan = renderError
     ? locateLatexError(shape.props.latex, renderError)
     : null;
-  const errorAt = errorSpan
-    ? sourcePosition(shape.props.latex, errorSpan.index)
+  const errorExcerpt = errorSpan
+    ? sourceExcerpt(shape.props.latex, errorSpan)
     : null;
   const errorId = `equation-error-${shape.id}`;
-  const visualHelpId = `equation-visual-help-${shape.id}`;
-  const sourceHelpId = `equation-source-help-${shape.id}`;
+  const helpId = `equation-help-${shape.id}`;
+  const listId = `equation-completions-${shape.id}`;
   const currentKey = shape.props.latex.trim();
-  const currentRender = currentKey ? getEquationRender(currentKey) : undefined;
-  const isLongEquation =
-    currentKey.length >= LONG_EQUATION_SOURCE_LENGTH ||
-    shape.props.w >= LONG_EQUATION_WARNING_WIDTH;
+  const currentRender = useEquationRender(currentKey, inline);
+
+  const lastGoodRender = useRef<TypesetRender | null>(null);
+  const freshRender =
+    currentRender && !('error' in currentRender) ? currentRender : null;
+  if (freshRender) lastGoodRender.current = freshRender;
+  if (!currentKey) lastGoodRender.current = null;
+  const previewRender = freshRender ?? lastGoodRender.current;
+  const previewStale = !freshRender && previewRender !== null && sourceSettled;
+
+  const previewOverflowing = useOverflowing(
+    () => previewRef.current,
+    currentKey,
+  );
+
+  // A brace, delimiter or environment that never closes, found by reading the
+  // source rather than by waiting for a typeset to fail — and only once the
+  // source has paused, so the `{` a user is still typing into doesn't accuse
+  // them. Held against the paused text, so the one-click repair can never be
+  // applied to a source that has moved on.
+  const pausedLatex = useDebouncedValue(shape.props.latex, PROBLEM_HINT_MS);
+  const problem =
+    pausedLatex === shape.props.latex ? sourceProblem(pausedLatex) : null;
+  const problemExcerpt = problem
+    ? sourceExcerpt(shape.props.latex, problem.span)
+    : null;
+  const problemId = `equation-problem-${shape.id}`;
+  // Whichever of the two message blocks is on screen also describes the field.
+  const messageId = error ? errorId : problem ? problemId : null;
 
   const updateLatex = (latex: string) => {
     const version = ++inputVersion.current;
     const key = latex.trim();
     if (!key) {
-      // Re-read rather than centering off the captured prop: a collaborator can
-      // have moved or resized this shape since the render that made this
-      // handler, and every other path here already goes through the store.
       const current = editor.getShape(shape.id);
       if (current?.type !== 'equation') return;
       editor.updateShape(shape.id, {
@@ -303,55 +397,276 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
       return;
     }
 
-    // Anything already typeset still lands in a single document patch carrying
-    // both the source and its measured geometry — which covers backspacing
-    // back through an expression, since every prefix was converted on the way
-    // in.
-    const cached = getEquationRender(key);
+    const cached = getEquationRender(key, inline);
     if (cached) {
-      patchEquationFromRender(shape.id, latex, cached);
+      patchEquationFromRender(shape.id, { latex }, cached);
       return;
     }
 
-    // Otherwise the source is saved on this keystroke and the geometry follows
-    // when the worker answers. Conversion is off the main thread, so there is
-    // no longer a warm path that could fill both at once — and equally no need
-    // for the old length-based throttle, since a slow expression no longer
-    // costs the typist a frame.
     editor.updateShape(shape.id, { props: { latex } });
-    void typesetEquation(key)
+    void typesetEquation(key, inline)
       .then((render) => {
-        // A later keystroke has already asked for its own geometry; letting
-        // this one land would size the shape to an expression that is no
-        // longer in the field.
         if (version !== inputVersion.current) return;
-        patchEquationFromRender(shape.id, latex, render);
+        patchEquationFromRender(shape.id, { latex }, render);
       })
-      // Only the renderer being unavailable rejects here, and the mount effect
-      // already reports that as `loadError`. The source is saved either way.
       .catch(() => undefined);
   };
 
-  /** Replace the textarea's selection with `text`, leaving the caret after it. */
-  const replaceSourceSelection = (
-    target: HTMLTextAreaElement,
-    text: string,
-  ) => {
-    const start = target.selectionStart ?? target.value.length;
-    const end = target.selectionEnd ?? start;
-    updateLatex(target.value.slice(0, start) + text + target.value.slice(end));
-    const caret = start + text.length;
-    // The textarea is controlled, so the new value only reaches the DOM on the
-    // next commit; moving the caret before then would put it in the old text.
-    requestAnimationFrame(() => target.setSelectionRange(caret, caret));
+  /**
+   * Switch between display and text style, re-measuring the box as it goes:
+   * the same source is a different shape in each — `\sum` grows limits above
+   * itself in display style and puts them beside itself in text style.
+   *
+   * Bumping the input version cancels any conversion still in flight for the
+   * style being left, whose measurements would otherwise land on the shape
+   * after this one and resize it back.
+   */
+  const applyInline = (next: boolean) => {
+    if (next === inline) return;
+    const version = ++inputVersion.current;
+    const key = shape.props.latex.trim();
+    if (!key) {
+      editor.updateShape(shape.id, { props: { inline: next } });
+      return;
+    }
+    const cached = getEquationRender(key, next);
+    if (cached) {
+      patchEquationFromRender(shape.id, { inline: next }, cached);
+      return;
+    }
+    // Nothing to measure yet, so the style goes ahead on its own: the
+    // control reads its state back off the shape, and waiting for a cold
+    // renderer would leave the button not responding to the click. The size
+    // follows when the render lands.
+    editor.updateShape(shape.id, { props: { inline: next } });
+    void typesetEquation(key, next)
+      .then((render) => {
+        if (version !== inputVersion.current) return;
+        patchEquationFromRender(shape.id, { inline: next }, render);
+      })
+      .catch(() => undefined);
   };
 
-  const copyLatex = async () => {
+  /**
+   * Start the next line of a derivation: a second equation below this one,
+   * inheriting its style, and focused ready to type.
+   *
+   * Placed by its *center* rather than its left edge, because the center is
+   * what an equation is resized around as it is typed (see `centeredMove`) —
+   * lines aligned on their left edges would drift apart with every keystroke,
+   * while centered ones stay a stack.
+   */
+  const addEquationBelow = () => {
+    const current = editor.getShape(shape.id);
+    if (current?.type !== 'equation' || !current.props.latex.trim()) return;
+    const props: EquationProps = {
+      ...current.props,
+      latex: '',
+      w: EQUATION_DEFAULT_SIZE.w,
+      h: EQUATION_DEFAULT_SIZE.h,
+    };
+    // Down the rotated shape's own axis, so a tilted derivation stays a line
+    // rather than stepping sideways out from under itself.
+    const centerToCenter =
+      current.props.h / 2 + props.fontSize * LINE_GAP_EM + props.h / 2;
+    const centerX =
+      current.x +
+      current.props.w / 2 -
+      Math.sin(current.rotation) * centerToCenter;
+    const centerY =
+      current.y +
+      current.props.h / 2 +
+      Math.cos(current.rotation) * centerToCenter;
+    const id = genId();
+    editor.createShape({
+      id,
+      type: 'equation',
+      x: centerX - props.w / 2,
+      y: centerY - props.h / 2,
+      rotation: current.rotation,
+      index: getTopIndex(editor.getShapes()),
+      props,
+    } as Shape);
+    useSelectionStore.getState().setSelection([id]);
+    requestEquationFocus(id);
+  };
+
+  const closeSuggestions = () => {
+    setSuggestions([]);
+    setActiveSuggestion(0);
+    pendingWrap.current = null;
+  };
+
+  /** Offer completions for the `\command` the caret is sitting in, if any. */
+  const refreshSuggestions = (target: HTMLTextAreaElement) => {
+    const token = latexTokenAt(target.value, target.selectionStart ?? 0);
+    // The caret has left the command the selection was going to fill, so there
+    // is no longer a completion for it to arrive with.
+    if (!token) pendingWrap.current = null;
+    setSuggestions(
+      token ? matchLatexCompletions(token.text, SUGGESTION_LIMIT) : [],
+    );
+    setActiveSuggestion(0);
+  };
+
+  /**
+   * Commit a shortcut's rewrite of the whole source.
+   *
+   * The write goes through the browser's insertion path where it can, so the
+   * field's undo history survives (`writeThroughUndoStack`); that also fires
+   * the field's own `change`, which is what carries the new source into the
+   * shape. Only the fallback has to call `updateLatex` by hand.
+   *
+   * The caret is restored either way: the field is controlled by the shape, so
+   * a re-render puts the value back with no opinion about where the caret was.
+   */
+  const applyEdit = (edit: SourceEdit) => {
+    const field = sourceRef.current;
+    if (!field || !writeThroughUndoStack(field, edit.value)) {
+      updateLatex(edit.value);
+    }
+    field?.setSelectionRange(edit.caret, edit.caret);
+    closeSuggestions();
+    requestAnimationFrame(() => {
+      sourceRef.current?.setSelectionRange(edit.caret, edit.caret);
+    });
+  };
+
+  const acceptSuggestion = (completion: LatexCompletion) => {
+    const target = sourceRef.current;
+    if (!target) return;
+    const token = latexTokenAt(target.value, target.selectionStart ?? 0);
+    if (!token) return closeSuggestions();
+    // Only the command typed *over* the selection inherits it: if the caret
+    // moved and another one was started elsewhere, the text belongs to neither.
+    const wrap = pendingWrap.current;
+    applyEdit(
+      applyLatexCompletion(
+        target.value,
+        token,
+        completion,
+        wrap?.index === token.index ? wrap.text : '',
+      ),
+    );
+  };
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
+    if (event.nativeEvent.isComposing) return;
+    const target = event.currentTarget;
+    const value = target.value;
+    const start = target.selectionStart ?? value.length;
+    const end = target.selectionEnd ?? start;
+    const take = (edit: SourceEdit | null): boolean => {
+      if (!edit) return false;
+      event.preventDefault();
+      applyEdit(edit);
+      return true;
+    };
+
+    // A `\` typed over a selection begins "wrap this in a command": the browser
+    // deletes the selection to make room for the backslash, and the completion
+    // accepted next puts the text back inside the snippet's first slot. Nothing
+    // is intercepted here, so a backslash that no completion follows leaves the
+    // field behaving exactly as a textarea does — typed over, and restorable
+    // with the undo the field already keeps.
+    if (event.key === '\\' && start !== end) {
+      pendingWrap.current = { index: start, text: value.slice(start, end) };
+    }
+
+    // The next line of a derivation, from anywhere in the field — including
+    // with the completion list open, where a bare Enter belongs to the list.
+    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault();
+      addEquationBelow();
+      return;
+    }
+
+    if (suggestions.length) {
+      const move =
+        event.key === 'ArrowDown' ? 1 : event.key === 'ArrowUp' ? -1 : 0;
+      if (move) {
+        event.preventDefault();
+        setActiveSuggestion(
+          (index) => (index + move + suggestions.length) % suggestions.length,
+        );
+        return;
+      }
+      if (event.key === 'Enter' || event.key === 'Tab') {
+        const completion = suggestions[activeSuggestion];
+        if (completion) {
+          event.preventDefault();
+          acceptSuggestion(completion);
+          return;
+        }
+      }
+      if (event.key === 'Escape') {
+        // Dismiss the list first; a second Escape leaves for the canvas.
+        event.preventDefault();
+        event.stopPropagation();
+        closeSuggestions();
+        return;
+      }
+    }
+
+    switch (event.key) {
+      case 'Escape':
+        event.preventDefault();
+        releaseFocus();
+        return;
+      case 'Enter':
+        if (event.shiftKey) return;
+        take(environmentNewline(value, start));
+        return;
+      case 'Tab':
+        if (event.shiftKey) return;
+        take(tabEdit(value, start));
+        return;
+      case '(':
+      case '[':
+      case '{':
+        take(openBracket(value, start, end, event.key));
+        return;
+      case ')':
+      case ']':
+      case '}':
+        take(skipClosingBracket(value, start, end, event.key));
+        return;
+      default:
+    }
+  };
+
+  const applyColor = (color: string) => {
+    editor.updateShape(shape.id, { props: { color } });
+  };
+
+  const moveSwatchFocus = (from: number, delta: number) => {
+    const next = (from + delta + swatches.length) % swatches.length;
+    const swatch = swatches[next];
+    if (!swatch) return;
+    applyColor(swatch.value);
+    swatchRefs.current[next]?.focus();
+  };
+
+  const applyFontSize = (fontSize: number) => {
+    const current = editor.getShape(shape.id);
+    if (current?.type !== 'equation') return;
+    const scale = fontSize / current.props.fontSize;
+    if (!Number.isFinite(scale) || scale <= 0) return;
+    const w = current.props.w * scale;
+    const h = current.props.h * scale;
+    editor.updateShape(shape.id, {
+      ...centeredMove(current, w, h),
+      props: { fontSize, w, h },
+    });
+  };
+
+  const copyLatex = async (bodyOnly: boolean) => {
+    const text = bodyOnly
+      ? shape.props.latex
+      : wrapMathLatex(shape.props.latex, inline);
     try {
-      await navigator.clipboard.writeText(shape.props.latex);
+      await navigator.clipboard.writeText(text);
     } catch {
-      // Clipboard API unavailable (e.g. an insecure context): the source tab
-      // still offers the text for a manual copy.
       return;
     }
     setCopied(true);
@@ -359,33 +674,8 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
     copiedTimer.current = window.setTimeout(() => setCopied(false), 1500);
   };
 
-  const showErrorInSource = () => {
-    if (!errorSpan) return;
-    setInputMode('source');
-    focusInput('source', errorSpan);
-  };
-
-  const toggleKeyboard = () => {
-    const keyboard = window.mathVirtualKeyboard;
-    const next = !keyboard.visible;
-    if (next) {
-      fieldRef.current?.focus();
-      keyboard.show({ animate: true });
-    } else {
-      keyboard.hide({ animate: true });
-    }
-    setKeyboardOpen(next);
-  };
-
-  // Escape hands the keyboard back to the canvas, where Delete, nudge and tool
-  // hotkeys work again.
   const releaseFocus = () => {
-    fieldRef.current?.blur();
     sourceRef.current?.blur();
-    window.mathVirtualKeyboard.hide({ animate: true });
-    // Leaving an equation empty discards it, the same rule the panel applies
-    // when the selection moves on — otherwise Escape strands a placeholder box
-    // on the board with nothing in it.
     if (!shape.props.latex.trim()) {
       editor.deleteShapes([shape.id]);
       useSelectionStore.getState().clear();
@@ -397,289 +687,377 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
     });
   };
 
-  const zoomToEquation = () => {
-    requestCanvasZoomToBounds(shapeRotatedBounds(shape));
-  };
-
   return (
     <Surface
       role="region"
       aria-label="Equation controls"
-      className="equation-panel touch-targets flex max-h-[calc(100dvh-9rem-env(safe-area-inset-top))] w-[min(22rem,calc(100vw-2rem))] flex-col gap-4 overflow-y-auto p-5 sm:max-h-[calc(100dvh-6.25rem-env(safe-area-inset-top))]"
+      className="touch-targets flex max-h-[calc(100dvh-7rem-env(safe-area-inset-top))] w-[min(23rem,calc(100vw-2rem))] flex-col gap-3 overflow-y-auto overscroll-contain p-3 shadow-lg sm:max-h-[calc(100dvh-6.25rem-env(safe-area-inset-top))]"
     >
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <div className="text-sm font-semibold tracking-tight text-primary">
+      <header className="flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <h2 className="text-sm font-semibold tracking-tight text-fg">
             Equation
-          </div>
-          <div className="text-xs text-secondary">
-            {loadError
-              ? 'Renderer unavailable'
-              : ready
-                ? 'Standalone display math'
-                : 'Preparing renderer…'}
-          </div>
-        </div>
-        {/* Copy sits last so it stays put against the panel edge when the
-            keyboard toggle comes and goes with the input mode. */}
-        <div className="flex shrink-0 items-center gap-1">
-          {inputMode === 'visual' ? (
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Math keyboard"
-              aria-pressed={keyboardOpen}
-              title="Math keyboard"
-              onClick={toggleKeyboard}
-              className={cn(keyboardOpen && 'bg-subtle')}
-            >
-              <Keyboard aria-hidden="true" />
-            </Button>
+          </h2>
+          {loadError ? (
+            <span className="text-2xs font-medium text-danger">
+              renderer error
+            </span>
+          ) : !ready ? (
+            <span className="text-2xs font-medium text-fg-muted">
+              preparing…
+            </span>
           ) : null}
+        </div>
+        <div className="flex items-center gap-0.5">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Add equation below"
+            title="Add equation below (⌘/Ctrl + Enter)"
+            disabled={!currentKey}
+            onClick={addEquationBelow}
+            className="rounded-md text-fg-secondary transition-all hover:bg-panel hover:text-fg disabled:opacity-40"
+          >
+            <CornerDownLeft className="size-4" aria-hidden="true" />
+          </Button>
           <Button
             variant="ghost"
             size="icon-sm"
             aria-label={copied ? 'LaTeX copied' : 'Copy LaTeX'}
-            title="Copy LaTeX"
+            title={`Copy as ${inline ? 'inline' : 'display'} math (Alt: body only)`}
             disabled={!currentKey}
-            onClick={() => void copyLatex()}
+            onClick={(event) => void copyLatex(event.altKey)}
+            className="rounded-md text-fg-secondary transition-all hover:bg-panel hover:text-fg disabled:opacity-40"
           >
             {copied ? (
-              <Check aria-hidden="true" />
+              <Check className="size-4 text-success" aria-hidden="true" />
             ) : (
-              <Copy aria-hidden="true" />
+              <Copy className="size-4" aria-hidden="true" />
             )}
           </Button>
         </div>
-      </div>
+      </header>
 
-      <Tabs
-        value={inputMode}
-        onValueChange={(value) => {
-          const next = value as EquationInputMode;
-          setInputMode(next);
-          focusInput(next);
-        }}
-        className="gap-2"
-      >
-        {/* Activating a tab moves focus into its field, so the tabs activate on
-            Enter rather than on arrow keys — otherwise arrowing between the two
-            would drop the user into the editor mid-navigation. */}
-        <TabsList
-          aria-label="Equation input mode"
-          activateOnFocus={false}
-          className="w-full"
-        >
-          <TabsTrigger value="visual">Visual</TabsTrigger>
-          <TabsTrigger value="source">LaTeX source</TabsTrigger>
-        </TabsList>
+      {/* Source field, with the completion list hanging off its bottom edge. */}
+      <div className="relative">
+        <Textarea
+          ref={sourceRef}
+          id={`equation-source-${shape.id}`}
+          aria-label="LaTeX source"
+          aria-invalid={error ? true : undefined}
+          aria-describedby={messageId ? `${helpId} ${messageId}` : helpId}
+          aria-autocomplete="list"
+          aria-expanded={suggestions.length > 0}
+          aria-controls={suggestions.length ? listId : undefined}
+          aria-activedescendant={
+            suggestions.length ? `${listId}-${activeSuggestion}` : undefined
+          }
+          value={shape.props.latex}
+          onChange={(event) => {
+            updateLatex(event.target.value);
+            refreshSuggestions(event.target);
+          }}
+          onKeyDown={handleKeyDown}
+          onBlur={closeSuggestions}
+          onPaste={(event) => {
+            const pasted = event.clipboardData.getData('text/plain');
+            const unwrapped = normalizePastedLatex(pasted);
+            if (unwrapped === pasted) return;
+            const target = event.currentTarget;
+            const start = target.selectionStart ?? target.value.length;
+            const end = target.selectionEnd ?? start;
+            event.preventDefault();
+            applyEdit({
+              value:
+                target.value.slice(0, start) +
+                unwrapped +
+                target.value.slice(end),
+              caret: start + unwrapped.length,
+            });
+          }}
+          placeholder={String.raw`\frac{a}{b}`}
+          spellCheck={false}
+          rows={3}
+          className="min-h-24 w-full resize-y font-mono text-sm leading-5 text-fg"
+        />
 
-        <TabsContent value="visual">
-          <FieldGroup className="gap-2">
-            <Field data-invalid={error ? true : undefined}>
-              <FieldLabel
-                htmlFor={`equation-visual-${shape.id}`}
-                className={SECTION_LABEL}
-              >
-                Formula
-              </FieldLabel>
-              <div
-                data-overflow={isLongEquation ? true : undefined}
-                // The whole bordered box reads as the input, but MathLive only
-                // listens on its own host — so a click in the shell's padding
-                // ring would land on nothing. Forward those to the field, caret
-                // at the end. Clicks on the field itself fall through, leaving
-                // MathLive to put the caret where the user actually aimed.
-                onPointerDown={(event) => {
-                  if (event.target !== event.currentTarget) return;
-                  event.preventDefault();
-                  focusInput('visual');
-                }}
+        {suggestions.length ? (
+          <ul
+            id={listId}
+            role="listbox"
+            aria-label="LaTeX commands"
+            className="absolute inset-x-0 top-full z-10 mt-1 overflow-hidden rounded-md border border-border bg-surface py-1 shadow-lg"
+          >
+            {suggestions.map((completion, index) => (
+              <li
+                key={completion.command}
+                id={`${listId}-${index}`}
+                role="option"
+                aria-selected={index === activeSuggestion}
+                // Keep the caret in the field: a blur would close the list
+                // before the click that chose from it landed.
+                onPointerDown={(event) => event.preventDefault()}
+                onPointerEnter={() => setActiveSuggestion(index)}
+                onClick={() => acceptSuggestion(completion)}
                 className={cn(
-                  'equation-field-shell rounded-md border border-control-border bg-surface px-0.5 py-1.5 transition-all duration-150 ease-out',
-                  'focus-within:border-focus focus-within:ring-2 focus-within:ring-focus/20',
-                  'group-data-[invalid]/field:border-danger group-data-[invalid]/field:ring-2 group-data-[invalid]/field:ring-danger/20',
+                  'flex cursor-pointer items-baseline justify-between gap-3 px-2.5 py-1',
+                  index === activeSuggestion && 'bg-panel',
                 )}
               >
-                <MathField
-                  id={`equation-visual-${shape.id}`}
-                  // Matches the visible label: a mismatch breaks voice control.
-                  aria-label="Formula"
-                  aria-invalid={error ? true : undefined}
-                  aria-describedby={
-                    error ? `${visualHelpId} ${errorId}` : visualHelpId
-                  }
-                  className="w-full"
-                  value={shape.props.latex}
-                  format="latex"
-                  virtualKeyboardPolicy="manual"
-                  // MathLive typesets the placeholder, so plain words arrive as
-                  // spaceless italic math ("Typeanequation"). \text keeps the
-                  // spacing and an upright, non-formula look.
-                  placeholder={String.raw`\text{Type an equation…}`}
-                  elementRef={(element) => {
-                    fieldRef.current = element;
-                  }}
-                  onChange={updateLatex}
-                  onEscape={releaseFocus}
-                />
-              </div>
-              <FieldDescription
-                id={visualHelpId}
-                className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs"
-              >
-                <span>
-                  <Kbd>\</Kbd> searches commands
+                <code className="truncate font-mono text-xs text-fg">
+                  {completion.command}
+                </code>
+                <span className="shrink-0 text-2xs text-fg-muted">
+                  {completion.hint}
                 </span>
-                <span aria-hidden="true">·</span>
-                <span>
-                  <Kbd>Esc</Kbd> returns to the canvas
-                </span>
-              </FieldDescription>
-            </Field>
-          </FieldGroup>
-        </TabsContent>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
 
-        <TabsContent value="source" className="flex flex-col gap-3">
-          <FieldGroup className="gap-2">
-            <Field data-invalid={error ? true : undefined}>
-              <FieldLabel
-                htmlFor={`equation-source-${shape.id}`}
-                className={SECTION_LABEL}
-              >
-                LaTeX source
-              </FieldLabel>
-              <Textarea
-                ref={sourceRef}
-                id={`equation-source-${shape.id}`}
-                aria-invalid={error ? true : undefined}
-                aria-describedby={
-                  error ? `${sourceHelpId} ${errorId}` : sourceHelpId
-                }
-                value={shape.props.latex}
-                onChange={(event) => updateLatex(event.target.value)}
-                onPaste={(event) => {
-                  const pasted = event.clipboardData.getData('text/plain');
-                  const unwrapped = normalizePastedLatex(pasted);
-                  // Nothing to strip: let the browser paste it, so the native
-                  // undo entry the default action creates is preserved.
-                  if (unwrapped === pasted) return;
-                  event.preventDefault();
-                  replaceSourceSelection(event.currentTarget, unwrapped);
-                }}
-                onKeyDown={(event) => {
-                  if (event.key !== 'Escape') return;
-                  event.preventDefault();
-                  releaseFocus();
-                }}
-                // A JSX attribute string is taken literally, so an escaped
-                // backslash here would show the user a command they can't type.
-                placeholder={String.raw`\frac{a}{b}`}
-                spellCheck={false}
-                className="min-h-24 resize-y font-mono text-sm"
-              />
-              <FieldDescription
-                id={sourceHelpId}
-                className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs"
-              >
-                <span>Edit raw LaTeX</span>
-                <span aria-hidden="true">·</span>
-                <span>
-                  <Kbd>Esc</Kbd> returns to the canvas
-                </span>
-              </FieldDescription>
-            </Field>
-          </FieldGroup>
-        </TabsContent>
-      </Tabs>
-
-      {/* Outside the tabs: the canvas rendering is what both modes are aiming
-          at, and in visual mode it is the only view of the equation when the
-          shape itself is off-screen or sitting behind this panel. */}
-      <div className="flex flex-col gap-1.5">
-        <PanelLabel>Canvas preview</PanelLabel>
-        <div
-          role="img"
-          aria-label={
-            currentKey
-              ? `Preview of equation: ${currentKey}`
-              : 'Empty equation preview'
-          }
-          className="flex min-h-16 items-center overflow-x-auto rounded-md border border-border bg-muted p-3"
-        >
-          {!ready && !loadError ? (
-            // Says what the header's "Preparing renderer…" means where the
-            // typing is happening: the field works, only the picture is late.
-            <span className="text-xs text-secondary">
-              Preparing the renderer — what you type is saved.
-            </span>
-          ) : !currentKey ? (
-            <span className="text-xs text-secondary">
-              Start typing to preview the equation.
-            </span>
-          ) : currentRender && !('error' in currentRender) ? (
-            <div
-              aria-hidden="true"
-              className="equation-output-preview"
-              style={{ color: shape.props.color }}
-              dangerouslySetInnerHTML={{ __html: currentRender.svg }}
-            />
-          ) : error ? (
-            <span className="text-xs text-danger">
-              Preview unavailable until the equation is fixed.
-            </span>
-          ) : (
-            <span className="text-xs text-secondary">Rendering…</span>
-          )}
-        </div>
+      {/* Live canvas preview. */}
+      <div
+        ref={previewRef}
+        data-overflow={previewOverflowing ? true : undefined}
+        aria-busy={previewStale || undefined}
+        className="equation-fade-end equation-preview-box scrollbar-none flex min-h-14 items-center justify-center overflow-x-auto rounded-md bg-canvas/60 p-2 text-center"
+      >
+        {!ready && !loadError ? (
+          <span role="status" className="text-xs text-fg-muted">
+            Preparing renderer — what you type is saved.
+          </span>
+        ) : !currentKey ? (
+          <span role="status" className="text-xs text-fg-muted">
+            Start typing to preview the equation.
+          </span>
+        ) : previewRender ? (
+          <div
+            role="img"
+            aria-label={`Preview of equation: ${currentKey}`}
+            className={cn(
+              'equation-output-preview',
+              previewStale && 'opacity-60',
+            )}
+            style={{ color: shape.props.color }}
+            dangerouslySetInnerHTML={{ __html: previewRender.svg }}
+          />
+        ) : (
+          <span role="status" className="text-xs text-fg-muted">
+            Rendering…
+          </span>
+        )}
       </div>
 
       {error ? (
-        <FieldError id={errorId}>
-          <div className="flex flex-col gap-1.5">
-            <div className="flex flex-col gap-0.5">
-              <span>{error}</span>
-              <span>
-                This equation won’t be included in exports until fixed.
-              </span>
-            </div>
-            {errorAt ? (
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="min-w-0">
-                  Line {errorAt.line}, column {errorAt.column}
-                </span>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="xs"
-                  onClick={showErrorInSource}
-                >
-                  {inputMode === 'source' ? 'Highlight' : 'Show in source'}
-                </Button>
-              </div>
-            ) : null}
+        <div
+          id={errorId}
+          role="alert"
+          className="flex flex-col gap-1.5 rounded-md border border-danger-border bg-danger-bg p-2 text-xs"
+        >
+          <div className="flex items-start gap-1.5">
+            <AlertCircle
+              className="mt-0.5 size-3.5 shrink-0 text-danger"
+              aria-hidden="true"
+            />
+            <span className="min-w-0 text-danger">{error}</span>
           </div>
-        </FieldError>
-      ) : null}
-
-      {isLongEquation && !error ? (
-        <div className="flex items-center justify-between gap-2">
-          <p className="min-w-0 text-xs text-secondary">
-            Long equations stay on one line. Use a structure template for
-            explicit breaks.
-          </p>
-          <Button
-            type="button"
-            variant="outline"
-            size="xs"
-            onClick={zoomToEquation}
-          >
-            <Maximize2 data-icon="inline-start" aria-hidden="true" />
-            Zoom to equation
-          </Button>
+          {errorExcerpt ? (
+            <button
+              type="button"
+              onClick={() => errorSpan && focusInput(errorSpan)}
+              className="min-w-0 truncate rounded-xs border border-danger-border/50 bg-surface/90 px-1.5 py-1 text-left font-mono text-2xs text-danger"
+            >
+              {errorExcerpt.clippedStart ? '…' : null}
+              {errorExcerpt.before}
+              <span className="rounded-xs bg-danger/15 px-0.5 font-semibold underline decoration-wavy underline-offset-2">
+                {errorExcerpt.marked}
+              </span>
+              {errorExcerpt.after}
+              {errorExcerpt.clippedEnd ? '…' : null}
+            </button>
+          ) : null}
         </div>
       ) : null}
 
+      {/* A fault in the source, named while it is still being written.
+          Suppressed once MathJax has failed: the block above is then saying the
+          same thing with the renderer's own words. */}
+      {!error && problem && problemExcerpt ? (
+        <div
+          id={problemId}
+          role="status"
+          className="flex flex-col gap-1.5 rounded-md border border-warning-border bg-warning-bg p-2 text-xs"
+        >
+          <div className="flex items-start gap-1.5">
+            <AlertCircle
+              className="mt-0.5 size-3.5 shrink-0 text-warning"
+              aria-hidden="true"
+            />
+            <span className="min-w-0 text-warning">{problem.message}</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => focusInput(problem.span)}
+              className="min-w-0 flex-1 truncate rounded-xs border border-warning-border/60 bg-surface/90 px-1.5 py-1 text-left font-mono text-2xs text-warning"
+            >
+              {problemExcerpt.clippedStart ? '…' : null}
+              {problemExcerpt.before}
+              <span className="rounded-xs bg-warning/15 px-0.5 font-semibold underline decoration-wavy underline-offset-2">
+                {problemExcerpt.marked}
+              </span>
+              {problemExcerpt.after}
+              {problemExcerpt.clippedEnd ? '…' : null}
+            </button>
+            <Button
+              variant="ghost"
+              size="sm"
+              // Keep the caret in the field: the repair is written through the
+              // field's own insertion path, which needs it focused to land on
+              // the undo stack.
+              onPointerDown={(event) => event.preventDefault()}
+              onClick={() => applyEdit(problem.fix)}
+              className="h-6 shrink-0 rounded-md px-2 text-2xs font-medium text-warning hover:bg-warning/10"
+            >
+              {problem.action}
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
+      {/* Colour and size: the only two things about an equation that aren't in
+          its source, and so the only controls left in the panel. */}
+      <div
+        role="radiogroup"
+        aria-label="Equation color"
+        className="grid grid-cols-6 gap-1"
+      >
+        {swatches.map((paletteColor, index) => {
+          const active = shape.props.color === paletteColor.value;
+          return (
+            <button
+              key={paletteColor.value}
+              ref={(node) => {
+                swatchRefs.current[index] = node;
+              }}
+              type="button"
+              role="radio"
+              aria-label={paletteColor.name}
+              aria-checked={active}
+              tabIndex={active ? 0 : -1}
+              title={paletteColor.name}
+              onClick={() => applyColor(paletteColor.value)}
+              onKeyDown={(event) => {
+                const delta =
+                  event.key === 'ArrowRight' || event.key === 'ArrowDown'
+                    ? 1
+                    : event.key === 'ArrowLeft' || event.key === 'ArrowUp'
+                      ? -1
+                      : 0;
+                if (!delta) return;
+                event.preventDefault();
+                moveSwatchFocus(index, delta);
+              }}
+              className="flex h-7 w-full items-center justify-center rounded-md transition-colors hover:bg-panel active:scale-[0.96]"
+            >
+              <span
+                className={cn(
+                  'size-4 rounded-full border transition-transform duration-120',
+                  active &&
+                    'scale-110 ring-2 ring-focus ring-offset-2 ring-offset-surface',
+                  !active && 'hover:scale-105',
+                )}
+                style={{
+                  backgroundColor: paletteColor.value,
+                  borderColor: swatchBorder(paletteColor.value),
+                }}
+              />
+            </button>
+          );
+        })}
+      </div>
+
+      <div
+        role="group"
+        aria-label="Equation size"
+        className="grid grid-cols-4 gap-1 rounded-md border border-border bg-panel p-1"
+      >
+        {FONT_SIZES.map((size) => {
+          const active = Math.round(shape.props.fontSize) === size;
+          return (
+            <button
+              key={size}
+              type="button"
+              aria-pressed={active}
+              aria-label={`Size ${size}`}
+              onClick={() => applyFontSize(size)}
+              className={cn(
+                'flex h-6 items-center justify-center rounded-sm text-xs font-medium tabular-nums transition-all duration-150',
+                active
+                  ? 'bg-surface font-semibold text-fg shadow-xs'
+                  : 'text-fg-secondary hover:bg-surface/50 hover:text-fg',
+              )}
+            >
+              {size}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Display or text style. Not a property of the source — the same LaTeX
+          is valid in both — so it belongs beside colour and size rather than
+          in the field. */}
+      <div
+        role="group"
+        aria-label="Equation style"
+        className="grid grid-cols-2 gap-1 rounded-md border border-border bg-panel p-1"
+      >
+        {STYLES.map((style) => {
+          const active = style.inline === inline;
+          return (
+            <button
+              key={style.label}
+              type="button"
+              aria-pressed={active}
+              title={style.hint}
+              onClick={() => applyInline(style.inline)}
+              className={cn(
+                'flex h-6 items-center justify-center rounded-sm text-xs font-medium transition-all duration-150',
+                active
+                  ? 'bg-surface font-semibold text-fg shadow-xs'
+                  : 'text-fg-secondary hover:bg-surface/50 hover:text-fg',
+              )}
+            >
+              {style.label}
+            </button>
+          );
+        })}
+      </div>
+
+      <div
+        id={helpId}
+        className="flex flex-wrap items-center justify-center gap-x-2.5 gap-y-1 text-2xs text-fg-muted"
+      >
+        <span className="inline-flex items-center gap-1">
+          <Kbd className="font-mono text-2xs">\</Kbd>
+          <span>commands</span>
+        </span>
+        <span aria-hidden="true" className="text-border-strong">
+          ·
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <Kbd className="text-2xs">Tab</Kbd>
+          <span>next slot</span>
+        </span>
+        <span aria-hidden="true" className="text-border-strong">
+          ·
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <Kbd className="text-2xs">Esc</Kbd>
+          <span>canvas</span>
+        </span>
+      </div>
     </Surface>
   );
 }
@@ -690,9 +1068,7 @@ export function EquationPanel() {
   // Subscribe to the one selected shape, not the whole page record — see the
   // same note in graph-panel.tsx.
   const selectedShape = useDocumentStore((state) =>
-    selectedId
-      ? state.shapesById.get(selectedId)
-      : undefined,
+    selectedId ? state.shapesById.get(selectedId) : undefined,
   );
   const equationShape =
     selectedShape?.type === 'equation' ? selectedShape : undefined;

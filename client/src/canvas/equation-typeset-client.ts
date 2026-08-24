@@ -40,6 +40,7 @@ const WARMUP_LATEX = 'x';
 
 interface Pending {
   latex: string;
+  inline: boolean;
   resolve: (render: EquationRender) => void;
   reject: (reason: Error) => void;
   timer: ReturnType<typeof setTimeout>;
@@ -67,9 +68,12 @@ function spawnWorker(): Worker {
     new URL('./equation-typeset.worker.ts', import.meta.url),
     { type: 'module' },
   );
-  created.addEventListener('message', (event: MessageEvent<TypesetResponse>) => {
-    settle(event.data.id, event.data.render);
-  });
+  created.addEventListener(
+    'message',
+    (event: MessageEvent<TypesetResponse>) => {
+      settle(event.data.id, event.data.render);
+    },
+  );
   // A worker that fails to start (or throws outside a request) answers nothing
   // ever again, so give up on the requests it was holding rather than let them
   // hang until their timeouts fire one by one.
@@ -82,7 +86,11 @@ function spawnWorker(): Worker {
 function dispatch(id: number, entry: Omit<Pending, 'timer'>): void {
   pending.set(id, { ...entry, timer: armTimeout(id) });
   worker ??= spawnWorker();
-  worker.postMessage({ id, latex: entry.latex } satisfies TypesetRequest);
+  worker.postMessage({
+    id,
+    latex: entry.latex,
+    inline: entry.inline,
+  } satisfies TypesetRequest);
 }
 
 function armTimeout(id: number): ReturnType<typeof setTimeout> {
@@ -123,9 +131,18 @@ function restartWorker(failure: Error | null): void {
   }
 }
 
-function typesetOffThread(latex: string): Promise<EquationRender> {
+function typesetOffThread(
+  latex: string,
+  inline: boolean,
+): Promise<EquationRender> {
   return new Promise<EquationRender>((resolve, reject) => {
-    dispatch(nextRequestId++, { latex, resolve, reject, retried: false });
+    dispatch(nextRequestId++, {
+      latex,
+      inline,
+      resolve,
+      reject,
+      retried: false,
+    });
   });
 }
 
@@ -141,11 +158,14 @@ function workerAvailable(): boolean {
  * typeset resolves to an `error` entry, which callers cache like any other
  * result.
  */
-export function typesetOnce(latex: string): Promise<EquationRender> {
+export function typesetOnce(
+  latex: string,
+  inline = false,
+): Promise<EquationRender> {
   if (!workerAvailable()) {
-    return ensureConverter().then(() => convertEquation(latex));
+    return ensureConverter().then(() => convertEquation(latex, inline));
   }
-  return typesetOffThread(latex);
+  return typesetOffThread(latex, inline);
 }
 
 /**

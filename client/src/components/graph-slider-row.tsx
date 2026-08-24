@@ -152,7 +152,7 @@ export function SliderRow({
                 e.currentTarget.blur();
               }
             }}
-            className="h-6 w-14 !rounded-none !border-0 !bg-transparent px-1 text-right font-['KaTeX_Main',serif] text-sm font-normal tabular-nums text-fg hover:text-fg !shadow-none focus:!bg-subtle/60 focus:text-fg focus:!outline-none focus:!ring-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+            className="h-6 w-14 !rounded-none !border-0 !bg-transparent px-1 text-right font-['KaTeX_Main',serif] text-sm font-normal tabular-nums text-fg hover:text-fg !shadow-none focus:!bg-panel/60 focus:text-fg focus:!outline-none focus:!ring-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
           />
         </div>
       </div>
@@ -173,7 +173,7 @@ export function SliderRow({
               e.currentTarget.blur();
             }
           }}
-          className="h-5.5 w-11 !rounded-none !border-0 !bg-transparent px-0.5 text-center font-['KaTeX_Main',serif] text-xs font-normal tabular-nums text-fg-secondary hover:text-fg !shadow-none focus:!bg-subtle/60 focus:text-fg focus:!outline-none focus:!ring-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+          className="h-5.5 w-11 !rounded-none !border-0 !bg-transparent px-0.5 text-center font-['KaTeX_Main',serif] text-xs font-normal tabular-nums text-fg-secondary hover:text-fg !shadow-none focus:!bg-panel/60 focus:text-fg focus:!outline-none focus:!ring-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
         />
 
         <Slider
@@ -202,7 +202,7 @@ export function SliderRow({
               e.currentTarget.blur();
             }
           }}
-          className="h-5.5 w-11 !rounded-none !border-0 !bg-transparent px-0.5 text-center font-['KaTeX_Main',serif] text-xs font-normal tabular-nums text-fg-secondary hover:text-fg !shadow-none focus:!bg-subtle/60 focus:text-fg focus:!outline-none focus:!ring-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+          className="h-5.5 w-11 !rounded-none !border-0 !bg-transparent px-0.5 text-center font-['KaTeX_Main',serif] text-xs font-normal tabular-nums text-fg-secondary hover:text-fg !shadow-none focus:!bg-panel/60 focus:text-fg focus:!outline-none focus:!ring-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
         />
       </div>
     </div>

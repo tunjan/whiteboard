@@ -130,7 +130,7 @@ export function CanvasControls({
             label="Reset zoom to 100%"
             shortcut="Control+0"
             onClick={onZoomReset}
-            className="min-w-12 px-1.5 font-normal text-primary tabular-nums"
+            className="min-w-12 px-1.5 font-normal text-fg tabular-nums"
             disabled={disabled}
           >
             {Math.round(zoom * 100)}%
@@ -197,7 +197,7 @@ export function CanvasControls({
                         {index + 1}. {equation.label}
                       </span>
                       {equation.locked ? (
-                        <span className="text-xs text-tertiary">Locked</span>
+                        <span className="text-xs text-fg-muted">Locked</span>
                       ) : null}
                     </DropdownMenuItem>
                   ))}

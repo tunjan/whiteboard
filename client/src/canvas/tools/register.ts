@@ -3,6 +3,7 @@
 import {
   ArrowUpRight,
   Circle,
+  Highlighter,
   Slash,
   Square,
 } from 'lucide-react';
@@ -26,6 +27,16 @@ import { createCommentTool } from './comment-tool';
 toolRegistry.register(createSelectTool());
 toolRegistry.register(createHandTool());
 toolRegistry.register(createDrawTool());
+// The same freehand state machine laying marker ink instead of pencil ink.
+toolRegistry.register(
+  createDrawTool({
+    id: 'highlighter',
+    label: 'Highlighter',
+    hotkey: 'i',
+    icon: Highlighter,
+    ink: 'marker',
+  }),
+);
 toolRegistry.register(createWandTool());
 toolRegistry.register(createTextTool());
 toolRegistry.register(createGraphTool());

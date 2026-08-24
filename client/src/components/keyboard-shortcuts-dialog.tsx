@@ -41,9 +41,21 @@ const VIEW_SHORTCUTS = [
   { label: 'Reset zoom', keys: ['⌘/Ctrl', '0'] },
 ] as const;
 
+// The panel's own inline hints cover these while it is open, and vanish with it.
+const EQUATION_SHORTCUTS = [
+  { label: 'Commit and return to the canvas', keys: ['Esc'] },
+  { label: 'Search LaTeX commands', keys: ['\\'] },
+  { label: 'Accept the highlighted command', keys: ['Enter'] },
+  { label: 'Dismiss the command list', keys: ['Esc'] },
+  { label: 'Next empty slot or matrix cell', keys: ['Tab'] },
+  { label: 'New row inside aligned or cases', keys: ['Enter'] },
+  { label: 'New equation below this one', keys: ['⌘/Ctrl', 'Enter'] },
+] as const;
+
 const GENERAL_SHORTCUTS = [
   { label: 'Reset tool and selection', keys: ['Esc'] },
   { label: 'Tool lock', keys: ['Q'] },
+  { label: 'Borrow a tool while its key is held', keys: ['Hold tool key'] },
 ] as const;
 
 function ShortcutKeys({ keys }: { keys: readonly string[] }) {
@@ -70,7 +82,7 @@ function ShortcutList({
           key={item.label}
           className="grid min-h-8 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-md px-2 py-1 text-sm odd:bg-panel/60"
         >
-          <dt className="text-secondary">{item.label}</dt>
+          <dt className="text-fg-secondary">{item.label}</dt>
           <dd>
             <ShortcutKeys keys={item.keys} />
           </dd>
@@ -90,10 +102,15 @@ function ShortcutSection({
   items: ReadonlyArray<{ label: string; keys: readonly string[] }>;
 }) {
   return (
-    <section aria-labelledby={id} className="grid gap-2">
+    <section
+      aria-labelledby={id}
+      // `break-inside-avoid` keeps a section whole when the columns balance;
+      // the bottom margin replaces the flex gap columns don't provide.
+      className="mb-4 grid break-inside-avoid gap-2"
+    >
       <h3
         id={id}
-        className="text-xs font-medium tracking-wide text-tertiary uppercase"
+        className="text-xs font-medium tracking-wide text-fg-muted uppercase"
       >
         {title}
       </h3>
@@ -116,38 +133,51 @@ export function KeyboardShortcutsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[min(42rem,calc(100dvh-2rem))] gap-4 overflow-y-auto p-4 sm:max-w-lg">
+      {/* Six sections, forty-nine rows: in one 32rem column that was three
+          screens of scrolling behind a full-height scrollbar. Reference sheets
+          are read by scanning, not by scrolling, so the sections flow into
+          balanced columns as the viewport allows — two from `sm`, three from
+          `lg`, where the whole sheet fits at once and no scrollbar appears.
+          Narrow screens still scroll, minus the scrollbar track. */}
+      <DialogContent className="max-h-[calc(100dvh-2rem)] gap-4 overflow-y-auto p-4 scrollbar-none sm:max-w-3xl lg:max-w-5xl">
         <DialogHeader className="pr-10">
           <DialogTitle>Keyboard shortcuts</DialogTitle>
           <DialogDescription>
             Tool keys work while focus is outside a text or equation editor.
           </DialogDescription>
         </DialogHeader>
-        <ShortcutSection
-          id="tool-shortcuts-heading"
-          title="Tools"
-          items={toolShortcuts}
-        />
-        <ShortcutSection
-          id="edit-shortcuts-heading"
-          title="Edit"
-          items={EDIT_SHORTCUTS}
-        />
-        <ShortcutSection
-          id="arrange-shortcuts-heading"
-          title="Arrange"
-          items={ARRANGE_SHORTCUTS}
-        />
-        <ShortcutSection
-          id="view-shortcuts-heading"
-          title="View"
-          items={VIEW_SHORTCUTS}
-        />
-        <ShortcutSection
-          id="general-shortcuts-heading"
-          title="General"
-          items={GENERAL_SHORTCUTS}
-        />
+        <div className="columns-1 gap-x-6 sm:columns-2 lg:columns-3">
+          <ShortcutSection
+            id="tool-shortcuts-heading"
+            title="Tools"
+            items={toolShortcuts}
+          />
+          <ShortcutSection
+            id="edit-shortcuts-heading"
+            title="Edit"
+            items={EDIT_SHORTCUTS}
+          />
+          <ShortcutSection
+            id="arrange-shortcuts-heading"
+            title="Arrange"
+            items={ARRANGE_SHORTCUTS}
+          />
+          <ShortcutSection
+            id="equation-shortcuts-heading"
+            title="Equations"
+            items={EQUATION_SHORTCUTS}
+          />
+          <ShortcutSection
+            id="view-shortcuts-heading"
+            title="View"
+            items={VIEW_SHORTCUTS}
+          />
+          <ShortcutSection
+            id="general-shortcuts-heading"
+            title="General"
+            items={GENERAL_SHORTCUTS}
+          />
+        </div>
       </DialogContent>
     </Dialog>
   );

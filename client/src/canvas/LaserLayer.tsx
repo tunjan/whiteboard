@@ -20,13 +20,13 @@ const LASER_CORE_COLOR = '#FFFFFF';
 // non-scaling strokes it wraps — and is skipped outright when a straight
 // stroke gives the path a zero-height bounding box.
 const GLOW_LAYERS = [
-  { width: 46, opacity: 0.05 },
-  { width: 34, opacity: 0.07 },
-  { width: 25, opacity: 0.1 },
-  { width: 18, opacity: 0.16 },
+  { width: 28, opacity: 0.05 },
+  { width: 21, opacity: 0.07 },
+  { width: 15, opacity: 0.1 },
+  { width: 11, opacity: 0.16 },
 ];
-const LASER_BODY_WIDTH = 12;
-const LASER_CORE_WIDTH = 4;
+const LASER_BODY_WIDTH = 7;
+const LASER_CORE_WIDTH = 2.5;
 
 function pathFor(points: Point[]): string {
   const first = points[0];

@@ -3,11 +3,12 @@
 The design system lives in [`src/index.css`](../../index.css), in six numbered
 sections:
 
-1. **Fonts** — the three `@font-face` declarations (Inter, Geist Mono, Caveat).
+1. **Fonts** — Geist for product UI, Inter for measured canvas text, Geist Mono
+   for values/shortcuts, and Caveat for handwriting.
 2. **Primitives** — `:root` and `.dark`. The only place a literal colour or
-   shadow value appears. Private to that file; prefixed `--c-*` / `--s-*`.
+   shadow value appears.
 3. **Theme** — `@theme`. The public API: every name here becomes a Tailwind
-   utility (`--color-surface` → `bg-surface`) *and* a plain custom property, so
+   utility (`--color-surface` → `bg-surface`) _and_ a plain custom property, so
    raw CSS can use `var(--color-surface)`.
 4. **Base** — resets, the global focus ring, touch hardening.
 5. **Utilities** — `scrollbar-none`, coarse-pointer touch targets.
@@ -26,31 +27,30 @@ Shared visual decisions belong in a token, not a class.
 **Focus is single-sourced.** `:focus-visible` in section 4 draws one outline for
 the whole app. Do not add `focus-visible:ring-*` to a component, and do not add
 `outline-none` to an interactive control — either one silently removes the only
-focus indicator that control has. Popup *containers* (dialog, popover, menu
-positioners) and menu *items* are the exceptions: they suppress the outline
+focus indicator that control has. Popup _containers_ (dialog, popover, menu
+positioners) and menu _items_ are the exceptions: they suppress the outline
 because a background highlight already signals focus.
 
 ## Token vocabulary
 
-| group | names |
-|---|---|
-| surfaces | `canvas` `panel` `surface` `surface-hover` `sunken` `inverse` `inverse-hover` `scrim` |
-| lines | `border` `border-strong` `border-subtle` `focus` |
-| ink | `fg` `fg-secondary` `fg-muted` `fg-subtle` `fg-inverse` |
-| status | `danger` `success` `warning` `info` `neutral` `inactive`, each as `-fg` `-bg` `-border` |
-| brand | `link` (the blue), `accent-brand` |
-| radii | `xs` 4 · `sm` 6 · `md` 8 · `lg` 10 · `xl` 12 · `2xl` 16 · `full` |
-| elevation | `e0`–`e5`, plus component aliases `xs` `sm` `md` `lg` `hover` `floating` |
-| motion | `duration-instant` `-fast` `-base` `-slow` `-slower`; `ease-out-quart` `ease-in-out-quart` |
+| group     | names                                                                                      |
+| --------- | ------------------------------------------------------------------------------------------ |
+| surfaces  | `canvas` `panel` `surface` `surface-hover` `sunken` `inverse` `inverse-hover` `scrim`      |
+| lines     | `border` `border-strong` `border-subtle` `control-border` `focus`                          |
+| ink       | `fg` `fg-secondary` `fg-muted` `fg-subtle` `fg-inverse`                                    |
+| status    | `danger` `success` `warning` `info` `neutral` `inactive`, each as `-fg` `-bg` `-border`    |
+| action    | `primary` `action` `action-hover` `action-active` `link` `focus` (one blue accent)         |
+| radii     | `compact` 4 · `control` 8 · `overlay` 12 · `panel` 16 · `full`                             |
+| elevation | `control` `panel` `overlay`                                                                |
+| motion    | `duration-instant` `-fast` `-base` `-slow` `-slower`; `ease-out-quart` `ease-in-out-quart` |
 
 Status colours always carry the explicit `-fg` / `-bg` / `-border` suffix. The
 bare `danger` / `success` aliases resolve, but `neutral` and `inactive` have no
 bare form, so the suffixed spelling is the one that works across the whole set.
 
-`scrim` is the modal backdrop; pick the opacity per overlay (`bg-scrim/40` for
-dialogs, `bg-scrim/10` for the sheet). `inverse-hover` is the hover step for
-`bg-inverse` — it flips with the theme, which is why buttons don't need a
-`dark:` variant for it.
+`scrim` is the modal backdrop; pick the opacity per overlay (`bg-scrim/35` for
+dialogs, `bg-scrim/25` for the sheet). `inverse` remains the neutral selected
+tool state; primary actions use the blue `action` role.
 
 Board chrome uses `Surface` systematically: `mode="docked" chrome` for
 viewport-edge controls and `mode="floating" chrome` for the central tool rail.
@@ -62,13 +62,13 @@ The shadcn aliases (`background`, `foreground`, `card`, `popover`,
 `accent-foreground`) are also mapped, so components added by `shadcn add`
 resolve without edits.
 
-Two deliberate deviations from stock shadcn:
+Two deliberate conventions keep shadcn components and board chrome aligned:
 
-- **`secondary` is ink, not a surface.** `text-secondary` is this app's
-  second-level text colour; `bg-secondary` is unused. Reach for `bg-panel`.
-- **`accent` is the hover surface, and the brand blue is `link`.** Binding
-  `accent` to the blue is what previously painted focused menu items solid blue
-  under near-black text.
+- **Text roles are always explicit.** Use `text-fg-secondary` and
+  `text-fg-muted`; `secondary` remains a surface role for component variants.
+- **`accent` is the neutral hover surface.** The single blue accent is exposed
+  as `primary`, `action`, `link`, and `focus`, and is reserved for key actions
+  and keyboard focus rather than ordinary tool selection.
 
 Those aliases are a **landing pad, not a destination.** A component pasted in by
 `shadcn add` renders correctly on day one, but before it ships its classes get
@@ -96,20 +96,20 @@ cd client && npm run build && python3 scripts/class-diff.py
 
 The script checks two different things. `UNRESOLVED` is the dead-class check:
 names that generate no CSS. `GUIDELINE VIOLATIONS` enforces the rules on this
-page, because the worst offenders are all *valid* class names —
+page, because the worst offenders are all _valid_ class names —
 
-| rule | what it catches |
-|---|---|
-| `focus-ring` | `focus-visible:ring-*` competing with the global outline |
-| `outline-suppressed` | `outline-none` / `outline-hidden` outside the popup allowlist |
+| rule                    | what it catches                                                                                                        |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `focus-ring`            | `focus-visible:ring-*` competing with the global outline                                                               |
+| `outline-suppressed`    | `outline-none` / `outline-hidden` outside the popup allowlist                                                          |
 | `ring-offset-no-colour` | `ring-offset-2` with no offset colour — Tailwind's default is a literal `#fff`, so it paints a white halo in dark mode |
-| `raw-palette` | `bg-stone-*`, `bg-black`, `bg-white` instead of a semantic name |
-| `dark-colour-fork` | a `dark:` variant on a colour utility |
+| `raw-palette`           | `bg-stone-*`, `bg-black`, `bg-white` instead of a semantic name                                                        |
+| `dark-colour-fork`      | a `dark:` variant on a colour utility                                                                                  |
 
 Violations are fatal inside `src/components/ui/` and reported-only elsewhere,
 so the gate can stay green while the rest of the app catches up.
 
 **One trap worth knowing:** Tailwind builds `duration-*` utilities from the
-`--transition-duration-*` namespace, *not* `--duration-*`. Defining only the
+`--transition-duration-*` namespace, _not_ `--duration-*`. Defining only the
 latter gives you a real CSS variable and no utility — `duration-base` silently
 did nothing for a while. Both are declared now; add to both if you add a step.

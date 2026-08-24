@@ -2,8 +2,20 @@ import { useId, useState, type FormEvent } from 'react';
 import { login } from '@/board/auth';
 import { BrandMark } from '@/components/brand-mark';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
-import { Field, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
+import {
+  Field,
+  FieldError,
+  FieldGroup,
+  FieldLabel,
+} from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 
 /** Tutor sign-in. Gates the board-management home screen. */
@@ -24,28 +36,34 @@ export function Login({ onSuccess }: { onSuccess: () => void }) {
   };
 
   return (
-    <div className="grid min-h-dvh place-items-center bg-canvas px-4 py-10 sm:px-6 text-primary">
-      <Card className="w-full max-w-sm shadow-md p-6">
-        <CardContent className="p-0">
-          <form onSubmit={submit} className="flex flex-col gap-6">
-            <div className="flex flex-col items-start gap-5">
-              <div className="flex items-center gap-2.5">
-                <BrandMark className="size-6 text-primary" />
-                <p className="text-sm font-semibold tracking-tight text-primary">Whiteboard</p>
-              </div>
-              <div className="grid gap-1">
-                <h1 className="text-2xl font-semibold tracking-tight text-primary">
-                  Tutor Access
-                </h1>
-                <p className="text-sm text-secondary leading-relaxed">
-                  Enter the tutor password to access dashboard and manage canvases.
-                </p>
-              </div>
+    <main className="grid min-h-dvh place-items-center bg-canvas px-4 py-10 text-fg sm:px-6">
+      <form onSubmit={submit} className="w-full max-w-sm">
+        <Card className="gap-6 py-6 shadow-e2">
+          <CardHeader className="gap-5">
+            <div className="flex items-center gap-2.5">
+              <BrandMark className="size-7" />
+              <span className="text-sm font-semibold text-fg">Whiteboard</span>
             </div>
+            <div className="grid gap-1.5">
+              <CardTitle>
+                <h1 className="text-balance text-2xl font-semibold text-fg">
+                  Tutor access
+                </h1>
+              </CardTitle>
+              <CardDescription className="text-pretty text-base text-fg-secondary">
+                Enter the tutor password to access the dashboard and manage
+                canvases.
+              </CardDescription>
+            </div>
+          </CardHeader>
 
+          <CardContent>
             <FieldGroup>
               <Field data-invalid={error ? true : undefined}>
-                <FieldLabel htmlFor={passwordId} className="text-xs font-medium text-secondary">
+                <FieldLabel
+                  htmlFor={passwordId}
+                  className="text-sm font-medium text-fg-secondary"
+                >
                   Password
                 </FieldLabel>
                 <Input
@@ -58,16 +76,24 @@ export function Login({ onSuccess }: { onSuccess: () => void }) {
                   autoComplete="current-password"
                   aria-invalid={error ? true : undefined}
                 />
-                {error ? <FieldError className="text-xs text-danger mt-1">{error}</FieldError> : null}
+                {error ? <FieldError>{error}</FieldError> : null}
               </Field>
             </FieldGroup>
+          </CardContent>
 
-            <Button type="submit" variant="default" className="w-full h-10 text-sm font-medium" disabled={busy}>
+          <CardFooter>
+            <Button
+              type="submit"
+              variant="default"
+              size="md"
+              className="w-full text-sm"
+              disabled={busy}
+            >
               {busy ? 'Signing in…' : 'Sign In'}
             </Button>
-          </form>
-        </CardContent>
-      </Card>
-    </div>
+          </CardFooter>
+        </Card>
+      </form>
+    </main>
   );
 }

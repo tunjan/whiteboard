@@ -1,8 +1,11 @@
+import { rotatePoint } from '@whiteboard/shared';
 import type {
   FontFamily,
   FontWeight,
+  Point,
   TextAlign,
   TextProps,
+  TextShape,
   TextSizingMode,
 } from '@whiteboard/shared';
 
@@ -48,6 +51,22 @@ export function textLineHeight(
   return Number.isFinite(value) && value > 0 ? value : LINE_HEIGHT_FACTOR;
 }
 
+/**
+ * Line advance in whole pixels.
+ *
+ * Layout engines disagree on fractional line boxes — WebKit rounds them to
+ * integers, Blink keeps the subpixel remainder. The SVG renderer and the
+ * textarea overlay would therefore accumulate a different per-line offset from
+ * the same multiplier, drifting the caret off the glyphs further down a long
+ * text. Quantizing once, here, is what keeps the two representations agreeing.
+ */
+export function resolveLineHeightPx(
+  fontSize: number,
+  lineHeight: number,
+): number {
+  return Math.max(1, Math.round(fontSize * lineHeight));
+}
+
 let ctx: CanvasRenderingContext2D | null | undefined;
 
 function getCtx(): CanvasRenderingContext2D | null {
@@ -66,6 +85,42 @@ function fallbackWidth(text: string, fontSize: number): number {
 
 const widthCache = new Map<string, number>();
 const WIDTH_CACHE_MAX = 8000;
+
+const metricsListeners = new Set<() => void>();
+
+/**
+ * Run `listener` whenever cached metrics are discarded and every text shape
+ * needs re-measuring. Returns an unsubscribe function.
+ */
+export function subscribeToTextMetrics(listener: () => void): () => void {
+  metricsListeners.add(listener);
+  return () => metricsListeners.delete(listener);
+}
+
+/** Drop every cached advance width and notify subscribers. */
+export function invalidateTextMetrics(): void {
+  if (widthCache.size === 0 && metricsListeners.size === 0) return;
+  widthCache.clear();
+  for (const listener of metricsListeners) listener();
+}
+
+let fontWatchStarted = false;
+
+/**
+ * Web fonts resolve after first paint. Any text measured in the meantime is
+ * measured against a fallback face and — because the cache is keyed only by
+ * family, weight, size and content — would keep those wrong metrics for the
+ * life of the tab. Re-measure once each family lands, then once more when the
+ * document's font set settles.
+ */
+export function watchFontLoading(): void {
+  if (fontWatchStarted) return;
+  if (typeof document === 'undefined' || !document.fonts) return;
+  fontWatchStarted = true;
+
+  document.fonts.addEventListener('loadingdone', invalidateTextMetrics);
+  void document.fonts.ready.then(invalidateTextMetrics);
+}
 
 /** Browser advance width for a string, in shape-local/world units. */
 export function measureTextWidth(
@@ -256,7 +311,10 @@ export function layoutText(options: TextLayoutOptions): TextLayout {
   const requestedWidth = Math.max(MIN_TEXT_WIDTH, options.width ?? 0);
   const mode =
     options.sizingMode ?? ((options.width ?? 0) > 0 ? 'fixed' : 'auto');
-  const lineHeight = fontSize * Math.max(0.5, options.lineHeight ?? LINE_HEIGHT_FACTOR);
+  const lineHeight = resolveLineHeightPx(
+    fontSize,
+    Math.max(0.5, options.lineHeight ?? LINE_HEIGHT_FACTOR),
+  );
   const { ascent, descent } = fontMetrics(fontSize, fontFamily, weight);
 
   const rawLines: UnpositionedLine[] = [];
@@ -288,9 +346,14 @@ export function layoutText(options: TextLayoutOptions): TextLayout {
     paragraphStart += paragraph.length + (i < paragraphs.length - 1 ? 1 : 0);
   }
 
+  // Advance widths exclude the ink that slanted and script faces throw past
+  // their nominal box, and the editing textarea clips at exactly this width.
+  // Rounding up and adding a pixel keeps that overhang — and, once the browser
+  // lays the same string out with its own subpixel metrics, the last word —
+  // inside the box instead of shaved off or wrapped.
   const contentWidth = Math.max(
     MIN_TEXT_WIDTH,
-    ...rawLines.map((line) => line.width),
+    Math.ceil(Math.max(0, ...rawLines.map((line) => line.width))) + 1,
   );
   const width = mode === 'fixed' ? requestedWidth : contentWidth;
   const lines: TextLayoutLine[] = rawLines.map((line, index) => {
@@ -480,4 +543,77 @@ export function textSelectionRects(
     });
   }
   return rects;
+}
+
+/**
+ * Slack to leave around a text box for ink that escapes its advance box.
+ *
+ * Measurement returns advance widths, but italic and script faces throw
+ * ascenders, descenders and swashes well past them. Anywhere a hard rectangle
+ * is drawn at exactly the measured size, that ink is shaved off.
+ */
+export const TEXT_INK_MARGIN = 0.3;
+
+export function textInkMargin(fontSize: number): number {
+  return Math.ceil(fontSize * TEXT_INK_MARGIN);
+}
+
+/**
+ * Horizontal offset from a click point to the box's left edge, so that the
+ * point the user aimed at is the edge their alignment implies: the start of the
+ * text, its centre, or its end.
+ */
+export function textAlignOffset(width: number, align: TextAlign): number {
+  if (align === 'middle') return -width / 2;
+  if (align === 'end') return -width;
+  return 0;
+}
+
+/**
+ * Position that holds an auto-sized text still while its box resizes.
+ *
+ * `x`/`y` address the top-left corner, so a growing box always expands right
+ * and down. That is correct for start-aligned text but wrong everywhere else:
+ * centred text would crawl sideways with every keystroke, and a font-size
+ * change would drop the shape instead of growing it about its middle. The
+ * compensation below cancels the part of the growth the alignment says should
+ * have gone the other way.
+ *
+ * Typing deliberately leaves `y` alone. Vertical growth during a text edit is a
+ * new line appearing below the caret, and re-centring on it would shift every
+ * line the user has already written.
+ */
+export function stabilizeTextPosition(
+  shape: Pick<TextShape, 'x' | 'y' | 'rotation' | 'props'>,
+  next: TextProps,
+): Point {
+  const prev = shape.props;
+  if (textSizingMode(next) !== 'auto') return { x: shape.x, y: shape.y };
+
+  const textDidChange = prev.text !== next.text;
+  const styleDidChange =
+    prev.fontSize !== next.fontSize ||
+    prev.fontFamily !== next.fontFamily ||
+    fontWeight(prev.fontWeight) !== fontWeight(next.fontWeight) ||
+    textLineHeight(prev) !== textLineHeight(next) ||
+    prev.align !== next.align;
+  if (!textDidChange && !styleDidChange) return { x: shape.x, y: shape.y };
+
+  const before = layoutTextProps(prev);
+  const after = layoutTextProps(next);
+  const dw = after.width - before.width;
+  const dh = after.height - before.height;
+
+  // A pure text edit keeps its baseline; a style change grows about the centre.
+  const dy = textDidChange ? 0 : dh / 2;
+  const dx =
+    next.align === 'middle' ? dw / 2 : next.align === 'end' ? dw : 0;
+  if (dx === 0 && dy === 0) return { x: shape.x, y: shape.y };
+
+  // The offset is expressed in the box's own frame, so a rotated shape has to
+  // move along its rotated axes rather than the world's.
+  const rotated = shape.rotation
+    ? rotatePoint({ x: dx, y: dy }, { x: 0, y: 0 }, shape.rotation)
+    : { x: dx, y: dy };
+  return { x: shape.x - rotated.x, y: shape.y - rotated.y };
 }

@@ -40,6 +40,7 @@ import {
 } from '@/collab/use-follow-store';
 import { usePresenceStore } from '@/collab/use-presence-store';
 import { ShapeView } from './ShapeView';
+import { VanishLayer } from './VanishLayer';
 import { FrameView } from './shapes/frame';
 import { plotArea } from './shapes/graph';
 import { panViewport, zoomViewport } from './shapes/graph-interaction';
@@ -106,6 +107,7 @@ import { useHiddenStore } from './use-hidden-store';
 import { useLiveStrokeShapeId } from './use-live-stroke-store';
 import { useSelectionStore } from './use-selection-store';
 import { useSpacePan } from './use-space-pan';
+import { springReturnTool, type SpringHold } from './spring-tool';
 import { useTextEditingStore } from './use-text-editing-store';
 import { useFrameEditingStore } from './use-frame-editing-store';
 import { requestEquationFocus } from './equation-focus';
@@ -150,6 +152,18 @@ function isTouchPointer(e: ReactPointerEvent): boolean {
 // A touch/pen that hasn't fired an event in this long is treated as released,
 // even without a pointerup/cancel — recovers from iOS dropping those events.
 const STALE_TOUCH_MS = 2000;
+
+/**
+ * How long a tool hotkey must be held for the press to read as a hold rather
+ * than a tap, when the hand did nothing with the tool it borrowed.
+ *
+ * Only the empty-handed case needs a clock at all: pressing a key and using
+ * the tool is a hold however briefly the key was down. This covers the press
+ * that borrows a tool, thinks better of it, and lets go — long enough not to
+ * catch an ordinary deliberate tap, short enough that a hand which paused
+ * before drawing still gets its previous tool back.
+ */
+const SPRING_HOLD_MS = 250;
 
 // Shared empties for the page-wide derivations below, so a page with no
 // parenting and no equations reuses one object per frame instead of allocating
@@ -228,6 +242,13 @@ export function Canvas() {
   const gesture = useRef<'pan' | 'tool' | null>(null);
   // The pointer currently driving `gesture` (so stray pointers are ignored).
   const toolPointerId = useRef<number | null>(null);
+  // A tool hotkey currently held down, and the tool it borrowed from. Null when
+  // the last hotkey was a tap, or when the borrowed tool has been given back.
+  // See `releaseSpring`.
+  const spring = useRef<SpringHold | null>(null);
+  // Tool to return to once the current gesture ends, set when the hotkey came
+  // up while the hand was still drawing. See `finishSpring`.
+  const springReturn = useRef<string | null>(null);
   // Live touch pointers on the surface, id → last-seen position (container px) and
   // timestamp. Drives single- vs multi-touch routing and the pinch math. iOS
   // routinely drops pointerup/cancel when the OS steals a gesture, so entries are
@@ -589,6 +610,49 @@ export function Canvas() {
     [containerRef],
   );
 
+  /**
+   * Let go of a tool that a held hotkey borrowed.
+   *
+   * Tapping a tool key is a mode switch and stays; holding one is a moment's
+   * use of another tool, and the moment ends with the key. What separates them
+   * is whether the hand did anything with the borrowed tool — drew, erased,
+   * dragged a selection — or held the key long enough that nothing else was
+   * meant by it. Without that distinction every hotkey press would be
+   * provisional until the key came back up.
+   *
+   * Reverting is skipped when the active tool is no longer the borrowed one:
+   * the toolbar, Escape, or a creation tool completing have already moved on,
+   * and there is nothing left to give back.
+   */
+  const releaseSpring = useCallback((e: KeyboardEvent) => {
+    const held = spring.current;
+    if (!held || held.key !== e.key.toLowerCase()) return;
+    spring.current = null;
+    const to = springReturnTool(
+      held,
+      e,
+      useToolStore.getState().activeToolId,
+      SPRING_HOLD_MS,
+    );
+    if (to === null) return;
+    // The key came up before the hand did. Finishing the stroke matters more
+    // than the exact instant the tool reverts, so the switch waits for the
+    // gesture rather than cutting it off halfway.
+    if (gesture.current === 'tool') {
+      springReturn.current = to;
+      return;
+    }
+    useToolStore.getState().setTool(to);
+  }, []);
+
+  /** Complete a revert that was deferred until the gesture in flight ended. */
+  const finishSpring = useCallback(() => {
+    const to = springReturn.current;
+    if (to === null) return;
+    springReturn.current = null;
+    useToolStore.getState().setTool(to);
+  }, []);
+
   // End the active tool/pan gesture, either committing it (the pointer lifted
   // normally) or cancelling it (a pinch/pen stole the interaction).
   const endToolGesture = useCallback(
@@ -611,8 +675,9 @@ export function Canvas() {
       }
       gesture.current = null;
       toolPointerId.current = null;
+      if (wasToolGesture) finishSpring();
     },
-    [ctx],
+    [ctx, finishSpring],
   );
 
   const startToolGesture = useCallback(
@@ -620,6 +685,9 @@ export function Canvas() {
       // Make every new gesture an undo boundary as a fallback for browsers
       // that drop a preceding pointer-up/cancel event.
       breakUndoCapture();
+      // Using a tool is what makes a held hotkey a hold rather than a tap, so
+      // the gesture is what the spring springs back from.
+      if (spring.current) spring.current.used = true;
       gesture.current = 'tool';
       toolPointerId.current = e.pointerId;
       e.currentTarget.setPointerCapture(e.pointerId);
@@ -1005,7 +1073,9 @@ export function Canvas() {
       if (e.pointerId !== toolPointerId.current) return;
       if (gesture.current === 'pan') {
         pan.onPointerUp(e);
-      } else if (gesture.current === 'tool') {
+      }
+      const wasToolGesture = gesture.current === 'tool';
+      if (wasToolGesture) {
         activeTool()?.onPointerUp?.(toInfo(e), ctx);
         breakUndoCapture();
         if (e.currentTarget.hasPointerCapture(e.pointerId)) {
@@ -1014,8 +1084,11 @@ export function Canvas() {
       }
       gesture.current = null;
       toolPointerId.current = null;
+      // After the gesture is closed out, so the tool this hands back to enters
+      // with nothing in flight.
+      if (wasToolGesture) finishSpring();
     },
-    [pan, toInfo, ctx, releaseTouch],
+    [pan, toInfo, ctx, releaseTouch, finishSpring],
   );
 
   // The browser fires pointercancel when it steals a touch (e.g. a pinch is
@@ -1440,11 +1513,27 @@ export function Canvas() {
       const tool = toolRegistry.byHotkey(e.key);
       if (tool) {
         e.preventDefault();
+        // Auto-repeat while a key is held is not a second press: re-arming on
+        // it would record the borrowed tool as the one to return to.
+        if (e.repeat) return;
+        const from = useToolStore.getState().activeToolId;
+        // Pressing the active tool's own key borrows nothing.
+        spring.current =
+          from === tool.id
+            ? null
+            : {
+                key: e.key.toLowerCase(),
+                from,
+                to: tool.id,
+                at: e.timeStamp,
+                used: false,
+              };
         useToolStore.getState().setTool(tool.id);
       }
     };
     const onKeyUp = (e: KeyboardEvent) => {
       if (isTypingTarget(e.target)) return;
+      releaseSpring(e);
       if (e.key !== 'Shift' && e.key !== 'Control' && e.key !== 'Meta') return;
       toolRegistry.get(useToolStore.getState().activeToolId)?.onKeyUp?.(e, ctx);
     };
@@ -1454,7 +1543,7 @@ export function Canvas() {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
     };
-  }, [ctx]);
+  }, [ctx, releaseSpring]);
 
   // The single paste path (Cmd+V). Prefers our own tagged copy (editable
   // shapes), then a clipboard image, then the in-app buffer as a fallback.
@@ -1676,6 +1765,9 @@ export function Canvas() {
           stroke. Its own element, so a stroke's per-frame churn never dirties
           the raster of the page-sized SVG behind it. */}
       {liveStrokeId && <ActiveStrokeLayer camera={camera} />}
+
+      {/* Mounts only while something is fading out after a delete. */}
+      <VanishLayer camera={camera} />
 
       {/* While the camera moves, an invisible blocker captures pointer hit-tests
           so the browser doesn't walk the SVG shape tree every frame. Pointer and

@@ -275,7 +275,7 @@ export function MusicPlayer({
               className={cn(
                 'rounded-md border',
                 toolbarItem && 'bg-surface',
-                isPlaying && 'border-border bg-panel text-primary',
+                isPlaying && 'border-border bg-panel text-fg',
               )}
             />
           }
@@ -295,13 +295,13 @@ export function MusicPlayer({
           className={cn(CHROME_CONTROLS, 'w-80 max-w-[calc(100vw-1.5rem)] gap-0 overflow-hidden p-0')}
         >
           {/* ── Header strip ──────────────────────────────────────────────── */}
-          <div className="flex items-start justify-between border-b border-border bg-subtle px-4 py-3">
+          <div className="flex items-start justify-between border-b border-border bg-panel px-4 py-3">
             <div>
               {/* Eyebrow label — the system's signature section marker (§5.3) */}
-              <span className="font-mono text-2xs font-medium uppercase tracking-[0.08em] text-tertiary">
+              <span className="font-mono text-2xs font-medium uppercase tracking-[0.08em] text-fg-muted">
                 Music
               </span>
-              <p className="mt-0.5 text-xs text-tertiary">
+              <p className="mt-0.5 text-xs text-fg-muted">
                 Playback is shared with everyone on this board
               </p>
             </div>
@@ -310,21 +310,21 @@ export function MusicPlayer({
           {/* ── Now playing strip ─────────────────────────────────────────── */}
           <div
             aria-label="Now playing"
-            className="flex flex-col gap-3 border-b border-border bg-subtle px-4 pt-3 pb-4"
+            className="flex flex-col gap-3 border-b border-border bg-panel px-4 pt-3 pb-4"
           >
             {/* Track identity + controls */}
             <div className="flex items-center gap-3">
               {/* Thumbnail: small square with current state glyph */}
-              <div className="flex size-10 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-tertiary shadow-xs">
+              <div className="flex size-10 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-fg-muted shadow-xs">
                 <Music2 size={16} strokeWidth={1.5} aria-hidden="true" />
               </div>
 
               {/* Title + subtitle */}
               <div className="min-w-0 flex-1" aria-live="polite">
-                <p className="truncate text-sm font-medium text-primary">
+                <p className="truncate text-sm font-medium text-fg">
                   {currentTrack?.title ?? 'Ready when you are'}
                 </p>
-                <p className="truncate text-xs text-secondary">
+                <p className="truncate text-xs text-fg-secondary">
                   {currentTrack
                     ? trackSubtitle(currentTrack)
                     : 'Choose a track below'}
@@ -377,10 +377,10 @@ export function MusicPlayer({
                   setSeekPreview(Array.isArray(next) ? next[0]! : next)
                 }
                 onValueCommitted={seekTrack}
-                className="-my-1.5 py-1.5 [&_[data-slot=slider-thumb]]:size-3"
+                className="-my-1.5 py-1.5"
               />
               {/* Mono tabular time readout (§5.4 numerals: always tabular) */}
-              <div className="mt-1.5 flex items-center justify-between font-mono text-xs tabular-nums text-tertiary">
+              <div className="mt-1.5 flex items-center justify-between font-mono text-xs tabular-nums text-fg-muted">
                 <span>{formatTime(timelineTime)}</span>
                 <span>{duration > 0 ? formatTime(duration) : '--:--'}</span>
               </div>
@@ -409,7 +409,7 @@ export function MusicPlayer({
                 }
                 className="py-1.5"
               />
-              <span className="w-8 shrink-0 text-right font-mono text-xs tabular-nums text-tertiary">
+              <span className="w-8 shrink-0 text-right font-mono text-xs tabular-nums text-fg-muted">
                 {Math.round(volume * 100)}%
               </span>
             </div>
@@ -430,7 +430,7 @@ export function MusicPlayer({
 
             {/* Attribution — caption below the controls (§5.4 caption role) */}
             {playback.requestedBy && !audioBlocked && (
-              <p className="text-xs text-tertiary">
+              <p className="text-xs text-fg-muted">
                 Started by {playback.requestedBy}
               </p>
             )}
@@ -440,11 +440,11 @@ export function MusicPlayer({
           <div className="flex flex-col gap-3 px-4 pt-3 pb-4">
             {/* Library eyebrow + track count */}
             <div className="flex items-center justify-between">
-              <span className="font-mono text-2xs font-medium uppercase tracking-[0.08em] text-tertiary">
+              <span className="font-mono text-2xs font-medium uppercase tracking-[0.08em] text-fg-muted">
                 Library
               </span>
               {library !== null && !libraryError && (
-                <span className="font-mono text-xs tabular-nums text-tertiary">
+                <span className="font-mono text-xs tabular-nums text-fg-muted">
                   {activeTracks.length}{' '}
                   {activeTracks.length === 1 ? 'track' : 'tracks'}
                 </span>
@@ -466,12 +466,12 @@ export function MusicPlayer({
 
             {/* Error state */}
             {libraryError && (
-              <div className="flex flex-col gap-2.5 rounded-xl border border-border bg-subtle p-3">
+              <div className="flex flex-col gap-2.5 rounded-xl border border-border bg-panel p-3">
                 <div>
-                  <p className="text-sm font-medium text-primary">
+                  <p className="text-sm font-medium text-fg">
                     Couldn&apos;t load your music
                   </p>
-                  <p className="mt-0.5 text-xs text-secondary">
+                  <p className="mt-0.5 text-xs text-fg-secondary">
                     Check your connection and try again.
                   </p>
                 </div>
@@ -490,12 +490,12 @@ export function MusicPlayer({
 
             {/* Empty library state */}
             {library !== null && !libraryError && playlists.length === 0 && (
-              <div className="flex flex-col gap-2.5 rounded-xl border border-border bg-subtle p-3">
+              <div className="flex flex-col gap-2.5 rounded-xl border border-border bg-panel p-3">
                 <div>
-                  <p className="text-sm font-medium text-primary">
+                  <p className="text-sm font-medium text-fg">
                     Your library is empty
                   </p>
-                  <p className="mt-0.5 text-xs text-secondary">
+                  <p className="mt-0.5 text-xs text-fg-secondary">
                     Add audio files to the local music folder, then refresh.
                   </p>
                 </div>
@@ -522,7 +522,7 @@ export function MusicPlayer({
                   <div
                     role="tablist"
                     aria-label="Playlists"
-                    className="scrollbar-none flex gap-1 overflow-x-auto rounded-lg bg-muted p-1"
+                    className="scrollbar-none flex gap-1 overflow-x-auto rounded-lg bg-panel p-1"
                   >
                     {playlists.map((playlist) => {
                       const active = playlist.name === activePlaylist;
@@ -537,8 +537,8 @@ export function MusicPlayer({
                             'flex shrink-0 items-center gap-1.5 rounded-md px-3 text-sm font-medium',
                             'h-7 transition-[background-color,color,box-shadow] duration-[120ms] ease-[cubic-bezier(0.65,0,0.35,1)]',
                             active
-                              ? 'bg-surface text-primary shadow-xs'
-                              : 'text-tertiary hover:text-secondary',
+                              ? 'bg-surface text-fg shadow-xs'
+                              : 'text-fg-muted hover:text-fg-secondary',
                           )}
                         >
                           <ListMusic size={13} strokeWidth={1.5} aria-hidden="true" />
@@ -577,7 +577,7 @@ export function MusicPlayer({
                           // Active = lifted chip; inactive = ghost
                           active
                             ? 'bg-surface shadow-xs'
-                            : 'hover:bg-subtle',
+                            : 'hover:bg-panel',
                         )}
                       >
                         {/* State glyph in thumbnail slot — shows play/pause when active */}
@@ -585,7 +585,7 @@ export function MusicPlayer({
                           className={cn(
                             'flex size-8 shrink-0 items-center justify-center rounded-md',
                             'transition-colors duration-[80ms]',
-                            active ? 'bg-subtle text-primary' : 'bg-subtle text-tertiary',
+                            active ? 'bg-panel text-fg' : 'bg-panel text-fg-muted',
                           )}
                           aria-hidden="true"
                         >
@@ -603,12 +603,12 @@ export function MusicPlayer({
                           <span
                             className={cn(
                               'block truncate text-sm',
-                              active ? 'font-medium text-primary' : 'text-primary',
+                              active ? 'font-medium text-fg' : 'text-fg',
                             )}
                           >
                             {track.title}
                           </span>
-                          <span className="block truncate text-xs text-secondary">
+                          <span className="block truncate text-xs text-fg-secondary">
                             {track.artist ?? track.playlist}
                           </span>
                         </span>

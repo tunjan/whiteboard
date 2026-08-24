@@ -23,7 +23,11 @@ import {
   exportSelectionToPng,
 } from '@/canvas/export-png';
 import { deleteTargetIds } from '@/canvas/hierarchy';
-import { editor } from '@/canvas/use-document-store';
+import {
+  editor,
+  moveShapesToPage,
+  useDocumentStore,
+} from '@/canvas/use-document-store';
 import { useHiddenStore } from '@/canvas/use-hidden-store';
 import { useImageCroppingStore } from '@/canvas/use-image-cropping-store';
 import { useSelectionStore } from '@/canvas/use-selection-store';
@@ -48,13 +52,24 @@ export function CanvasContextMenu({ children }: { children: ReactNode }) {
   const canAlign = selectedIds.length >= 2;
   const canDistribute = selectedIds.length >= 3;
   const canGroup = selectedIds.length >= 2;
-  const hasGroup = selectedIds.some((id) => editor.getShape(id)?.type === 'group');
+  const hasGroup = selectedIds.some(
+    (id) => editor.getShape(id)?.type === 'group',
+  );
   const singleImageId =
-    selectedIds.length === 1 && editor.getShape(selectedIds[0]!)?.type === 'image'
+    selectedIds.length === 1 &&
+    editor.getShape(selectedIds[0]!)?.type === 'image'
       ? selectedIds[0]!
       : null;
   const align = (edge: Parameters<typeof alignShapes>[2]) =>
     alignShapes(editor, selectedIds, edge);
+
+  const pages = useDocumentStore((s) => s.doc.pages);
+  const pageOrder = useDocumentStore((s) => s.doc.pageOrder);
+  const currentPageId = useDocumentStore((s) => s.currentPageId);
+  const otherPages = pageOrder
+    .filter((id) => id !== currentPageId)
+    .map((id) => pages[id])
+    .filter((page) => page !== undefined);
 
   const setLocked = (locked: boolean) => {
     for (const id of selectedIds) editor.updateShape(id, { locked });
@@ -134,7 +149,9 @@ export function CanvasContextMenu({ children }: { children: ReactNode }) {
         </ContextMenuItem>
         {singleImageId && (
           <ContextMenuItem
-            onClick={() => useImageCroppingStore.getState().start(singleImageId)}
+            onClick={() =>
+              useImageCroppingStore.getState().start(singleImageId)
+            }
           >
             Crop
           </ContextMenuItem>
@@ -237,6 +254,32 @@ export function CanvasContextMenu({ children }: { children: ReactNode }) {
           Ungroup
           <ContextMenuShortcut>⌘⇧G</ContextMenuShortcut>
         </ContextMenuItem>
+
+        <ContextMenuSeparator />
+
+        <ContextMenuSub>
+          <ContextMenuSubTrigger
+            disabled={!has || allLocked || !otherPages.length}
+          >
+            Move to page
+          </ContextMenuSubTrigger>
+          <ContextMenuSubContent className="w-44">
+            {otherPages.map((page) => (
+              <ContextMenuItem
+                key={page.id}
+                onClick={() => {
+                  const unlocked = selectedIds.filter(
+                    (id) => !editor.getShape(id)?.locked,
+                  );
+                  moveShapesToPage(unlocked, page.id);
+                  useSelectionStore.getState().clear();
+                }}
+              >
+                <span className="truncate">{page.name}</span>
+              </ContextMenuItem>
+            ))}
+          </ContextMenuSubContent>
+        </ContextMenuSub>
 
         <ContextMenuSeparator />
 

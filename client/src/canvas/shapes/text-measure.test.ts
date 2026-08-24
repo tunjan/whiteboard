@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  MIN_TEXT_WIDTH,
   caretForTextIndex,
   layoutText,
+  layoutTextProps,
+  resolveLineHeightPx,
+  stabilizeTextPosition,
+  textAlignOffset,
   textIndexAtPoint,
   textSelectionRects,
 } from './text-measure';
@@ -133,5 +138,144 @@ describe('font weight', () => {
       'aa',
       'aa',
     ]);
+  });
+});
+
+describe('line height quantization', () => {
+  it('rounds the line advance to whole pixels', () => {
+    // 10 * 1.15 = 11.5 exactly, which the two layout engines would round in
+    // opposite directions if it were left fractional.
+    expect(resolveLineHeightPx(10, 1.15)).toBe(12);
+    expect(resolveLineHeightPx(24, 1.2)).toBe(29);
+    expect(resolveLineHeightPx(10, 0.01)).toBe(1);
+  });
+
+  it('lays lines out on the quantized advance', () => {
+    const layout = layoutText({
+      text: 'a\nb\nc',
+      fontSize: 24,
+      lineHeight: 1.2,
+      sizingMode: 'auto',
+    });
+    expect(layout.lineHeight).toBe(29);
+    expect(layout.lines.map((line) => line.y)).toEqual([0, 29, 58]);
+    expect(layout.height).toBe(87);
+  });
+});
+
+describe('auto-size width', () => {
+  it('pads the measured advance so trailing ink is not shaved off', async () => {
+    const { layoutText: layout } = await importWithStubCanvas();
+    // Stub advance: 3 chars * 10px * 0.6 = 18.
+    expect(layout({ text: 'abc', fontSize: 10, sizingMode: 'auto' }).width).toBe(
+      19,
+    );
+  });
+
+  it('never reports less than the minimum width', () => {
+    expect(layoutText({ text: '', fontSize: 10, sizingMode: 'auto' }).width).toBe(
+      MIN_TEXT_WIDTH,
+    );
+  });
+});
+
+describe('alignment offset', () => {
+  it('places the click point on the edge the alignment anchors to', () => {
+    expect(textAlignOffset(100, 'start')).toBe(0);
+    expect(textAlignOffset(100, 'middle')).toBe(-50);
+    expect(textAlignOffset(100, 'end')).toBe(-100);
+  });
+});
+
+describe('typographical stabilization', () => {
+  const base = {
+    x: 100,
+    y: 100,
+    rotation: 0,
+    props: {
+      text: 'ab',
+      color: '#000',
+      fontSize: 10,
+      fontFamily: 'sans' as const,
+      fontWeight: 400 as const,
+      sizingMode: 'auto' as const,
+      width: 0,
+      lineHeight: 1.2,
+      align: 'start' as const,
+    },
+  };
+
+  it('leaves start-aligned text alone while typing', () => {
+    const next = { ...base.props, text: 'abcdef' };
+    expect(stabilizeTextPosition(base, next)).toEqual({ x: 100, y: 100 });
+  });
+
+  it('holds the centre of middle-aligned text as it grows', () => {
+    const shape = { ...base, props: { ...base.props, align: 'middle' as const } };
+    const next = { ...shape.props, text: 'abcdef' };
+    const grown = layoutTextProps(next).width - layoutTextProps(shape.props).width;
+
+    const moved = stabilizeTextPosition(shape, next);
+    expect(moved.x).toBeCloseTo(100 - grown / 2);
+    // Centre before and centre after must coincide.
+    expect(moved.x + layoutTextProps(next).width / 2).toBeCloseTo(
+      100 + layoutTextProps(shape.props).width / 2,
+    );
+    // Typing must not move the shape vertically.
+    expect(moved.y).toBe(100);
+  });
+
+  it('holds the right edge of end-aligned text as it grows', () => {
+    const shape = { ...base, props: { ...base.props, align: 'end' as const } };
+    const next = { ...shape.props, text: 'abcdef' };
+    const moved = stabilizeTextPosition(shape, next);
+    expect(moved.x + layoutTextProps(next).width).toBeCloseTo(
+      100 + layoutTextProps(shape.props).width,
+    );
+  });
+
+  it('grows about the vertical centre on a style change, not on a text change', () => {
+    const bigger = { ...base.props, fontSize: 20 };
+    const before = layoutTextProps(base.props).height;
+    const after = layoutTextProps(bigger).height;
+    expect(stabilizeTextPosition(base, bigger).y).toBeCloseTo(
+      100 - (after - before) / 2,
+    );
+  });
+
+  it('moves a rotated shape along its own axes', () => {
+    const shape = {
+      ...base,
+      rotation: Math.PI / 2,
+      props: { ...base.props, align: 'middle' as const },
+    };
+    const next = { ...shape.props, text: 'abcdef' };
+    const grown = layoutTextProps(next).width - layoutTextProps(shape.props).width;
+    const moved = stabilizeTextPosition(shape, next);
+    // A quarter turn sends the horizontal correction down the y axis.
+    expect(moved.x).toBeCloseTo(100);
+    expect(moved.y).toBeCloseTo(100 - grown / 2);
+  });
+
+  it('is a no-op for fixed-width text, whose box the content cannot resize', () => {
+    const shape = {
+      ...base,
+      props: {
+        ...base.props,
+        align: 'middle' as const,
+        sizingMode: 'fixed' as const,
+        width: 200,
+      },
+    };
+    expect(stabilizeTextPosition(shape, { ...shape.props, text: 'abcdef' })).toEqual(
+      { x: 100, y: 100 },
+    );
+  });
+
+  it('is a no-op when neither the text nor the style changed', () => {
+    expect(stabilizeTextPosition(base, { ...base.props })).toEqual({
+      x: 100,
+      y: 100,
+    });
   });
 });

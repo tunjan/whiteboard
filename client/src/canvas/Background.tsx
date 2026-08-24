@@ -22,7 +22,7 @@ const MINOR = 'var(--grid-minor)';
 const MAJOR = 'var(--grid-major)';
 const DOT = 'var(--grid-dot)';
 const AXIS = 'var(--grid-axis)';
-const LABEL = 'var(--color-secondary)';
+const LABEL = 'var(--color-fg-secondary)';
 
 /**
  * Infinite background rendered in **screen space** (no camera transform) so
@@ -214,12 +214,7 @@ function CoordinateAxes({ camera, width, height }: AxesProps) {
       })}
 
       {/* Single origin label. */}
-      <text
-        x={axisX + 6}
-        y={axisY + 14}
-        textAnchor="start"
-        {...labelStyle}
-      >
+      <text x={axisX + 6} y={axisY + 14} textAnchor="start" {...labelStyle}>
         0
       </text>
     </g>

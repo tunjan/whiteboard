@@ -50,6 +50,8 @@ interface CameraStore {
    * camera and restores (or defaults) the target page's camera.
    */
   switchTo: (boardId: string, pageId: string) => void;
+  /** Seed a new page's viewport from another page's (used by page duplication). */
+  copyPage: (boardId: string, fromPageId: string, toPageId: string) => void;
   /** Forget the saved viewport for a page that no longer exists. */
   deletePage: (boardId: string, pageId: string) => void;
   reset: () => void;
@@ -133,9 +135,10 @@ function loadCameras(): Record<string, Camera> {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return {};
-    const parsed = JSON.parse(raw) as
-      | { cameras?: Record<string, Camera>; state?: { cameras?: Record<string, Camera> } }
-      | null;
+    const parsed = JSON.parse(raw) as {
+      cameras?: Record<string, Camera>;
+      state?: { cameras?: Record<string, Camera> };
+    } | null;
     return parsed?.cameras ?? parsed?.state?.cameras ?? {};
   } catch {
     return {};
@@ -223,6 +226,18 @@ export const useCameraStore = create<CameraStore>((set, get) => ({
         activeKey: key,
         camera: constrainCamera(cameras[key]),
       };
+    });
+  },
+  copyPage: (boardId, fromPageId, toPageId) => {
+    set((s) => {
+      const fromKey = cameraKey(boardId, fromPageId);
+      // The source page's live camera has not been flushed into `cameras` yet
+      // while it is the active one.
+      const source = fromKey === s.activeKey ? s.camera : s.cameras[fromKey];
+      if (!source) return {};
+      const cameras = { ...s.cameras, [cameraKey(boardId, toPageId)]: source };
+      saveCameras(cameras);
+      return { cameras };
     });
   },
   deletePage: (boardId, pageId) => {

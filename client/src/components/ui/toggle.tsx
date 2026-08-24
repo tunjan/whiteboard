@@ -1,36 +1,36 @@
-import { Toggle as TogglePrimitive } from "@base-ui/react/toggle"
-import { cva, type VariantProps } from "class-variance-authority"
+import { Toggle as TogglePrimitive } from '@base-ui/react/toggle';
+import { cva, type VariantProps } from 'class-variance-authority';
 
-import { cn } from "@/lib/utils"
+import { cn } from '@/lib/utils';
 
 const toggleVariants = cva(
   // Hover tracks the host surface, same as Button — see the note there.
-  "group/toggle inline-flex items-center justify-center gap-1 rounded-md text-sm font-medium whitespace-nowrap transition-colors hover:bg-[var(--chrome-hover,var(--color-panel))] hover:text-fg disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-danger-border aria-pressed:bg-panel [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  "group/toggle inline-flex items-center justify-center gap-1 rounded-control text-sm font-medium whitespace-nowrap transition-colors hover:bg-[var(--chrome-hover,var(--color-panel))] hover:text-fg disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-danger-control-border aria-pressed:bg-panel [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
       variant: {
-        default: "bg-transparent",
+        default: 'bg-transparent',
         outline:
-          "border border-border bg-transparent shadow-xs hover:bg-[var(--chrome-hover,var(--color-panel))]",
+          'border border-control-border bg-transparent shadow-control hover:bg-[var(--chrome-hover,var(--color-panel))]',
       },
       size: {
         default:
-          "h-9 min-w-9 px-2.5 has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2",
-        sm: "h-8 min-w-8 px-2.5 has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5",
-        lg: "h-10 min-w-10 px-2.5 has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2",
+          'h-9 min-w-9 px-2.5 has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2',
+        sm: 'h-8 min-w-8 px-2.5 has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5',
+        lg: 'h-10 min-w-10 px-2.5 has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2',
       },
     },
     defaultVariants: {
-      variant: "default",
-      size: "default",
+      variant: 'default',
+      size: 'default',
     },
-  }
-)
+  },
+);
 
 function Toggle({
   className,
-  variant = "default",
-  size = "default",
+  variant = 'default',
+  size = 'default',
   ...props
 }: TogglePrimitive.Props & VariantProps<typeof toggleVariants>) {
   return (
@@ -39,7 +39,7 @@ function Toggle({
       className={cn(toggleVariants({ variant, size, className }))}
       {...props}
     />
-  )
+  );
 }
 
-export { Toggle, toggleVariants }
+export { Toggle, toggleVariants };

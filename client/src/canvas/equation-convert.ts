@@ -171,6 +171,15 @@ async function loadMathJax(): Promise<void> {
         // output in case a later release moves these elsewhere.
         name !== 'html',
     ),
+    macros: {
+      // MathLive writes an unfilled slot as `\placeholder{}` — from a template
+      // the panel inserted, or from any structure the virtual keyboard built.
+      // MathJax has never heard of the command, so without this every equation
+      // with an empty slot failed to typeset with "Undefined control sequence"
+      // while the user was still filling it in. Rendering it as its (empty)
+      // argument leaves the gap where the slot is.
+      placeholder: ['{#1}', 1],
+    },
     formatError: (_jax: unknown, error: unknown) => {
       throw error;
     },
@@ -200,14 +209,19 @@ export function ensureConverter(): Promise<void> {
 /**
  * Typeset one expression. Requires `ensureConverter` to have resolved.
  *
+ * `inline` selects TeX's text style over display style, which is a decision
+ * about the *typesetting* rather than about the source: the same LaTeX renders
+ * with limits beside `\sum` instead of above it, and with smaller fractions.
+ * Both are legitimate renders of the same expression, so both are cached.
+ *
  * A TeX failure comes back as an `error` entry rather than throwing: invalid
  * source is an ordinary, cacheable outcome here, not an exception.
  */
-export function convertEquation(latex: string): EquationRender {
+export function convertEquation(latex: string, inline = false): EquationRender {
   if (!runtime) throw new Error('MathJax is not ready');
   try {
     const container = runtime.document.convert(latex, {
-      display: true,
+      display: !inline,
       em: BASE_EM,
       ex: BASE_EX,
     }) as LiteElement;

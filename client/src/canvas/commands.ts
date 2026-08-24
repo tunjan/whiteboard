@@ -10,6 +10,26 @@ function byIndex(a: Shape, b: Shape): number {
 }
 
 /**
+ * Rewrite a connector's bindings onto cloned targets. A terminal bound to a
+ * shape that was cloned follows the clone; one bound outside the cloned set
+ * keeps pointing at the original, which is what same-page duplication wants.
+ */
+function remapBindings(
+  props: Record<string, unknown>,
+  idMap: Map<string, string>,
+): void {
+  const bindings = props.bindings as
+    | { start?: { shapeId: string } | null; end?: { shapeId: string } | null }
+    | undefined;
+  if (!bindings) return;
+  for (const terminal of ['start', 'end'] as const) {
+    const binding = bindings[terminal];
+    const mapped = binding ? idMap.get(binding.shapeId) : undefined;
+    if (binding && mapped) binding.shapeId = mapped;
+  }
+}
+
+/**
  * Materialize clones of `subtree` into the editor with fresh ids, remapping
  * `parentId` within the subtree so container relationships survive. Each clone
  * is offset and stacked on top. Returns the new ids of the original roots.
@@ -27,7 +47,8 @@ export function materializeClones(
   for (const s of [...subtree].sort(byIndex)) {
     const newId = idMap.get(s.id)!;
     const remapped = s.parentId ? idMap.get(s.parentId) : undefined;
-    const parentId = remapped ?? (keepExternalParent ? (s.parentId ?? null) : null);
+    const parentId =
+      remapped ?? (keepExternalParent ? (s.parentId ?? null) : null);
     const clone = {
       ...s,
       id: newId,
@@ -38,6 +59,7 @@ export function materializeClones(
       props: structuredClone(s.props),
       locked: false,
     } as Shape;
+    remapBindings(clone.props as Record<string, unknown>, idMap);
     editor.createShape(clone);
     if (rootIds.includes(s.id)) newRoots.push(newId);
   }
@@ -186,7 +208,8 @@ export function pruneDegenerateGroups(
 
   if (!removed.size) return [];
   editor.transact(() => {
-    for (const r of reparented) editor.updateShape(r.id, { parentId: r.parentId });
+    for (const r of reparented)
+      editor.updateShape(r.id, { parentId: r.parentId });
     editor.deleteShapes([...removed]);
   });
   return [...removed];

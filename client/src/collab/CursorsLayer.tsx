@@ -100,7 +100,7 @@ function OffscreenCursorIndicator({
         // can appear belong to one system — except for the hairline, which
         // carries the identity colour at full strength so the marker stays
         // scannable from across the board without flooding the disc.
-        className="absolute inset-0 flex items-center justify-center rounded-full border bg-surface/95 text-2xs font-medium leading-none text-primary shadow-e2 transition-colors duration-instant group-hover:bg-surface-hover"
+        className="absolute inset-0 flex items-center justify-center rounded-full border bg-surface/95 text-2xs font-medium leading-none text-fg shadow-e2 transition-colors duration-instant group-hover:bg-surface-hover"
         style={{ borderColor: color }}
       >
         {name.trim().charAt(0).toUpperCase() || '?'}
@@ -247,7 +247,7 @@ export function CursorsLayer({
                 <CursorIcon color={p.color} />
                 <span
                   className={cn(
-                    'absolute left-3 flex h-6 max-w-40 items-center gap-1.5 rounded-lg border border-border bg-surface/95 px-2 text-2xs font-medium leading-none text-primary shadow-e2',
+                    'absolute left-3 flex h-6 max-w-40 items-center gap-1.5 rounded-lg border border-border bg-surface/95 px-2 text-2xs font-medium leading-none text-fg shadow-e2',
                     placeLabelAbove ? 'bottom-3' : 'top-3',
                   )}
                 >

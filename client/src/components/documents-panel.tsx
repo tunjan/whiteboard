@@ -109,10 +109,10 @@ function RowAction({
             onClick={onClick}
             className={cn(
               // 32×32 ghost icon — colour on hover only
-              'size-8 rounded-md text-tertiary transition-[background-color,color] duration-[80ms] ease-[cubic-bezier(0.2,0,0,1)]',
+              'size-8 rounded-md text-fg-muted transition-[background-color,color] duration-[80ms] ease-[cubic-bezier(0.2,0,0,1)]',
               danger
                 ? 'hover:bg-danger-bg hover:text-danger'
-                : 'hover:bg-subtle hover:text-primary',
+                : 'hover:bg-panel hover:text-fg',
             )}
           />
         }
@@ -158,14 +158,14 @@ function DocumentRow({
         // e0 in-flow card; hover changes surface only, no lift
         'group/row flex items-center gap-2.5 rounded-lg px-3 py-2',
         'transition-[background-color,border-color] duration-[80ms] ease-[cubic-bezier(0.2,0,0,1)]',
-        'hover:bg-subtle',
+        'hover:bg-panel',
       )}
     >
       {/* File-type icon */}
       <ExtIcon
         size={16}
         strokeWidth={1.5}
-        className="shrink-0 text-tertiary transition-colors duration-[80ms] group-hover/row:text-secondary"
+        className="shrink-0 text-fg-muted transition-colors duration-[80ms] group-hover/row:text-fg-secondary"
       />
 
       {/* Name + meta — the link covers both lines */}
@@ -178,19 +178,17 @@ function DocumentRow({
         aria-label={`Open ${meta.name}`}
       >
         {/* Primary label — sentence-case filename */}
-        <span className="block truncate text-sm font-medium text-primary leading-[20px]">
+        <span className="block truncate text-sm font-medium text-fg leading-[20px]">
           {meta.name}
         </span>
         {/* Secondary meta — size · uploader · date in tabular mono */}
-        <span className="block truncate text-xs leading-[16px] text-tertiary">
-          <span className="font-mono tabular-nums">{formatBytes(meta.size)}</span>
-          {meta.uploadedBy ? (
-            <span className="mx-1 text-[10px]">·</span>
-          ) : null}
-          {meta.uploadedBy ? (
-            <span>{meta.uploadedBy}</span>
-          ) : null}
-          <span className="mx-1 text-[10px]">·</span>
+        <span className="block truncate text-xs leading-[16px] text-fg-muted">
+          <span className="font-mono tabular-nums">
+            {formatBytes(meta.size)}
+          </span>
+          {meta.uploadedBy ? <span className="mx-1">·</span> : null}
+          {meta.uploadedBy ? <span>{meta.uploadedBy}</span> : null}
+          <span className="mx-1">·</span>
           <span className="font-mono tabular-nums">{dateLabel}</span>
         </span>
       </a>
@@ -243,9 +241,7 @@ function UploadRow({
       className={cn(
         // Slightly sunken card — panel bg + border so it reads as an in-progress chip
         'flex items-start gap-2.5 rounded-lg border px-3 py-2.5',
-        error
-          ? 'border-danger-border bg-danger-bg'
-          : 'border-border bg-subtle',
+        error ? 'border-danger-border bg-danger-bg' : 'border-border bg-panel',
       )}
     >
       {/* Status icon */}
@@ -261,7 +257,7 @@ function UploadRow({
           <Upload
             size={14}
             strokeWidth={1.5}
-            className="text-tertiary"
+            className="text-fg-muted"
             aria-hidden
           />
         )}
@@ -270,7 +266,7 @@ function UploadRow({
       {/* Content */}
       <div className="min-w-0 flex-1">
         {/* Filename */}
-        <p className="truncate text-xs font-medium leading-[16px] text-primary">
+        <p className="truncate text-xs font-medium leading-[16px] text-fg">
           {name}
         </p>
 
@@ -282,12 +278,12 @@ function UploadRow({
         ) : (
           /* Progress feedback */
           <>
-            <p className="mt-0.5 font-mono text-xs tabular-nums leading-[16px] text-tertiary">
+            <p className="mt-0.5 font-mono text-xs tabular-nums leading-[16px] text-fg-muted">
               {uploaded} of {total}
             </p>
             {/* Progress bar — inset radius = 0 (full pill) */}
             <div
-              className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-muted"
+              className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-panel"
               role="progressbar"
               aria-valuenow={pct}
               aria-valuemin={0}
@@ -331,11 +327,11 @@ function EmptyState() {
       <Folder
         size={20}
         strokeWidth={1.5}
-        className="mb-2 text-tertiary"
+        className="mb-2 text-fg-muted"
         aria-hidden
       />
-      <p className="text-sm font-medium text-secondary">No documents yet</p>
-      <p className="mt-1 max-w-[220px] text-xs leading-[18px] text-tertiary">
+      <p className="text-sm font-medium text-fg-secondary">No documents yet</p>
+      <p className="mt-1 max-w-[220px] text-xs leading-[18px] text-fg-muted">
         Add a PDF, worksheet, or image to share it with everyone on this board.
       </p>
     </div>
@@ -349,8 +345,13 @@ function EmptyState() {
 function DropZoneOverlay() {
   return (
     <div className="flex flex-col items-center justify-center gap-2 px-4 py-10">
-      <Upload size={20} strokeWidth={1.5} className="text-secondary" aria-hidden />
-      <p className="text-sm font-medium text-secondary">Drop to add</p>
+      <Upload
+        size={20}
+        strokeWidth={1.5}
+        className="text-fg-secondary"
+        aria-hidden
+      />
+      <p className="text-sm font-medium text-fg-secondary">Drop to add</p>
     </div>
   );
 }
@@ -377,12 +378,16 @@ export function DocumentsPanel({
   const open = useDocumentsStore((s) => s.panelOpen);
   const setOpen = useDocumentsStore((s) => s.setPanelOpen);
 
-  const [pendingDelete, setPendingDelete] = useState<BoardDocumentMeta | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<BoardDocumentMeta | null>(
+    null,
+  );
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const uploaderName = identity?.name ?? 'Someone';
-  const list = Object.values(documents).sort((a, b) => b.createdAt - a.createdAt);
+  const list = Object.values(documents).sort(
+    (a, b) => b.createdAt - a.createdAt,
+  );
   const uploadList = Object.values(uploads);
   const totalBytes = list.reduce((sum, meta) => sum + meta.size, 0);
   const fileCount = list.length;
@@ -452,21 +457,22 @@ export function DocumentsPanel({
         >
           {/* -------- Header strip -------- */}
           {/*
-           * compound-card toolbar strip: bg-subtle (panel-like), border-b,
+           * compound-card toolbar strip: bg-panel (panel-like), border-b,
            * padding-x = 20 (same as body's px-5).
            * Layout: title-group left, "Add files" action right.
            */}
-          <div className="flex items-center gap-3 border-b border-border bg-subtle px-4 py-2.5">
+          <div className="flex items-center gap-3 border-b border-border bg-panel px-4 py-2.5">
             {/* Left: eyebrow + inline count — min-w-0 so it can compress */}
             <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
               {/* Eyebrow — mono, uppercase, tracked, muted */}
-              <span className="shrink-0 font-mono text-[11px] font-medium uppercase leading-4 tracking-[0.08em] text-tertiary">
+              <span className="shrink-0 font-mono text-2xs font-medium uppercase tracking-[0.08em] text-fg-muted">
                 Files
               </span>
               {/* Count + size — inline, truncated, same mono weight */}
               {fileCount > 0 ? (
-                <span className="truncate font-mono text-[11px] tabular-nums leading-4 text-tertiary">
-                  · {fileCount} {fileCount === 1 ? 'file' : 'files'} · {formatBytes(totalBytes)}
+                <span className="truncate font-mono text-2xs tabular-nums text-fg-muted">
+                  · {fileCount} {fileCount === 1 ? 'file' : 'files'} ·{' '}
+                  {formatBytes(totalBytes)}
                 </span>
               ) : null}
             </div>
@@ -478,8 +484,8 @@ export function DocumentsPanel({
               size="sm"
               onClick={() => inputRef.current?.click()}
               className={cn(
-                'h-7 shrink-0 gap-1.5 rounded-md border-border bg-surface px-2.5 text-xs font-medium text-primary',
-                'shadow-none hover:border-strong hover:bg-subtle',
+                'h-7 shrink-0 gap-1.5 rounded-md border-border bg-surface px-2.5 text-xs font-medium text-fg',
+                'shadow-none hover:border-strong hover:bg-panel',
                 'transition-[background-color,border-color] duration-[80ms] ease-[cubic-bezier(0.2,0,0,1)]',
               )}
             >
@@ -508,8 +514,7 @@ export function DocumentsPanel({
             className={cn(
               'flex max-h-72 flex-col gap-1 overflow-y-auto px-2 py-2',
               // Drag-over ring — inset so it doesn't push layout
-              dragOver &&
-                'ring-2 ring-inset ring-primary rounded-b-2xl',
+              dragOver && 'ring-2 ring-inset ring-primary rounded-b-2xl',
             )}
           >
             {dragOver ? (
@@ -547,8 +552,8 @@ export function DocumentsPanel({
 
           {/* -------- Footer strip (shown only when there are files) -------- */}
           {fileCount > 0 ? (
-            <div className="flex items-center justify-between border-t border-border bg-subtle px-5 py-2.5">
-              <span className="text-xs leading-4 text-tertiary">
+            <div className="flex items-center justify-between border-t border-border bg-panel px-5 py-2.5">
+              <span className="text-xs leading-4 text-fg-muted">
                 Shared with everyone on the board
               </span>
             </div>
@@ -569,7 +574,7 @@ export function DocumentsPanel({
           <AlertDialogHeader>
             <AlertDialogTitle>Delete document?</AlertDialogTitle>
             <AlertDialogDescription>
-              <strong className="font-medium text-primary">
+              <strong className="font-medium text-fg">
                 "{pendingDelete?.name}"
               </strong>{' '}
               will be removed for everyone on this board. This can't be undone.

@@ -48,19 +48,16 @@ function PrecisionGlyph() {
 const MODES: {
   mode: EraserMode;
   label: string;
-  hint: string;
   Glyph: () => React.JSX.Element;
 }[] = [
   {
     mode: 'object',
     label: 'Object eraser',
-    hint: 'Erase whole objects',
     Glyph: ObjectGlyph,
   },
   {
     mode: 'precision',
     label: 'Precision eraser',
-    hint: 'Cut through strokes and lines',
     Glyph: PrecisionGlyph,
   },
 ];
@@ -112,7 +109,7 @@ export function EraserModeSelector({ active }: { active: boolean }) {
         aria-hidden={!active}
         inert={!active}
         className={cn(
-          'rounded-xl p-1 shadow-e5',
+          'rounded-xl border border-border/80 bg-surface/92 p-1 shadow-e4',
           'origin-bottom transition-[opacity,transform] duration-base ease-out-quart',
           'motion-reduce:transition-none',
           active
@@ -134,12 +131,12 @@ export function EraserModeSelector({ active }: { active: boolean }) {
           <span
             aria-hidden="true"
             className={cn(
-              'pointer-events-none absolute inset-y-0 left-0 w-1/2 rounded-lg border border-border bg-panel',
+              'pointer-events-none absolute inset-y-0 left-0 w-1/2 rounded-lg border border-border-strong/60 bg-panel shadow-xs',
               'transition-transform duration-base ease-out-quart motion-reduce:transition-none',
               eraserMode === 'precision' && 'translate-x-full',
             )}
           />
-          {MODES.map(({ mode, label, hint, Glyph }) => {
+          {MODES.map(({ mode, label, Glyph }) => {
             const selected = mode === eraserMode;
             return (
               <Tooltip key={mode}>
@@ -157,15 +154,15 @@ export function EraserModeSelector({ active }: { active: boolean }) {
                         'relative z-10 flex size-8 items-center justify-center rounded-lg',
                         'transition-colors duration-fast ease-out-quart motion-reduce:transition-none',
                         selected
-                          ? 'text-blue-700 dark:text-blue-200'
-                          : 'text-secondary hover:text-primary',
+                          ? 'text-fg font-medium'
+                          : 'text-fg-muted hover:text-fg',
                       )}
                     />
                   }
                 >
                   <Glyph />
                 </TooltipTrigger>
-                <TooltipContent side="top">{hint}</TooltipContent>
+                <TooltipContent side="top">{label}</TooltipContent>
               </Tooltip>
             );
           })}

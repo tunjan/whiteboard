@@ -40,7 +40,12 @@ import { editor, useDocumentStore } from './use-document-store';
 import { useHiddenStore } from './use-hidden-store';
 import { useImageCroppingStore } from './use-image-cropping-store';
 import { useSelectionStore } from './use-selection-store';
-import { bringToFront, sendBackward, sendToBack, bringForward } from './z-order';
+import {
+  bringToFront,
+  sendBackward,
+  sendToBack,
+  bringForward,
+} from './z-order';
 import { buttonVariants } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -125,7 +130,8 @@ export function SelectionToolbar({ camera }: SelectionToolbarProps) {
     (id) => editor.getShape(id)?.type === 'group',
   );
   const singleImageId =
-    selectedIds.length === 1 && editor.getShape(selectedIds[0]!)?.type === 'image'
+    selectedIds.length === 1 &&
+    editor.getShape(selectedIds[0]!)?.type === 'image'
       ? selectedIds[0]!
       : null;
 
@@ -173,7 +179,7 @@ export function SelectionToolbar({ camera }: SelectionToolbarProps) {
           role="toolbar"
           aria-label="Selection actions"
           className={cn(
-            'touch-targets flex h-11 items-center gap-1.5 p-1.5 shadow-e5',
+            'touch-targets flex h-12 items-center gap-2 bg-surface/92 p-2 shadow-panel',
             'motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95 motion-safe:duration-200 motion-safe:ease-[var(--ease-out-expo)]',
             below
               ? 'origin-top motion-safe:slide-in-from-top-1'
@@ -309,11 +315,7 @@ export function SelectionToolbar({ camera }: SelectionToolbarProps) {
                         <DropdownMenuItem
                           disabled={!canDistribute}
                           onClick={() =>
-                            distributeShapes(
-                              editor,
-                              selectedIds,
-                              'horizontal',
-                            )
+                            distributeShapes(editor, selectedIds, 'horizontal')
                           }
                         >
                           Distribute horizontally
@@ -362,10 +364,7 @@ export function SelectionToolbar({ camera }: SelectionToolbarProps) {
                     onClick={() => {
                       copySelectionToPngClipboard(selectedIds).catch(
                         (err: unknown) =>
-                          console.error(
-                            '[clipboard] copy as PNG failed',
-                            err,
-                          ),
+                          console.error('[clipboard] copy as PNG failed', err),
                       );
                     }}
                   >
@@ -435,11 +434,9 @@ function IconButton({
         aria-pressed={active || undefined}
         className={cn(
           buttonVariants({ variant: 'ghost', size: 'icon-sm' }),
-          'disabled:border-transparent disabled:bg-transparent disabled:text-tertiary',
-          active &&
-            'bg-muted text-primary hover:bg-muted hover:text-primary',
-          destructive &&
-            'hover:bg-danger-bg hover:text-danger',
+          'disabled:border-transparent disabled:bg-transparent disabled:text-fg-muted',
+          active && 'bg-panel text-fg hover:bg-panel hover:text-fg',
+          destructive && 'hover:bg-danger-bg hover:text-danger',
         )}
       >
         {children}

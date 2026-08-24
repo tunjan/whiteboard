@@ -6,6 +6,7 @@ import type {
   GraphParametricDomain,
   StrokeDash,
 } from '@whiteboard/shared';
+import { textOnColor } from '@/collab/identity';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { MathField } from '@/components/ui/math-field';
@@ -132,7 +133,7 @@ function ColorRadioGroup({
               'relative grid size-8 place-items-center rounded-md border transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-1',
               active
                 ? 'border-primary ring-2 ring-focus ring-offset-1 bg-surface'
-                : 'border-border/60 hover:border-border-strong hover:bg-subtle/80',
+                : 'border-border/60 hover:border-border-strong hover:bg-panel/80',
             )}
           >
             <span
@@ -140,7 +141,10 @@ function ColorRadioGroup({
               style={{ background: paletteColor.value }}
             />
             {active && (
-              <span className="absolute inset-0 grid place-items-center text-white drop-shadow-xs">
+              <span
+                className="absolute inset-0 grid place-items-center"
+                style={{ color: textOnColor(paletteColor.value) }}
+              >
                 <Check className="size-2.5 stroke-[3]" />
               </span>
             )}
@@ -166,7 +170,7 @@ function CurveStylePopover({
       <PopoverTrigger
         aria-label={`Curve style: ${graphColorName(expression.color, theme)}, ${expression.dash} line`}
         title="Color & style"
-        className="group/swatch relative grid size-8 place-items-center rounded-lg transition-all hover:bg-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-1"
+        className="group/swatch relative grid size-8 place-items-center rounded-lg transition-all hover:bg-panel focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-1"
       >
         <span
           className="size-5 rounded-full ring-1 ring-border-strong shadow-xs transition-transform duration-instant group-hover/swatch:scale-110"
@@ -266,7 +270,7 @@ function DomainRow({
   };
 
   const inputClass =
-    'h-5.5 w-11 !rounded-none !border-0 !bg-transparent px-0.5 text-center font-[\'KaTeX_Main\',serif] text-xs font-normal tabular-nums text-fg-secondary hover:text-fg !shadow-none focus:!bg-subtle/60 focus:text-fg focus:!outline-none focus:!ring-0 focus-visible:!outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none';
+    "h-5.5 w-11 !rounded-none !border-0 !bg-transparent px-0.5 text-center font-['KaTeX_Main',serif] text-xs font-normal tabular-nums text-fg-secondary hover:text-fg !shadow-none focus:!bg-panel/60 focus:text-fg focus:!outline-none focus:!ring-0 focus-visible:!outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none";
 
   // pl-12 clears the index + swatch gutter, so this lines up with the field.
   return (
@@ -288,7 +292,9 @@ function DomainRow({
         }}
         className={inputClass}
       />
-      <span className="font-['KaTeX_Math','KaTeX_Main',serif] italic select-none">≤ t ≤</span>
+      <span className="font-['KaTeX_Math','KaTeX_Main',serif] italic select-none">
+        ≤ t ≤
+      </span>
       <Input
         type="number"
         step="any"
@@ -362,11 +368,11 @@ export function ExpressionRow({
   };
 
   return (
-    <div className="group/row relative flex min-h-16 flex-col px-3 py-2.5 transition-colors duration-instant hover:bg-subtle/40 focus-within:bg-subtle/60">
+    <div className="group/row relative flex min-h-16 flex-col px-3 py-2.5 transition-colors duration-instant hover:bg-panel/40 focus-within:bg-panel/60">
       <div className="flex flex-1 items-center gap-2">
         {/* Left gutter: Index + Swatch */}
         <div className="flex shrink-0 items-center gap-2">
-          <span className="w-4 text-right text-base font-medium text-tertiary select-none">
+          <span className="w-4 text-right text-base font-medium text-fg-muted select-none">
             {index + 1}
           </span>
           <CurveStylePopover expression={expression} onPatch={onPatch} />

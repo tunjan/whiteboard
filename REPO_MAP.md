@@ -18,7 +18,7 @@ A self-hostable, real-time collaborative whiteboard built for tutoring. Uses an 
 ### Key Technologies
 
 - **Language/Runtime:** TypeScript (strict), Node.js 22+, npm workspaces
-- **Frontend:** React 19, Vite, Zustand 5, Tailwind CSS v4 (`@theme` in `index.css`), Base UI primitives, Lucide icons, MathLive/KaTeX, RBush (R-tree spatial index)
+- **Frontend:** React 19, Vite, Zustand 5, Tailwind CSS v4 (`@theme` in `index.css`), Base UI primitives, Lucide icons, MathLive (authoring) / MathJax (typesetting), RBush (R-tree spatial index)
 - **Sync & Collab:** Yjs CRDT, `y-indexeddb` (offline local cache), Hocuspocus v4 (server sync), WebRTC Mesh (audio voice chat)
 - **Backend:** Hono, Drizzle ORM, Postgres (`bytea` for Yjs binary dumps), `jose` (JWT cookie auth)
 
@@ -39,6 +39,9 @@ A self-hostable, real-time collaborative whiteboard built for tutoring. Uses an 
 - `shapes` (Y.Map): Default page (`page-default`) shapes.
 - `shapes:<pageId>` (Y.Map): Shapes for subsequent pages.
 - `pages` (Y.Map): Page metadata (`id`, `name`, `index`).
+  - Page ops live in `use-document-store.ts`: `createPage`, `renamePage`, `deletePage`, `movePage(ToIndex)`, `duplicatePage`, `moveShapesToPage`.
+  - `duplicatePage` clones shapes with **fresh** ids, remapping `parentId` and connector bindings within the copy; `moveShapesToPage` **keeps** ids and world positions, re-rooting any moved shape whose parent stays behind.
+  - Undo is per page (one `Y.UndoManager` per page's shapes map). A cross-page move writes to two maps, so the initiating page's manager takes the target map into scope and `crossPageMoveOwner` makes exactly one manager capture the transaction — otherwise undo would restore the shapes on the source while the copies stayed on the target.
 - `documents` (Y.Map): Shared file repository metadata.
 - `stickers` (Y.Array): Custom sticker library for the board.
 - `comments` (Y.Map): Canvas thread comments (not shapes, no undo).
@@ -106,6 +109,8 @@ A self-hostable, real-time collaborative whiteboard built for tutoring. Uses an 
 | `SelectionLayer.tsx`                      | Selection bounding box, 8 resize handles, rotation handle, and custom shape handles.                                                                               |
 | `SelectionToolbar.tsx`                    | Floating quick-actions toolbar above active selection.                                                                                                             |
 | `CommentsLayer.tsx`                       | Canvas thread comment pins and popup dialogs.                                                                                                                      |
+| `CommentText.tsx`                         | Renders a comment body: Markdown marks as elements, `$…$` / `$$…$$` as MathJax-typeset math (shares the equation render cache).                                     |
+| `comment-markdown.ts`                     | Parser for the Markdown-with-LaTeX subset comment bodies are written in (`parseCommentMarkdown`, `parseInline`).                                                    |
 | `LaserLayer.tsx`                          | Real-time fading laser pointer trails.                                                                                                                             |
 | `DrawingCursor.tsx` / `EraserCursor.tsx`  | Dynamic SVG cursor overlays matching brush/eraser size.                                                                                                            |
 | `TextEditorOverlay.tsx`                   | In-place rich/plain text editor overlay for text shapes.                                                                                                           |
@@ -128,10 +133,12 @@ A self-hostable, real-time collaborative whiteboard built for tutoring. Uses an 
 | `order.ts` / `z-order.ts`                                             | Fractional indexing string generation and layer reordering commands (bring forward, send to back).                      |
 | `commands.ts`                                                         | Composite canvas actions: duplicate, group, ungroup, delete with cascade.                                               |
 | `hierarchy.ts`                                                        | Parent-child tree traversal for groups and frames.                                                                      |
+| `page-names.ts`                                                       | Collision-free page naming (`getIncrementedName`): reuses a trailing counter instead of stacking suffixes.              |
 | `clipboard.ts` / `board/clipboard-os.ts`                              | Internal and OS clipboard serialization for shapes, images, and text.                                                   |
 | `export-png.tsx` / `png-phys.ts`                                      | Headless SVG-to-Canvas PNG exporter with DPI scaling and physical metadata.                                             |
 | `graph-parser.ts` / `graph-sampler.ts` / `graph-intersections.ts`     | 2D graphing engine: parses expressions/parameters, samples curve vertices, computes Newton-Raphson curve intersections. |
-| `equation-render.ts` / `equation-source.ts`                           | KaTeX / MathJax display equation SVG compilation and caching.                                                           |
+| `equation-render.ts` / `equation-source.ts`                           | MathJax display-equation SVG compilation and caching.                                                                   |
+| `equation-complete.ts` / `equation-shortcuts.ts`                      | LaTeX command catalog for the panel's autocomplete, plus pure typing edits (auto-brackets, Tab slots, environment rows). |
 | `link-url.ts` / `place-image.ts` / `place-link.ts` / `place-video.ts` | Asset drop and paste placement handlers.                                                                                |
 
 #### Canvas Zustand Stores & Hooks
@@ -166,7 +173,7 @@ Every shape implements `ShapeUtil<T>` (registered in `register.ts`):
 | `video`     | `video.tsx`                                                     | YouTube embed player with aspect ratio preservation.                                                                       |
 | `bookmark`  | `bookmark.tsx`                                                  | Unfurled link card with preview image, favicon, domain name.                                                               |
 | `graph`     | `graph.tsx`, `graph-storage.ts`, `graph-interaction.ts`         | 2D cartesian plot with pan/zoom viewport, dynamic expressions, parameters.                                                 |
-| `equation`  | `equation.tsx`                                                  | LaTeX math equation with KaTeX SVG renderer.                                                                               |
+| `equation`  | `equation.tsx`                                                  | LaTeX math equation with MathJax SVG renderer.                                                                             |
 | `group`     | `group.tsx`                                                     | Composite container shape (bounds = union of children).                                                                    |
 | `frame`     | `frame.tsx`                                                     | Named slide/artboard container shape.                                                                                      |
 
@@ -180,16 +187,17 @@ All tools implement `Tool` (registered in `register.ts`):
 | ----------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `select`                | `select-tool.ts`                                          | Hotkey `v` / `s`. Pointer dragging, multi-selection marquee, 8 resize handles, rotation handle, handle dragging, double-click to edit text/open group. |
 | `hand`                  | `hand-tool.ts`                                            | Hotkey `h` / `Space`. Click-drag canvas panning.                                                                                                       |
-| `draw`                  | `draw-tool.ts`                                            | Hotkey `d` / `p` / `b`. Freehand ink drawing with hardware coalesced samples.                                                                          |
+| `draw`                  | `draw-tool.ts`                                            | Hotkey `d` / `p` / `b`. Freehand ink drawing with hardware coalesced samples. `createDrawTool(config)` also backs the highlighter.                                                                          |
+| `highlighter`           | `draw-tool.ts`                                            | Hotkey `i`. The same freehand state machine laying marker ink: constant width, translucent, stacked under the drawing.                                  |
 | `wand`                  | `wand-tool.ts`                                            | Hotkey `w`. Gesture-recognizing pen that auto-converts strokes to neat shapes.                                                                         |
 | `line` / `arrow`        | `line-tool.ts`                                            | Hotkey `l` / `a`. Drag to create line/arrow; snaps endpoints to shape anchor points.                                                                   |
 | `rectangle` / `ellipse` | `box-tool.ts`                                             | Hotkey `r` / `o`. Drag to create boxes/ellipses (Shift for 1:1 square/circle).                                                                         |
 | `polygon`               | `polygon-tool.ts`                                         | Drag to create regular polygons.                                                                                                                       |
-| `text`                  | `text-tool.ts`                                            | Hotkey `t`. Click canvas to place text and open inline editor.                                                                                         |
+| `text`                  | `text-tool.ts`                                            | Hotkey `t`. Click to place auto-sizing text; drag horizontally for a fixed-width wrapping box. Opens the inline editor either way.                      |
 | `eraser`                | `eraser-tool.ts`, `cut-polyline.ts`, `precision-erase.ts` | Hotkey `e`. Whole-object deletion or precision path slicing.                                                                                           |
 | `laser`                 | `laser-tool.ts`                                           | Hotkey `k`. Transient presenter laser trail.                                                                                                           |
 | `graph`                 | `graph-tool.ts`                                           | Hotkey `g`. Click/drag to drop a new 2D graphing coordinate plane.                                                                                     |
-| `equation`              | `equation-tool.ts`                                        | Hotkey `q` / `x`. Click/drag to drop a LaTeX equation.                                                                                                 |
+| `equation`              | `equation-tool.ts`                                        | Hotkey `m`. Click/drag to drop a LaTeX equation.                                                                                                       |
 | `sticker`               | `sticker-tool.ts`                                         | Stamp selected sticker onto board.                                                                                                                     |
 | `frame`                 | `frame-tool.ts`                                           | Hotkey `f`. Drag to create a frame container.                                                                                                          |
 | `comment`               | `comment-tool.ts`                                         | Hotkey `c`. Click to drop a discussion comment pin.                                                                                                    |
@@ -221,12 +229,12 @@ All tools implement `Tool` (registered in `register.ts`):
 | `board-chrome.tsx`        | Top header bar: board title, back button, share button, page navigation, voice HUD, presence list. |
 | `style-panel.tsx`         | Floating property inspector: stroke color, fill type, stroke width, opacity, font size, align.     |
 | `graph-panel.tsx`         | Graph equation list, function curves, slider variables, viewport range bounds.                     |
-| `equation-panel.tsx`      | MathLive virtual visual equation keyboard and LaTeX editor.                                        |
+| `equation-panel.tsx`      | LaTeX source editor: command autocomplete and Quick-LaTeX typing shortcuts.                        |
 | `documents-panel.tsx`     | Drawer for uploading, downloading, and viewing board file attachments.                             |
 | `page-menu.tsx`           | Multi-page list switcher, reordering, creation, and deletion.                                      |
 | `canvas-context-menu.tsx` | Right-click context menu (Cut, Copy, Paste, Bring to Front, Send to Back, Group, Lock).            |
 | `board-notes-dialog.tsx`  | Tutor-only private student notes.                                                                  |
-| `settings-dialog.tsx`     | Board preferences, dark/light theme switcher, performance overlay toggle.                          |
+| `board-actions-menu.tsx`  | Board ⋯ menu: dialogs, PNG copy/export + resolution, and all board preferences (theme, snapping, pen, sound, perf overlay). |
 | `music/music-player.tsx`  | Whiteboard background music audio player and playlist selector.                                    |
 
 ---

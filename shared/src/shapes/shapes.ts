@@ -303,8 +303,15 @@ export interface GraphProps {
 }
 
 export interface EquationProps {
-  /** LaTeX source rendered in display mode. */
+  /** LaTeX source. */
   latex: string;
+  /**
+   * Typeset in text style rather than display style: limits beside `\sum`
+   * rather than above it, smaller fractions — the conventions for math set in
+   * a line of prose. Absent on every equation written before the choice
+   * existed, and on every one since that didn't ask for it.
+   */
+  inline?: boolean;
   /** Applied as currentColor to the MathJax SVG paths. */
   color: string;
   /** Typographic scale in world units. */

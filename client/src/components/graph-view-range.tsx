@@ -60,7 +60,11 @@ function RangeStepper({
           onClick={() => onNudge(-1)}
           className="h-full w-6.5 rounded-none text-fg-secondary hover:bg-surface-hover hover:text-fg focus-visible:relative focus-visible:z-1 focus-visible:ring-0 focus-visible:outline-none"
         >
-          <Minus className="size-3" data-icon="inline-start" aria-hidden="true" />
+          <Minus
+            className="size-3"
+            data-icon="inline-start"
+            aria-hidden="true"
+          />
         </Button>
       </InputGroupAddon>
       <InputGroupInput
@@ -92,7 +96,11 @@ function RangeStepper({
           onClick={() => onNudge(1)}
           className="h-full w-6.5 rounded-none text-fg-secondary hover:bg-surface-hover hover:text-fg focus-visible:relative focus-visible:z-1 focus-visible:ring-0 focus-visible:outline-none"
         >
-          <Plus className="size-3" data-icon="inline-start" aria-hidden="true" />
+          <Plus
+            className="size-3"
+            data-icon="inline-start"
+            aria-hidden="true"
+          />
         </Button>
       </InputGroupAddon>
     </InputGroup>
@@ -267,7 +275,10 @@ export function ViewRange({
   }, [viewport.xMin, viewport.xMax, viewport.yMin, viewport.yMax]);
 
   // Shape plot aspect ratio (w / h after accounting for padding)
-  const plotAspect = Math.max(0.1, (shapeProps.w - 32) / Math.max(1, shapeProps.h - 32));
+  const plotAspect = Math.max(
+    0.1,
+    (shapeProps.w - 32) / Math.max(1, shapeProps.h - 32),
+  );
 
   const applyIsotropicY = useCallback(
     (currentVp: GraphViewport): GraphViewport => {
@@ -315,7 +326,9 @@ export function ViewRange({
   };
 
   const activePreset = GRAPH_VIEWPORT_PRESETS.find((preset) => {
-    const targetVp = aspectLocked ? applyIsotropicY(preset.viewport) : preset.viewport;
+    const targetVp = aspectLocked
+      ? applyIsotropicY(preset.viewport)
+      : preset.viewport;
     const directMatch =
       Math.abs(viewport.xMin - preset.viewport.xMin) < 0.05 &&
       Math.abs(viewport.xMax - preset.viewport.xMax) < 0.05 &&
@@ -352,35 +365,38 @@ export function ViewRange({
             {GRAPH_VIEWPORT_PRESETS.map((preset) => {
               const isActive = activePreset?.name === preset.name;
               return (
-              <Tooltip key={preset.name}>
-                <TooltipTrigger
-                  render={
-                    <button
-                      type="button"
-                      aria-pressed={isActive}
-                      aria-label={`${preset.name}: ${preset.label}`}
-                      onClick={() => applyPreset(preset.name)}
-                      className={cn(
-                        'flex h-8 min-w-0 grow basis-0 items-center justify-center transition-colors duration-instant select-none outline-none focus-visible:relative focus-visible:z-10 focus-visible:ring-2 focus-visible:ring-focus',
-                        isActive
-                          ? 'bg-panel text-fg shadow-2xs'
-                          : 'text-fg-secondary hover:bg-surface-hover hover:text-fg',
-                      )}
-                    >
-                      <PresetIcon name={preset.name} />
-                    </button>
-                  }
-                />
-                <TooltipContent side="top" className="flex flex-col gap-0.5 text-center">
-                  <span className="font-semibold text-xs">{preset.name}</span>
-                  <span className="font-mono text-[10px] text-fg-subtle">
-                    {preset.label} · {preset.description}
-                  </span>
-                </TooltipContent>
-              </Tooltip>
-            );
-          })}
-        </div>
+                <Tooltip key={preset.name}>
+                  <TooltipTrigger
+                    render={
+                      <button
+                        type="button"
+                        aria-pressed={isActive}
+                        aria-label={`${preset.name}: ${preset.label}`}
+                        onClick={() => applyPreset(preset.name)}
+                        className={cn(
+                          'flex h-8 min-w-0 grow basis-0 items-center justify-center transition-colors duration-instant select-none outline-none focus-visible:relative focus-visible:z-10 focus-visible:ring-2 focus-visible:ring-focus',
+                          isActive
+                            ? 'bg-panel text-fg shadow-2xs'
+                            : 'text-fg-secondary hover:bg-surface-hover hover:text-fg',
+                        )}
+                      >
+                        <PresetIcon name={preset.name} />
+                      </button>
+                    }
+                  />
+                  <TooltipContent
+                    side="top"
+                    className="flex flex-col gap-0.5 text-center"
+                  >
+                    <span className="font-semibold text-xs">{preset.name}</span>
+                    <span className="font-mono text-2xs text-fg-subtle">
+                      {preset.label} · {preset.description}
+                    </span>
+                  </TooltipContent>
+                </Tooltip>
+              );
+            })}
+          </div>
 
           <div className="flex items-center gap-0.5 shrink-0">
             <Tooltip>
@@ -399,13 +415,22 @@ export function ViewRange({
                     onClick={toggleAspectLock}
                     className={cn(
                       'size-8 rounded-lg text-fg-secondary hover:text-fg border border-transparent',
-                      aspectLocked && 'border-border bg-panel text-fg font-semibold shadow-2xs',
+                      aspectLocked &&
+                        'border-border bg-panel text-fg font-semibold shadow-2xs',
                     )}
                   >
                     {aspectLocked ? (
-                      <Lock className="size-3.5" data-icon="inline-start" aria-hidden="true" />
+                      <Lock
+                        className="size-3.5"
+                        data-icon="inline-start"
+                        aria-hidden="true"
+                      />
                     ) : (
-                      <Unlock className="size-3.5" data-icon="inline-start" aria-hidden="true" />
+                      <Unlock
+                        className="size-3.5"
+                        data-icon="inline-start"
+                        aria-hidden="true"
+                      />
                     )}
                   </Button>
                 }
@@ -429,7 +454,11 @@ export function ViewRange({
                     }}
                     className="size-8 rounded-lg text-fg-secondary hover:text-fg"
                   >
-                    <RefreshCw className="size-3.5" data-icon="inline-start" aria-hidden="true" />
+                    <RefreshCw
+                      className="size-3.5"
+                      data-icon="inline-start"
+                      aria-hidden="true"
+                    />
                   </Button>
                 }
               />
@@ -444,7 +473,7 @@ export function ViewRange({
         {VIEW_RANGE_AXES.map(({ label, symbol, minKey, maxKey }) => (
           <div key={label} className="flex items-center gap-2">
             <span
-              className="grid size-7 shrink-0 place-items-center rounded-md border border-border/70 bg-subtle font-mono text-xs font-semibold text-fg-secondary select-none"
+              className="grid size-7 shrink-0 place-items-center rounded-md border border-border/70 bg-panel font-mono text-xs font-semibold text-fg-secondary select-none"
               aria-hidden="true"
             >
               {symbol}

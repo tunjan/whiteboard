@@ -1,15 +1,15 @@
-import { Slider as SliderPrimitive } from '@base-ui/react/slider';
-import { cn } from '@/lib/utils';
+import { Slider } from '@/components/ui/slider';
 
 /**
- * A fader, not a generic range input: a wide capsule track with a translucent
- * fill, and a bar-shaped thumb that grows taut while dragging.
+ * The style panel's opacity fader.
  *
- * Built on the same base-ui primitive the shared `Slider` wraps — pointer
- * capture, keyboard stepping, and ARIA all come from there — just restyled,
- * since opacity's 100 steps bury a dot thumb on a 6px rail. `data-dragging`
- * is the primitive's own drag state, so the grow-on-press needs no local
- * state or pointer handling of its own.
+ * It is the shared capsule `Slider` — opacity's 100 steps need a wide track
+ * and a thumb big enough to grab — wrapped to own the 0–1 range and to hand
+ * its caller a bare number rather than base-ui's number-or-array.
+ *
+ * It runs thinner than the shared control, and fills soft grey rather than
+ * ink: this sits in the style panel among the colour swatches, where a
+ * full-height black bar reads as a colour choice instead of an amount.
  */
 export function OpacitySlider({
   value,
@@ -21,28 +21,16 @@ export function OpacitySlider({
   'aria-label': string;
 }) {
   return (
-    <SliderPrimitive.Root
+    <Slider
       aria-label={ariaLabel}
       min={0}
       max={1}
       step={0.01}
       value={value}
-      thumbAlignment="edge"
-      onValueChange={(next) => onValueChange(Array.isArray(next) ? next[0]! : next)}
-    >
-      <SliderPrimitive.Control className="relative flex h-4.5 w-full touch-none items-center overflow-hidden rounded-md bg-panel select-none">
-        <SliderPrimitive.Track className="relative h-full w-full">
-          <SliderPrimitive.Indicator className="absolute inset-y-0 left-0 h-full bg-fg/15" />
-        </SliderPrimitive.Track>
-        <SliderPrimitive.Thumb
-          className={cn(
-            'block h-3 w-1 rounded-sm bg-fg shadow-sm outline-none select-none',
-            'ring-focus/50 focus-visible:ring-4',
-            'transition-transform duration-fast ease-[cubic-bezier(0.34,1.56,0.64,1)] motion-reduce:transition-none',
-            'data-dragging:scale-y-[1.35]',
-          )}
-        />
-      </SliderPrimitive.Control>
-    </SliderPrimitive.Root>
+      onValueChange={(next) =>
+        onValueChange(Array.isArray(next) ? next[0]! : next)
+      }
+      className="[--wb-slider-thumb:1.125rem] [--wb-slider-track:1rem] [&_[data-slot=slider-range]]:bg-fg-subtle"
+    />
   );
 }

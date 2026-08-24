@@ -27,7 +27,8 @@ IGNORE = {"bg-minor", "bg-major", "border-box", "text-balance", "text-pretty",
           "bg-blend-color", "bg-none", "bg-cover", "bg-contain", "bg-center",
           "bg-no-repeat", "shadow-none", "ring-inset", "outline-none",
           "outline-hidden", "outline-dashed", "outline-solid", "ease-linear",
-          "ease-initial", "fill-none", "stroke-none"}
+          "ease-initial", "fill-none", "stroke-none", "stroke-width",
+          "stroke-dasharray", "stroke-dashoffset"}
 SPECIAL = "[]()./,%#!:*&>=+$?|~^'\"@"
 
 # --- style guidelines (ui/README.md) -------------------------------------

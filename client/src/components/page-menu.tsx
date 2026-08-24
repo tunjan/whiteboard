@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import {
   ArrowDown,
   ArrowUp,
+  Copy,
   EllipsisVertical,
   GripVertical,
   Pencil,
@@ -11,6 +12,7 @@ import {
 import {
   createPage,
   deletePage,
+  duplicatePage,
   movePage,
   movePageToIndex,
   renamePage,
@@ -148,7 +150,9 @@ export function PageMenu() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [reopenAfterDelete, setReopenAfterDelete] = useState(false);
   const [userListHeight, setUserListHeight] = useState<number | null>(null);
-  const [viewportHeight, setViewportHeight] = useState(() => window.innerHeight);
+  const [viewportHeight, setViewportHeight] = useState(
+    () => window.innerHeight,
+  );
 
   const ordered = pageOrder
     .map((id) => pages[id])
@@ -222,7 +226,7 @@ export function PageMenu() {
               variant="ghost"
               size="sm"
               aria-label={`Pages, current page: ${current?.name ?? 'Page 1'}`}
-              className="max-w-[clamp(4.5rem,18vw,11.25rem)] px-2 font-medium text-primary rounded-md"
+              className="max-w-[clamp(4.5rem,18vw,11.25rem)] px-2 font-medium text-fg rounded-md"
             />
           }
         >
@@ -232,13 +236,16 @@ export function PageMenu() {
         <PopoverContent
           align="start"
           sideOffset={10}
-          className={cn(CHROME_CONTROLS, 'w-[min(16rem,calc(100vw-2rem))] gap-0 p-0')}
+          className={cn(
+            CHROME_CONTROLS,
+            'w-[min(16rem,calc(100vw-2rem))] gap-0 p-0',
+          )}
         >
           <div className="flex items-center justify-between gap-2 px-3 pt-2.5 pb-1.5">
-            <PopoverTitle className="text-xs font-medium tracking-wide text-tertiary uppercase">
+            <PopoverTitle className="text-xs font-medium tracking-wide text-fg-muted uppercase">
               Pages
             </PopoverTitle>
-            <span className="text-xs text-tertiary tabular-nums">
+            <span className="text-xs text-fg-muted tabular-nums">
               {ordered.length}
             </span>
           </div>
@@ -302,7 +309,7 @@ export function PageMenu() {
                         }}
                         className={cn(
                           'min-w-0 flex-1 justify-start',
-                          active && 'font-medium text-primary',
+                          active && 'font-medium text-fg',
                         )}
                       >
                         <span className="truncate">{page.name}</span>
@@ -319,6 +326,7 @@ export function PageMenu() {
                           // the editor the moment the row swaps it in.
                           window.setTimeout(() => setEditingId(page.id), 0);
                         }}
+                        onDuplicate={() => duplicatePage(page.id)}
                         onMoveUp={() => movePage(page.id, 'up')}
                         onMoveDown={() => movePage(page.id, 'down')}
                         onDelete={() => {
@@ -440,6 +448,7 @@ function PageActions({
   canMoveDown,
   canDelete,
   onRename,
+  onDuplicate,
   onMoveUp,
   onMoveDown,
   onDelete,
@@ -449,6 +458,7 @@ function PageActions({
   canMoveDown: boolean;
   canDelete: boolean;
   onRename: () => void;
+  onDuplicate: () => void;
   onMoveUp: () => void;
   onMoveDown: () => void;
   onDelete: () => void;
@@ -471,6 +481,10 @@ function PageActions({
           <DropdownMenuItem onClick={onRename}>
             <Pencil />
             Rename
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={onDuplicate}>
+            <Copy />
+            Duplicate
           </DropdownMenuItem>
           <DropdownMenuItem disabled={!canMoveUp} onClick={onMoveUp}>
             <ArrowUp />
@@ -642,7 +656,7 @@ function PageInlineRename({
       // resolve through the neutral ring token, so the field focuses the same
       // colour as everything else rather than introducing a lone blue.
       className={cn(
-        'h-8 min-w-0 flex-1 rounded-md border-transparent bg-panel px-3 font-medium text-primary',
+        'h-8 min-w-0 flex-1 rounded-md border-transparent bg-panel px-3 font-medium text-fg',
         'text-base sm:text-sm [@media(pointer:coarse)]:h-11',
         'focus:border-strong focus:bg-surface focus:ring-2 focus:ring-ring/15',
         'focus-visible:outline-none',
@@ -706,7 +720,7 @@ function PageNameForm({
 
   return (
     <form
-      className="flex flex-col gap-2.5 rounded-lg border border-border bg-subtle p-2.5"
+      className="flex flex-col gap-2.5 rounded-lg border border-border bg-panel p-2.5"
       onSubmit={(event) => {
         event.preventDefault();
         submit();

@@ -18,6 +18,7 @@ import {
   type WhiteboardDocument,
 } from '@whiteboard/shared';
 import type { Editor, ShapePatch } from './editor';
+import { collectSubtree, deleteShapesWithCleanup } from './commands';
 import { generateKeyBetween, jitterKeyBetween } from './order';
 import {
   encodePointsForStorage,
@@ -35,11 +36,20 @@ import { shapeRegistry } from './shapes/shape-registry';
 import { shapeRotatedBounds } from './shape-bounds';
 import { BindingGraph } from './binding-graph';
 import { SpatialIndex } from './spatial-index';
+import {
+  subscribeToTextMetrics,
+  watchFontLoading,
+} from './shapes/text-measure';
 import { useCameraStore } from './use-camera-store';
 import { type CommentMessage, useCommentsStore } from './use-comments-store';
 import { useCustomStickersStore } from './use-custom-stickers-store';
 import { useDocumentsStore } from './use-documents-store';
+import { useEraserCutStore } from './use-eraser-cut-store';
+import { useEraserStore } from './use-eraser-store';
+import { useHiddenStore } from './use-hidden-store';
 import { getLiveStrokeShapeId } from './use-live-stroke-store';
+import { resolveOpacity } from './opacity';
+import { clearVanishing, vanishShapes } from './use-vanish-store';
 import { useConnectionStore } from '@/collab/use-connection-store';
 import { startLatencyMonitor } from '@/collab/latency';
 import { bindVoiceProvider } from '@/collab/voice/voice-session';
@@ -57,6 +67,7 @@ import {
   leavePageInteractionState,
   resetPageInteractionStates,
 } from './page-interaction-state';
+import { getIncrementedName } from './page-names';
 import { readPageSession, writePageSession } from './page-session-state';
 import { completeInteractionBeforePageSwitch } from './page-transition';
 
@@ -640,6 +651,38 @@ function asMusicStatus(value: unknown): MusicPlaybackStatus {
     : DEFAULT_MUSIC_PLAYBACK.status;
 }
 
+/**
+ * Start the fade-out for shapes that just left the document.
+ *
+ * Called from the shape observer rather than from `deleteShapes`, so a peer's
+ * delete, an undone create and the eraser all fade the same way — anything that
+ * removes a shape from the page passes through here exactly once.
+ *
+ * Two kinds of shape are exempt, because a ghost would put them back on screen
+ * in a state the user never saw:
+ *  - locally hidden shapes, which were not being rendered at all;
+ *  - shapes the precision eraser is mid-cut on, whose surviving fragments have
+ *    been standing in for them all stroke. Fading the uncut original over those
+ *    fragments would flash the erased ink back for the length of the animation.
+ */
+function startVanish(removed: Shape[]): void {
+  if (removed.length === 0) return;
+  const hidden = useHiddenStore.getState().hidden;
+  const cutting = useEraserCutStore.getState().fragments;
+  const isMarked = useEraserStore.getState().isMarked;
+  // Deleting a group deletes its children in the same batch, so ancestors may
+  // already be out of the cache — resolve opacity against the batch too, or a
+  // child of a faded group would ghost back at full strength.
+  const removedById = new Map(removed.map((s) => [s.id, s]));
+  const getShape = (id: string) => shapeCache.get(id) ?? removedById.get(id);
+  const entries: { shape: Shape; opacity: number }[] = [];
+  for (const shape of removed) {
+    if (hidden[shape.id] || shape.id in cutting) continue;
+    entries.push({ shape, opacity: resolveOpacity(shape, getShape, isMarked) });
+  }
+  vanishShapes(entries);
+}
+
 function applyAffected(ids: Set<string>): void {
   if (!session) return;
   // A stroke or drag mutates a shape's props/position but never its z-`index`
@@ -648,6 +691,7 @@ function applyAffected(ids: Set<string>): void {
   // sorted array by swapping the changed entries in place (O(N), no re-sort).
   let orderChanged = false;
   const updated = new Map<string, Shape>();
+  const removed: Shape[] = [];
   for (const id of ids) {
     const m = session.currentShapes.get(id);
     if (m) {
@@ -667,6 +711,7 @@ function applyAffected(ids: Set<string>): void {
       else updated.set(id, shape);
     } else {
       const prev = shapeCache.get(id);
+      if (prev) removed.push(prev);
       if (prev?.parentId) parentedCount--;
       if (prev?.type === 'equation') equationCount--;
       shapeCache.delete(id);
@@ -675,6 +720,7 @@ function applyAffected(ids: Set<string>): void {
       orderChanged = true;
     }
   }
+  startVanish(removed);
   markBindingDirty(ids);
   if (orderChanged || !sortedShapesCache) {
     sortedShapesCache = null;
@@ -708,6 +754,9 @@ function applyAffected(ids: Set<string>): void {
 
 function fullResync(): void {
   if (!session) return;
+  // Ghosts belong to the page that was on screen; the board is being rebuilt
+  // under them, so drop them rather than fade them over the new page.
+  clearVanishing();
   shapeCache.clear();
   sortedShapesCache = null;
   spatialIndex.clear();
@@ -729,6 +778,16 @@ function fullResync(): void {
   rebuildPagesCache();
   rebuildSnapshot();
 }
+
+// Web fonts resolve after the first shapes have already been measured against
+// fallback faces, and text bounds — along with their entries in the spatial
+// index — are derived from those metrics. Re-derive everything once the real
+// faces land, otherwise hit-testing and selection boxes stay subtly wrong for
+// the life of the tab.
+subscribeToTextMetrics(() => {
+  if (session) fullResync();
+});
+watchFontLoading();
 
 function makeShapesObserver(): (
   events: Y.YEvent<Y.AbstractType<unknown>>[],
@@ -806,9 +865,7 @@ export function loadBoard(
   const documents = doc.getMap<BoardDocumentMeta>('documents');
   const stickers = doc.getMap<CustomStickerMeta>('stickers');
   const currentShapes = getShapesMap(doc, DEFAULT_PAGE_ID);
-  const undo = new Y.UndoManager(currentShapes, {
-    trackedOrigins: new Set([LOCAL_ORIGIN]),
-  });
+  const undo = makeUndoManager(DEFAULT_PAGE_ID, currentShapes);
   const undoByPage = new Map([[DEFAULT_PAGE_ID, undo]]);
 
   const shapesObserver = makeShapesObserver();
@@ -997,6 +1054,34 @@ export function redo(): void {
   session?.undo.redo();
 }
 
+/**
+ * Page whose undo manager owns the transaction currently being applied, while a
+ * cross-page move is in flight. A move writes to two pages' shape maps at once,
+ * and both managers can see it; without this only-one-owner rule each would
+ * capture half the move, so undoing on the source page would restore the shapes
+ * there while the copies stayed on the target.
+ */
+let crossPageMoveOwner: string | null = null;
+
+/**
+ * Undo history for one page. Scope grows when a cross-page move needs the
+ * target page's map to be revertible from here, so capture is gated on the
+ * transaction actually concerning this page rather than on scope alone.
+ */
+function makeUndoManager(pageId: string, map: Y.Map<YShape>): Y.UndoManager {
+  // Yjs keys its changed-type maps by the invariant `AbstractType`, which a
+  // `Y.Map<YShape>` does not structurally satisfy.
+  type ChangedKey = Parameters<Y.Transaction['changed']['has']>[0];
+  const scoped = map as unknown as ChangedKey;
+  return new Y.UndoManager(map, {
+    trackedOrigins: new Set([LOCAL_ORIGIN]),
+    captureTransaction: (tr) =>
+      crossPageMoveOwner === null
+        ? tr.changed.has(scoped) || tr.changedParentTypes.has(scoped)
+        : crossPageMoveOwner === pageId,
+  });
+}
+
 // --- Pages API ---
 
 function cleanupDeletedPageState(pageId: string): void {
@@ -1044,11 +1129,7 @@ function switchToPageInternal(
   session.currentPageId = pageId;
   session.shapesObserver = makeShapesObserver();
   map.observeDeep(session.shapesObserver);
-  session.undo =
-    session.undoByPage.get(pageId) ??
-    new Y.UndoManager(map, {
-      trackedOrigins: new Set([LOCAL_ORIGIN]),
-    });
+  session.undo = session.undoByPage.get(pageId) ?? makeUndoManager(pageId, map);
   session.undoByPage.set(pageId, session.undo);
   session.unbindUndoState = bindUndoState(session.undo);
 
@@ -1071,26 +1152,180 @@ export function setCurrentPageForFollow(pageId: string): void {
   switchToPageInternal(pageId, 'follow');
 }
 
+/**
+ * Order index for a page inserted directly after `anchorId`, or after the last
+ * page when the anchor is gone.
+ */
+function indexAfterPage(metas: PageMeta[], anchorId: string): string {
+  const at = metas.findIndex((m) => m.id === anchorId);
+  const before =
+    at >= 0 ? (metas[at]?.index ?? null) : (metas.at(-1)?.index ?? null);
+  const after = at >= 0 ? (metas[at + 1]?.index ?? null) : null;
+  return jitterKeyBetween(before, after);
+}
+
+/** Write one page record. Must run inside a `doc.transact`. */
+function putPageMeta(id: string, name: string, index: string): void {
+  const m = new Y.Map<unknown>();
+  m.set('id', id);
+  m.set('name', name);
+  m.set('index', index);
+  session!.pages.set(id, m);
+}
+
 /** Create a new page after the current one and switch to it. Returns its id. */
 export function createPage(name?: string): string {
   if (!session) return '';
   const id = genId();
   const metas = readPages(session.pages);
-  const at = metas.findIndex((m) => m.id === session!.currentPageId);
-  const before =
-    at >= 0 ? (metas[at]?.index ?? null) : (metas.at(-1)?.index ?? null);
-  const after = at >= 0 ? (metas[at + 1]?.index ?? null) : null;
-  const index = jitterKeyBetween(before, after);
-  const pageName = name?.trim() || `Page ${metas.length + 1}`;
+  const pageName = getIncrementedName(
+    name?.trim() || `Page ${metas.length + 1}`,
+    metas.map((m) => m.name),
+  );
+  const index = indexAfterPage(metas, session.currentPageId);
   session.doc.transact(() => {
-    const m = new Y.Map<unknown>();
-    m.set('id', id);
-    m.set('name', pageName);
-    m.set('index', index);
-    session!.pages.set(id, m);
+    putPageMeta(id, pageName, index);
   });
   switchToPageInternal(id);
   return id;
+}
+
+/**
+ * Copy a page and everything on it to a new page placed just after it, then
+ * switch to the copy.
+ *
+ * Shapes are cloned with fresh ids: the source and the copy are independent
+ * pages, so sharing ids would make the two indistinguishable to anything keyed
+ * by shape id (selection restore, presence, comments). `parentId` and connector
+ * bindings are remapped within the copied set so frames, groups, and bound
+ * arrows keep pointing at their counterparts on the new page rather than
+ * reaching back across to the original.
+ *
+ * Returns the new page id, or `''` when the source page does not exist.
+ */
+export function duplicatePage(id: string): string {
+  if (!session || !session.pages.has(id)) return '';
+  const metas = readPages(session.pages);
+  const source = metas.find((m) => m.id === id);
+  if (!source) return '';
+
+  const newId = genId();
+  const name = getIncrementedName(
+    `${source.name} Copy`,
+    metas.map((m) => m.name),
+  );
+  const index = indexAfterPage(metas, id);
+
+  const sourceShapes = getShapesMap(session.doc, id);
+  const idMap = new Map<string, string>();
+  for (const shapeId of sourceShapes.keys()) idMap.set(shapeId, genId());
+
+  session.doc.transact(() => {
+    putPageMeta(newId, name, index);
+    const target = getShapesMap(session!.doc, newId);
+    for (const [shapeId, m] of sourceShapes) {
+      const shape = yToShape(m);
+      const clone = {
+        ...shape,
+        id: idMap.get(shapeId)!,
+        parentId: shape.parentId ? (idMap.get(shape.parentId) ?? null) : null,
+        props: structuredClone(shape.props),
+      } as Shape;
+      remapClonedBindings(clone, idMap);
+      target.set(clone.id, shapeToY(clone));
+    }
+  }, LOCAL_ORIGIN);
+
+  // Land the copy on the same view of the same drawing, not at the origin.
+  useCameraStore.getState().copyPage(session.boardId, id, newId);
+  switchToPageInternal(newId);
+  return newId;
+}
+
+/**
+ * Point a cloned connector's bindings at the clones of its targets. A target
+ * outside `idMap` was not copied, so the binding is dropped rather than left
+ * addressing a shape on another page.
+ */
+function remapClonedBindings(shape: Shape, idMap: Map<string, string>): void {
+  if (shape.type !== 'arrow') return;
+  const bindings = shape.props.bindings;
+  if (!bindings) return;
+  shape.props.bindings = {
+    start: bindings.start
+      ? idMap.has(bindings.start.shapeId)
+        ? { ...bindings.start, shapeId: idMap.get(bindings.start.shapeId)! }
+        : null
+      : bindings.start,
+    end: bindings.end
+      ? idMap.has(bindings.end.shapeId)
+        ? { ...bindings.end, shapeId: idMap.get(bindings.end.shapeId)! }
+        : null
+      : bindings.end,
+  };
+}
+
+/**
+ * Move `ids` (and their descendants) from the current page to `targetPageId`,
+ * keeping their ids and their world positions.
+ *
+ * A moved shape whose parent stays behind is re-rooted to the target page:
+ * carrying a `parentId` that names a frame or group on another page would leave
+ * it unreachable by the hierarchy walks. Connectors bound across the split heal
+ * themselves — the routing pass nulls any binding whose target is absent from
+ * the page being rendered.
+ *
+ * Returns the ids that were moved.
+ */
+export function moveShapesToPage(
+  ids: string[],
+  targetPageId: string,
+): string[] {
+  if (!session || ids.length === 0) return [];
+  if (targetPageId === session.currentPageId) return [];
+  if (!session.pages.has(targetPageId)) return [];
+
+  const moving = collectSubtree(editor, ids);
+  if (moving.length === 0) return [];
+  const movingIds = new Set(moving.map((s) => s.id));
+
+  const target = getShapesMap(session.doc, targetPageId);
+  const movedIds = moving.map((s) => s.id);
+
+  // Undo has to put the shapes back on this page *and* take them off the
+  // target, so the target's map joins this page's undo scope for good. Capture
+  // stays correct because `makeUndoManager` gates on the transaction, not the
+  // scope. The bracketing `stopCapturing` calls keep the move a step of its
+  // own rather than merging with an edit made moments before or after.
+  const undo = session.undo;
+  undo.addToScope([target]);
+  undo.stopCapturing();
+  crossPageMoveOwner = session.currentPageId;
+  try {
+    transactLocal(() => {
+      for (const shape of moving) {
+        const keepsParent = shape.parentId
+          ? movingIds.has(shape.parentId)
+          : false;
+        target.set(
+          shape.id,
+          shapeToY({
+            ...shape,
+            parentId: keepsParent ? shape.parentId : null,
+          } as Shape),
+        );
+      }
+      // `movedIds`, not `ids`: `deleteShapes` does not cascade, so passing the
+      // roots alone would strand their children on this page. Groups the move
+      // empties out are pruned here too.
+      deleteShapesWithCleanup(editor, movedIds);
+    });
+  } finally {
+    crossPageMoveOwner = null;
+    undo.stopCapturing();
+  }
+
+  return movedIds;
 }
 
 export function renamePage(id: string, name: string): void {

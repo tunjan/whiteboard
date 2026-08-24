@@ -1,7 +1,7 @@
-@import "tailwindcss";
-@import "tw-animate-css";
-@import "shadcn/tailwind.css";
-@import "@fontsource-variable/geist";
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import 'shadcn/tailwind.css';
+@import '@fontsource-variable/geist';
 
 /* ==========================================================================
  * Fonts
@@ -11,28 +11,31 @@
  * ========================================================================== */
 
 @font-face {
-    font-family: 'Inter Variable';
-    font-style: normal;
-    font-display: swap;
-    font-weight: 100 900;
-    src: url('@fontsource-variable/inter/files/inter-latin-wght-normal.woff2') format('woff2-variations');
+  font-family: 'Inter Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url('@fontsource-variable/inter/files/inter-latin-wght-normal.woff2')
+    format('woff2-variations');
 }
 
 @font-face {
-    font-family: 'Geist Mono Variable';
-    font-style: normal;
-    font-display: swap;
-    font-weight: 100 900;
-    src: url('@fontsource-variable/geist-mono/files/geist-mono-latin-wght-normal.woff2') format('woff2-variations');
+  font-family: 'Geist Mono Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url('@fontsource-variable/geist-mono/files/geist-mono-latin-wght-normal.woff2')
+    format('woff2-variations');
 }
 
 /* Canvas "handwriting" text style. Also embedded by the PNG exporter. */
 @font-face {
-    font-family: 'Caveat Variable';
-    font-style: normal;
-    font-display: swap;
-    font-weight: 400 700;
-    src: url('@fontsource-variable/caveat/files/caveat-latin-wght-normal.woff2') format('woff2-variations');
+  font-family: 'Caveat Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400 700;
+  src: url('@fontsource-variable/caveat/files/caveat-latin-wght-normal.woff2')
+    format('woff2-variations');
 }
 
 @custom-variant dark (&:is(.dark *));
@@ -41,359 +44,381 @@
  * 1. Primitives
  *
  * The only place a literal colour or shadow appears. Everything downstream
- * refers to these by name, so a theme is defined exactly once. `--c-*` is
- * private to this file; components consume the `@theme` names in section 2.
+ * refers to these by role, so each theme is defined exactly once.
  * ========================================================================== */
 
 :root {
-    color-scheme: light;
+  color-scheme: light;
 
-    /* Surfaces, back to front — warm off-white canvas per Instrument Panel design system. */
-    --bg-canvas:   #E7E5E4;
-    --bg-panel:    #F5F5F4;
-    --bg-surface:  #FFFFFF;
-    --bg-surface-hover: #FAFAF9;
-    --bg-sunken:   #F5F5F4;
-    --bg-inverse:  #1C1917;
-    --bg-inverse-hover: #292524;
+  /* Surfaces, back to front. Warm neutrals keep the canvas quiet without
+       making cards and controls look grey or muddy. */
+  --bg-canvas: #f7f6f3;
+  --bg-panel: #f3f2ef;
+  --bg-surface: #ffffff;
+  --bg-surface-hover: #faf9f7;
+  --bg-sunken: #efeeea;
+  --bg-inverse: #1c1917;
+  --bg-inverse-hover: #292524;
 
-    --fg:            #0C0A09;
-    --fg-secondary:  #44403C;
-    --fg-muted:      #57534E;
-    --fg-subtle:     #78716C;
-    --fg-inverse:    #FAFAF9;
+  --fg: #0c0a09;
+  --fg-secondary: #44403c;
+  --fg-muted: #57534e;
+  --fg-subtle: #78716c;
+  --fg-inverse: #fafaf9;
 
-    --border:        #E7E5E4;
-    --border-strong: #D6D3D1;
-    --border-subtle: #F5F5F4;
+  --border: #e5e3de;
+  --border-strong: #d6d3d1;
+  --border-subtle: #efeeea;
+  --control-border: #8b8b86;
 
-    --ring: #0C0A09;
+  /* One accent, used only for primary actions, links and focus. */
+  --action-solid: #1d4ed8;
+  --action-hover: #1e40af;
+  --action-active: #1e3a8a;
+  --action-foreground: #fafaf9;
+  --ring: var(--action-solid);
 
-    /* Modal scrim. Opacity is chosen per overlay (`bg-scrim/40`, `bg-scrim/10`). */
-    --c-scrim: #000000;
+  /* Modal scrim. Opacity is chosen per overlay (`bg-scrim/35`, `bg-scrim/25`). */
+  --c-scrim: #000000;
 
-    --status-success-fg: #15803D; --status-success-bg: #F0FDF4; --status-success-border: #BBF7D0;
-    --status-warning-fg: #B45309; --status-warning-bg: #FFFBEB; --status-warning-border: #FDE68A;
-    --status-danger-fg:  #B91C1C; --status-danger-bg:  #FEF2F2; --status-danger-border:  #FECACA;
-    --status-info-fg:    #1D4ED8; --status-info-bg:    #EFF6FF; --status-info-border:    #BFDBFE;
-    --status-inactive-fg:#6D28D9; --status-inactive-bg:#F5F3FF; --status-inactive-border:#DDD6FE;
-    --status-neutral-fg: #57534E; --status-neutral-bg: #F5F5F4; --status-neutral-border: #E7E5E4;
+  --status-success-fg: #15803d;
+  --status-success-bg: #f0fdf4;
+  --status-success-border: #bbf7d0;
+  --status-warning-fg: #b45309;
+  --status-warning-bg: #fffbeb;
+  --status-warning-border: #fde68a;
+  --status-danger-fg: #b91c1c;
+  --status-danger-bg: #fef2f2;
+  --status-danger-border: #fecaca;
+  --status-danger-control-border: #b91c1c;
+  --status-info-fg: #1d4ed8;
+  --status-info-bg: #eff6ff;
+  --status-info-border: #bfdbfe;
+  --status-inactive-fg: #57534e;
+  --status-inactive-bg: #f3f2ef;
+  --status-inactive-border: #d6d3d1;
+  --status-neutral-fg: #57534e;
+  --status-neutral-bg: #f5f5f4;
+  --status-neutral-border: #e7e5e4;
 
-    /* `--status-danger-fg` is tuned for light surfaces; this is for danger text
+  /* `--status-danger-fg` is tuned for light surfaces; this is for danger text
        sitting directly on a `bg-inverse` surface instead (e.g. a dark pill). */
-    --status-danger-fg-on-inverse: #F87171;
+  --status-danger-fg-on-inverse: #f87171;
 
-    /* Legacy canvas variables */
-    --c-canvas: #F5F5F3;
-    --c-surface: #FFFFFF;
-    --c-subtle: #F7F7F5;
-    --c-muted: #F1F1EF;
-    --c-line: #E4E4E0;
-    --c-line-strong: #D2D2CD;
-    --c-control-border: #8B8B86;
-    --c-focus: #0C0A09;
-    --c-ink: #0C0A09;
-    --c-ink-muted: #44403C;
-    --c-ink-faint: #57534E;
-    --c-ink-quiet: #A8A29E;
-    --c-ink-inverse: #FAFAF9;
-    --c-placeholder: #A8A29E;
-    --c-action: #1C1917;
-    --c-action-hover: #292524;
-    --c-action-active: #0C0A09;
-    --c-on-action: #FAFAF9;
-    --c-link: #1D4ED8;
+  --s-control: 0 1px 2px rgba(12, 10, 9, 0.04);
+  --s-panel:
+    0 4px 14px -8px rgba(12, 10, 9, 0.14), 0 1px 3px rgba(12, 10, 9, 0.05);
+  --s-overlay:
+    0 16px 40px -16px rgba(12, 10, 9, 0.22),
+    0 4px 12px -6px rgba(12, 10, 9, 0.1);
 
-    --s-control: 0 1px 2px rgba(12, 10, 9, 0.04);
-    --s-panel: 0 1px 3px rgba(12, 10, 9, 0.06);
-    --s-overlay: 0 12px 32px -8px rgba(12, 10, 9, 0.12);
-    --s-elevation-5: 0 20px 48px -10px rgba(12, 10, 9, 0.22), 0 8px 20px -6px rgba(12, 10, 9, 0.12);
-
-    --grid-minor: rgba(12, 10, 9, 0.05);
-    --grid-major: rgba(12, 10, 9, 0.10);
-    --grid-dot: rgba(12, 10, 9, 0.25);
-    --grid-axis: rgba(12, 10, 9, 0.40);
-    --background: #E7E5E4;
-    --foreground: #0C0A09;
-    --card: #FFFFFF;
-    --card-foreground: #0C0A09;
-    --popover: #FFFFFF;
-    --popover-foreground: #0C0A09;
-    --primary: #1C1917;
-    --primary-foreground: #FAFAF9;
-    --secondary: #F5F5F4;
-    --secondary-foreground: #0C0A09;
-    --muted: #F5F5F4;
-    --muted-foreground: #57534E;
-    --accent: #F5F5F4;
-    --accent-foreground: #0C0A09;
-    --destructive: #B91C1C;
-    --border: #E7E5E4;
-    --input: #E7E5E4;
-    --ring: #0C0A09;
-    --radius: 0.625rem;
+  --grid-minor: rgba(12, 10, 9, 0.05);
+  --grid-major: rgba(12, 10, 9, 0.1);
+  --grid-dot: rgba(12, 10, 9, 0.25);
+  --grid-axis: rgba(12, 10, 9, 0.4);
+  --background: var(--bg-canvas);
+  --foreground: var(--fg);
+  --card: var(--bg-surface);
+  --card-foreground: var(--fg);
+  --popover: var(--bg-surface);
+  --popover-foreground: var(--fg);
+  --primary: var(--action-solid);
+  --primary-foreground: var(--action-foreground);
+  --secondary: var(--bg-panel);
+  --secondary-foreground: var(--fg);
+  --muted: var(--bg-panel);
+  --muted-foreground: var(--fg-muted);
+  --accent: var(--bg-panel);
+  --accent-foreground: var(--fg);
+  --destructive: var(--status-danger-fg);
+  --input: var(--control-border);
+  --radius: 0.5rem;
 }
 
 .dark {
-    color-scheme: dark;
+  color-scheme: dark;
 
-    --bg-canvas:   #0C0A09;
-    --bg-panel:    #1C1917;
-    --bg-surface:  #292524;
-    --bg-surface-hover: #322D2A;
-    --bg-sunken:   #0C0A09;
-    --bg-inverse:  #FAFAF9;
-    --bg-inverse-hover: #E7E5E4;
+  --bg-canvas: #0c0a09;
+  --bg-panel: #1c1917;
+  --bg-surface: #292524;
+  --bg-surface-hover: #322d2a;
+  --bg-sunken: #0c0a09;
+  --bg-inverse: #fafaf9;
+  --bg-inverse-hover: #e7e5e4;
 
-    --fg:           #FAFAF9;
-    --fg-secondary: #D6D3D1;
-    --fg-muted:     #A8A29E;
-    --fg-subtle:    #A8A29E;
-    --fg-inverse:   #1C1917;
+  --fg: #fafaf9;
+  --fg-secondary: #d6d3d1;
+  --fg-muted: #a8a29e;
+  --fg-subtle: #a8a29e;
+  --fg-inverse: #1c1917;
 
-    --border:        #292524;
-    --border-strong: #44403C;
-    --border-subtle: #1C1917;
+  --border: #44403c;
+  --border-strong: #57534e;
+  --border-subtle: #292524;
+  --control-border: #78716c;
 
-    --ring: #FAFAF9;
+  --action-solid: #60a5fa;
+  --action-hover: #93c5fd;
+  --action-active: #3b82f6;
+  --action-foreground: #0c0a09;
+  --ring: var(--action-solid);
 
-    --c-scrim: #000000;
+  --c-scrim: #000000;
 
-    --status-success-fg: #4ADE80; --status-success-bg: #052E16; --status-success-border: #166534;
-    --status-warning-fg: #FBBF24; --status-warning-bg: #451A03; --status-warning-border: #92400E;
-    --status-danger-fg:  #F87171; --status-danger-bg:  #450A0A; --status-danger-border:  #991B1B;
-    --status-info-fg:    #60A5FA; --status-info-bg:    #172554; --status-info-border:    #1E40AF;
-    --status-inactive-fg:#A78BFA; --status-inactive-bg:#2E1065; --status-inactive-border:#5B21B6;
-    --status-neutral-fg: #A8A29E; --status-neutral-bg: #292524; --status-neutral-border: #78716C;
+  --status-success-fg: #4ade80;
+  --status-success-bg: #052e16;
+  --status-success-border: #166534;
+  --status-warning-fg: #fbbf24;
+  --status-warning-bg: #451a03;
+  --status-warning-border: #92400e;
+  --status-danger-fg: #f87171;
+  --status-danger-bg: #450a0a;
+  --status-danger-border: #991b1b;
+  --status-danger-control-border: #f87171;
+  --status-info-fg: #60a5fa;
+  --status-info-bg: #172554;
+  --status-info-border: #1e40af;
+  --status-inactive-fg: #a8a29e;
+  --status-inactive-bg: #292524;
+  --status-inactive-border: #57534e;
+  --status-neutral-fg: #a8a29e;
+  --status-neutral-bg: #292524;
+  --status-neutral-border: #78716c;
 
-    /* See light theme: `bg-inverse` flips to a light surface here, so this
+  /* See light theme: `bg-inverse` flips to a light surface here, so this
        needs to be a dark red instead. */
-    --status-danger-fg-on-inverse: #DC2626;
+  --status-danger-fg-on-inverse: #dc2626;
 
-    /* Legacy canvas variables */
-    --c-canvas: #0C0A09;
-    --c-surface: #292524;
-    --c-subtle: #1C1917;
-    --c-muted: #292524;
-    --c-line: #292524;
-    --c-line-strong: #44403C;
-    --c-control-border: #44403C;
-    --c-focus: #FAFAF9;
-    --c-ink: #FAFAF9;
-    --c-ink-muted: #D6D3D1;
-    --c-ink-faint: #A8A29E;
-    --c-ink-quiet: #78716C;
-    --c-ink-inverse: #1C1917;
-    --c-placeholder: #78716C;
-    --c-action: #FAFAF9;
-    --c-action-hover: #FFFFFF;
-    --c-action-active: #E7E5E4;
-    --c-on-action: #1C1917;
-    --c-link: #60A5FA;
+  --s-control: 0 1px 2px rgba(0, 0, 0, 0.24);
+  --s-panel: 0 4px 16px -8px rgba(0, 0, 0, 0.4), 0 1px 3px rgba(0, 0, 0, 0.28);
+  --s-overlay:
+    0 18px 44px -14px rgba(0, 0, 0, 0.58), 0 6px 16px -8px rgba(0, 0, 0, 0.36);
 
-    --s-control: 0 1px 2px rgba(0, 0, 0, 0.40);
-    --s-panel: 0 1px 2px rgba(0, 0, 0, 0.45);
-    --s-overlay: 0 16px 40px -8px rgba(0, 0, 0, 0.50);
-    --s-elevation-5: 0 24px 56px -12px rgba(0, 0, 0, 0.75), 0 10px 28px -6px rgba(0, 0, 0, 0.45);
-
-    --grid-minor: rgba(250, 250, 249, 0.06);
-    --grid-major: rgba(250, 250, 249, 0.12);
-    --grid-dot: rgba(250, 250, 249, 0.28);
-    --grid-axis: rgba(250, 250, 249, 0.45);
-    --background: #0C0A09;
-    --foreground: #FAFAF9;
-    --card: #292524;
-    --card-foreground: #FAFAF9;
-    --popover: #292524;
-    --popover-foreground: #FAFAF9;
-    --primary: #FAFAF9;
-    --primary-foreground: #1C1917;
-    --secondary: #1C1917;
-    --secondary-foreground: #FAFAF9;
-    --muted: #1C1917;
-    --muted-foreground: #A8A29E;
-    --accent: #1C1917;
-    --accent-foreground: #FAFAF9;
-    --destructive: #F87171;
-    --border: #292524;
-    --input: #292524;
-    --ring: #FAFAF9;
+  --grid-minor: rgba(250, 250, 249, 0.06);
+  --grid-major: rgba(250, 250, 249, 0.12);
+  --grid-dot: rgba(250, 250, 249, 0.28);
+  --grid-axis: rgba(250, 250, 249, 0.45);
+  --background: var(--bg-canvas);
+  --foreground: var(--fg);
+  --card: var(--bg-surface);
+  --card-foreground: var(--fg);
+  --popover: var(--bg-surface);
+  --popover-foreground: var(--fg);
+  --primary: var(--action-solid);
+  --primary-foreground: var(--action-foreground);
+  --secondary: var(--bg-panel);
+  --secondary-foreground: var(--fg);
+  --muted: var(--bg-panel);
+  --muted-foreground: var(--fg-muted);
+  --accent: var(--bg-panel);
+  --accent-foreground: var(--fg);
+  --destructive: var(--status-danger-fg);
+  --input: var(--control-border);
 }
 
 @theme {
-    /* ---------- primitives ---------- */
-    --color-stone-0:   #FFFFFF;
-    --color-stone-50:  #FAFAF9;
-    --color-stone-100: #F5F5F4;
-    --color-stone-200: #E7E5E4;
-    --color-stone-300: #D6D3D1;
-    --color-stone-400: #A8A29E;
-    --color-stone-500: #78716C;
-    --color-stone-600: #57534E;
-    --color-stone-700: #44403C;
-    --color-stone-800: #292524;
-    --color-stone-900: #1C1917;
-    --color-stone-950: #0C0A09;
+  /* ---------- primitives ---------- */
+  --color-stone-0: #ffffff;
+  --color-stone-50: #fafaf9;
+  --color-stone-100: #f5f5f4;
+  --color-stone-200: #e7e5e4;
+  --color-stone-300: #d6d3d1;
+  --color-stone-400: #a8a29e;
+  --color-stone-500: #78716c;
+  --color-stone-600: #57534e;
+  --color-stone-700: #44403c;
+  --color-stone-800: #292524;
+  --color-stone-900: #1c1917;
+  --color-stone-950: #0c0a09;
 
-    /* ---------- radius ---------- */
-    --radius-xs:   4px;
-    --radius-sm:   6px;
-    --radius-md:   8px;
-    --radius-lg:  10px;
-    --radius-xl:  12px;
-    --radius-2xl: 16px;
-    --radius-3xl: 20px;
-    --radius-4xl: 24px;
-    --radius-panel: 16px;
-    --radius-full: 9999px;
-    --radius: 8px;
+  /* ---------- geometry ----------
+       Layout spacing uses Tailwind's 4px base grid. The named radii keep
+       controls, overlays and panels concentric instead of drifting by file. */
+  --radius-compact: 4px;
+  --radius-control: 8px;
+  --radius-overlay: 12px;
+  --radius-panel: 16px;
+  --radius-full: 9999px;
 
-    /* ---------- type ---------- */
-    --font-sans: 'Inter Variable', 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
-    --font-mono: 'Geist Mono Variable', 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+  /* Compatibility aliases while component call sites move to role names. */
+  --radius-xs: var(--radius-compact);
+  --radius-sm: var(--radius-compact);
+  --radius-md: var(--radius-control);
+  --radius-lg: var(--radius-control);
+  --radius-xl: var(--radius-overlay);
+  --radius-2xl: var(--radius-panel);
+  --radius-3xl: var(--radius-panel);
+  --radius-4xl: var(--radius-panel);
+  --radius: var(--radius-control);
 
-    --text-2xs:   11px;  --text-2xs--line-height: 16px;
-    --text-xs:    12px;  --text-xs--line-height:  16px;
-    --text-sm:    13px;  --text-sm--line-height:  20px;
-    --text-base:  14px;  --text-base--line-height: 20px;
-    --text-md:    16px;  --text-md--line-height:  24px;
-    --text-lg:    18px;  --text-lg--line-height:  26px;
-    --text-xl:    22px;  --text-xl--line-height:  28px;
-    --text-2xl:   28px;  --text-2xl--line-height: 34px;
-    --text-3xl:   34px;  --text-3xl--line-height: 40px;
+  /* ---------- type ---------- */
+  --font-sans:
+    'Geist Variable', ui-sans-serif, system-ui, -apple-system,
+    BlinkMacSystemFont, sans-serif;
+  --font-canvas:
+    'Inter Variable', 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-mono:
+    'Geist Mono Variable', 'JetBrains Mono', ui-monospace, SFMono-Regular,
+    monospace;
 
-    /* ---------- elevation ---------- */
-    --shadow-e0: none;
-    --shadow-e1: 0 1px 2px 0 rgb(12 10 9 / 0.04);
-    --shadow-e2: 0 1px 3px 0 rgb(12 10 9 / 0.06), 0 1px 2px -1px rgb(12 10 9 / 0.04);
-    --shadow-e3: 0 4px 12px -2px rgb(12 10 9 / 0.08), 0 2px 4px -2px rgb(12 10 9 / 0.04);
-    --shadow-e4: 0 12px 32px -8px rgb(12 10 9 / 0.12), 0 4px 8px -4px rgb(12 10 9 / 0.06);
-    --shadow-e5: var(--s-elevation-5);
+  --text-2xs: 11px;
+  --text-2xs--line-height: 16px;
+  --text-xs: 12px;
+  --text-xs--line-height: 16px;
+  --text-sm: 13px;
+  --text-sm--line-height: 20px;
+  --text-base: 14px;
+  --text-base--line-height: 20px;
+  --text-md: 16px;
+  --text-md--line-height: 24px;
+  --text-lg: 18px;
+  --text-lg--line-height: 24px;
+  --text-xl: 22px;
+  --text-xl--line-height: 28px;
+  --text-2xl: 28px;
+  --text-2xl--line-height: 34px;
+  --text-3xl: 34px;
+  --text-3xl--line-height: 40px;
 
-    --shadow-xs: var(--s-control);
-    --shadow-sm: var(--s-control);
-    --shadow-md: var(--s-panel);
-    --shadow-lg: var(--s-overlay);
-    --shadow-hover: var(--shadow-e3);
-    --shadow-floating: var(--shadow-e5);
+  /* ---------- elevation ---------- */
+  --shadow-control: var(--s-control);
+  --shadow-panel: var(--s-panel);
+  --shadow-overlay: var(--s-overlay);
 
-    /* ---------- motion ---------- */
-    --ease-out-quart: cubic-bezier(0.20, 0, 0, 1);
-    --ease-in-out-quart: cubic-bezier(0.65, 0, 0.35, 1);
+  /* Compatibility aliases collapse the old five-step ladder to three
+       deliberate tiers and remain theme-aware. */
+  --shadow-e0: none;
+  --shadow-e1: var(--s-control);
+  --shadow-e2: var(--s-control);
+  --shadow-e3: var(--s-panel);
+  --shadow-e4: var(--s-overlay);
+  --shadow-e5: var(--s-overlay);
+  --shadow-xs: var(--s-control);
+  --shadow-sm: var(--s-control);
+  --shadow-md: var(--s-panel);
+  --shadow-lg: var(--s-overlay);
+  --shadow-hover: var(--s-panel);
+  --shadow-floating: var(--s-overlay);
 
-    /* Tailwind generates `duration-*` utilities from --transition-duration-*,
+  /* ---------- motion ---------- */
+  --ease-out-quart: cubic-bezier(0.2, 0, 0, 1);
+  --ease-in-out-quart: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* Tailwind generates `duration-*` utilities from --transition-duration-*,
        not --duration-*. Both are kept: the former is the utility API, the
        latter stays readable as var(--duration-base) from raw CSS. */
-    --transition-duration-instant: 80ms;
-    --transition-duration-fast:   120ms;
-    --transition-duration-base:   160ms;
-    --transition-duration-slow:   240ms;
-    --transition-duration-slower: 320ms;
+  --transition-duration-instant: 80ms;
+  --transition-duration-fast: 120ms;
+  --transition-duration-base: 160ms;
+  --transition-duration-slow: 240ms;
+  --transition-duration-slower: 320ms;
 
-    --duration-instant: 80ms;
-    --duration-fast:   120ms;
-    --duration-base:   160ms;
-    --duration-slow:   240ms;
-    --duration-slower: 320ms;
+  --duration-instant: 80ms;
+  --duration-fast: 120ms;
+  --duration-base: 160ms;
+  --duration-slow: 240ms;
+  --duration-slower: 320ms;
 
-    /* ---------- Surfaces ---------- */
-    --color-canvas:  var(--bg-canvas);
-    --color-panel:   var(--bg-panel);
-    --color-surface: var(--bg-surface);
-    --color-surface-hover: var(--bg-surface-hover);
-    --color-subtle:  var(--bg-panel);
-    --color-muted:   var(--bg-panel);
-    --color-sunken:  var(--bg-sunken);
-    --color-inverse: var(--bg-inverse);
-    --color-inverse-hover: var(--bg-inverse-hover);
-    --color-scrim:   var(--c-scrim);
+  /* ---------- Surfaces ---------- */
+  --color-canvas: var(--bg-canvas);
+  --color-panel: var(--bg-panel);
+  --color-surface: var(--bg-surface);
+  --color-surface-hover: var(--bg-surface-hover);
+  --color-subtle: var(--bg-panel);
+  --color-muted: var(--bg-panel);
+  --color-sunken: var(--bg-sunken);
+  --color-inverse: var(--bg-inverse);
+  --color-inverse-hover: var(--bg-inverse-hover);
+  --color-scrim: var(--c-scrim);
 
-    /* ---------- Foregrounds / Ink ---------- */
-    --color-fg:           var(--fg);
-    --color-fg-secondary: var(--fg-secondary);
-    --color-fg-muted:     var(--fg-muted);
-    --color-fg-subtle:    var(--fg-subtle);
-    --color-fg-inverse:   var(--fg-inverse);
+  /* ---------- Foregrounds / Ink ---------- */
+  --color-fg: var(--fg);
+  --color-fg-secondary: var(--fg-secondary);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-subtle: var(--fg-subtle);
+  --color-fg-inverse: var(--fg-inverse);
 
-    --color-primary:      var(--fg);
-    --color-secondary:    var(--fg-secondary);
-    --color-tertiary:     var(--fg-muted);
-    --color-placeholder:  var(--fg-subtle);
+  --color-primary: var(--action-solid);
+  --color-secondary: var(--bg-panel);
+  --color-tertiary: var(--fg-muted);
+  --color-placeholder: var(--fg-subtle);
 
-    /* ---------- Lines / Borders ---------- */
-    --color-border:        var(--border);
-    --color-border-strong: var(--border-strong);
-    --color-border-subtle: var(--border-subtle);
-    --color-control-border: var(--border-strong);
-    --color-strong:        var(--border-strong);
-    --color-ring:          var(--ring);
-    --color-focus:         var(--ring);
+  /* ---------- Lines / Borders ---------- */
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-border-subtle: var(--border-subtle);
+  --color-control-border: var(--control-border);
+  --color-strong: var(--border-strong);
+  --color-ring: var(--ring);
+  --color-focus: var(--ring);
 
-    /* ---------- Primary action ---------- */
-    --color-action: var(--bg-inverse);
-    --color-action-hover: var(--color-stone-800);
-    --color-action-active: var(--color-stone-950);
-    --color-on-action: var(--fg-inverse);
+  /* ---------- Primary action ---------- */
+  --color-action: var(--action-solid);
+  --color-action-hover: var(--action-hover);
+  --color-action-active: var(--action-active);
+  --color-on-action: var(--action-foreground);
 
-    /* ---------- Purposeful accent ---------- */
-    --color-link: var(--c-link);
-    --color-accent-brand: var(--c-link);
-    --color-accent-brand-foreground: var(--c-ink-inverse);
+  /* ---------- Purposeful accent ---------- */
+  --color-link: var(--action-solid);
+  --color-accent-brand: var(--action-solid);
+  --color-accent-brand-foreground: var(--action-foreground);
 
-    /* ---------- Status ---------- */
-    --color-success: var(--status-success-fg);
-    --color-success-fg: var(--status-success-fg);
-    --color-success-bg: var(--status-success-bg);
-    --color-success-border: var(--status-success-border);
+  /* ---------- Status ---------- */
+  --color-success: var(--status-success-fg);
+  --color-success-fg: var(--status-success-fg);
+  --color-success-bg: var(--status-success-bg);
+  --color-success-border: var(--status-success-border);
 
-    --color-warning-fg: var(--status-warning-fg);
-    --color-warning: var(--status-warning-fg);
-    --color-warning-bg: var(--status-warning-bg);
-    --color-warning-border: var(--status-warning-border);
+  --color-warning-fg: var(--status-warning-fg);
+  --color-warning: var(--status-warning-fg);
+  --color-warning-bg: var(--status-warning-bg);
+  --color-warning-border: var(--status-warning-border);
 
-    --color-danger-fg: var(--status-danger-fg);
-    --color-danger: var(--status-danger-fg);
-    --color-danger-bg: var(--status-danger-bg);
-    --color-danger-border: var(--status-danger-border);
-    --color-danger-fg-on-inverse: var(--status-danger-fg-on-inverse);
+  --color-danger-fg: var(--status-danger-fg);
+  --color-danger: var(--status-danger-fg);
+  --color-danger-bg: var(--status-danger-bg);
+  --color-danger-border: var(--status-danger-border);
+  --color-danger-control-border: var(--status-danger-control-border);
+  --color-danger-fg-on-inverse: var(--status-danger-fg-on-inverse);
 
-    --color-info-fg: var(--status-info-fg);
-    --color-info: var(--status-info-fg);
-    --color-info-bg: var(--status-info-bg);
-    --color-info-border: var(--status-info-border);
+  --color-info-fg: var(--status-info-fg);
+  --color-info: var(--status-info-fg);
+  --color-info-bg: var(--status-info-bg);
+  --color-info-border: var(--status-info-border);
 
-    --color-inactive-fg: var(--status-inactive-fg);
-    --color-inactive-bg: var(--status-inactive-bg);
-    --color-inactive-border: var(--status-inactive-border);
+  --color-inactive-fg: var(--status-inactive-fg);
+  --color-inactive-bg: var(--status-inactive-bg);
+  --color-inactive-border: var(--status-inactive-border);
 
-    --color-neutral-fg: var(--status-neutral-fg);
-    --color-neutral-bg: var(--status-neutral-bg);
-    --color-neutral-border: var(--status-neutral-border);
+  --color-neutral-fg: var(--status-neutral-fg);
+  --color-neutral-bg: var(--status-neutral-bg);
+  --color-neutral-border: var(--status-neutral-border);
 
-    /* ---------- Legacy aliases for canvas / shadcn ---------- */
-    --color-background: var(--bg-canvas);
-    --color-foreground: var(--fg);
-    --color-card: var(--bg-surface);
-    --color-card-foreground: var(--fg);
-    --color-popover: var(--bg-surface);
-    --color-popover-foreground: var(--fg);
-    --color-primary-foreground: var(--fg-inverse);
-    --color-secondary-foreground: var(--fg);
-    --color-muted-foreground: var(--fg-muted);
-    --color-faint-foreground: var(--fg-subtle);
-    --color-accent: var(--bg-panel);
-    --color-accent-foreground: var(--fg);
-    --color-destructive: var(--status-danger-fg);
-    --color-input: var(--border);
+  /* ---------- Legacy aliases for canvas / shadcn ---------- */
+  --color-background: var(--bg-canvas);
+  --color-foreground: var(--fg);
+  --color-card: var(--bg-surface);
+  --color-card-foreground: var(--fg);
+  --color-popover: var(--bg-surface);
+  --color-popover-foreground: var(--fg);
+  --color-primary-foreground: var(--action-foreground);
+  --color-secondary-foreground: var(--fg);
+  --color-muted-foreground: var(--fg-muted);
+  --color-faint-foreground: var(--fg-subtle);
+  --color-accent: var(--bg-panel);
+  --color-accent-foreground: var(--fg);
+  --color-destructive: var(--status-danger-fg);
+  --color-input: var(--control-border);
 
-    --color-sidebar: var(--bg-panel);
-    --color-sidebar-foreground: var(--fg);
-    --color-sidebar-primary: var(--bg-inverse);
-    --color-sidebar-primary-foreground: var(--fg-inverse);
-    --color-sidebar-accent: var(--bg-surface);
-    --color-sidebar-accent-foreground: var(--fg);
-    --color-sidebar-border: var(--border);
-    --color-sidebar-ring: var(--ring);
+  --color-sidebar: var(--bg-panel);
+  --color-sidebar-foreground: var(--fg);
+  --color-sidebar-primary: var(--action-solid);
+  --color-sidebar-primary-foreground: var(--action-foreground);
+  --color-sidebar-accent: var(--bg-surface);
+  --color-sidebar-accent-foreground: var(--fg);
+  --color-sidebar-border: var(--border);
+  --color-sidebar-ring: var(--ring);
 }
 
 /* ==========================================================================
@@ -401,76 +426,77 @@
  * ========================================================================== */
 
 @layer base {
-    * {
-        @apply border-border outline-ring/50;
-    }
+  * {
+    @apply border-border outline-ring/50;
+  }
 
-    html {
-        @apply font-sans;
-    }
+  html {
+    @apply font-sans;
+  }
 
-    body {
-        @apply text-sm bg-background text-foreground;
-        font-synthesis: none;
-        text-rendering: optimizeLegibility;
-        -webkit-font-smoothing: antialiased;
-    }
+  body {
+    @apply text-sm bg-background text-foreground;
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
 
-    html,
-    body,
-    #root {
-        height: 100%;
-    }
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
 
-    /*
+  /*
      * One focus treatment for the whole app. An outline (not a ring) so it
      * never depends on a component's background, and so components don't have
      * to restate it. Components may still tint their *border* on focus.
      */
-    :focus-visible {
-        outline: 2px solid var(--color-focus);
-        outline-offset: 2px;
-    }
+  :focus-visible {
+    outline: 2px solid var(--color-focus);
+    outline-offset: 2px;
+  }
 
-    button:not(:disabled),
-    [role="button"]:not(:disabled) {
-        cursor: pointer;
-    }
+  button:not(:disabled),
+  [role='button']:not(:disabled) {
+    cursor: pointer;
+  }
 
-    /* iPad / Safari touch hardening. */
-    html,
-    body {
-        /* No rubber-band scroll chaining or pull-to-refresh over the canvas. */
-        overscroll-behavior: none;
-        /* No gray flash on tap, no long-press text-selection callout. */
-        -webkit-tap-highlight-color: transparent;
-        -webkit-touch-callout: none;
-    }
+  /* iPad / Safari touch hardening. */
+  html,
+  body {
+    /* No rubber-band scroll chaining or pull-to-refresh over the canvas. */
+    overscroll-behavior: none;
+    /* No gray flash on tap, no long-press text-selection callout. */
+    -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+  }
 
-    /* Treat the app like a native surface: never select chrome text on
+  /* Treat the app like a native surface: never select chrome text on
        long-press, but keep real text fields (and the canvas text editor)
        selectable. */
-    body {
-        -webkit-user-select: none;
-        user-select: none;
-    }
+  body {
+    -webkit-user-select: none;
+    user-select: none;
+  }
 
-    input,
-    textarea,
-    [contenteditable],
-    [contenteditable] * {
-        -webkit-user-select: text;
-        user-select: text;
-    }
+  input,
+  textarea,
+  [contenteditable],
+  [contenteditable] * {
+    -webkit-user-select: text;
+    user-select: text;
+  }
 
-    /* Buttons/menus: kill the 300ms tap delay and double-tap zoom on controls.
+  /* Buttons/menus: kill the 300ms tap delay and double-tap zoom on controls.
        The canvas keeps its own `touch-action: none` for custom gestures. */
-    button,
-    [role="button"],
-    [role="menuitem"],
-    a {
-        touch-action: manipulation;
-    }
+  button,
+  [role='button'],
+  [role='menuitem'],
+  a {
+    touch-action: manipulation;
+  }
 }
 
 /* ==========================================================================
@@ -478,41 +504,71 @@
  * ========================================================================== */
 
 @layer utilities {
-    .scrollbar-none {
-        scrollbar-width: none;
+  .type-page-title {
+    font-size: var(--text-2xl);
+    line-height: var(--text-2xl--line-height);
+    font-weight: 600;
+    letter-spacing: -0.025em;
+    text-wrap: balance;
+  }
+
+  .type-section-title {
+    font-size: var(--text-xl);
+    line-height: var(--text-xl--line-height);
+    font-weight: 600;
+    letter-spacing: -0.025em;
+    text-wrap: balance;
+  }
+
+  .type-panel-title {
+    font-size: var(--text-base);
+    line-height: var(--text-base--line-height);
+    font-weight: 600;
+  }
+
+  .type-overline {
+    font-size: var(--text-2xs);
+    line-height: var(--text-2xs--line-height);
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .scrollbar-none {
+    scrollbar-width: none;
+  }
+
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+
+  @media (pointer: coarse) {
+    /* iOS zooms the viewport when a focused editable surface computes
+           below 16px. Keep dense desktop controls, but enforce the touch
+           floor without asking every call site to remember it. */
+    input:not([type='checkbox']):not([type='radio']):not([type='range']),
+    textarea,
+    [contenteditable='true'] {
+      font-size: 16px !important;
     }
 
-    .scrollbar-none::-webkit-scrollbar {
-        display: none;
-    }
-
-    @media (pointer: coarse) {
-        /* Controls revealed on hover for mouse users must be permanently
+    /* Controls revealed on hover for mouse users must be permanently
            visible where there is no hover (touch). Applied alongside
            group-hover. */
-        .touch-reveal {
-            opacity: 1 !important;
-        }
-
-        /* Opt-in container: keep mouse layouts compact while giving coarse
-           pointers the recommended 44px target. */
-        .touch-targets button,
-        .touch-targets [role="button"],
-        .touch-targets [role="menuitem"],
-        .touch-targets [data-slot="button"] {
-            min-height: 2.75rem;
-            min-width: 2.75rem;
-        }
-
-        /* Equation templates are dense and used while a virtual keyboard is
-           open, so give this authoring surface the full recommended target. */
-        .equation-panel button,
-        .equation-panel [role="button"],
-        .equation-panel [data-slot="button"] {
-            min-height: 2.75rem;
-            min-width: 2.75rem;
-        }
+    .touch-reveal {
+      opacity: 1 !important;
     }
+
+    /* Opt-in container: keep mouse layouts compact while giving coarse
+           pointers the recommended 44px target. */
+    .touch-targets button,
+    .touch-targets [role='button'],
+    .touch-targets [role='menuitem'],
+    .touch-targets [data-slot='button'] {
+      min-height: 2.75rem;
+      min-width: 2.75rem;
+    }
+  }
 }
 
 /* ==========================================================================
@@ -520,105 +576,118 @@
  * ========================================================================== */
 
 .tool-panel-presence {
-    --panel-open-dur: 260ms;
-    --panel-close-dur: 170ms;
-    --panel-translate-y: -10px;
-    --panel-ease: var(--ease-out-expo);
-    transform-origin: top right;
+  --panel-open-dur: 260ms;
+  --panel-close-dur: 170ms;
+  --panel-translate-y: -10px;
+  --panel-ease: var(--ease-out-expo);
+  transform-origin: top right;
 }
 
-.tool-panel-presence [data-slot="surface"],
-.tool-panel-presence > * {
-    border-color: var(--c-line-strong);
-    box-shadow: 0 3px 10px rgba(24, 24, 27, 0.07), 0 1px 2px rgba(24, 24, 27, 0.04);
-}
-
-.dark .tool-panel-presence [data-slot="surface"],
-.dark .tool-panel-presence > * {
-    border-color: var(--c-line-strong);
-    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3), 0 1px 2px rgba(0, 0, 0, 0.15);
-}
-
-.tool-panel-presence[data-phase="closing"] {
-    z-index: 20;
+.tool-panel-presence[data-phase='closing'] {
+  z-index: 20;
 }
 
 .t-panel-slide {
-    transform: translateY(var(--panel-translate-y));
-    opacity: 0;
-    pointer-events: none;
-    transition:
-        transform var(--panel-close-dur) var(--panel-ease),
-        opacity var(--panel-close-dur) var(--panel-ease);
+  transform: translateY(var(--panel-translate-y));
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    transform var(--panel-close-dur) var(--panel-ease),
+    opacity var(--panel-close-dur) var(--panel-ease);
 }
 
-.t-panel-slide[data-open="true"] {
-    transform: translateY(0);
-    opacity: 1;
-    pointer-events: auto;
-    transition:
-        transform var(--panel-open-dur) var(--panel-ease),
-        opacity var(--panel-open-dur) var(--panel-ease);
+.t-panel-slide[data-open='true'] {
+  transform: translateY(0);
+  opacity: 1;
+  pointer-events: auto;
+  transition:
+    transform var(--panel-open-dur) var(--panel-ease),
+    opacity var(--panel-open-dur) var(--panel-ease);
 }
 
 .tool-panel-content {
-    animation: tool-panel-content-in 180ms var(--panel-ease) both;
+  animation: tool-panel-content-in 180ms var(--panel-ease) both;
 }
 
 @keyframes tool-panel-content-in {
-    from {
-        transform: translateY(-4px);
-        opacity: 0;
-    }
+  from {
+    transform: translateY(-4px);
+    opacity: 0;
+  }
 
-    to {
-        transform: translateY(0);
-        opacity: 1;
-    }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
 }
-
 
 /* A stamped sticker lands with a slight overshoot, the way a stamp presses
    down and settles. Applied only to the sticker the local user just placed
    (see use-sticker-pop-store), never on load or to a peer's shapes. Duration
    is mirrored by POP_MS there. */
 @keyframes sticker-pop {
-    from {
-        transform: scale(0.4);
-        opacity: 0;
-    }
+  from {
+    transform: scale(0.4);
+    opacity: 0;
+  }
 
-    55% {
-        transform: scale(1.08);
-        opacity: 1;
-    }
+  55% {
+    transform: scale(1.08);
+    opacity: 1;
+  }
 
-    to {
-        transform: scale(1);
-        opacity: 1;
-    }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
 }
 
 .sticker-pop {
-    animation: sticker-pop 260ms cubic-bezier(0.2, 0, 0, 1) both;
-    /* Scale about the group's own box rather than the SVG origin, so the pop
+  animation: sticker-pop 260ms cubic-bezier(0.2, 0, 0, 1) both;
+  /* Scale about the group's own box rather than the SVG origin, so the pop
        is centered on the sticker wherever it sits in world space. */
-    transform-box: fill-box;
-    transform-origin: center;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+/* A deleted shape fades out where it stood instead of blinking away, so the eye
+   can follow what left. Applied to ghost copies in VanishLayer, never to a live
+   shape; duration is mirrored by VANISH_MS in use-vanish-store. Opacity only —
+   these are the shape's real pixels, and any movement would read as the shape
+   going somewhere rather than going away. */
+@keyframes shape-vanish {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
+  }
+}
+
+.shape-vanish {
+  animation: shape-vanish 180ms cubic-bezier(0.4, 0, 1, 1) both;
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .t-panel-slide {
-        transition: none !important;
-    }
+  .t-panel-slide {
+    transition: none !important;
+  }
 
-    .tool-panel-content {
-        animation: none;
-    }
+  .tool-panel-content {
+    animation: none;
+  }
 
-    .sticker-pop {
-        animation: none;
-    }
+  .sticker-pop {
+    animation: none;
+  }
+
+  /* No fade for reduced motion: hide the ghost outright so the delete stays as
+     immediate as it was before. */
+  .shape-vanish {
+    animation: none;
+    opacity: 0;
+  }
 }
 
 /* ==========================================================================
@@ -627,97 +696,113 @@
 
 /* Graph panel math input: make the MathLive field blend into the expression
    row (transparent, borderless, foreground-colored) like a plain text input. */
-.graph-math-field {
-    display: flex;
-    align-items: center;
-    flex: 1 1 auto;
-    min-width: 0;
-    min-height: 2.25rem;
-    padding: 0 0.5rem;
-    border: 0;
-    background: transparent;
-    color: var(--color-foreground);
-    font-size: 1rem;
-    /* MathLive ignores pointer input (click-to-place-caret, drag-select) when
+.math-field-base {
+  display: flex;
+  align-items: center;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 2.25rem;
+  padding: 0 0.5rem;
+  border: 0;
+  background: transparent;
+  color: var(--color-foreground);
+  font-size: 1rem;
+  /* MathLive ignores pointer input (click-to-place-caret, drag-select) when
        the host's computed user-select is none — undo the app-wide select-none. */
-    -webkit-user-select: text;
-    user-select: text;
-    --hue: 212;
-    --caret-color: var(--color-primary);
-    --selection-background-color: color-mix(in oklab, var(--color-primary) 22%, transparent);
-    --contains-highlight-background-color: transparent;
-    --smart-fence-color: var(--color-secondary);
-    --placeholder-color: var(--color-secondary);
+  -webkit-user-select: text;
+  user-select: text;
+  --hue: 212;
+  --caret-color: var(--color-primary);
+  --selection-background-color: color-mix(
+    in oklab,
+    var(--color-primary) 22%,
+    transparent
+  );
+  --contains-highlight-background-color: transparent;
+  --smart-fence-color: var(--color-fg-secondary);
+  --placeholder-color: var(--color-fg-secondary);
 }
 
 /* The graph panel treats each expression as the primary object, so the math
    gets a roomier authoring line than the compact equation controls elsewhere.
    Keep the host block-level: flex makes MathLive's shadow container use the
    formula's intrinsic width and paint over the row actions. */
-.graph-math-field.graph-expression-field {
-    display: block;
-    align-content: center;
-    min-height: 3rem;
-    padding-inline: 0.25rem;
-    font-size: 1.125rem;
+.math-field-base.graph-expression-field {
+  display: block;
+  align-content: center;
+  min-height: 3rem;
+  padding-inline: 0.25rem;
+  font-size: 1.125rem;
 }
 
 /* Keep long formulas horizontally scrollable without letting scrollbar chrome
    take vertical space away from the expression's centerline. */
 .graph-expression-field::part(content) {
-    overflow-x: auto;
-    overflow-y: hidden;
-    overscroll-behavior-x: contain;
-    scrollbar-width: none;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
 }
 
 .graph-expression-field::part(content)::-webkit-scrollbar {
-    display: none;
+  display: none;
 }
 
 /* Focus indication comes from the expression row highlight, not the field. */
-.graph-math-field:focus,
-.graph-math-field:focus-within,
-.graph-math-field:focus-visible {
-    outline: none;
-    box-shadow: none;
+.math-field-base:focus,
+.math-field-base:focus-within,
+.math-field-base:focus-visible {
+  outline: none;
+  box-shadow: none;
 }
 
 /* No inline menu/keyboard affordances in this compact panel. */
-.graph-math-field::part(menu-toggle),
-.graph-math-field::part(virtual-keyboard-toggle) {
-    display: none;
+.math-field-base::part(menu-toggle),
+.math-field-base::part(virtual-keyboard-toggle) {
+  display: none;
 }
 
-/* Equation authoring keeps mathematical lines explicit. When a formula grows
-   past the comfortable width, indicate horizontal continuation without
-   clipping the MathLive field's own scrolling surface. */
-.equation-field-shell {
-    position: relative;
-    min-width: 0;
-    overflow: hidden;
+/* When a rendered formula grows past the comfortable width, indicate the
+   horizontal continuation without clipping the box's own scrolling surface.
+ *
+ * `--fade-to` names the fill being faded into, so a surface that is not the
+   board's can say so. */
+.equation-fade-end {
+  position: relative;
 }
 
-.equation-field-shell[data-overflow]::after {
-    position: absolute;
-    inset-block: 0;
-    inset-inline-end: 0;
-    width: 1.75rem;
-    content: '';
-    pointer-events: none;
-    background: linear-gradient(to right, transparent, var(--color-muted));
+.equation-fade-end[data-overflow]::after {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: 0;
+  width: 1.75rem;
+  content: '';
+  pointer-events: none;
+  background: linear-gradient(
+    to right,
+    transparent,
+    var(--fade-to, var(--color-surface))
+  );
+}
+
+.equation-preview-box {
+  --fade-to: var(--color-canvas);
 }
 
 .equation-output-preview {
-    flex: none;
-    min-width: max-content;
+  flex: none;
+  min-width: max-content;
 }
 
+/* Left free to take its natural height up to a ceiling. Pinning every formula
+   to one line height crushed exactly the equations worth previewing — a
+   \frac, a \sum with limits, a pmatrix — down to the size of `x = 1`. */
 .equation-output-preview > svg {
-    display: block;
-    width: auto;
-    max-width: none;
-    height: 3rem;
+  display: block;
+  width: auto;
+  max-width: none;
+  height: auto;
+  max-height: 6rem;
 }
 
 /* ==========================================================================
@@ -738,29 +823,29 @@
  * ========================================================================== */
 
 :root {
-    /* Board root. */
-    --z-canvas: 100;
-    --z-ui: 300;
+  /* Board root. */
+  --z-canvas: 100;
+  --z-ui: 300;
 
-    /* Inside the canvas surface. */
-    --z-canvas-background: 10;
-    --z-canvas-shapes: 20;
-    --z-canvas-blocker: 30;
-    --z-canvas-indicator: 40;
-    --z-canvas-collaborator: 50;
-    --z-canvas-front: 60;
-    --z-canvas-hud: 70;
+  /* Inside the canvas surface. */
+  --z-canvas-background: 10;
+  --z-canvas-shapes: 20;
+  --z-canvas-blocker: 30;
+  --z-canvas-indicator: 40;
+  --z-canvas-collaborator: 50;
+  --z-canvas-front: 60;
+  --z-canvas-hud: 70;
 
-    /* Inside the UI shell. Panels are unset (DOM order); only the audio-blocked
+  /* Inside the UI shell. Panels are unset (DOM order); only the audio-blocked
        banner is raised, because it shares the bottom-center slot with the
        toolbar and has to stay readable on top of it. */
-    --z-ui-alert: 40;
+  --z-ui-alert: 40;
 }
 
 /* The board root. Isolating it means a stray z-index elsewhere on the page can
    never interleave itself with a canvas overlay. */
 .wb-board {
-    isolation: isolate;
+  isolation: isolate;
 }
 
 /* The canvas surface. `contain: strict` is size + layout + paint + style
@@ -770,7 +855,7 @@
    containment is safe here only because the surface is sized by its `inset-0`
    containing block and never by its contents. */
 .wb-canvas-surface {
-    contain: strict;
+  contain: strict;
 }
 
 /* The UI shell: a full-bleed, click-through plane holding the floating panels.
@@ -779,27 +864,11 @@
    that reset at zero specificity so a panel managing its own pointer-events
    (`.t-panel-slide` while closed) still wins. */
 .wb-ui-layer {
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
 }
 
 :where(.wb-ui-layer) > * {
-    pointer-events: auto;
-}
-
-@theme inline {
-    --color-sidebar-ring: var(--sidebar-ring);
-    --color-sidebar-border: var(--sidebar-border);
-    --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-    --color-sidebar-accent: var(--sidebar-accent);
-    --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-    --color-sidebar-primary: var(--sidebar-primary);
-    --color-sidebar-foreground: var(--sidebar-foreground);
-    --color-sidebar: var(--sidebar);
-    --color-chart-5: var(--chart-5);
-    --color-chart-4: var(--chart-4);
-    --color-chart-3: var(--chart-3);
-    --color-chart-2: var(--chart-2);
-    --color-chart-1: var(--chart-1);
+  pointer-events: auto;
 }

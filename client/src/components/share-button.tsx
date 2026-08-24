@@ -88,7 +88,7 @@ export function ShareButton() {
             title={link}
             aria-label="Share link"
             onFocus={(e) => e.currentTarget.select()}
-            className="w-full font-mono text-sm text-primary"
+            className="w-full font-mono text-sm text-fg"
           />
           <Button
             variant={copied ? 'outline' : 'default'}

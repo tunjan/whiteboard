@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { EquationShape } from '@whiteboard/shared';
 import {
-  getEquationRender,
   requestEquationTypeset,
-  useEquationRenderStore,
+  useEquationRender,
   type EquationRender,
 } from '../equation-render';
 import { boxBounds, boxHitTest, rotationTransform } from './box-geometry';
@@ -217,13 +216,15 @@ export const equationUtil: ShapeUtil<'equation'> = {
   },
 
   Component: ({ shape }) => {
-    useEquationRenderStore((state) => state.version);
     const latex = shape.props.latex.trim();
-    const entry = latex ? getEquationRender(latex) : undefined;
+    const inline = shape.props.inline ?? false;
+    // Subscribes to this expression alone: a keystroke in the panel caches one
+    // new prefix, and only the shapes showing *that* prefix should re-render.
+    const entry = useEquationRender(latex, inline);
     const lastTypeset = useRef<TypesetRender | null>(null);
     const settled = useSettledSource(latex);
 
-    if (latex && !entry) requestEquationTypeset(latex);
+    if (latex && !entry) requestEquationTypeset(latex, inline);
 
     const display = equationDisplay(latex, entry, lastTypeset.current, settled);
     if (display.kind === 'typeset') lastTypeset.current = display.render;

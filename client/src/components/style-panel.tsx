@@ -15,9 +15,10 @@ import type {
   LineSpline,
   StrokeDash,
   TextAlign,
+  TextProps,
 } from '@whiteboard/shared';
 import { orthogonalRoute } from '@/canvas/shapes/connector-routing';
-import { fontStack } from '@/canvas/shapes/text-measure';
+import { fontStack, stabilizeTextPosition } from '@/canvas/shapes/text-measure';
 import { editor, useDocumentStore } from '@/canvas/use-document-store';
 import { useSelectionStore } from '@/canvas/use-selection-store';
 import {
@@ -278,6 +279,7 @@ export function StylePanel() {
 
   const showSize =
     targetType === 'draw' ||
+    targetType === 'highlighter' ||
     targetType === 'line' ||
     targetType === 'arrow' ||
     targetType === 'rectangle' ||
@@ -300,6 +302,12 @@ export function StylePanel() {
     targetType === 'ellipse' ||
     targetType === 'polygon' ||
     targetType === 'mixed';
+
+  // The highlighter fixes its own translucency — that is what separates a
+  // highlight from a coloured band — so the slider would be inert while it is
+  // the active tool. It returns for the selection, where it edits the stroke
+  // that was drawn like it edits any other shape.
+  const showOpacity = activeToolId !== 'highlighter';
 
   const showFont = targetType === 'text' || targetType === 'mixed';
   const showAlign = targetType === 'text' || targetType === 'mixed';
@@ -449,31 +457,33 @@ export function StylePanel() {
     }
   };
 
+  /**
+   * Restyle every selected text, moving each box so the restyle grows it about
+   * its anchored edge and its centre rather than pushing it right and down.
+   */
+  const applyTextProps = (patch: Partial<TextProps>) => {
+    for (const id of selectedIds) {
+      const shape = editor.getShape(id);
+      if (shape?.type !== 'text') continue;
+      const next = { ...shape.props, ...patch };
+      const { x, y } = stabilizeTextPosition(shape, next);
+      editor.updateShape(id, { x, y, props: patch });
+    }
+  };
+
   const applyFontFamily = (f: FontFamily) => {
     setFontFamily(f);
-    for (const id of selectedIds) {
-      if (editor.getShape(id)?.type === 'text') {
-        editor.updateShape(id, { props: { fontFamily: f } });
-      }
-    }
+    applyTextProps({ fontFamily: f });
   };
 
   const applyFontWeight = (w: FontWeight) => {
     setFontWeight(w);
-    for (const id of selectedIds) {
-      if (editor.getShape(id)?.type === 'text') {
-        editor.updateShape(id, { props: { fontWeight: w } });
-      }
-    }
+    applyTextProps({ fontWeight: w });
   };
 
   const applyAlign = (a: TextAlign) => {
     setAlign(a);
-    for (const id of selectedIds) {
-      if (editor.getShape(id)?.type === 'text') {
-        editor.updateShape(id, { props: { align: a } });
-      }
-    }
+    applyTextProps({ align: a });
   };
 
   return (
@@ -558,18 +568,20 @@ export function StylePanel() {
                   </>
                 ) : null}
 
-                <Tooltip>
-                  <TooltipTrigger render={<div />}>
-                    <OpacitySlider
-                      aria-label="Opacity"
-                      value={opacity}
-                      onValueChange={applyOpacity}
-                    />
-                  </TooltipTrigger>
-                  <TooltipContent side="left">
-                    Opacity {Math.round(opacity * 100)}%
-                  </TooltipContent>
-                </Tooltip>
+                {showOpacity ? (
+                  <Tooltip>
+                    <TooltipTrigger render={<div />}>
+                      <OpacitySlider
+                        aria-label="Opacity"
+                        value={opacity}
+                        onValueChange={applyOpacity}
+                      />
+                    </TooltipTrigger>
+                    <TooltipContent side="left">
+                      Opacity {Math.round(opacity * 100)}%
+                    </TooltipContent>
+                  </Tooltip>
+                ) : null}
               </div>
 
               {showFill ||

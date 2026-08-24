@@ -44,7 +44,7 @@ export function FollowControls({
           <Tooltip>
             <TooltipTrigger
               render={
-                <span className="flex items-center gap-2 rounded-md px-2 text-xs font-medium text-primary" />
+                <span className="flex items-center gap-2 rounded-md px-2 text-xs font-medium text-fg" />
               }
             >
               <span
@@ -109,7 +109,7 @@ export function FollowControls({
                   'h-8 min-w-8 border border-transparent',
                   showLabel ? 'px-2.5' : 'w-8 px-0',
                   toolbarItem && 'bg-surface shadow-e1',
-                  following && 'border-border bg-panel text-primary',
+                  following && 'border-border bg-panel text-fg',
                 )}
               />
             }
@@ -132,7 +132,7 @@ export function FollowControls({
             style={{ background: tutorColor }}
             aria-hidden="true"
           />
-          <span className="text-xs font-medium text-primary">
+          <span className="text-xs font-medium text-fg">
             Following tutor. Move to exit.
           </span>
         </Surface>

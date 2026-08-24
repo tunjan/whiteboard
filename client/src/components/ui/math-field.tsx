@@ -40,6 +40,11 @@ export interface MathFieldProps {
   onBackspaceEmpty?: () => void;
   /** Escape inside the field — used to hand focus back to the canvas. */
   onEscape?: () => void;
+  /**
+   * Rewrite pasted text before it is inserted. Returning the input unchanged
+   * lets MathLive's own paste handling run, which keeps the native undo entry.
+   */
+  onPasteText?: (text: string) => string;
   /** Arrow key pressed with nowhere to go inside the field — used to move
    * focus to the previous/next expression row (Desmos-style). */
   onMoveOut?: (direction: 'upward' | 'downward') => void;
@@ -60,6 +65,7 @@ export function MathField({
   onBackspaceEmpty,
   onEscape,
   onMoveOut,
+  onPasteText,
   placeholder,
   className,
   elementRef,
@@ -78,6 +84,7 @@ export function MathField({
     onBackspaceEmpty,
     onEscape,
     onMoveOut,
+    onPasteText,
   });
   handlers.current = {
     onChange,
@@ -85,6 +92,7 @@ export function MathField({
     onBackspaceEmpty,
     onEscape,
     onMoveOut,
+    onPasteText,
   };
 
   const setRef = React.useCallback(
@@ -124,6 +132,20 @@ export function MathField({
       } else if (event.key === 'Escape' && handlers.current.onEscape) {
         event.preventDefault();
         event.stopPropagation();
+        // Two-stage Escape while a `\command` is being typed. Swallowing every
+        // Escape left a mistyped `\alph` with no way out but committing it —
+        // and on a still-empty equation the caller's Escape deletes the shape,
+        // so one keystroke lost the work.
+        //
+        // Cancelling explicitly rather than falling through to MathLive: its
+        // own binding for this is *shift*+Escape, and plain Escape in LaTeX
+        // mode is bound to nothing at all, so deferring would strand the user
+        // in a mode with no exit.
+        if (mf.mode === 'latex') {
+          mf.executeCommand(['complete', 'reject']);
+          return;
+        }
+        // Back in math mode, Escape means what the caller says it means.
         handlers.current.onEscape();
       } else if (
         event.key === 'Backspace' &&
@@ -148,12 +170,28 @@ export function MathField({
       }
     };
 
+    const onPaste = (event: ClipboardEvent) => {
+      const transform = handlers.current.onPasteText;
+      const pasted = event.clipboardData?.getData('text/plain');
+      if (!transform || !pasted) return;
+      const rewritten = transform(pasted);
+      // Nothing to change: let MathLive paste it, so the native undo entry the
+      // default action creates is preserved.
+      if (rewritten === pasted) return;
+      event.preventDefault();
+      event.stopPropagation();
+      mf.insert(rewritten, { format: 'latex', selectionMode: 'after' });
+      handlers.current.onChange(mf.getValue(formatRef.current));
+    };
+
     mf.addEventListener('input', onInput);
+    mf.addEventListener('paste', onPaste, { capture: true });
     // Capture phase so we preempt the mathfield's own key handling.
     mf.addEventListener('keydown', onKeyDown, { capture: true });
     mf.addEventListener('move-out', onMoveOutEvent);
     return () => {
       mf.removeEventListener('input', onInput);
+      mf.removeEventListener('paste', onPaste, { capture: true });
       mf.removeEventListener('keydown', onKeyDown, { capture: true });
       mf.removeEventListener('move-out', onMoveOutEvent);
     };
@@ -186,7 +224,7 @@ export function MathField({
   return (
     <math-field
       ref={setRef}
-      className={cn('graph-math-field', className)}
+      className={cn('math-field-base', className)}
       {...attrs}
     />
   );

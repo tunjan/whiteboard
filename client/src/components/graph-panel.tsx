@@ -135,8 +135,8 @@ function GraphPanelContent({ shape }: { shape: GraphShape }) {
           <Button
             variant="outline"
             className="h-9.5 shrink-0 gap-1.5 rounded-lg px-3"
-            aria-label="Function presets"
-            title="Function presets"
+            aria-label="Curve presets"
+            title="Curve presets"
           >
             <Sparkles className="size-4" data-icon="inline-start" aria-hidden="true" />
             <ChevronDown className="size-3.5 opacity-60" data-icon="inline-end" aria-hidden="true" />

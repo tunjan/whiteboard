@@ -8,7 +8,8 @@ import {
   fontStack,
   fontWeight,
   layoutTextProps,
-  textLineHeight,
+  stabilizeTextPosition,
+  textInkMargin,
 } from './shapes/text-measure';
 import { editor } from './use-document-store';
 import { useSelectionStore } from './use-selection-store';
@@ -85,6 +86,16 @@ export function TextEditorOverlay({
     element.setSelectionRange(start, end);
   }, [shape.props.text]);
 
+  /**
+   * Write new text, moving the box so that the edge the alignment anchors to
+   * stays put. Without this, every keystroke in a centred or right-aligned
+   * auto-sizing text would slide the whole line sideways.
+   */
+  const writeText = (value: string) => {
+    const { x, y } = stabilizeTextPosition(shape, { ...shape.props, text: value });
+    editor.updateShape(shape.id, { x, y, props: { text: value } });
+  };
+
   const commit = () => {
     const value = ref.current?.value ?? shape.props.text;
     setLocalTextSelection(null);
@@ -92,7 +103,7 @@ export function TextEditorOverlay({
       deleteShapesWithCleanup(editor, [shape.id]);
       useSelectionStore.getState().clear();
     } else {
-      editor.updateShape(shape.id, { props: { text: value } });
+      writeText(value);
       useSelectionStore.getState().setSelection([shape.id]);
     }
     stop();
@@ -102,6 +113,14 @@ export function TextEditorOverlay({
   const screen = worldToScreen(shape, camera);
   const zoom = camera.z;
   const fontSize = shape.props.fontSize * zoom;
+
+  // The textarea hides its overflow at exactly the measured box, which clips
+  // the swashes and descenders a script face throws past its advance width.
+  // Grow the element outward and pad it back in by the same amount, so the ink
+  // survives while the glyphs stay exactly where the SVG renderer puts them.
+  // Auto-sizing only: in a fixed-width box the element's content width is the
+  // wrap boundary, and padding it would wrap at a different point than layout.
+  const ink = fixed ? 0 : textInkMargin(fontSize);
 
   return (
     <textarea
@@ -113,8 +132,7 @@ export function TextEditorOverlay({
       spellCheck
       autoCapitalize="sentences"
       onInput={(event) => {
-        const value = event.currentTarget.value.replace(/\r\n?/g, '\n');
-        editor.updateShape(shape.id, { props: { text: value } });
+        writeText(event.currentTarget.value.replace(/\r\n?/g, '\n'));
         publishSelection(event.currentTarget);
       }}
       onSelect={(event) => publishSelection(event.currentTarget)}
@@ -123,9 +141,7 @@ export function TextEditorOverlay({
       }}
       onCompositionEnd={(event) => {
         composing.current = false;
-        editor.updateShape(shape.id, {
-          props: { text: event.currentTarget.value.replace(/\r\n?/g, '\n') },
-        });
+        writeText(event.currentTarget.value.replace(/\r\n?/g, '\n'));
         publishSelection(event.currentTarget);
       }}
       onBlur={() => {
@@ -144,19 +160,22 @@ export function TextEditorOverlay({
         }
       }}
       onPointerDown={(event) => event.stopPropagation()}
-      className="absolute z-[var(--z-canvas-front)] m-0 block resize-none overflow-hidden border-0 bg-transparent p-0 outline-none"
+      className="absolute z-[var(--z-canvas-front)] m-0 block resize-none overflow-hidden border-0 bg-transparent outline-none"
       style={{
-        left: screen.x,
-        top: screen.y,
-        width: layout.width * zoom,
-        height: layout.height * zoom,
-        minWidth: layout.width * zoom,
-        minHeight: layout.height * zoom,
+        left: screen.x - ink,
+        top: screen.y - ink,
+        width: layout.width * zoom + ink * 2,
+        height: layout.height * zoom + ink * 2,
+        minWidth: layout.width * zoom + ink * 2,
+        minHeight: layout.height * zoom + ink * 2,
+        padding: ink,
         boxSizing: 'border-box',
         fontFamily: fontStack(shape.props.fontFamily),
         fontWeight: fontWeight(shape.props.fontWeight),
         fontSize,
-        lineHeight: textLineHeight(shape.props),
+        // The engine has already quantized this; re-deriving it from the
+        // multiplier here would let the two representations round apart.
+        lineHeight: `${layout.lineHeight * zoom}px`,
         textAlign:
           shape.props.align === 'middle'
             ? 'center'

@@ -102,7 +102,7 @@ export function BoardView({ boardId }: { boardId: string }) {
   }, [identity]);
 
   return (
-    <div className="wb-board relative h-dvh w-screen overflow-hidden overscroll-none bg-muted text-primary">
+    <div className="wb-board relative h-dvh w-screen overflow-hidden overscroll-none bg-panel text-fg">
       <CanvasContextMenu>
         <Canvas />
       </CanvasContextMenu>

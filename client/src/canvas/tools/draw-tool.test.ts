@@ -7,6 +7,7 @@ import {
   it,
   vi,
 } from 'vitest';
+import { Pencil } from 'lucide-react';
 import type { DrawPoint, DrawProps, Shape } from '@whiteboard/shared';
 import '../shapes/register';
 import type { Editor } from '../editor';
@@ -17,6 +18,7 @@ import {
   useLiveStrokeStore,
   type LiveStrokeFrame,
 } from '../use-live-stroke-store';
+import { useStyleStore } from '../use-style-store';
 import { createDrawTool } from './draw-tool';
 import type { ToolContext, ToolPointerInfo } from './types';
 
@@ -626,6 +628,31 @@ describe('velocity-derived pressure', () => {
 });
 
 describe('predicted pointer tail', () => {
+  // The tail is opt-in and off by default, so every case below that expects one
+  // has to ask for it. The gate itself is covered by its own test.
+  beforeEach(() => {
+    useCanvasUiStore.getState().setPencilPrediction(true);
+  });
+  afterEach(() => {
+    useCanvasUiStore.getState().setPencilPrediction(false);
+  });
+
+  it('draws no tail at all while the preference is off', () => {
+    useCanvasUiStore.getState().setPencilPrediction(false);
+    const { ctx } = context();
+    const tool = createDrawTool();
+
+    withSynchronousFrames(() => {
+      tool.onPointerDown?.(pointer(0, 0), ctx);
+      tool.onPointerMove?.(
+        pointer(10, 0, { predicted: [prediction(25, 8)] }),
+        ctx,
+      );
+    });
+
+    expect(publishedTail).toEqual([]);
+  });
+
   it('does not extrapolate when stroke stabilisation is disabled', () => {
     const previous = useCanvasUiStore.getState().pencilStabilization;
     useCanvasUiStore.getState().setPencilStabilization(0);
@@ -1075,5 +1102,137 @@ describe('segment extension', () => {
     // A cancel discards the stroke it was making, not the one it joined.
     expect(shapes.size).toBe(1);
     expect(drawPoints([...shapes.values()][0])!).toEqual(before);
+  });
+});
+
+describe('highlighter (marker ink)', () => {
+  const MARKER = {
+    id: 'highlighter',
+    label: 'Highlighter',
+    hotkey: 'i',
+    icon: Pencil,
+    ink: 'marker',
+  } as const;
+
+  function marker() {
+    return createDrawTool(MARKER);
+  }
+
+  function frame(id: string, index: string): Shape {
+    return {
+      id,
+      type: 'frame',
+      x: 0,
+      y: 0,
+      rotation: 0,
+      index,
+      parentId: null,
+      props: { w: 100, h: 100, name: 'Slide' },
+    } as Shape;
+  }
+
+  function stroke(id: string, index: string): Shape {
+    return {
+      id,
+      type: 'draw',
+      x: 0,
+      y: 0,
+      rotation: 0,
+      index,
+      parentId: null,
+      props: { points: [{ x: 0, y: 0, pressure: 0.5 }], isClosed: false },
+    } as unknown as Shape;
+  }
+
+  /** The single shape the gesture created, ignoring anything seeded first. */
+  function only(shapes: Map<string, Shape>, ...seeded: string[]): Shape {
+    const created = [...shapes.values()].filter(
+      (s) => !seeded.includes(s.id),
+    );
+    expect(created).toHaveLength(1);
+    return created[0]!;
+  }
+
+  it('lays a flat band: constant width, no taper, no dash, no fill', () => {
+    const { ctx, shapes } = context();
+    const tool = marker();
+    tool.onPointerDown?.(pointer(0, 0), ctx);
+    tool.onPointerMove?.(pointer(40, 0), ctx);
+    tool.onPointerUp?.(pointer(40, 0), ctx);
+
+    const shape = only(shapes);
+    expect(shape.type).toBe('draw');
+    if (shape.type !== 'draw') return;
+    expect(shape.props.thinning).toBe(0);
+    expect(shape.props.startTaper).toBe(0);
+    expect(shape.props.endTaper).toBe(false);
+    expect(shape.props.dash).toBe('solid');
+    expect(shape.props.fillStyle).toBe('none');
+    expect(shape.props.simulatePressure).toBe(false);
+  });
+
+  it('is wider than the pen at the same size, and translucent', () => {
+    useStyleStore.setState({ size: 2, opacity: 1 });
+    const pen = context();
+    createDrawTool().onPointerDown?.(pointer(0, 0), pen.ctx);
+    createDrawTool().onPointerUp?.(pointer(0, 0), pen.ctx);
+    const penShape = only(pen.shapes);
+
+    const wash = context();
+    const tool = marker();
+    tool.onPointerDown?.(pointer(0, 0), wash.ctx);
+    tool.onPointerUp?.(pointer(0, 0), wash.ctx);
+    const markerShape = only(wash.shapes);
+
+    if (penShape.type !== 'draw' || markerShape.type !== 'draw') return;
+    expect(markerShape.props.size).toBeGreaterThan(penShape.props.size);
+    expect(markerShape.opacity).toBeLessThan(1);
+    expect(penShape.opacity).toBe(1);
+  });
+
+  it('lands under the drawing, where the pen lands on top of it', () => {
+    const { ctx, shapes } = context();
+    shapes.set('ink', stroke('ink', 'a1'));
+
+    marker().onPointerDown?.(pointer(0, 0), ctx);
+    const wash = only(shapes, 'ink');
+    expect(wash.index < 'a1').toBe(true);
+
+    shapes.delete(wash.id);
+    createDrawTool().onPointerDown?.(pointer(0, 0), ctx);
+    expect(only(shapes, 'ink').index > 'a1').toBe(true);
+  });
+
+  it('stays above a frame it is drawn on, which would paint over it', () => {
+    const { ctx, shapes } = context();
+    shapes.set('slide', frame('slide', 'a1'));
+    shapes.set('ink', stroke('ink', 'a3'));
+
+    marker().onPointerDown?.(pointer(50, 50), ctx);
+    const wash = only(shapes, 'slide', 'ink');
+    // Above the frame's background, still below the ink it is highlighting.
+    expect(wash.index > 'a1').toBe(true);
+    expect(wash.index < 'a3').toBe(true);
+  });
+
+  it('goes all the way to the back when no frame is under it', () => {
+    const { ctx, shapes } = context();
+    // The frame is elsewhere on the board, so it cannot hide this stroke.
+    shapes.set('slide', frame('slide', 'a1'));
+    shapes.set('ink', stroke('ink', 'a3'));
+
+    marker().onPointerDown?.(pointer(500, 500), ctx);
+    expect(only(shapes, 'slide', 'ink').index < 'a1').toBe(true);
+  });
+
+  it('takes Shift as straight-line mode rather than extending pen ink', () => {
+    const { ctx, shapes } = context();
+    shapes.set('ink', stroke('ink', 'a1'));
+
+    // Pressing right on the existing stroke's free end, which is what the pen
+    // reads as "continue this stroke".
+    marker().onPointerDown?.(pointer(0, 0, { shiftKey: true }), ctx);
+    expect(shapes.size).toBe(2);
+    expect(drawPoints(shapes.get('ink'))).toHaveLength(1);
   });
 });

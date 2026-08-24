@@ -3,6 +3,7 @@ import { generateNKeysBetween } from 'fractional-indexing';
 import type { Shape } from '@whiteboard/shared';
 import {
   deleteShapesWithCleanup,
+  duplicateShapes,
   groupShapes,
   pruneDegenerateGroups,
   ungroupShapes,
@@ -246,5 +247,45 @@ describe('deleteShapesWithCleanup', () => {
     deleteShapesWithCleanup(editor, ['c']);
     expect(editor.getShape(gid)).toBeDefined();
     expect(parentOf(editor, 'a')).toBe(gid);
+  });
+});
+
+describe('duplicateShapes', () => {
+  /** An arrow bound to `targetId`, plus the plain shape it points at. */
+  function boundArrow(targetId: string): Editor {
+    const editor = makeEditor([
+      { id: targetId },
+      { id: 'arrow', type: 'arrow' },
+    ]);
+    const arrow = editor.getShape('arrow')!;
+    (arrow.props as Record<string, unknown>).bindings = {
+      start: { shapeId: targetId, anchor: { x: 0.5, y: 0.5 } },
+      end: null,
+    };
+    return editor;
+  }
+
+  const bindingTarget = (editor: Editor, id: string): string | undefined =>
+    (
+      editor.getShape(id)?.props as {
+        bindings?: { start?: { shapeId: string } | null };
+      }
+    ).bindings?.start?.shapeId;
+
+  it('binds the cloned arrow to the cloned target, not the original', () => {
+    const editor = boundArrow('rect');
+    const [newRect, newArrow] = duplicateShapes(editor, ['rect', 'arrow']);
+
+    expect(newArrow).toBeDefined();
+    expect(bindingTarget(editor, newArrow!)).toBe(newRect);
+    // The original is untouched.
+    expect(bindingTarget(editor, 'arrow')).toBe('rect');
+  });
+
+  it('leaves a binding to a shape outside the duplicated set alone', () => {
+    const editor = boundArrow('rect');
+    const [newArrow] = duplicateShapes(editor, ['arrow']);
+
+    expect(bindingTarget(editor, newArrow!)).toBe('rect');
   });
 });

@@ -1,3 +1,4 @@
+import type { ComponentType } from 'react';
 import { Pencil } from 'lucide-react';
 import {
   genId,
@@ -7,7 +8,8 @@ import {
   type Point,
   type Shape,
 } from '@whiteboard/shared';
-import { getTopIndex } from '../order';
+import { topFrameAtPoint } from '../frame-operations';
+import { getBottomIndex, getIndexAboveTopmostOf, getTopIndex } from '../order';
 import { InputsManager, isPenOrStylus } from '../inputs-manager';
 import { pencilStabilizationToStreamline } from '../shapes/ink';
 import { NOMINAL_SAMPLE_SPACING } from '../shapes/ink-engine';
@@ -140,7 +142,92 @@ function pathLength(points: DrawPoint[]): number {
   return total;
 }
 
-export function createDrawTool(): Tool {
+/**
+ * How a tool built on this state machine lays ink down.
+ *
+ * `pencil` is the freehand pen: it follows the pencil dynamics from Settings,
+ * carries hardware or velocity pressure, and stacks on top of the page like any
+ * other new shape.
+ *
+ * `marker` is the highlighter: one flat translucent band of constant width that
+ * lands *under* what is already drawn, so the ink it crosses stays crisp
+ * instead of being tinted by the wash laid over it.
+ */
+export type InkKind = 'pencil' | 'marker';
+
+/** Identity and ink kind of one tool built on the draw state machine. */
+export interface DrawToolConfig {
+  id: string;
+  label: string;
+  hotkey: string;
+  icon: ComponentType<{ className?: string }>;
+  ink: InkKind;
+}
+
+const PENCIL_CONFIG: DrawToolConfig = {
+  id: 'draw',
+  label: 'Draw',
+  hotkey: 'd',
+  icon: Pencil,
+  ink: 'pencil',
+};
+
+/**
+ * How much wider than the pen the marker is at the same size setting.
+ *
+ * A highlighter has to cover a line of handwriting in a single pass, and the
+ * four size presets are quoted for a pen nib. Scaling them keeps the one shared
+ * size control meaningful for both tools instead of giving the marker a second
+ * one to keep in sync.
+ */
+const MARKER_SIZE_SCALE = 6;
+
+/**
+ * How translucent a new marker stroke is.
+ *
+ * Fixed rather than read from the style panel: the wash reads as a highlight
+ * only while the page under it still shows through, and an opaque band would
+ * bury whatever it crosses that is not ink — an image, a graph, the grid. The
+ * stroke's own opacity stays editable once it is selected, like any shape's.
+ */
+const MARKER_OPACITY = 0.35;
+
+/**
+ * Marker stabilization and softening, as engine weights rather than the
+ * Settings slider the pencil reads.
+ *
+ * The pencil's zoom correction is deliberately not applied here. It exists
+ * because a hand's tremor covers more world units zoomed out and shows in a
+ * fine line; a band six times wider than the nib swallows that tremor at every
+ * zoom, so correcting for it would only round off the corners of a deliberate
+ * gesture.
+ */
+const MARKER_STREAMLINE = 0.5;
+const MARKER_SMOOTHING = 0.5;
+
+/**
+ * Where a marker stroke goes in the stacking order: under the drawing, but
+ * never under the frame it was drawn on.
+ *
+ * Straight to the back is what "highlight" means — the ink keeps its own colour
+ * and the wash sits behind it. But a frame paints an opaque background across
+ * its whole area, so a stroke behind *that* is not behind the drawing, it is
+ * gone. Only a frame under the press can hide this stroke, so only that frame
+ * constrains it: the wash lands just above it, which
+ * `getIndexAboveTopmostOf` still keeps below whatever is stacked higher — the
+ * frame's own content included. Anywhere else on the board the stroke goes all
+ * the way to the back, where a highlight belongs.
+ */
+function markerIndex(shapes: readonly Shape[], at: Point): string {
+  const frame = topFrameAtPoint(shapes, at);
+  return frame === null
+    ? getBottomIndex(shapes)
+    : getIndexAboveTopmostOf(shapes, [frame.id]);
+}
+
+export function createDrawTool(
+  config: DrawToolConfig = PENCIL_CONFIG,
+): Tool {
   let id: string | null = null;
   let origin = { x: 0, y: 0 };
   let points: DrawPoint[] = [];
@@ -148,10 +235,9 @@ export function createDrawTool(): Tool {
   // store so visible ink reaches the predicted pointer position; NEVER written
   // to the document — peers only ever receive real samples.
   let predicted: DrawPoint[] = [];
-  // A zero-stabilisation pencil is a literal input mode. Browser prediction is
-  // extrapolation rather than a hardware sample, so letting it extend that
-  // stroke made the tip bend or retract despite stabilization being disabled.
-  let predictionEnabled = true;
+  // Whether this stroke draws a predicted tail at all. Set at pointer-down from
+  // the preference and the stroke's own dynamics; off unless both allow it.
+  let predictionEnabled = false;
   // Screen position whose motion produced the current predicted tail. Some
   // browsers repeat an identical pointermove and prediction after the hand has
   // stopped; that repetition must not make the extrapolation fresh again.
@@ -359,7 +445,10 @@ export function createDrawTool(): Tool {
       y: worldOrigin.y,
       rotation: 0,
       opacity: strokeOpacity,
-      index: getTopIndex(ctx.editor.getShapes()),
+      index:
+        config.ink === 'marker'
+          ? markerIndex(ctx.editor.getShapes(), worldOrigin)
+          : getTopIndex(ctx.editor.getShapes()),
       props: { ...strokeProps, points: points.slice() },
     } as Shape);
     beginLiveStroke(sid);
@@ -640,11 +729,11 @@ export function createDrawTool(): Tool {
   };
 
   return {
-    id: 'draw',
-    label: 'Draw',
-    hotkey: 'd',
+    id: config.id,
+    label: config.label,
+    hotkey: config.hotkey,
     cursor: 'crosshair',
-    icon: Pencil,
+    icon: config.icon,
     // Every sample is a reading of where the hand was and when. Dropping them
     // costs path detail on fast strokes and, with velocity-derived pressure,
     // coarsens the speed measurement the stroke's width comes from. The rAF
@@ -663,8 +752,16 @@ export function createDrawTool(): Tool {
       // Real pens carry hardware pressure; only mouse/touch fall back to the
       // user's velocity-based simulation preference.
       stylusInput = isPenOrStylus(info.pointerType, info.pressure);
-      velocityPressure = !stylusInput && pencil.pencilSimulatePressure;
-      predictionEnabled = pencil.pencilStabilization > 0;
+      // A marker has no width profile for pressure to act on, so there is
+      // nothing for the velocity filter to measure for.
+      velocityPressure =
+        config.ink === 'pencil' && !stylusInput && pencil.pencilSimulatePressure;
+      // Opt-in, and then only where it describes something: a zero-stabilization
+      // pencil is a literal input mode, and extrapolation is not a hardware
+      // sample. The marker carries its own fixed stabilization.
+      predictionEnabled =
+        pencil.pencilPrediction &&
+        (config.ink === 'marker' || pencil.pencilStabilization > 0);
       predictionAnchorScreen = null;
       stalePredictionAnchorScreen = null;
       inputs.reset(info.screenPoint, info.timestamp);
@@ -678,7 +775,13 @@ export function createDrawTool(): Tool {
       // Shift-clicking an existing stroke's free end continues that stroke.
       // Checked before any style is read: the appended segment belongs to the
       // shape it joins and must keep that shape's colour and brush.
-      if (info.shiftKey) {
+      //
+      // The pen only. Nothing in the schema tells a marker stroke apart from a
+      // pen one, so a marker looking for a free end would happily adopt a pen
+      // stroke and carry on drawing it as a pen — and Shift is worth more to
+      // the marker as its straight-line mode, which is how a line of text gets
+      // highlighted in one level pass.
+      if (info.shiftKey && config.ink === 'pencil') {
         const extending = extendableAt(ctx, info);
         if (extending) {
           extendShape(extending);
@@ -686,6 +789,30 @@ export function createDrawTool(): Tool {
         }
       }
       const style = useStyleStore.getState();
+      if (config.ink === 'marker') {
+        strokeOpacity = MARKER_OPACITY;
+        strokeProps = {
+          ...(util.getDefaultProps() as DrawProps),
+          points: [],
+          color: style.color,
+          size: style.size * MARKER_SIZE_SCALE,
+          // A marker lays one flat band: no dash to break it up, no interior to
+          // paint, and — with `thinning` at zero — no width profile for
+          // pressure, its easing, or the tapers to shape.
+          dash: 'solid',
+          fillStyle: 'none',
+          simulatePressure: false,
+          pressureEasing: 'linear',
+          pressureWarmup: false,
+          thinning: 0,
+          smoothing: MARKER_SMOOTHING,
+          streamline: MARKER_STREAMLINE,
+          startTaper: 0,
+          endTaper: false,
+        };
+        beginShape(ctx, info.point, { x: 0, y: 0, pressure: NEUTRAL_PRESSURE });
+        return;
+      }
       strokeOpacity = style.opacity;
       strokeProps = {
         ...(util.getDefaultProps() as DrawProps),

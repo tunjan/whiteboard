@@ -196,7 +196,7 @@ export function isExportable(shape: Shape): boolean {
   if (shape.type !== 'equation') return true;
   const latex = shape.props.latex.trim();
   if (!latex) return false;
-  const render = getEquationRender(latex);
+  const render = getEquationRender(latex, shape.props.inline);
   return Boolean(render) && !render?.error;
 }
 
@@ -214,7 +214,10 @@ export function countInvalidEquations(
     ) {
       continue;
     }
-    const render = getEquationRender(shape.props.latex.trim());
+    const render = getEquationRender(
+      shape.props.latex.trim(),
+      shape.props.inline,
+    );
     if (render?.error) count++;
   }
   return count;
@@ -233,16 +236,22 @@ async function prewarmEquationRenders(
   shapes: Shape[],
   renderSet?: Set<string>,
 ): Promise<void> {
-  const latexes = new Set<string>();
+  // Keyed by style as well as source: two equations sharing an expression but
+  // typeset differently are two renders, and the cache `isExportable` reads
+  // holds them separately.
+  const wanted = new Map<string, { latex: string; inline: boolean }>();
   for (const shape of shapes) {
     if (shape.type !== 'equation' || (renderSet && !renderSet.has(shape.id))) {
       continue;
     }
     const latex = shape.props.latex.trim();
-    if (latex) latexes.add(latex);
+    const inline = shape.props.inline ?? false;
+    if (latex) wanted.set(`${inline ? 'i' : 'b'}${latex}`, { latex, inline });
   }
   await Promise.all(
-    [...latexes].map((latex) => typesetEquation(latex).catch(() => undefined)),
+    [...wanted.values()].map(({ latex, inline }) =>
+      typesetEquation(latex, inline).catch(() => undefined),
+    ),
   );
 }
 

@@ -21,6 +21,35 @@ describe('equation SVG rendering', () => {
     expect(getEquationRender(latex)).toBe(render);
   });
 
+  // The same source in text style: limits beside the sum rather than above it,
+  // and a smaller fraction — a different render, not a different expression.
+  it('typesets one expression differently in each style', async () => {
+    const latex = String.raw`\sum_{i=1}^{n} \frac{1}{i}`;
+    const block = await typesetEquation(latex);
+    const inline = await typesetEquation(latex, true);
+
+    if ('error' in block || 'error' in inline)
+      throw new Error('did not render');
+    expect(inline.height).toBeLessThan(block.height);
+    expect(inline.width).toBeGreaterThan(block.width);
+    expect(inline.svg).not.toBe(block.svg);
+  });
+
+  it('caches the two styles apart', async () => {
+    const latex = String.raw`\int_0^1 x^2`;
+    const inline = await typesetEquation(latex, true);
+
+    // Nothing has asked for the display render yet, so the shared source must
+    // not hand back the inline one.
+    expect(getEquationRender(latex)).toBeUndefined();
+    expect(getEquationRender(latex, true)).toBe(inline);
+
+    const block = await typesetEquation(latex);
+    expect(block).not.toBe(inline);
+    expect(getEquationRender(latex)).toBe(block);
+    expect(getEquationRender(latex, true)).toBe(inline);
+  });
+
   it('caches invalid LaTeX as a recoverable render error', async () => {
     const latex = String.raw`\frac{a}`;
     const render = await typesetEquation(latex);
