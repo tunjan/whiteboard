@@ -112,6 +112,28 @@
     0 16px 40px -16px rgba(12, 10, 9, 0.22),
     0 4px 12px -6px rgba(12, 10, 9, 0.1);
 
+  /* Toolbar relief. The bar is lit from above: a white rim along its top
+       edge, a warm shade along its bottom, and a contact shadow under it that
+       fades out into a wide ambient one. Keys borrow the same light — idle
+       ones sit flush, and engaging one presses it into the bar. */
+  --tb-sheen-top: rgba(255, 255, 255, 0.7);
+  --tb-sheen-bottom: rgba(12, 10, 9, 0.04);
+  --tb-rim: rgba(255, 255, 255, 0.9);
+  --tb-rim-soft: rgba(255, 255, 255, 0.75);
+  --tb-groove: rgba(12, 10, 9, 0.07);
+  --s-toolbar:
+    0 1px 1px rgba(12, 10, 9, 0.05), 0 3px 6px -3px rgba(12, 10, 9, 0.1),
+    0 10px 20px -10px rgba(12, 10, 9, 0.16),
+    0 22px 44px -22px rgba(12, 10, 9, 0.24);
+  --s-key-hover: 0 1px 2px rgba(12, 10, 9, 0.07);
+  --s-key-inset: inset 0 1px 3px rgba(12, 10, 9, 0.16);
+  /* The selected chip is a well cut into the bar. On this theme the chip is
+       near-black, so the shaded top of the well is lost in it and the cue
+       that reads is the light pooling along the bottom lip. */
+  --s-key-chip:
+    inset 0 1px 2px rgba(12, 10, 9, 0.5),
+    inset 0 -1px 0 0 rgba(255, 255, 255, 0.15);
+
   --grid-minor: rgba(12, 10, 9, 0.05);
   --grid-major: rgba(12, 10, 9, 0.1);
   --grid-dot: rgba(12, 10, 9, 0.25);
@@ -133,6 +155,17 @@
   --destructive: var(--status-danger-fg);
   --input: var(--control-border);
   --radius: 0.5rem;
+
+  --color-focus: var(--action-solid);
+  --color-accent-brand: var(--action-solid);
+  --color-background: var(--bg-canvas);
+  --color-foreground: var(--fg);
+  --color-card: var(--bg-surface);
+  --color-muted: var(--bg-panel);
+  --color-muted-foreground: var(--fg-muted);
+  --color-panel: var(--bg-panel);
+  --color-destructive: var(--status-danger-fg);
+  --color-border: var(--border);
 }
 
 .dark {
@@ -194,6 +227,21 @@
   --s-overlay:
     0 18px 44px -14px rgba(0, 0, 0, 0.58), 0 6px 16px -8px rgba(0, 0, 0, 0.36);
 
+  /* See light theme. */
+  --tb-sheen-top: rgba(255, 255, 255, 0.055);
+  --tb-sheen-bottom: rgba(0, 0, 0, 0.18);
+  --tb-rim: rgba(255, 255, 255, 0.08);
+  --tb-rim-soft: rgba(255, 255, 255, 0.06);
+  --tb-groove: rgba(0, 0, 0, 0.35);
+  --s-toolbar:
+    0 1px 2px rgba(0, 0, 0, 0.4), 0 4px 8px -4px rgba(0, 0, 0, 0.4),
+    0 12px 24px -10px rgba(0, 0, 0, 0.5), 0 26px 50px -22px rgba(0, 0, 0, 0.6);
+  --s-key-hover: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --s-key-inset: inset 0 1px 3px rgba(0, 0, 0, 0.55);
+  /* Mirror of the light theme: the chip flips to near-white here, so the
+       bottom lip disappears into it and the shaded top edge is what reads. */
+  --s-key-chip: inset 0 1px 3px rgba(12, 10, 9, 0.3);
+
   --grid-minor: rgba(250, 250, 249, 0.06);
   --grid-major: rgba(250, 250, 249, 0.12);
   --grid-dot: rgba(250, 250, 249, 0.28);
@@ -214,6 +262,17 @@
   --accent-foreground: var(--fg);
   --destructive: var(--status-danger-fg);
   --input: var(--control-border);
+
+  --color-focus: var(--action-solid);
+  --color-accent-brand: var(--action-solid);
+  --color-background: var(--bg-canvas);
+  --color-foreground: var(--fg);
+  --color-card: var(--bg-surface);
+  --color-muted: var(--bg-panel);
+  --color-muted-foreground: var(--fg-muted);
+  --color-panel: var(--bg-panel);
+  --color-destructive: var(--status-danger-fg);
+  --color-border: var(--border);
 }
 
 @theme {
@@ -871,4 +930,63 @@
 
 :where(.wb-ui-layer) > * {
   pointer-events: auto;
+}
+
+/* ==========================================================================
+ * 8. Toolbar relief
+ *
+ * The floating toolbar reads as a physical slab rather than a painted
+ * rectangle: a lit top rim, a shaded bottom edge, and a contact shadow that
+ * fades into a wide ambient one. Its keys sit in that same light — a key
+ * rises a little under the cursor, the active key stands proud of the bar,
+ * and any key sinks into it while held. Colour values live in section 1.
+ * ========================================================================== */
+
+.tb-shell {
+  background-image: linear-gradient(
+    to bottom,
+    var(--tb-sheen-top),
+    transparent 42%,
+    var(--tb-sheen-bottom)
+  );
+  box-shadow:
+    inset 0 1px 0 0 var(--tb-rim),
+    inset 0 -1px 0 0 var(--tb-groove),
+    var(--s-toolbar);
+}
+
+.tb-key {
+  transition-property:
+    color, background-color, border-color, box-shadow, transform;
+}
+
+.tb-key:hover {
+  box-shadow:
+    inset 0 1px 0 0 var(--tb-rim-soft),
+    var(--s-key-hover);
+}
+
+/* After `.tb-key:hover` so the engaged states keep their own relief while the
+   pointer is over them. Both sit *in* the bar rather than on it: idle keys are
+   flush, and engaging one presses it in. */
+.tb-key-chip,
+.tb-key-chip:hover {
+  box-shadow: var(--s-key-chip);
+}
+
+.tb-key-sunken,
+.tb-key-sunken:hover {
+  box-shadow: var(--s-key-inset);
+}
+
+/* Last: pressing anything sinks it, whatever it was doing before. Pairs with
+   the 1px downward nudge every Button already takes on `:active`. */
+.tb-key:active {
+  box-shadow: var(--s-key-inset);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tb-key {
+    transition: none;
+  }
 }

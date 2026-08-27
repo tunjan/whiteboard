@@ -85,7 +85,7 @@ export function Toolbar() {
           onFocusCapture={toolbar.onFocusCapture}
           className={cn(
             'relative flex w-max max-w-[calc(100vw-1rem)] items-center rounded-xl',
-            'border-border bg-surface/92 p-1.5 shadow-e3',
+            'border-border bg-surface/92 p-1.5 tb-shell',
             'origin-bottom transition-[opacity,transform] duration-base ease-out-quart',
             'motion-reduce:transition-none',
             hidden &&
@@ -181,7 +181,10 @@ export function Toolbar() {
                 tabIndex={hidden ? 0 : -1}
                 className={cn(
                   'absolute bottom-0 left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-lg px-3 py-1.5',
-                  'border-border bg-surface/92 shadow-e3 hover:bg-panel',
+                  // Same relief as the bar, but a pill this small sits closer
+                  // to the canvas than the bar does, so it takes the panel
+                  // shadow instead of the bar's wider ambient one.
+                  'border-border bg-surface/92 tb-shell [--s-toolbar:var(--s-panel)] hover:bg-panel',
                   'transition-[opacity,transform] duration-base ease-out-quart motion-reduce:transition-none',
                   hidden
                     ? 'translate-y-0 opacity-100'

@@ -183,3 +183,34 @@ export function segmentErasesShape(
 function sub(p: Point, origin: { x: number; y: number }): Point {
   return { x: p.x - origin.x, y: p.y - origin.y };
 }
+
+/**
+ * Does segment a-b touch the axis-aligned box `b`? Liang–Barsky slab clipping:
+ * the segment is parameterised as a + t·(b-a) and each axis contributes the
+ * interval of `t` for which the point lies between that axis' slab walls. The
+ * segment enters the box exactly when those intervals overlap, so the whole
+ * test is two interval intersections and no allocation.
+ *
+ * Used for the frame clip mask, where "does the swipe reach inside this frame"
+ * is the question and the exact crossing point is not needed.
+ */
+export function segmentIntersectsBounds(a: Point, b: Point, box: Bounds): boolean {
+  let t0 = 0;
+  let t1 = 1;
+  for (const axis of ['x', 'y'] as const) {
+    const d = b[axis] - a[axis];
+    const min = axis === 'x' ? box.minX : box.minY;
+    const max = axis === 'x' ? box.maxX : box.maxY;
+    if (d === 0) {
+      // Parallel to this pair of walls: inside them, or it never enters.
+      if (a[axis] < min || a[axis] > max) return false;
+      continue;
+    }
+    const enter = (min - a[axis]) / d;
+    const exit = (max - a[axis]) / d;
+    t0 = Math.max(t0, Math.min(enter, exit));
+    t1 = Math.min(t1, Math.max(enter, exit));
+    if (t0 > t1) return false;
+  }
+  return true;
+}

@@ -1,13 +1,14 @@
 import { Eraser } from 'lucide-react';
 import { genId, type Point, type Shape } from '@whiteboard/shared';
-import { pruneDegenerateGroups } from '../commands';
+import { collectSubtree, pruneDegenerateGroups } from '../commands';
 import { generateKeyBetween } from '../order';
 import { shapeRegistry } from '../shapes/shape-registry';
 import { useCameraStore } from '../use-camera-store';
 import { useCanvasUiStore, type EraserMode } from '../use-canvas-ui-store';
 import { useEraserCutStore } from '../use-eraser-cut-store';
 import { useEraserStore } from '../use-eraser-store';
-import { candidatesAlong, eraseAlong, protectedAt } from './erase';
+import { useEraserTrailStore } from '../use-eraser-trail-store';
+import { candidatesAlong, eraseAlong, eraseTargetId, eraseTopAlong, protectedAt } from './erase';
 import { segmentErasesShape } from './erase-geometry';
 import { cutRuns, cuttablePoints, fragmentShape, type PointRun } from './precision-erase';
 import type { Tool, ToolContext, ToolPointerInfo } from './types';
@@ -41,6 +42,12 @@ export function createEraserTool(): Tool {
   let mode: EraserMode = 'object';
   /** Backgrounds (containers/text) under the start point, spared all stroke. */
   let protectedIds = new Set<string>();
+  /**
+   * Accelerator held at pointer-down: take only the topmost shape each sample
+   * instead of everything the swipe crosses. Captured for the whole stroke, so
+   * the modifier means the same thing whether you click or drag with it.
+   */
+  let topOnly = false;
   /** Accumulated queue of shape ids to delete on release. */
   const queue = new Set<string>();
   /** Surviving runs per cut shape (precision mode). Empty array = fully erased. */
@@ -50,11 +57,13 @@ export function createEraserTool(): Tool {
   function reset() {
     erasing = false;
     last = null;
+    topOnly = false;
     protectedIds = new Set();
     queue.clear();
     cuts.clear();
     useEraserStore.getState().clear();
     useEraserCutStore.getState().clear();
+    useEraserTrailStore.getState().end();
   }
 
   /** Rebuild the in-place preview from the accumulated runs. */
@@ -70,6 +79,16 @@ export function createEraserTool(): Tool {
 
   function extend(editor: ToolContext['editor'], from: Point, to: Point) {
     const margin = eraserMargin();
+    if (topOnly) {
+      // One shape per sample, whole, in either mode: the accelerator is how you
+      // lift the drawing on top without disturbing what it sits on.
+      const id = eraseTopAlong(editor, from, to, margin, protectedIds);
+      if (id) {
+        queue.add(id);
+        useEraserStore.getState().set([...queue]);
+      }
+      return;
+    }
     if (mode === 'object') {
       for (const id of eraseAlong(editor, from, to, margin, protectedIds)) {
         queue.add(id);
@@ -85,7 +104,7 @@ export function createEraserTool(): Tool {
         // Not a polyline: precision mode falls back to the whole-shape rule.
         const util = shapeRegistry.getFor(shape);
         if (util && segmentErasesShape(shape, util, from, to, margin)) {
-          queue.add(shape.id);
+          queue.add(eraseTargetId(editor, shape, protectedIds));
         }
         continue;
       }
@@ -97,7 +116,13 @@ export function createEraserTool(): Tool {
       cuts.set(shape.id, next);
       cutChanged = true;
     }
-    useEraserStore.getState().set([...queue]);
+    // Ink the swipe has consumed entirely is already gone from this screen — its
+    // fragment list is empty — but peers still hold the whole shape and have no
+    // cut preview. Marking it queues the same fade for them until the delete
+    // lands. Locally it changes nothing: there are no fragments left to dim.
+    const consumed: string[] = [];
+    for (const [id, runs] of cuts) if (runs.length === 0) consumed.push(id);
+    useEraserStore.getState().set([...queue, ...consumed]);
     if (cutChanged) publishCuts(editor);
   }
 
@@ -108,22 +133,32 @@ export function createEraserTool(): Tool {
    */
   function commit(ctx: ToolContext) {
     if (!erasing) return;
-    const deletions = [...queue];
     const entries = [...cuts];
+    // Everything actually leaving the page. A queued group only ever stands in
+    // for its members and `deleteShapes` does not cascade, so it is expanded to
+    // its subtree here — before the transaction opens, because inside one
+    // `getShapes()` is served from a cache blind to the transaction's own
+    // writes, which would hide the fragments the cuts below are about to add.
+    const doomed = new Set(
+      queue.size ? collectSubtree(ctx.editor, [...queue]).map((s) => s.id) : [],
+    );
     // Groups the erased shapes belonged to, checked once the writes land: the
     // prune has to read the post-delete hierarchy, so it cannot run inside the
     // transaction below.
     const orphanedParents = new Set<string>();
-    if (deletions.length || entries.length) {
+    if (doomed.size || entries.length) {
       ctx.editor.transact(() => {
         // Sorted by index, so the shape after the original bounds the range the
         // extra fragments are inserted into — they stay stacked where the ink was.
         const sorted = ctx.editor.getShapes();
         for (const [id, runs] of entries) {
+          // Cutting a shape inside a group that is itself being erased is wasted
+          // work, and its fragments would outlive the parent meant to hold them.
+          if (doomed.has(id)) continue;
           const shape = ctx.editor.getShape(id);
           if (!shape) continue;
           if (runs.length === 0) {
-            deletions.push(id);
+            doomed.add(id);
             continue;
           }
           // The first fragment keeps the original id, so its parent, z-index and
@@ -148,12 +183,12 @@ export function createEraserTool(): Tool {
             below = index;
           }
         }
-        if (deletions.length) {
-          for (const id of deletions) {
+        if (doomed.size) {
+          for (const id of doomed) {
             const parentId = ctx.editor.getShape(id)?.parentId;
             if (parentId) orphanedParents.add(parentId);
           }
-          ctx.editor.deleteShapes(deletions);
+          ctx.editor.deleteShapes([...doomed]);
         }
       });
     }
@@ -178,10 +213,12 @@ export function createEraserTool(): Tool {
       if (info.button !== 0) return;
       erasing = true;
       last = info.point;
+      topOnly = info.metaKey || info.ctrlKey;
       mode = useCanvasUiStore.getState().eraserMode;
       protectedIds = protectedAt(ctx.editor, info.point, eraserMargin());
       queue.clear();
       cuts.clear();
+      useEraserTrailStore.getState().begin(info.point);
       // A click with no drag still erases what's under the cursor.
       extend(ctx.editor, info.point, info.point);
     },
@@ -191,6 +228,7 @@ export function createEraserTool(): Tool {
       const from = last ?? info.point;
       extend(ctx.editor, from, info.point);
       last = info.point;
+      useEraserTrailStore.getState().extend(info.point);
     },
 
     onPointerUp(_info: ToolPointerInfo, ctx: ToolContext) {

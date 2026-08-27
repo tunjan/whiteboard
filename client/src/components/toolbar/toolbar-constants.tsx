@@ -46,16 +46,16 @@ export const COMPACT_MORE_TOOLS = [
 ] as const;
 
 export const TOOL_ACTIVE =
-  'border-transparent bg-inverse text-fg-inverse shadow-none hover:bg-inverse-hover hover:text-fg-inverse active:bg-inverse active:text-fg-inverse';
+  'tb-key-chip border-transparent bg-inverse text-fg-inverse hover:bg-inverse-hover hover:text-fg-inverse active:bg-inverse active:text-fg-inverse';
 
 export const TOOL_PRESSED =
-  'border-border-strong bg-panel text-fg shadow-none hover:bg-panel active:bg-panel/90';
+  'tb-key-sunken border-border-strong bg-panel text-fg hover:bg-panel active:bg-panel/90';
 
 export const TOOL_IDLE =
   'border-transparent bg-transparent text-fg-secondary hover:bg-panel hover:text-fg active:bg-panel/80';
 
 export const TOOL_GEOMETRY =
-  'relative group/button size-9 min-w-9 rounded-lg p-0 transition-colors duration-fast ease-out-quart';
+  'tb-key relative group/button size-9 min-w-9 rounded-lg p-0 duration-fast ease-out-quart';
 
 export function toolButtonClass(active: boolean, pressed = false) {
   return cn(

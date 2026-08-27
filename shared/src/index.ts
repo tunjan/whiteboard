@@ -15,4 +15,5 @@ export * from './documents';
 export * from './stickers';
 export * from './links';
 export * from './latency';
+export * from './ai-latex';
 export * from './voice';

@@ -40,6 +40,12 @@ export interface PeerPresence {
   textSelection: TextSelectionPresence | null;
   /** Ids of the shapes this peer has selected, or null when nothing is. */
   selection: string[] | null;
+  /**
+   * Ids this peer's in-progress erase stroke has marked for deletion, or null
+   * when it is not erasing. Momentary: the shapes are still in the document and
+   * only render dimmed until the peer lifts the eraser and the delete lands.
+   */
+  erasing: string[] | null;
   /** In-progress laser-pointer strokes, or null when the peer has none. */
   laser: LaserStroke[] | null;
   /** This peer's current in-board voice membership and mute state. */

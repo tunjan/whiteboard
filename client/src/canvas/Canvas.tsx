@@ -27,6 +27,7 @@ import { PeerSelectionLayer } from '@/collab/PeerSelectionLayer';
 import { CommentsLayer } from './CommentsLayer';
 import { DrawingCursor } from './DrawingCursor';
 import { EraserCursor } from './EraserCursor';
+import { EraserTrail } from './EraserTrail';
 import { LaserLayer } from './LaserLayer';
 import {
   getLocalUser,
@@ -38,6 +39,7 @@ import {
   stopFollowingForManualCameraChange,
   useFollowStore,
 } from '@/collab/use-follow-store';
+import { useShallow } from 'zustand/react/shallow';
 import { usePresenceStore } from '@/collab/use-presence-store';
 import { ShapeView } from './ShapeView';
 import { VanishLayer } from './VanishLayer';
@@ -314,6 +316,22 @@ export function Canvas() {
   const erasing = useEraserStore((s) => s.marked);
   const cutFragments = useEraserCutStore((s) => s.fragments);
   const currentPageId = useDocumentStore((s) => s.currentPageId);
+  // Shapes a *peer's* held eraser has marked, dimmed here exactly as our own are
+  // so a delete is never a surprise from across the board. `useShallow` is what
+  // makes it affordable: peers republish at cursor rate, and without it every
+  // peer's cursor tick would hand this a fresh array and rebuild the whole shape
+  // tree below. Element-wise equality means only a real change to what is being
+  // erased gets through.
+  const peerErasingIds = usePresenceStore(
+    useShallow((s) =>
+      s.peers.flatMap((peer) =>
+        peer.erasing && (!peer.page || peer.page === currentPageId)
+          ? peer.erasing
+          : [],
+      ),
+    ),
+  );
+  const peerErasing = useMemo(() => new Set(peerErasingIds), [peerErasingIds]);
   const shapesById = useDocumentStore((s) => s.shapesById);
   // Shared, pre-sorted array from the store (stable across camera-only renders).
   const shapes = useDocumentStore((s) => s.shapes);
@@ -470,7 +488,7 @@ export function Canvas() {
       hidden,
     );
     const getShape = (id: string) => shapesById.get(id);
-    const isMarked = (id: string) => !!erasing[id];
+    const isMarked = (id: string) => !!erasing[id] || peerErasing.has(id);
     const renderShape = (shape: Shape, insideFrame = false): ReactNode => {
       // Mid-cut under the precision eraser: the document still holds the whole
       // shape, but what the user should see is the ink that survived so far.
@@ -528,6 +546,7 @@ export function Canvas() {
     topLevelShapes,
     childrenByParent,
     erasing,
+    peerErasing,
     cutFragments,
     editingId,
     playingId,
@@ -1585,6 +1604,8 @@ export function Canvas() {
       }
       if (files.length) {
         e.preventDefault();
+        // Its own undo step, matching pasted links below.
+        breakUndoCapture();
         void placeImageFiles(files, world).then(selectPasted);
         return;
       }
@@ -1785,6 +1806,7 @@ export function Canvas() {
       )}
       <CursorsLayer camera={camera} viewportSize={size} />
       <LaserLayer camera={camera} />
+      <EraserTrail camera={camera} />
       <CommentsLayer camera={camera} />
       {showDrawingCursor && <DrawingCursor containerRef={containerRef} />}
       {showEraserCursor && <EraserCursor containerRef={containerRef} />}

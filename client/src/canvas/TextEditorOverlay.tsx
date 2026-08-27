@@ -189,7 +189,7 @@ export function TextEditorOverlay({
         transform: shape.rotation ? `rotate(${shape.rotation}rad)` : undefined,
         transformOrigin: 'center center',
         boxShadow: fixed
-          ? 'inset 0 0 0 1px var(--color-accent-brand)'
+          ? 'inset 0 0 0 1px var(--action-solid, #3b82f6)'
           : undefined,
         opacity: shape.opacity ?? 1,
       }}

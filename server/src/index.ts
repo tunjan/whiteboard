@@ -5,6 +5,7 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { env } from './env';
+import { aiRoutes } from './ai/routes';
 import { authRoutes } from './auth/routes';
 import { blobRoutes } from './blobs/routes';
 import { boardRoutes } from './boards/routes';
@@ -16,6 +17,7 @@ import { musicRoutes } from './music/routes';
 const app = new Hono();
 
 app.get('/health', (c) => c.json({ status: 'ok' }));
+app.route('/api/ai', aiRoutes);
 app.route('/api/auth', authRoutes);
 app.route('/api/boards', boardRoutes);
 app.route('/api/blobs', blobRoutes);

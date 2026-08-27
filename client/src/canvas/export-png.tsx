@@ -153,6 +153,36 @@ export async function exportSelectionToPng(
 }
 
 /**
+ * Longest side, in pixels, of the raster handed to a vision model.
+ *
+ * Not the user's export resolution: handwriting is often only a couple of
+ * hundred world units across, and rasterized at the board's own scale the
+ * strokes arrive too small to read. Sized up to a resolution where a model can
+ * tell a subscript from an exponent, and no further — the image travels as
+ * base64 in a request body.
+ */
+const RECOGNITION_TARGET_PX = 1024;
+
+/**
+ * Rasterize `ids` as an image for handwriting recognition, or null when they
+ * render to nothing. Shares the export pipeline so what the model reads is
+ * exactly what the board draws.
+ */
+export async function renderShapesForRecognition(
+  ids: string[],
+): Promise<Blob | null> {
+  const scene = await selectionScene(ids);
+  if (!scene) return null;
+  const w = scene.bounds.maxX - scene.bounds.minX + scene.padding * 2;
+  const h = scene.bounds.maxY - scene.bounds.minY + scene.padding * 2;
+  const longest = Math.max(w, h, 1);
+  // Never below 1: downscaling ink that is already large loses the fine strokes
+  // that separate a prime from a comma.
+  const scale = Math.min(4, Math.max(1, RECOGNITION_TARGET_PX / longest));
+  return renderPngBlob(scene, scale);
+}
+
+/**
  * Copy the whole current page to the system clipboard as a PNG.
  *
  * The blob promise is started but deliberately not awaited here: Safari only
@@ -266,8 +296,17 @@ function exportScale(): number {
   return Math.min(scale, Math.max(...PNG_EXPORT_SCALES));
 }
 
-/** Rasterize a scene to a PNG blob at the largest scale the caps allow. */
-async function renderPngBlob({ tree, bounds, padding }: Scene): Promise<Blob> {
+/**
+ * Rasterize a scene to a PNG blob at the largest scale the caps allow.
+ *
+ * `requestedScale` overrides the user's export resolution for renders that are
+ * not exports — see `renderShapesForRecognition`, which sizes for a model's
+ * eyes rather than for a file the user asked to save.
+ */
+async function renderPngBlob(
+  { tree, bounds, padding }: Scene,
+  requestedScale?: number,
+): Promise<Blob> {
   const minX = bounds.minX - padding;
   const minY = bounds.minY - padding;
   const w = bounds.maxX - bounds.minX + padding * 2;
@@ -276,7 +315,7 @@ async function renderPngBlob({ tree, bounds, padding }: Scene): Promise<Blob> {
   // The user's chosen resolution (Settings → General → PNG Resolution). This
   // used to be `min(devicePixelRatio, 2)`, which made the same board export at
   // a different size depending on the monitor it happened to be opened on.
-  let scale = exportScale();
+  let scale = requestedScale ?? exportScale();
   // `MAX_DIM` still wins: a sprawling board at 4x would otherwise allocate a
   // canvas large enough to fail, so the request is silently reduced to fit.
   scale = Math.min(scale, MAX_DIM / w, MAX_DIM / h);

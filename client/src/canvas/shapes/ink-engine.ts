@@ -82,6 +82,49 @@ const INK_MITER_LIMIT = 1.5;
  */
 const MITER_DENOMINATOR_FLOOR = 2 / (INK_MITER_LIMIT * INK_MITER_LIMIT);
 
+/**
+ * Direction change, as a cosine, at or below which a step is treated as an
+ * intended corner rather than tremor.
+ *
+ * Only consulted for steps longer than `MAX_FILTER_STEP`, and measured over
+ * `CORNER_WINDOW` of travel rather than between neighbouring samples, so that
+ * what it compares is a turn the hand made against the tremor it carried while
+ * making it. About 26 degrees sits between the two.
+ */
+const CORNER_DIRECTION_CHANGE = 0.9;
+
+/**
+ * Travel on each side of a sample, in world units, over which the turn that
+ * releases the clamp is measured. Long enough that hand tremor averages out of
+ * the direction estimate, short enough that a letterform's corner still reads
+ * as one.
+ */
+const CORNER_WINDOW = 8;
+
+/**
+ * The same window expressed in filter response distances, for settings lagging
+ * enough that eight units is not sufficient warning of an approaching corner.
+ */
+const CORNER_WINDOW_RESPONSES = 3;
+
+/**
+ * Longest step, in world units, the streamline filter credits to one sample.
+ *
+ * The filter's response is a distance, so a hand moving faster than it is
+ * calibrated to follow closes almost the whole gap in a single step: at five
+ * units the weight is 0.99 and stabilization has effectively switched itself
+ * off, which is why quick sweeping strokes came out carrying every bit of
+ * tremor while slow ones were steady. Clamping the step restores a floor of
+ * smoothing at speed. Chosen so the default slider settles near 0.47 per
+ * sample, which is what tldraw applies at its own default and measured as the
+ * point past which corners drawn slowly start to visibly round off.
+ *
+ * Being a clamp on distance rather than on the weight, it scales with the
+ * slider and vanishes with it: at zero stabilization the response is zero, the
+ * weight is 1 whatever the step, and the filter stays the identity.
+ */
+const MAX_FILTER_STEP = 0.75;
+
 function clamp(value: number, min: number, max: number): number {
   if (!Number.isFinite(value)) return min;
   return Math.max(min, Math.min(max, value));
@@ -390,6 +433,64 @@ function ingest(
   return expandTwoPointStroke(stagedCount, simulatePressure);
 }
 
+/**
+ * Cosine of the turn the stroke makes at `index`, measured over a window of
+ * travel on each side rather than between neighbouring samples.
+ *
+ * The window is the whole point. Tremor and an intended corner are both
+ * direction changes; what separates them is scale. Between adjacent samples a
+ * couple of units of jitter on a two-unit step swings the direction by tens of
+ * degrees, so a per-sample test reads tremor as a corner and releases the
+ * stabilization exactly where it was needed. Averaged over `CORNER_WINDOW`
+ * units of travel the jitter cancels and only a turn the hand actually made
+ * survives.
+ *
+ * Read from the staged (unfiltered) coordinates: the filtered ones have
+ * already had the very direction change this is trying to detect partly
+ * removed. Ends are measured over whatever travel is available, and a stroke's
+ * final sample is reported straight so its tail is stabilized like the run
+ * leading into it.
+ */
+function directionChangeAt(
+  index: number,
+  stagedCount: number,
+  window: number,
+): number {
+  if (index + 1 >= stagedCount) return 1;
+
+  const centerX = buffers.stageX[index]!;
+  const centerY = buffers.stageY[index]!;
+
+  let back = index;
+  let travelled = 0;
+  while (back > 0 && travelled < window) {
+    travelled += vectorLength(
+      buffers.stageX[back]! - buffers.stageX[back - 1]!,
+      buffers.stageY[back]! - buffers.stageY[back - 1]!,
+    );
+    back--;
+  }
+
+  let forward = index;
+  travelled = 0;
+  while (forward + 1 < stagedCount && travelled < window) {
+    travelled += vectorLength(
+      buffers.stageX[forward + 1]! - buffers.stageX[forward]!,
+      buffers.stageY[forward + 1]! - buffers.stageY[forward]!,
+    );
+    forward++;
+  }
+
+  const inX = centerX - buffers.stageX[back]!;
+  const inY = centerY - buffers.stageY[back]!;
+  const outX = buffers.stageX[forward]! - centerX;
+  const outY = buffers.stageY[forward]! - centerY;
+  const inLength = vectorLength(inX, inY);
+  const outLength = vectorLength(outX, outY);
+  if (inLength === 0 || outLength === 0) return 1;
+  return clamp((inX * outX + inY * outY) / (inLength * outLength), -1, 1);
+}
+
 /** Streamline staged coordinates and retain raw coordinates for elbow bounds. */
 function streamline(
   stagedCount: number,
@@ -399,6 +500,13 @@ function streamline(
 ): number {
   if (stagedCount === 0) return 0;
   const response = responseDistanceFor(streamlineRawWeight(streamlineAmount));
+  // Heavy stabilization lags further, so it needs more room to shed that lag
+  // before the corner arrives; at light settings the constant already governs.
+  const cornerWindow = Math.max(
+    CORNER_WINDOW,
+    CORNER_WINDOW_RESPONSES * response,
+  );
+  const clampedWeight = onePoleWeight(MAX_FILTER_STEP, response);
 
   buffers.pointX[0] = buffers.stageX[0]!;
   buffers.pointY[0] = buffers.stageY[0]!;
@@ -424,12 +532,27 @@ function streamline(
     const pinToRaw = last && i === stagedCount - 1;
     const rawX = buffers.stageX[i]!;
     const rawY = buffers.stageY[i]!;
-    // Weight this step by how far the hand actually travelled, not by the fact
-    // that a sample arrived. See `responseDistanceFor`.
-    const weight = onePoleWeight(
-      vectorLength(rawX - previousRawX, rawY - previousRawY),
-      response,
-    );
+    // Weight this step by how far the hand actually travelled, not by the
+    // fact that a sample arrived, and by at most `MAX_FILTER_STEP` of it.
+    // See `responseDistanceFor`.
+    const stepX = rawX - previousRawX;
+    const stepY = rawY - previousRawY;
+    const stepLength = vectorLength(stepX, stepY);
+    const uncapped = onePoleWeight(stepLength, response);
+    let weight = uncapped;
+    if (stepLength > MAX_FILTER_STEP) {
+      // Applied everywhere, the clamp also lags genuine corners, cutting a
+      // fast right angle inside its vertex by more than a brush width. So it
+      // is released in proportion to how sharply the hand is actually
+      // turning: full on a straight run or a gentle curve, absent at a
+      // corner, which keeps the unclamped response it has today.
+      const straightness = clamp01(
+        (directionChangeAt(i, stagedCount, cornerWindow) -
+          CORNER_DIRECTION_CHANGE) /
+          (1 - CORNER_DIRECTION_CHANGE),
+      );
+      weight = uncapped - (uncapped - clampedWeight) * straightness;
+    }
     previousRawX = rawX;
     previousRawY = rawY;
     const x = pinToRaw ? rawX : previousX + (rawX - previousX) * weight;

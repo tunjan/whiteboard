@@ -28,4 +28,25 @@ export const env = {
   musicDir: process.env.MUSIC_DIR ?? 'data/music',
   /** Directory where board repository documents are stored (content-addressed). */
   docDir: process.env.DOC_DIR ?? 'data/docs',
+  /**
+   * OpenRouter credentials for the AI LaTeX endpoints. Unset is a supported
+   * configuration rather than a broken one: the routes answer 503 and the
+   * canvas hides the two buttons that would call them.
+   */
+  openRouterApiKey: process.env.OPENROUTER_API_KEY,
+  /**
+   * The model that reads ink. Kept on DeepSeek's vision listing rather than
+   * the earlier `stealth/ox-alpha` preview slug: same family as the text
+   * model below, so `REASONING` in `openrouter.ts` can turn reasoning off
+   * outright instead of only down to `effort: 'low'`.
+   */
+  openRouterVisionModel:
+    process.env.OPENROUTER_VISION_MODEL ?? 'deepseek/deepseek-v4-flash-vision-exp',
+  /**
+   * Text-only sibling, for writing a formula from its name. Kept on DeepSeek
+   * rather than the same stealth slug: that one is a vision listing, and this
+   * job never sends an image.
+   */
+  openRouterTextModel:
+    process.env.OPENROUTER_TEXT_MODEL ?? 'deepseek/deepseek-v4-flash',
 } as const;

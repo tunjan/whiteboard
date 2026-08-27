@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_PENCIL_DYNAMICS,
+  DEFAULT_PENCIL_STABILIZATION,
   STROKE_PROFILES,
   getInkCenterlinePath,
   getInkPathData,
@@ -668,19 +669,131 @@ describe('finished-stroke endpoint', () => {
     expect(trailing).toBeLessThan(pinned - 2);
   });
 
-  it('lags by the same distance however fast the line was drawn', () => {
-    // Sample spacing is a record of hand speed, not of the line's shape.
-    // Filtering once per sample rather than per unit travelled put the tip of
-    // this 120-unit line at 107 when it was drawn slowly and at 55 when it was
-    // drawn quickly — and rounded off fast corners to match.
-    const careful = maxPathX(
-      getInkPathData(ramp(4, 120), 10, false, stabilized),
+  /** A corner of `deg`, both arms 60 units long, sampled every `spacing`. */
+  const bentLine = (deg: number, spacing: number, arm = 60) => {
+    const steps = Math.round(arm / spacing);
+    const points = Array.from({ length: steps + 1 }, (_, index) => ({
+      x: (index * arm) / steps,
+      y: 0,
+      pressure: 0.5,
+    }));
+    const radians = (deg * Math.PI) / 180;
+    for (let index = 1; index <= steps; index++) {
+      const along = (index * arm) / steps;
+      points.push({
+        x: arm + along * Math.cos(radians),
+        y: along * Math.sin(radians),
+        pressure: 0.5,
+      });
+    }
+    return points;
+  };
+
+  /** How far inside its true vertex the rendered centerline cuts a corner. */
+  const cornerCut = (deg: number, spacing: number, streamline: number) => {
+    const line = buildInkCenterline(
+      bentLine(deg, spacing),
+      10,
+      streamline,
+      true,
     );
+    let nearest = Number.POSITIVE_INFINITY;
+    for (let index = 0; index < line.count; index++) {
+      nearest = Math.min(
+        nearest,
+        Math.hypot(line.x[index]! - 60, line.y[index]!),
+      );
+    }
+    return nearest;
+  };
+
+  it('keeps a corner in the same place however fast it was drawn', () => {
+    // Sample spacing is a record of hand speed, not of the line's shape.
+    // Filtering once per sample rather than per unit travelled rounded off
+    // corners in proportion to how quickly they were drawn. Stabilization is
+    // clamped on long steps so a fast hand cannot outrun it, but the clamp is
+    // released where the hand is genuinely turning, so at the setting the
+    // pencil actually ships with a corner has to land on its vertex either way.
+    const shipped = pencilStabilizationToStreamline(
+      DEFAULT_PENCIL_STABILIZATION,
+    );
+    for (const deg of [45, 60, 90, 135]) {
+      expect(cornerCut(deg, 4, shipped)).toBeLessThan(0.5);
+      expect(cornerCut(deg, 20, shipped)).toBeLessThan(0.5);
+    }
+  });
+
+  it('still resolves corners at the top of the stabilization range', () => {
+    // Maximum stabilization is a request to be smoothed, and it rounds corners
+    // by a couple of units at any speed -- as it did before the clamp existed.
+    // The bound is what keeps the clamp's lag from compounding into something
+    // that swallows a letterform.
+    for (const deg of [45, 60, 90, 135]) {
+      expect(cornerCut(deg, 4, 0.9)).toBeLessThan(3);
+      expect(cornerCut(deg, 20, 0.9)).toBeLessThan(3);
+    }
+  });
+
+  /**
+   * Excess turning in the rendered centerline over the turning the ideal curve
+   * makes, in radians. This is what "wobbly" is: a path that oscillates turns
+   * far more than the curve it is meant to be. Lag that merely cuts the curve
+   * short does not register here, which is what separates the two.
+   */
+  const wobble = (spacing: number, amplitude: number) => {
+    let seed = 12345;
+    const noise = () =>
+      ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff) * 2 - 1;
+    const arc = Math.PI * 2 * 2.2;
+    const steps = Math.round(((20 + 120) / 2) * arc) / spacing;
+    const points = Array.from({ length: Math.round(steps) + 1 }, (_, index) => {
+      const along = index / Math.round(steps);
+      const angle = along * arc;
+      const radius = 20 + 100 * along;
+      return {
+        x: radius * Math.cos(angle) + noise() * amplitude,
+        y: radius * Math.sin(angle) + noise() * amplitude,
+        pressure: 0.5,
+      };
+    });
+
+    const line = buildInkCenterline(points, 10, 0.4735, true);
+    let turning = 0;
+    for (let index = 2; index < line.count; index++) {
+      const ax = line.x[index - 1]! - line.x[index - 2]!;
+      const ay = line.y[index - 1]! - line.y[index - 2]!;
+      const bx = line.x[index]! - line.x[index - 1]!;
+      const by = line.y[index]! - line.y[index - 1]!;
+      const la = Math.hypot(ax, ay);
+      const lb = Math.hypot(bx, by);
+      if (la === 0 || lb === 0) continue;
+      const cosine = (ax * bx + ay * by) / (la * lb);
+      turning += Math.abs(Math.acos(Math.max(-1, Math.min(1, cosine))));
+    }
+    return Math.max(0, turning - arc);
+  };
+
+  it('steadies a fast curve carrying hand tremor', () => {
+    // The reason the clamp exists. Filtering purely on distance let a hand
+    // moving five units a sample close 99% of the gap, so stabilization
+    // switched itself off on exactly the quick sweeping strokes whose tremor
+    // is most visible; this spiral wobbled by 98 radians of excess turning
+    // where it now wobbles by 65. The bounds sit between the two, so a change
+    // that quietly restores the old behaviour fails here.
+    expect(wobble(5, 2)).toBeLessThan(80);
+    expect(wobble(10, 2)).toBeLessThan(10);
+  });
+
+  it('stabilizes a fast straight line rather than passing it through raw', () => {
+    // The other half of that clamp: with no turn to protect, a long step is
+    // credited at most `MAX_FILTER_STEP` of travel, so the filter still lags a
+    // quick line. Unpinned, which is the only form that exposes the filter --
+    // every caller in the app pins the final point to the raw lift position.
     const quick = maxPathX(
       getInkPathData(ramp(20, 120), 10, false, stabilized),
     );
 
-    expect(Math.abs(quick - careful)).toBeLessThan(3);
+    expect(quick).toBeLessThan(120);
   });
 
   it('is a no-op without stabilization, where the EMA is the identity', () => {

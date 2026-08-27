@@ -90,6 +90,7 @@ A self-hostable, real-time collaborative whiteboard built for tutoring. Uses an 
 | `links.ts`            | `LinkMetaResponse`, URL sanitization contract.                                                                                                                                                                                                                                       |
 | `music.ts`            | `MusicTrack`, `MusicPlaylist`, `MusicPlaybackState`.                                                                                                                                                                                                                                 |
 | `voice.ts`            | WebRTC signaling types (`VoiceSignalMessage`, `VoicePeerState`).                                                                                                                                                                                                                     |
+| `ai-latex.ts`         | AI LaTeX endpoint contract: request/response shapes, size caps, the `UNREADABLE` refusal sentinel.                                                                                                                                                                                   |
 | `latency.ts`          | Ping/pong latency measurement constants.                                                                                                                                                                                                                                             |
 | `board-repository.ts` | `BoardMeta`, `BoardRepository` interface for dashboard.                                                                                                                                                                                                                              |
 
@@ -112,7 +113,7 @@ A self-hostable, real-time collaborative whiteboard built for tutoring. Uses an 
 | `CommentText.tsx`                         | Renders a comment body: Markdown marks as elements, `$…$` / `$$…$$` as MathJax-typeset math (shares the equation render cache).                                     |
 | `comment-markdown.ts`                     | Parser for the Markdown-with-LaTeX subset comment bodies are written in (`parseCommentMarkdown`, `parseInline`).                                                    |
 | `LaserLayer.tsx`                          | Real-time fading laser pointer trails.                                                                                                                             |
-| `DrawingCursor.tsx` / `EraserCursor.tsx`  | Dynamic SVG cursor overlays matching brush/eraser size.                                                                                                            |
+| `DrawingCursor.tsx` / `EraserCursor.tsx` / `EraserTrail.tsx` | Dynamic SVG cursor overlays matching brush/eraser size, plus the eraser's swipe trail.                                                                                                           |
 | `TextEditorOverlay.tsx`                   | In-place rich/plain text editor overlay for text shapes.                                                                                                           |
 | `ImageCropOverlay.tsx`                    | Visual image cropping controls.                                                                                                                                    |
 | `VideoPlayerOverlay.tsx`                  | YouTube iframe player overlay.                                                                                                                                     |
@@ -139,6 +140,7 @@ A self-hostable, real-time collaborative whiteboard built for tutoring. Uses an 
 | `graph-parser.ts` / `graph-sampler.ts` / `graph-intersections.ts`     | 2D graphing engine: parses expressions/parameters, samples curve vertices, computes Newton-Raphson curve intersections. |
 | `equation-render.ts` / `equation-source.ts`                           | MathJax display-equation SVG compilation and caching.                                                                   |
 | `equation-complete.ts` / `equation-shortcuts.ts`                      | LaTeX command catalog for the panel's autocomplete, plus pure typing edits (auto-brackets, Tab slots, environment rows). |
+| `ink-to-latex.ts`                                                     | Handwriting → equation: rasterize the strokes, transcribe them via `/api/ai/latex/ink`, swap ink for a typeset shape in one undo step. |
 | `link-url.ts` / `place-image.ts` / `place-link.ts` / `place-video.ts` | Asset drop and paste placement handlers.                                                                                |
 
 #### Canvas Zustand Stores & Hooks
@@ -148,8 +150,9 @@ A self-hostable, real-time collaborative whiteboard built for tutoring. Uses an 
 - `use-canvas-ui-store.ts` — Canvas HUD visibility, grid mode, performance stats toggles.
 - `use-tool-store.ts` / `use-tool-lock-store.ts` — Active tool ID and tool lock state.
 - `use-eraser-store.ts` / `use-eraser-cut-store.ts` — Precision path cutting state.
+- `use-eraser-trail-store.ts` — Self-consuming swipe trail (ring buffer, ≤8 points), drawn by `EraserTrail.tsx`.
 - `use-comments-store.ts` — Active comment threads.
-- `use-documents-store.ts` — Board file attachment drawer.
+- `use-documents-store.ts` — Board file attachment drawer, plus which attachments this user hasn't opened yet (`unread`, owned by `board/document-notifications.ts`).
 - `use-custom-stickers-store.ts` — User custom sticker library.
 - `use-camera-interaction.ts` / `use-wheel.ts` / `use-space-pan.ts` / `use-safari-gestures.ts` — Viewport pan/zoom input handling.
 
@@ -194,7 +197,7 @@ All tools implement `Tool` (registered in `register.ts`):
 | `rectangle` / `ellipse` | `box-tool.ts`                                             | Hotkey `r` / `o`. Drag to create boxes/ellipses (Shift for 1:1 square/circle).                                                                         |
 | `polygon`               | `polygon-tool.ts`                                         | Drag to create regular polygons.                                                                                                                       |
 | `text`                  | `text-tool.ts`                                            | Hotkey `t`. Click to place auto-sizing text; drag horizontally for a fixed-width wrapping box. Opens the inline editor either way.                      |
-| `eraser`                | `eraser-tool.ts`, `cut-polyline.ts`, `precision-erase.ts` | Hotkey `e`. Whole-object deletion or precision path slicing.                                                                                           |
+| `eraser`                | `eraser-tool.ts`, `erase.ts`, `erase-geometry.ts`, `cut-polyline.ts`, `precision-erase.ts` | Hotkey `e`. Whole-object deletion or precision path slicing. Groups erase as a unit unless the swipe starts inside one; frame clips are respected; ⌘/Ctrl takes only the topmost shape.                                                                                           |
 | `laser`                 | `laser-tool.ts`                                           | Hotkey `k`. Transient presenter laser trail.                                                                                                           |
 | `graph`                 | `graph-tool.ts`                                           | Hotkey `g`. Click/drag to drop a new 2D graphing coordinate plane.                                                                                     |
 | `equation`              | `equation-tool.ts`                                        | Hotkey `m`. Click/drag to drop a LaTeX equation.                                                                                                       |
@@ -208,7 +211,7 @@ All tools implement `Tool` (registered in `register.ts`):
 
 | File                                          | Responsibility                                                                                               |
 | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `presence.ts`                                 | Awareness broadcast: local user identity, cursor position, selected shape IDs, active page, viewport bounds. |
+| `presence.ts`                                 | Awareness broadcast: local user identity, cursor position, selected shape IDs, in-progress erase marks, active page, viewport bounds. Momentary fields (cursor/laser/erasing) are not republished on rebind. |
 | `CursorsLayer.tsx`                            | Renders smooth multiplayer cursors with username tags and color swatches.                                    |
 | `PeerSelectionLayer.tsx`                      | Renders color-coded selection bounding boxes for collaborators.                                              |
 | `use-presence-store.ts`                       | Zustand store tracking all active peers in the room.                                                         |
@@ -229,8 +232,8 @@ All tools implement `Tool` (registered in `register.ts`):
 | `board-chrome.tsx`        | Top header bar: board title, back button, share button, page navigation, voice HUD, presence list. |
 | `style-panel.tsx`         | Floating property inspector: stroke color, fill type, stroke width, opacity, font size, align.     |
 | `graph-panel.tsx`         | Graph equation list, function curves, slider variables, viewport range bounds.                     |
-| `equation-panel.tsx`      | LaTeX source editor: command autocomplete and Quick-LaTeX typing shortcuts.                        |
-| `documents-panel.tsx`     | Drawer for uploading, downloading, and viewing board file attachments.                             |
+| `equation-panel.tsx`      | LaTeX source editor: command autocomplete, Quick-LaTeX typing shortcuts, and "describe an equation" generation. |
+| `documents-panel.tsx`     | Drawer for uploading, downloading, and viewing board file attachments; carries the unread dot.     |
 | `page-menu.tsx`           | Multi-page list switcher, reordering, creation, and deletion.                                      |
 | `canvas-context-menu.tsx` | Right-click context menu (Cut, Copy, Paste, Bring to Front, Send to Back, Group, Lock).            |
 | `board-notes-dialog.tsx`  | Tutor-only private student notes.                                                                  |
@@ -253,6 +256,7 @@ All tools implement `Tool` (registered in `register.ts`):
 | `blobs/routes.ts` / `blobs/store.ts`                          | Content-addressed binary storage (SHA256) for images and custom stickers.                                     |
 | `documents/routes.ts` / `documents/store.ts`                  | Board attachment storage with MIME validation (`/api/docs`).                                                  |
 | `links/routes.ts` / `links/fetch-remote.ts` / `links/meta.ts` | OpenGraph HTML scraper for link preview cards (downloads images to blob store).                               |
+| `ai/routes.ts` / `ai/openrouter.ts` / `ai/latex.ts` | OpenRouter proxy for the two AI LaTeX actions (`/api/ai`). Prompts and reply unwrapping live in `latex.ts`. |
 | `music/routes.ts`                                             | Scans `server/data/music` for audio files and serves streaming tracks.                                        |
 
 ---

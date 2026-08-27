@@ -10,6 +10,7 @@ import {
   boardDocumentsFull,
 } from '@/canvas/use-document-store';
 import { useDocumentsStore } from '@/canvas/use-documents-store';
+import { markOwnDocument } from './document-notifications';
 
 // Client for the board document repository. Unlike images (see ./blobs.ts)
 // documents are never recompressed — a file must download byte-identical to
@@ -92,8 +93,11 @@ async function runUpload(uploadId: string, uploaderName: string): Promise<void> 
     const storageId = await uploadBytes(file, ext, uploadId, (progress) => {
       useDocumentsStore.getState().updateUpload(uploadId, { progress });
     });
+    const id = genId();
+    // Claimed before publishing, so our own upload never notifies us.
+    markOwnDocument(id);
     addBoardDocument({
-      id: genId(),
+      id,
       storageId,
       name: file.name,
       ext,

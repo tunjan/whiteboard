@@ -20,6 +20,34 @@ export const EQUATION_DEFAULT_SIZE = { w: 120, h: 48 } as const;
  */
 export const EQUATION_SETTLE_MS = 500;
 
+/**
+ * The em size MathJax measures a render at. `EquationRender` dimensions are in
+ * these units, so every consumer scales them by `fontSize / EQUATION_RENDER_EM`
+ * to get world units.
+ */
+const EQUATION_RENDER_EM = 16;
+
+/** The world-space box a typeset render fills when set at `fontSize`. */
+export function equationBoxSize(
+  render: { width: number; height: number },
+  fontSize: number,
+): { w: number; h: number } {
+  const scale = fontSize / EQUATION_RENDER_EM;
+  return { w: render.width * scale, h: render.height * scale };
+}
+
+/**
+ * The `fontSize` at which a render stands `height` world units tall — how an
+ * equation replacing handwriting is made to match the hand it replaces.
+ */
+export function equationFontSizeForHeight(
+  render: { height: number },
+  height: number,
+): number {
+  if (render.height <= 0) return EQUATION_DEFAULT_FONT_SIZE;
+  return (height / render.height) * EQUATION_RENDER_EM;
+}
+
 type TypesetRender = Extract<EquationRender, { svg: string }>;
 
 export type EquationDisplay =

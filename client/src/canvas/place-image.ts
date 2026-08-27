@@ -15,46 +15,49 @@ const ACCEPT = 'image/png,image/jpeg,image/webp,image/gif';
 
 /**
  * Upload image files and create image shapes centered near `at`. Returns the
- * new shape ids (uploads run sequentially; failures are skipped).
+ * new shape ids (uploads run in parallel so one large file doesn't block the
+ * rest; failures are skipped).
  */
 export async function placeImageFiles(
   files: File[],
   at: Point,
 ): Promise<string[]> {
+  const uploads = await Promise.allSettled(
+    files.filter((f) => f.type.startsWith('image/')).map(uploadImageFile),
+  );
   const ids: string[] = [];
   let offset = 0;
-  for (const file of files) {
-    if (!file.type.startsWith('image/')) continue;
-    try {
-      const up = await uploadImageFile(file);
-      let w = up.naturalWidth || 300;
-      let h = up.naturalHeight || 200;
-      if (w > MAX_PLACE || h > MAX_PLACE) {
-        const scale = MAX_PLACE / Math.max(w, h);
-        w *= scale;
-        h *= scale;
-      }
-      const shape = {
-        id: genId(),
-        type: 'image',
-        x: at.x - w / 2 + offset,
-        y: at.y - h / 2 + offset,
-        rotation: 0,
-        index: getTopIndex(editor.getShapes()),
-        props: {
-          blobId: up.blobId,
-          w,
-          h,
-          naturalWidth: up.naturalWidth,
-          naturalHeight: up.naturalHeight,
-        },
-      } as Shape;
-      editor.createShape(shape);
-      ids.push(shape.id);
-      offset += 16;
-    } catch (err) {
-      console.error('[image] upload failed', err);
+  for (const result of uploads) {
+    if (result.status === 'rejected') {
+      console.error('[image] upload failed', result.reason);
+      continue;
     }
+    const up = result.value;
+    let w = up.naturalWidth || 300;
+    let h = up.naturalHeight || 200;
+    if (w > MAX_PLACE || h > MAX_PLACE) {
+      const scale = MAX_PLACE / Math.max(w, h);
+      w *= scale;
+      h *= scale;
+    }
+    const shape = {
+      id: genId(),
+      type: 'image',
+      x: at.x - w / 2 + offset,
+      y: at.y - h / 2 + offset,
+      rotation: 0,
+      index: getTopIndex(editor.getShapes()),
+      props: {
+        blobId: up.blobId,
+        w,
+        h,
+        naturalWidth: up.naturalWidth,
+        naturalHeight: up.naturalHeight,
+      },
+    } as Shape;
+    editor.createShape(shape);
+    ids.push(shape.id);
+    offset += 16;
   }
   return ids;
 }

@@ -1,6 +1,7 @@
 import { blobUrl } from '../../board/blobs';
 import { useLodDetail } from '../lod';
 import { boxBounds, boxHitTest, rotationTransform } from './box-geometry';
+import { mergedRectPath, useMergedCorners } from './image-merge';
 import { MEDIA_CORNER_RADIUS } from './style';
 import type { ShapeUtil } from './types';
 
@@ -38,6 +39,7 @@ export const imageUtil: ShapeUtil<'image'> = {
   Component: ({ shape }) => {
     const { blobId, w, h, crop } = shape.props;
     const detail = useLodDetail();
+    const squared = useMergedCorners(shape);
     if (!blobId) return null;
     // With a crop, draw the full source scaled so the crop sub-rect fills the
     // box; the clipPath below keeps only the box region visible.
@@ -48,20 +50,16 @@ export const imageUtil: ShapeUtil<'image'> = {
     const clipId = `image-clip-${shape.id}`;
     const shadowId = `image-shadow-${shape.id}`;
     const radius = Math.min(MEDIA_CORNER_RADIUS, w / 4, h / 4);
+    // Where a neighbouring image is flush against an edge, the corners on it are
+    // squared so the pair reads as one block instead of leaving a notch.
+    const outline = mergedRectPath(shape.x, shape.y, w, h, radius, squared);
     // Zoomed far out the drop shadow is sub-pixel; skip it (and its filter).
     const shadow = detail === 'high';
     return (
       <g transform={rotationTransform(shape.x, shape.y, w, h, shape.rotation)}>
         <defs>
           <clipPath id={clipId}>
-            <rect
-              x={shape.x}
-              y={shape.y}
-              width={w}
-              height={h}
-              rx={radius}
-              ry={radius}
-            />
+            <path d={outline} />
           </clipPath>
           {shadow && (
             <filter
@@ -93,13 +91,8 @@ export const imageUtil: ShapeUtil<'image'> = {
             clipPath={`url(#${clipId})`}
           />
         </g>
-        <rect
-          x={shape.x}
-          y={shape.y}
-          width={w}
-          height={h}
-          rx={radius}
-          ry={radius}
+        <path
+          d={outline}
           fill="none"
           stroke="var(--color-border)"
           strokeOpacity={1}

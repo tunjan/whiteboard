@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import { startDocumentNotifications } from '@/board/document-notifications';
 import { boardRepository } from '@/board/server-board-repository';
 import { Canvas } from '@/canvas/Canvas';
 import {
@@ -22,6 +23,7 @@ import { LatencyWarningToast } from '@/components/latency-warning-toast';
 import { NameDialog } from '@/components/name-dialog';
 import { StylePanel } from '@/components/style-panel';
 import { Toolbar } from '@/components/toolbar';
+import { Toaster } from '@/components/ui/toast';
 import { VideoPanel } from '@/components/video-panel';
 import { navigate } from '@/router';
 
@@ -56,10 +58,16 @@ export function BoardView({ boardId }: { boardId: string }) {
   useEffect(() => {
     pendingPage.current = new URLSearchParams(window.location.search).get('p');
     const dispose = loadBoard(boardId, { persist: true, collab: true });
+    // After loadBoard — it resets the documents store, which would otherwise
+    // land on the watcher as a repository that emptied itself.
+    const stopDocumentNotifications = startDocumentNotifications(boardId);
     void boardRepository.get(boardId).then((b) => {
       if (b) setName(b.name);
     });
-    return dispose;
+    return () => {
+      stopDocumentNotifications();
+      dispose();
+    };
   }, [boardId]);
 
   // Deep link: jump to the shared page once it exists in the synced doc.
@@ -128,6 +136,8 @@ export function BoardView({ boardId }: { boardId: string }) {
         <VideoPanel identity={identity} />
       </BoardUiLayer>
       <LatencyWarningToast />
+      {/* Bottom-right, clear of the latency warning's top-left viewport. */}
+      <Toaster />
 
       <NameDialog
         open={needsName || editingIdentity}

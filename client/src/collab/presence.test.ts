@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   restoreLocalPresence,
   setActiveAwareness,
+  setLocalErasing,
   setLocalPage,
   setLocalUser,
   setLocalVoice,
@@ -280,5 +281,71 @@ describe('local presence after a page-hide wipe', () => {
     restoreLocalPresence();
 
     expect(local.getLocalState()).toBe(before);
+  });
+});
+
+describe('collaborator erase presence', () => {
+  it('publishes a peer mid-erase so their targets can be dimmed', () => {
+    const local = makeAwareness();
+    const remote = makeAwareness();
+    setActiveAwareness(local);
+    remote.setLocalStateField('user', {
+      name: 'Student',
+      color: '#2f6df6',
+      isTutor: false,
+    });
+    remote.setLocalStateField('erasing', ['ink-1', 'ink-2']);
+
+    applyAwarenessUpdate(
+      local,
+      encodeAwarenessUpdate(remote, [remote.clientID]),
+      remote,
+    );
+
+    expect(usePresenceStore.getState().peers).toEqual([
+      expect.objectContaining({ erasing: ['ink-1', 'ink-2'] }),
+    ]);
+  });
+
+  it('reads a peer that is not erasing as null', () => {
+    const local = makeAwareness();
+    const remote = makeAwareness();
+    setActiveAwareness(local);
+    remote.setLocalStateField('user', {
+      name: 'Student',
+      color: '#2f6df6',
+      isTutor: false,
+    });
+
+    applyAwarenessUpdate(
+      local,
+      encodeAwarenessUpdate(remote, [remote.clientID]),
+      remote,
+    );
+
+    expect(usePresenceStore.getState().peers[0]!.erasing).toBeNull();
+  });
+
+  it('sends the first mark of a stroke immediately', () => {
+    const local = makeAwareness();
+    setActiveAwareness(local);
+
+    setLocalErasing(['ink-1']);
+
+    expect(local.getLocalState()?.erasing).toEqual(['ink-1']);
+  });
+
+  it('flushes the clear that ends a stroke even when it is throttled', async () => {
+    const local = makeAwareness();
+    setActiveAwareness(local);
+
+    setLocalErasing(['ink-1']);
+    // Straight after the first send, so this one can only go out on the
+    // trailing timer — the case where a lost clear would strand a peer's dim.
+    setLocalErasing([]);
+
+    expect(local.getLocalState()?.erasing).toEqual(['ink-1']);
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    expect(local.getLocalState()?.erasing).toBeNull();
   });
 });

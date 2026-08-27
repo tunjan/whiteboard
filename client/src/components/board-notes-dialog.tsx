@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { type BoardNotes, getBoardNotes, saveBoardNotes } from '@/board/board-notes';
 import { Button } from '@/components/ui/button';
 import {
@@ -9,7 +9,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 
@@ -24,8 +23,6 @@ export function BoardNotesDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const notesId = useId();
-  const errorLogId = useId();
   const [value, setValue] = useState<BoardNotes>(EMPTY);
   const [tab, setTab] = useState('notes');
   const [loading, setLoading] = useState(false);
@@ -66,54 +63,42 @@ export function BoardNotesDialog({
         if (!saving) onOpenChange(nextOpen);
       }}
     >
-      <DialogContent>
+      <DialogContent className="gap-5 sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Student Notes</DialogTitle>
-          <DialogDescription>
-            Private to you — students never see these notes.
-          </DialogDescription>
+          <DialogTitle>Student notes</DialogTitle>
+          <DialogDescription>Private — students never see these.</DialogDescription>
         </DialogHeader>
         <Tabs value={tab} onValueChange={(next) => setTab(next as string)}>
-          <TabsList aria-label="Student notes sections">
+          <TabsList aria-label="Notes sections">
             <TabsTrigger value="notes">Notes</TabsTrigger>
-            <TabsTrigger value="errors">Error Log</TabsTrigger>
+            <TabsTrigger value="errors">Errors</TabsTrigger>
           </TabsList>
-          <TabsContent value="notes">
-            <FieldGroup>
-              <Field>
-                <FieldLabel htmlFor={notesId}>Student Notes</FieldLabel>
-                <Textarea
-                  id={notesId}
-                  value={value.notes}
-                  onChange={(e) =>
-                    setValue((prev) => ({ ...prev, notes: e.target.value }))
-                  }
-                  disabled={loading}
-                  placeholder={loading ? 'Loading…' : 'Notes about this student…'}
-                  className="min-h-[12rem]"
-                  autoFocus
-                />
-              </Field>
-            </FieldGroup>
+          <TabsContent value="notes" className="mt-3">
+            <Textarea
+              aria-label="Student notes"
+              value={value.notes}
+              onChange={(e) =>
+                setValue((prev) => ({ ...prev, notes: e.target.value }))
+              }
+              disabled={loading}
+              placeholder={loading ? 'Loading…' : 'Notes about this student…'}
+              className="min-h-[16rem]"
+              autoFocus
+            />
           </TabsContent>
-          <TabsContent value="errors">
-            <FieldGroup>
-              <Field>
-                <FieldLabel htmlFor={errorLogId}>Error Log</FieldLabel>
-                <Textarea
-                  id={errorLogId}
-                  value={value.errorLog}
-                  onChange={(e) =>
-                    setValue((prev) => ({ ...prev, errorLog: e.target.value }))
-                  }
-                  disabled={loading}
-                  placeholder={
-                    loading ? 'Loading…' : 'Mistakes to revisit with this student…'
-                  }
-                  className="min-h-[12rem]"
-                />
-              </Field>
-            </FieldGroup>
+          <TabsContent value="errors" className="mt-3">
+            <Textarea
+              aria-label="Error log"
+              value={value.errorLog}
+              onChange={(e) =>
+                setValue((prev) => ({ ...prev, errorLog: e.target.value }))
+              }
+              disabled={loading}
+              placeholder={
+                loading ? 'Loading…' : 'Mistakes to revisit with this student…'
+              }
+              className="min-h-[16rem]"
+            />
           </TabsContent>
         </Tabs>
         <DialogFooter>
@@ -125,7 +110,7 @@ export function BoardNotesDialog({
             Cancel
           </Button>
           <Button onClick={save} disabled={loading || saving}>
-            Save Notes
+            Save
           </Button>
         </DialogFooter>
       </DialogContent>

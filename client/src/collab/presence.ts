@@ -43,11 +43,15 @@ let latestLaser: LaserStroke[] = [];
 let localSelection: string[] = [];
 let lastSelectionSent = 0;
 let selectionTrailingTimer: ReturnType<typeof setTimeout> | null = null;
+let localErasing: string[] = [];
+let lastErasingSent = 0;
+let erasingTrailingTimer: ReturnType<typeof setTimeout> | null = null;
 
 const CURSOR_THROTTLE_MS = 40;
 const VIEWPORT_THROTTLE_MS = 70;
 const LASER_THROTTLE_MS = 40;
 const SELECTION_THROTTLE_MS = 60;
+const ERASING_THROTTLE_MS = 60;
 
 // Previous peer objects keyed by clientId. Awareness fires `change` on any
 // peer's update (cursors publish at 25 Hz), but most peers are unchanged each
@@ -80,6 +84,7 @@ function publishPeers(a: Awareness): void {
       (state.textSelection as TextSelectionPresence | null) ?? null;
     const laser = (state.laser as LaserStroke[] | null) ?? null;
     const selection = (state.selection as string[] | null) ?? null;
+    const erasing = (state.erasing as string[] | null) ?? null;
     const prev = prevPeers.get(clientId);
     const parsedVoice = parseVoicePresence(state.voice);
     const voice =
@@ -107,6 +112,7 @@ function publishPeers(a: Awareness): void {
       prev.textSelection === textSelection &&
       prev.laser === laser &&
       prev.selection === selection &&
+      prev.erasing === erasing &&
       prev.voice === voice
         ? prev
         : {
@@ -123,6 +129,7 @@ function publishPeers(a: Awareness): void {
             textSelection,
             laser,
             selection,
+            erasing,
             voice,
           };
     next.set(clientId, peer);
@@ -135,6 +142,19 @@ function publishPeers(a: Awareness): void {
 /** Bind/unbind the active provider's awareness. Called by loadBoard. */
 export function setActiveAwareness(next: Awareness | null): void {
   if (awareness && onChange) awareness.off('change', onChange);
+  // An erase stroke's marks are momentary and deliberately not republished on
+  // rebind (like the cursor and laser). Dropping them here keeps a flush that
+  // was still pending on the old connection from landing on the new one to
+  // describe a stroke that is long over.
+  if (erasingTrailingTimer !== null) {
+    clearTimeout(erasingTrailingTimer);
+    erasingTrailingTimer = null;
+  }
+  localErasing = [];
+  // A new connection has no send history to be throttled against, so the first
+  // mark of the next stroke goes out at once instead of waiting out a window
+  // measured against the previous session.
+  lastErasingSent = 0;
   awareness = next;
   onChange = null;
   prevPeers = new Map();
@@ -289,6 +309,44 @@ export function setLocalSelection(ids: string[]): void {
     selectionTrailingTimer = null;
     sendSelection();
   }, SELECTION_THROTTLE_MS - elapsed);
+}
+
+function sendErasing(): void {
+  if (!awareness) return;
+  lastErasingSent = performance.now();
+  awareness.setLocalStateField(
+    'erasing',
+    localErasing.length > 0 ? localErasing : null,
+  );
+}
+
+/**
+ * Publish which shapes this client's erase stroke has marked, so peers dim them
+ * for as long as the stroke is held rather than watching them vanish with no
+ * warning. Throttled with a trailing flush like the selection: the flush is what
+ * guarantees the *final* state of a burst arrives, and here that matters more
+ * than usual — a dropped clear would leave a peer dimming a shape that is no
+ * longer being erased, with nothing to correct it.
+ */
+export function setLocalErasing(ids: string[]): void {
+  if (
+    ids.length === localErasing.length &&
+    ids.every((id, i) => id === localErasing[i])
+  ) {
+    return;
+  }
+  localErasing = ids;
+  if (!awareness) return;
+  if (erasingTrailingTimer !== null) return;
+  const elapsed = performance.now() - lastErasingSent;
+  if (elapsed >= ERASING_THROTTLE_MS) {
+    sendErasing();
+    return;
+  }
+  erasingTrailingTimer = setTimeout(() => {
+    erasingTrailingTimer = null;
+    sendErasing();
+  }, ERASING_THROTTLE_MS - elapsed);
 }
 
 export function setLocalTextSelection(

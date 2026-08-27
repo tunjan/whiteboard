@@ -22,11 +22,17 @@ interface DocumentsStore {
   startUpload: (upload: PendingUpload) => void;
   updateUpload: (id: string, patch: Partial<PendingUpload>) => void;
   clearUpload: (id: string) => void;
+  /** Ids of documents a peer added that this user hasn't opened yet. Owned by
+   *  `board/document-notifications.ts`, which persists them per board. */
+  unread: ReadonlySet<string>;
+  setUnread: (unread: ReadonlySet<string>) => void;
   /** Whether the documents popover is open. Lets a canvas file drop reveal it. */
   panelOpen: boolean;
   setPanelOpen: (open: boolean) => void;
   reset: () => void;
 }
+
+const NO_UNREAD: ReadonlySet<string> = new Set();
 
 export const useDocumentsStore = create<DocumentsStore>((set) => ({
   documents: {},
@@ -45,7 +51,10 @@ export const useDocumentsStore = create<DocumentsStore>((set) => ({
       const { [id]: _removed, ...rest } = s.uploads;
       return { uploads: rest };
     }),
+  unread: NO_UNREAD,
+  setUnread: (unread) => set({ unread }),
   panelOpen: false,
   setPanelOpen: (panelOpen) => set({ panelOpen }),
-  reset: () => set({ documents: {}, uploads: {}, panelOpen: false }),
+  reset: () =>
+    set({ documents: {}, uploads: {}, unread: NO_UNREAD, panelOpen: false }),
 }));

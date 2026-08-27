@@ -14,7 +14,7 @@ import { useSelectionStore } from './use-selection-store';
 /** Stable empty array for the non-group selection path (see `hasGroup`). */
 const NO_SHAPES: Shape[] = [];
 
-const ACCENT = 'var(--color-focus)';
+const ACCENT = 'var(--action-solid, #3b82f6)';
 const SNAP = '#e5484d';
 /** Half-length of a snap indicator's tick marks, in screen px. */
 const SNAP_TICK = 3;
@@ -104,7 +104,7 @@ export function SelectionLayer({ camera }: SelectionLayerProps) {
             <polygon
               points={`${nw.x},${nw.y} ${ne.x},${ne.y} ${se.x},${se.y} ${sw.x},${sw.y}`}
               fill="none"
-              stroke={locked ? 'var(--color-muted-foreground)' : ACCENT}
+              stroke={locked ? 'var(--muted-foreground, var(--fg-muted, #78716c))' : ACCENT}
               strokeWidth={1.5}
               strokeDasharray={locked ? '4 3' : isGroup ? '6 4' : undefined}
             />
@@ -136,7 +136,7 @@ export function SelectionLayer({ camera }: SelectionLayerProps) {
                     width={6}
                     height={16}
                     rx={3}
-                    fill="var(--color-background)"
+                    fill="var(--background, var(--bg-canvas, #ffffff))"
                     stroke={ACCENT}
                     strokeWidth={1.5}
                   />
@@ -150,7 +150,7 @@ export function SelectionLayer({ camera }: SelectionLayerProps) {
                   width={HANDLE}
                   height={HANDLE}
                   rx={1.5}
-                  fill="var(--color-background)"
+                  fill="var(--background, var(--bg-canvas, #ffffff))"
                   stroke={ACCENT}
                   strokeWidth={1.5}
                 />
@@ -170,7 +170,7 @@ export function SelectionLayer({ camera }: SelectionLayerProps) {
                 cx={p.x}
                 cy={p.y}
                 r={HANDLE / 2 - 0.5}
-                fill="var(--color-background)"
+                fill="var(--background, var(--bg-canvas, #ffffff))"
                 stroke={ACCENT}
                 strokeWidth={1.25}
               />
@@ -188,7 +188,7 @@ export function SelectionLayer({ camera }: SelectionLayerProps) {
             cx={p.x}
             cy={p.y}
             r={HANDLE / 2}
-            fill="var(--color-background)"
+            fill="var(--background, var(--bg-canvas, #ffffff))"
             stroke={ACCENT}
             strokeWidth={1.5}
           />
@@ -200,7 +200,7 @@ export function SelectionLayer({ camera }: SelectionLayerProps) {
             width={HANDLE}
             height={HANDLE}
             rx={1.5}
-            fill="var(--color-background)"
+            fill="var(--background, var(--bg-canvas, #ffffff))"
             stroke={ACCENT}
             strokeWidth={1.5}
           />

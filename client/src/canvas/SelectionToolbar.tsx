@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import type { Shape } from '@whiteboard/shared';
 import {
@@ -9,13 +9,16 @@ import {
   EyeOff,
   Group,
   ImageDown,
+  Loader2,
   Lock,
   MoreHorizontal,
   SendToBack,
+  Sigma,
   Trash2,
   Ungroup,
   Unlock,
 } from 'lucide-react';
+import { aiLatexEnabled } from '@/board/latex-ai';
 import type { Camera } from './camera';
 import { worldToScreen } from './camera';
 import { alignShapes, distributeShapes } from './align';
@@ -31,6 +34,7 @@ import {
   exportSelectionToPng,
 } from './export-png';
 import { deleteTargetIds } from './hierarchy';
+import { convertInkToEquation, inkStrokeIds } from './ink-to-latex';
 import { getSelectionInfo } from './selection-geometry';
 
 /** Stable empty array for the non-group selection path (see `hasGroup`). */
@@ -65,6 +69,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
+import { toast } from '@/components/ui/toast';
 import { cn } from '@/lib/utils';
 
 interface SelectionToolbarProps {
@@ -110,6 +115,20 @@ export function SelectionToolbar({ camera }: SelectionToolbarProps) {
     selectionHasGroup ? s.shapes : NO_SHAPES,
   );
 
+  // Whether the server has an AI key configured, so the equation button only
+  // appears where clicking it could work.
+  const [aiEnabled, setAiEnabled] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    aiLatexEnabled().then((enabled) => {
+      if (!cancelled) setAiEnabled(enabled);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const [converting, setConverting] = useState(false);
+
   // Hide while a drag-select is in progress to avoid flicker.
   if (marquee) return null;
 
@@ -134,6 +153,11 @@ export function SelectionToolbar({ camera }: SelectionToolbarProps) {
     editor.getShape(selectedIds[0]!)?.type === 'image'
       ? selectedIds[0]!
       : null;
+  const inkIds = inkStrokeIds(selectedIds);
+  const canConvertToEquation =
+    aiEnabled &&
+    inkIds !== null &&
+    !selectedIds.some((id) => editor.getShape(id)?.locked);
 
   // Position above the topmost (rotated) corner, centered on the bounds center.
   const corners = [
@@ -162,6 +186,21 @@ export function SelectionToolbar({ camera }: SelectionToolbarProps) {
   const align = (edge: Parameters<typeof alignShapes>[2]) =>
     alignShapes(editor, selectedIds, edge);
 
+  const convertToEquation = async () => {
+    if (!inkIds || converting) return;
+    setConverting(true);
+    try {
+      await convertInkToEquation(inkIds);
+    } catch (err) {
+      toast.add({
+        title: err instanceof Error ? err.message : 'Conversion failed',
+        type: 'error',
+      });
+    } finally {
+      setConverting(false);
+    }
+  };
+
   return (
     <TooltipProvider delay={300}>
       <div
@@ -186,6 +225,18 @@ export function SelectionToolbar({ camera }: SelectionToolbarProps) {
               : 'origin-bottom motion-safe:slide-in-from-bottom-1',
           )}
         >
+          {canConvertToEquation && (
+            <div className="flex items-center gap-0.5">
+              <IconButton
+                label="Convert to equation"
+                disabled={converting}
+                onClick={convertToEquation}
+              >
+                {converting ? <Loader2 className="animate-spin" /> : <Sigma />}
+              </IconButton>
+            </div>
+          )}
+
           <div className="flex items-center gap-0.5">
             <IconButton
               label="Duplicate"

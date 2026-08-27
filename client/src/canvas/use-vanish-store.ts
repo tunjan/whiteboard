@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import type { Shape } from '@whiteboard/shared';
 
 /** Must match the `shape-vanish` keyframe duration in index.css. */
-export const VANISH_MS = 180;
+export const VANISH_MS = 100;
 
 /**
  * Past this many shapes in one delete (select-all, clearing a page) the fade is
