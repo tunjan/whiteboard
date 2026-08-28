@@ -1,12 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
-import { AlertCircle, Check, Copy, CornerDownLeft } from 'lucide-react';
+import {
+  AlertCircle,
+  Check,
+  Copy,
+  CornerDownLeft,
+  Loader2,
+  Sparkles,
+} from 'lucide-react';
 import {
   genId,
   type EquationProps,
   type EquationShape,
   type Shape,
 } from '@whiteboard/shared';
+import { aiLatexEnabled, latexFromPrompt } from '@/board/latex-ai';
 import {
   applyLatexCompletion,
   latexTokenAt,
@@ -53,9 +61,16 @@ import { useSelectionStore } from '@/canvas/use-selection-store';
 import { paletteColors } from '@/canvas/use-style-store';
 import { ToolPanelPresence } from '@/components/tool-panel-presence';
 import { Button } from '@/components/ui/button';
-import { Kbd } from '@/components/ui/kbd';
 import { Surface } from '@/components/ui/surface';
 import { Textarea } from '@/components/ui/textarea';
+import { toast } from '@/components/ui/toast';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import { useThemeStore } from '@/use-theme-store';
 import { cn, swatchBorder } from '@/lib/utils';
 
@@ -248,7 +263,20 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
   const [copied, setCopied] = useState(false);
   const [suggestions, setSuggestions] = useState<LatexCompletion[]>([]);
   const [activeSuggestion, setActiveSuggestion] = useState(0);
+  const [aiEnabled, setAiEnabled] = useState(false);
+  const [prompt, setPrompt] = useState('');
+  const [generating, setGenerating] = useState(false);
   const theme = useThemeStore((state) => state.theme);
+
+  useEffect(() => {
+    let active = true;
+    aiLatexEnabled().then((enabled) => {
+      if (active) setAiEnabled(enabled);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // Always include the equation's own color: a shape can carry a value the
   // current theme's palette doesn't hold, and a grid with nothing selected
@@ -343,8 +371,8 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
     ? sourceExcerpt(shape.props.latex, errorSpan)
     : null;
   const errorId = `equation-error-${shape.id}`;
-  const helpId = `equation-help-${shape.id}`;
   const listId = `equation-completions-${shape.id}`;
+  const titleId = `equation-panel-title-${shape.id}`;
   const currentKey = shape.props.latex.trim();
   const currentRender = useEquationRender(currentKey, inline);
 
@@ -374,7 +402,7 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
     : null;
   const problemId = `equation-problem-${shape.id}`;
   // Whichever of the two message blocks is on screen also describes the field.
-  const messageId = error ? errorId : problem ? problemId : null;
+  const messageId = error ? errorId : problem ? problemId : undefined;
 
   const updateLatex = (latex: string) => {
     const version = ++inputVersion.current;
@@ -530,6 +558,32 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
     requestAnimationFrame(() => {
       sourceRef.current?.setSelectionRange(edit.caret, edit.caret);
     });
+  };
+
+  /**
+   * Ask the model to write LaTeX for a plain-language description.
+   *
+   * Written through `updateLatex` rather than `applyEdit`: the latter types
+   * through the source field's own undo stack, which only works while that
+   * field already has focus — here it's the prompt field that does.
+   */
+  const generateFromPrompt = async () => {
+    const text = prompt.trim();
+    if (!text || generating) return;
+    setGenerating(true);
+    try {
+      const latex = await latexFromPrompt(text);
+      updateLatex(latex);
+      setPrompt('');
+      focusInput();
+    } catch (err) {
+      toast.add({
+        title: err instanceof Error ? err.message : 'Generation failed',
+        type: 'error',
+      });
+    } finally {
+      setGenerating(false);
+    }
   };
 
   const acceptSuggestion = (completion: LatexCompletion) => {
@@ -688,377 +742,414 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
   };
 
   return (
-    <Surface
-      role="region"
-      aria-label="Equation controls"
-      className="touch-targets flex max-h-[calc(100dvh-7rem-env(safe-area-inset-top))] w-[min(23rem,calc(100vw-2rem))] flex-col gap-3 overflow-y-auto overscroll-contain p-3 shadow-lg sm:max-h-[calc(100dvh-6.25rem-env(safe-area-inset-top))]"
-    >
-      <header className="flex items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2">
-          <h2 className="text-sm font-semibold tracking-tight text-fg">
-            Equation
-          </h2>
-          {loadError ? (
-            <span className="text-2xs font-medium text-danger">
-              renderer error
-            </span>
-          ) : !ready ? (
-            <span className="text-2xs font-medium text-fg-muted">
-              preparing…
-            </span>
-          ) : null}
-        </div>
-        <div className="flex items-center gap-0.5">
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label="Add equation below"
-            title="Add equation below (⌘/Ctrl + Enter)"
-            disabled={!currentKey}
-            onClick={addEquationBelow}
-            className="rounded-md text-fg-secondary transition-all hover:bg-panel hover:text-fg disabled:opacity-40"
-          >
-            <CornerDownLeft className="size-4" aria-hidden="true" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label={copied ? 'LaTeX copied' : 'Copy LaTeX'}
-            title={`Copy as ${inline ? 'inline' : 'display'} math (Alt: body only)`}
-            disabled={!currentKey}
-            onClick={(event) => void copyLatex(event.altKey)}
-            className="rounded-md text-fg-secondary transition-all hover:bg-panel hover:text-fg disabled:opacity-40"
-          >
-            {copied ? (
-              <Check className="size-4 text-success" aria-hidden="true" />
-            ) : (
-              <Copy className="size-4" aria-hidden="true" />
-            )}
-          </Button>
-        </div>
-      </header>
-
-      {/* Source field, with the completion list hanging off its bottom edge. */}
-      <div className="relative">
-        <Textarea
-          ref={sourceRef}
-          id={`equation-source-${shape.id}`}
-          aria-label="LaTeX source"
-          aria-invalid={error ? true : undefined}
-          aria-describedby={messageId ? `${helpId} ${messageId}` : helpId}
-          aria-autocomplete="list"
-          aria-expanded={suggestions.length > 0}
-          aria-controls={suggestions.length ? listId : undefined}
-          aria-activedescendant={
-            suggestions.length ? `${listId}-${activeSuggestion}` : undefined
-          }
-          value={shape.props.latex}
-          onChange={(event) => {
-            updateLatex(event.target.value);
-            refreshSuggestions(event.target);
-          }}
-          onKeyDown={handleKeyDown}
-          onBlur={closeSuggestions}
-          onPaste={(event) => {
-            const pasted = event.clipboardData.getData('text/plain');
-            const unwrapped = normalizePastedLatex(pasted);
-            if (unwrapped === pasted) return;
-            const target = event.currentTarget;
-            const start = target.selectionStart ?? target.value.length;
-            const end = target.selectionEnd ?? start;
-            event.preventDefault();
-            applyEdit({
-              value:
-                target.value.slice(0, start) +
-                unwrapped +
-                target.value.slice(end),
-              caret: start + unwrapped.length,
-            });
-          }}
-          placeholder={String.raw`\frac{a}{b}`}
-          spellCheck={false}
-          rows={3}
-          className="min-h-24 w-full resize-y font-mono text-sm leading-5 text-fg"
-        />
-
-        {suggestions.length ? (
-          <ul
-            id={listId}
-            role="listbox"
-            aria-label="LaTeX commands"
-            className="absolute inset-x-0 top-full z-10 mt-1 overflow-hidden rounded-md border border-border bg-surface py-1 shadow-lg"
-          >
-            {suggestions.map((completion, index) => (
-              <li
-                key={completion.command}
-                id={`${listId}-${index}`}
-                role="option"
-                aria-selected={index === activeSuggestion}
-                // Keep the caret in the field: a blur would close the list
-                // before the click that chose from it landed.
-                onPointerDown={(event) => event.preventDefault()}
-                onPointerEnter={() => setActiveSuggestion(index)}
-                onClick={() => acceptSuggestion(completion)}
-                className={cn(
-                  'flex cursor-pointer items-baseline justify-between gap-3 px-2.5 py-1',
-                  index === activeSuggestion && 'bg-panel',
-                )}
-              >
-                <code className="truncate font-mono text-xs text-fg">
-                  {completion.command}
-                </code>
-                <span className="shrink-0 text-2xs text-fg-muted">
-                  {completion.hint}
-                </span>
-              </li>
-            ))}
-          </ul>
-        ) : null}
-      </div>
-
-      {/* Live canvas preview. */}
-      <div
-        ref={previewRef}
-        data-overflow={previewOverflowing ? true : undefined}
-        aria-busy={previewStale || undefined}
-        className="equation-fade-end equation-preview-box scrollbar-none flex min-h-14 items-center justify-center overflow-x-auto rounded-md bg-canvas/60 p-2 text-center"
+    <TooltipProvider delay={300}>
+      <Surface
+        role="region"
+        aria-labelledby={titleId}
+        className="touch-targets flex max-h-[calc(100dvh-7rem-env(safe-area-inset-top))] w-[min(23rem,calc(100vw-2rem))] flex-col gap-3.5 overflow-y-auto overscroll-contain p-3.5 shadow-e2 sm:max-h-[calc(100dvh-6.25rem-env(safe-area-inset-top))]"
       >
-        {!ready && !loadError ? (
-          <span role="status" className="text-xs text-fg-muted">
-            Preparing renderer — what you type is saved.
-          </span>
-        ) : !currentKey ? (
-          <span role="status" className="text-xs text-fg-muted">
-            Start typing to preview the equation.
-          </span>
-        ) : previewRender ? (
-          <div
-            role="img"
-            aria-label={`Preview of equation: ${currentKey}`}
-            className={cn(
-              'equation-output-preview',
-              previewStale && 'opacity-60',
-            )}
-            style={{ color: shape.props.color }}
-            dangerouslySetInnerHTML={{ __html: previewRender.svg }}
-          />
-        ) : (
-          <span role="status" className="text-xs text-fg-muted">
-            Rendering…
-          </span>
-        )}
-      </div>
+        <h2 id={titleId} className="sr-only">
+          Equation
+        </h2>
 
-      {error ? (
-        <div
-          id={errorId}
-          role="alert"
-          className="flex flex-col gap-1.5 rounded-md border border-danger-border bg-danger-bg p-2 text-xs"
-        >
+        <header className="flex items-center justify-end gap-0.5">
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Add equation below"
+                  disabled={!currentKey}
+                  onClick={addEquationBelow}
+                  className="rounded-lg text-fg-secondary hover:bg-panel hover:text-fg disabled:opacity-40"
+                />
+              }
+            >
+              <CornerDownLeft className="size-4" aria-hidden="true" />
+            </TooltipTrigger>
+            <TooltipContent side="top">
+              Add equation below (⌘/Ctrl + Enter)
+            </TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={copied ? 'LaTeX copied' : 'Copy LaTeX'}
+                  disabled={!currentKey}
+                  onClick={(event) => void copyLatex(event.altKey)}
+                  className="rounded-lg text-fg-secondary hover:bg-panel hover:text-fg disabled:opacity-40"
+                />
+              }
+            >
+              {copied ? (
+                <Check className="size-4 text-success" aria-hidden="true" />
+              ) : (
+                <Copy className="size-4" aria-hidden="true" />
+              )}
+            </TooltipTrigger>
+            <TooltipContent side="top">
+              Copy as {inline ? 'inline' : 'display'} math (Alt: body only)
+            </TooltipContent>
+          </Tooltip>
+        </header>
+
+        {/* Plain-language description → LaTeX, via the model. Only shown where
+            the server is actually configured to answer it. */}
+        {aiEnabled ? (
           <div className="flex items-start gap-1.5">
-            <AlertCircle
-              className="mt-0.5 size-3.5 shrink-0 text-danger"
-              aria-hidden="true"
-            />
-            <span className="min-w-0 text-danger">{error}</span>
-          </div>
-          {errorExcerpt ? (
-            <button
-              type="button"
-              onClick={() => errorSpan && focusInput(errorSpan)}
-              className="min-w-0 truncate rounded-xs border border-danger-border/50 bg-surface/90 px-1.5 py-1 text-left font-mono text-2xs text-danger"
-            >
-              {errorExcerpt.clippedStart ? '…' : null}
-              {errorExcerpt.before}
-              <span className="rounded-xs bg-danger/15 px-0.5 font-semibold underline decoration-wavy underline-offset-2">
-                {errorExcerpt.marked}
-              </span>
-              {errorExcerpt.after}
-              {errorExcerpt.clippedEnd ? '…' : null}
-            </button>
-          ) : null}
-        </div>
-      ) : null}
-
-      {/* A fault in the source, named while it is still being written.
-          Suppressed once MathJax has failed: the block above is then saying the
-          same thing with the renderer's own words. */}
-      {!error && problem && problemExcerpt ? (
-        <div
-          id={problemId}
-          role="status"
-          className="flex flex-col gap-1.5 rounded-md border border-warning-border bg-warning-bg p-2 text-xs"
-        >
-          <div className="flex items-start gap-1.5">
-            <AlertCircle
-              className="mt-0.5 size-3.5 shrink-0 text-warning"
-              aria-hidden="true"
-            />
-            <span className="min-w-0 text-warning">{problem.message}</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() => focusInput(problem.span)}
-              className="min-w-0 flex-1 truncate rounded-xs border border-warning-border/60 bg-surface/90 px-1.5 py-1 text-left font-mono text-2xs text-warning"
-            >
-              {problemExcerpt.clippedStart ? '…' : null}
-              {problemExcerpt.before}
-              <span className="rounded-xs bg-warning/15 px-0.5 font-semibold underline decoration-wavy underline-offset-2">
-                {problemExcerpt.marked}
-              </span>
-              {problemExcerpt.after}
-              {problemExcerpt.clippedEnd ? '…' : null}
-            </button>
-            <Button
-              variant="ghost"
-              size="sm"
-              // Keep the caret in the field: the repair is written through the
-              // field's own insertion path, which needs it focused to land on
-              // the undo stack.
-              onPointerDown={(event) => event.preventDefault()}
-              onClick={() => applyEdit(problem.fix)}
-              className="h-6 shrink-0 rounded-md px-2 text-2xs font-medium text-warning hover:bg-warning/10"
-            >
-              {problem.action}
-            </Button>
-          </div>
-        </div>
-      ) : null}
-
-      {/* Colour and size: the only two things about an equation that aren't in
-          its source, and so the only controls left in the panel. */}
-      <div
-        role="radiogroup"
-        aria-label="Equation color"
-        className="grid grid-cols-6 gap-1"
-      >
-        {swatches.map((paletteColor, index) => {
-          const active = shape.props.color === paletteColor.value;
-          return (
-            <button
-              key={paletteColor.value}
-              ref={(node) => {
-                swatchRefs.current[index] = node;
-              }}
-              type="button"
-              role="radio"
-              aria-label={paletteColor.name}
-              aria-checked={active}
-              tabIndex={active ? 0 : -1}
-              title={paletteColor.name}
-              onClick={() => applyColor(paletteColor.value)}
+            <Textarea
+              aria-label="Describe an equation to generate its LaTeX"
+              value={prompt}
+              onChange={(event) => setPrompt(event.target.value)}
               onKeyDown={(event) => {
-                const delta =
-                  event.key === 'ArrowRight' || event.key === 'ArrowDown'
-                    ? 1
-                    : event.key === 'ArrowLeft' || event.key === 'ArrowUp'
-                      ? -1
-                      : 0;
-                if (!delta) return;
+                if (event.key !== 'Enter' || event.shiftKey) return;
                 event.preventDefault();
-                moveSwatchFocus(index, delta);
+                void generateFromPrompt();
               }}
-              className="flex h-7 w-full items-center justify-center rounded-md transition-colors hover:bg-panel active:scale-[0.96]"
-            >
-              <span
-                className={cn(
-                  'size-4 rounded-full border transition-transform duration-120',
-                  active &&
-                    'scale-110 ring-2 ring-focus ring-offset-2 ring-offset-surface',
-                  !active && 'hover:scale-105',
+              placeholder="Describe an equation… “quadratic equation”"
+              rows={1}
+              disabled={generating}
+              className="min-h-9 flex-1 resize-none py-2 text-sm text-fg"
+            />
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="outline"
+                    size="icon-sm"
+                    aria-label="Generate LaTeX"
+                    disabled={!prompt.trim() || generating}
+                    onClick={() => void generateFromPrompt()}
+                    className="mt-0.5 shrink-0 rounded-lg"
+                  />
+                }
+              >
+                {generating ? (
+                  <Loader2
+                    className="size-4 animate-spin"
+                    aria-hidden="true"
+                  />
+                ) : (
+                  <Sparkles className="size-4" aria-hidden="true" />
                 )}
-                style={{
-                  backgroundColor: paletteColor.value,
-                  borderColor: swatchBorder(paletteColor.value),
-                }}
+              </TooltipTrigger>
+              <TooltipContent side="top">
+                Generate from description
+              </TooltipContent>
+            </Tooltip>
+          </div>
+        ) : null}
+
+        {/* Source field, with the completion list hanging off its bottom edge. */}
+        <div className="relative">
+          <Textarea
+            ref={sourceRef}
+            id={`equation-source-${shape.id}`}
+            aria-label="LaTeX source"
+            aria-invalid={error ? true : undefined}
+            aria-describedby={messageId}
+            aria-autocomplete="list"
+            aria-expanded={suggestions.length > 0}
+            aria-controls={suggestions.length ? listId : undefined}
+            aria-activedescendant={
+              suggestions.length ? `${listId}-${activeSuggestion}` : undefined
+            }
+            value={shape.props.latex}
+            onChange={(event) => {
+              updateLatex(event.target.value);
+              refreshSuggestions(event.target);
+            }}
+            onKeyDown={handleKeyDown}
+            onBlur={closeSuggestions}
+            onPaste={(event) => {
+              const pasted = event.clipboardData.getData('text/plain');
+              const unwrapped = normalizePastedLatex(pasted);
+              if (unwrapped === pasted) return;
+              const target = event.currentTarget;
+              const start = target.selectionStart ?? target.value.length;
+              const end = target.selectionEnd ?? start;
+              event.preventDefault();
+              applyEdit({
+                value:
+                  target.value.slice(0, start) +
+                  unwrapped +
+                  target.value.slice(end),
+                caret: start + unwrapped.length,
+              });
+            }}
+            placeholder={String.raw`\frac{a}{b}`}
+            spellCheck={false}
+            rows={3}
+            className="min-h-24 w-full resize-y font-mono text-sm leading-5 text-fg"
+          />
+
+          {suggestions.length ? (
+            <ul
+              id={listId}
+              role="listbox"
+              aria-label="LaTeX commands"
+              className="absolute inset-x-0 top-full z-10 mt-1 overflow-hidden rounded-xl border border-border bg-surface py-1 shadow-e3"
+            >
+              {suggestions.map((completion, index) => (
+                <li
+                  key={completion.command}
+                  id={`${listId}-${index}`}
+                  role="option"
+                  aria-selected={index === activeSuggestion}
+                  // Keep the caret in the field: a blur would close the list
+                  // before the click that chose from it landed.
+                  onPointerDown={(event) => event.preventDefault()}
+                  onPointerEnter={() => setActiveSuggestion(index)}
+                  onClick={() => acceptSuggestion(completion)}
+                  className={cn(
+                    'flex cursor-pointer items-baseline justify-between gap-3 px-2.5 py-1.5',
+                    index === activeSuggestion && 'bg-panel',
+                  )}
+                >
+                  <code className="truncate font-mono text-xs text-fg">
+                    {completion.command}
+                  </code>
+                  <span className="shrink-0 text-2xs text-fg-muted">
+                    {completion.hint}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+
+        {/* Live canvas preview. */}
+        <div
+          ref={previewRef}
+          data-overflow={previewOverflowing ? true : undefined}
+          aria-busy={previewStale || undefined}
+          className="equation-fade-end equation-preview-box scrollbar-none flex min-h-16 items-center justify-center overflow-x-auto rounded-xl bg-canvas/60 p-3 text-center"
+        >
+          {!ready && !loadError ? (
+            <span role="status" className="text-xs text-fg-muted">
+              Preparing renderer — what you type is saved.
+            </span>
+          ) : !currentKey ? (
+            <span role="status" className="text-xs text-fg-muted">
+              Start typing to preview the equation.
+            </span>
+          ) : previewRender ? (
+            <div
+              role="img"
+              aria-label={`Preview of equation: ${currentKey}`}
+              className={cn(
+                'equation-output-preview',
+                previewStale && 'opacity-60',
+              )}
+              style={{ color: shape.props.color }}
+              dangerouslySetInnerHTML={{ __html: previewRender.svg }}
+            />
+          ) : (
+            <span role="status" className="text-xs text-fg-muted">
+              Rendering…
+            </span>
+          )}
+        </div>
+
+        {error ? (
+          <div
+            id={errorId}
+            role="alert"
+            className="flex flex-col gap-1.5 rounded-xl border border-danger-border bg-danger-bg p-2.5 text-xs"
+          >
+            <div className="flex items-start gap-1.5">
+              <AlertCircle
+                className="mt-0.5 size-3.5 shrink-0 text-danger"
+                aria-hidden="true"
               />
-            </button>
-          );
-        })}
-      </div>
+              <span className="min-w-0 text-danger">{error}</span>
+            </div>
+            {errorExcerpt ? (
+              <button
+                type="button"
+                onClick={() => errorSpan && focusInput(errorSpan)}
+                className="min-w-0 truncate rounded-md border border-danger-border/50 bg-surface/90 px-1.5 py-1 text-left font-mono text-2xs text-danger"
+              >
+                {errorExcerpt.clippedStart ? '…' : null}
+                {errorExcerpt.before}
+                <span className="rounded-xs bg-danger/15 px-0.5 font-semibold underline decoration-wavy underline-offset-2">
+                  {errorExcerpt.marked}
+                </span>
+                {errorExcerpt.after}
+                {errorExcerpt.clippedEnd ? '…' : null}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
 
-      <div
-        role="group"
-        aria-label="Equation size"
-        className="grid grid-cols-4 gap-1 rounded-md border border-border bg-panel p-1"
-      >
-        {FONT_SIZES.map((size) => {
-          const active = Math.round(shape.props.fontSize) === size;
-          return (
-            <button
-              key={size}
-              type="button"
-              aria-pressed={active}
-              aria-label={`Size ${size}`}
-              onClick={() => applyFontSize(size)}
-              className={cn(
-                'flex h-6 items-center justify-center rounded-sm text-xs font-medium tabular-nums transition-all duration-150',
-                active
-                  ? 'bg-surface font-semibold text-fg shadow-xs'
-                  : 'text-fg-secondary hover:bg-surface/50 hover:text-fg',
-              )}
-            >
-              {size}
-            </button>
-          );
-        })}
-      </div>
+        {/* A fault in the source, named while it is still being written.
+            Suppressed once MathJax has failed: the block above is then saying
+            the same thing with the renderer's own words. */}
+        {!error && problem && problemExcerpt ? (
+          <div
+            id={problemId}
+            role="status"
+            className="flex flex-col gap-1.5 rounded-xl border border-warning-border bg-warning-bg p-2.5 text-xs"
+          >
+            <div className="flex items-start gap-1.5">
+              <AlertCircle
+                className="mt-0.5 size-3.5 shrink-0 text-warning"
+                aria-hidden="true"
+              />
+              <span className="min-w-0 text-warning">{problem.message}</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => focusInput(problem.span)}
+                className="min-w-0 flex-1 truncate rounded-md border border-warning-border/60 bg-surface/90 px-1.5 py-1 text-left font-mono text-2xs text-warning"
+              >
+                {problemExcerpt.clippedStart ? '…' : null}
+                {problemExcerpt.before}
+                <span className="rounded-xs bg-warning/15 px-0.5 font-semibold underline decoration-wavy underline-offset-2">
+                  {problemExcerpt.marked}
+                </span>
+                {problemExcerpt.after}
+                {problemExcerpt.clippedEnd ? '…' : null}
+              </button>
+              <Button
+                variant="ghost"
+                size="sm"
+                // Keep the caret in the field: the repair is written through
+                // the field's own insertion path, which needs it focused to
+                // land on the undo stack.
+                onPointerDown={(event) => event.preventDefault()}
+                onClick={() => applyEdit(problem.fix)}
+                className="h-6 shrink-0 rounded-md px-2 text-2xs font-medium text-warning hover:bg-warning/10"
+              >
+                {problem.action}
+              </Button>
+            </div>
+          </div>
+        ) : null}
 
-      {/* Display or text style. Not a property of the source — the same LaTeX
-          is valid in both — so it belongs beside colour and size rather than
-          in the field. */}
-      <div
-        role="group"
-        aria-label="Equation style"
-        className="grid grid-cols-2 gap-1 rounded-md border border-border bg-panel p-1"
-      >
-        {STYLES.map((style) => {
-          const active = style.inline === inline;
-          return (
-            <button
-              key={style.label}
-              type="button"
-              aria-pressed={active}
-              title={style.hint}
-              onClick={() => applyInline(style.inline)}
-              className={cn(
-                'flex h-6 items-center justify-center rounded-sm text-xs font-medium transition-all duration-150',
-                active
-                  ? 'bg-surface font-semibold text-fg shadow-xs'
-                  : 'text-fg-secondary hover:bg-surface/50 hover:text-fg',
-              )}
-            >
-              {style.label}
-            </button>
-          );
-        })}
-      </div>
+        {/* Colour, size and style: the only things about an equation that
+            aren't in its source, and so the only controls left in the panel. */}
+        <div
+          role="radiogroup"
+          aria-label="Equation color"
+          className="grid grid-cols-4 gap-1.5"
+        >
+          {swatches.map((paletteColor, index) => {
+            const active = shape.props.color === paletteColor.value;
+            return (
+              <Tooltip key={paletteColor.value}>
+                <TooltipTrigger
+                  render={
+                    <button
+                      ref={(node) => {
+                        swatchRefs.current[index] = node;
+                      }}
+                      type="button"
+                      role="radio"
+                      aria-label={paletteColor.name}
+                      aria-checked={active}
+                      tabIndex={active ? 0 : -1}
+                      onClick={() => applyColor(paletteColor.value)}
+                      onKeyDown={(event) => {
+                        const delta =
+                          event.key === 'ArrowRight' ||
+                          event.key === 'ArrowDown'
+                            ? 1
+                            : event.key === 'ArrowLeft' ||
+                                event.key === 'ArrowUp'
+                              ? -1
+                              : 0;
+                        if (!delta) return;
+                        event.preventDefault();
+                        moveSwatchFocus(index, delta);
+                      }}
+                      className="flex h-8 w-full items-center justify-center rounded-md transition-colors duration-150 ease-out hover:bg-panel active:scale-[0.98] motion-reduce:transition-none"
+                    />
+                  }
+                >
+                  <span
+                    className={cn(
+                      'size-5 rounded-full border',
+                      active &&
+                        'ring-2 ring-ring ring-offset-2 ring-offset-surface',
+                    )}
+                    style={{
+                      backgroundColor: paletteColor.value,
+                      borderColor: swatchBorder(paletteColor.value),
+                    }}
+                  />
+                </TooltipTrigger>
+                <TooltipContent side="top">{paletteColor.name}</TooltipContent>
+              </Tooltip>
+            );
+          })}
+        </div>
 
-      <div
-        id={helpId}
-        className="flex flex-wrap items-center justify-center gap-x-2.5 gap-y-1 text-2xs text-fg-muted"
-      >
-        <span className="inline-flex items-center gap-1">
-          <Kbd className="font-mono text-2xs">\</Kbd>
-          <span>commands</span>
-        </span>
-        <span aria-hidden="true" className="text-border-strong">
-          ·
-        </span>
-        <span className="inline-flex items-center gap-1">
-          <Kbd className="text-2xs">Tab</Kbd>
-          <span>next slot</span>
-        </span>
-        <span aria-hidden="true" className="text-border-strong">
-          ·
-        </span>
-        <span className="inline-flex items-center gap-1">
-          <Kbd className="text-2xs">Esc</Kbd>
-          <span>canvas</span>
-        </span>
-      </div>
-    </Surface>
+        <ToggleGroup
+          className="w-full"
+          spacing={1.5}
+          aria-label="Equation size"
+          value={[String(Math.round(shape.props.fontSize))]}
+          onValueChange={(values) => {
+            const next = values[0];
+            if (next) applyFontSize(Number(next));
+          }}
+        >
+          {FONT_SIZES.map((size) => (
+            <Tooltip key={size}>
+              <TooltipTrigger
+                render={
+                  <ToggleGroupItem
+                    className="grow basis-0"
+                    value={String(size)}
+                    aria-label={`Size ${size}`}
+                  />
+                }
+              >
+                {size}
+              </TooltipTrigger>
+              <TooltipContent side="top">Size {size}</TooltipContent>
+            </Tooltip>
+          ))}
+        </ToggleGroup>
+
+        {/* Display or text style. Not a property of the source — the same
+            LaTeX is valid in both — so it belongs beside colour and size
+            rather than in the field. */}
+        <ToggleGroup
+          className="w-full"
+          spacing={1.5}
+          aria-label="Equation style"
+          value={[inline ? 'inline' : 'display']}
+          onValueChange={(values) => {
+            const next = values[0];
+            if (next) applyInline(next === 'inline');
+          }}
+        >
+          {STYLES.map((style) => (
+            <Tooltip key={style.label}>
+              <TooltipTrigger
+                render={
+                  <ToggleGroupItem
+                    className="grow basis-0"
+                    value={style.inline ? 'inline' : 'display'}
+                    aria-label={style.label}
+                  />
+                }
+              >
+                {style.label}
+              </TooltipTrigger>
+              <TooltipContent side="top">{style.hint}</TooltipContent>
+            </Tooltip>
+          ))}
+        </ToggleGroup>
+      </Surface>
+    </TooltipProvider>
   );
 }
 

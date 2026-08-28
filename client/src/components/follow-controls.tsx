@@ -69,7 +69,6 @@ export function FollowControls({
                 tabIndex={toolbarItem ? -1 : undefined}
                 aria-label="Bring everyone to my view"
                 onClick={summonAll}
-                className={toolbarItem ? 'bg-surface shadow-e1' : undefined}
               />
             }
           >
@@ -108,7 +107,6 @@ export function FollowControls({
                 className={cn(
                   'h-8 min-w-8 border border-transparent',
                   showLabel ? 'px-2.5' : 'w-8 px-0',
-                  toolbarItem && 'bg-surface shadow-e1',
                   following && 'border-border bg-panel text-fg',
                 )}
               />

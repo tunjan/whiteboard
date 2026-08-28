@@ -1,6 +1,5 @@
 import { useRef, useState, type DragEvent, type ReactNode } from 'react';
 import {
-  AlertTriangle,
   Download,
   File,
   FileArchive,
@@ -18,6 +17,7 @@ import {
   INLINE_DOCUMENT_EXTS,
   type BoardDocumentMeta,
 } from '@whiteboard/shared';
+import { markDocumentOpened } from '@/board/document-notifications';
 import {
   addFilesToRepository,
   cancelUpload,
@@ -27,7 +27,7 @@ import {
 import { removeBoardDocument } from '@/canvas/use-document-store';
 import { useDocumentsStore } from '@/canvas/use-documents-store';
 import type { Identity } from '@/collab/identity';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import {
   AlertDialog,
   AlertDialogContent,
@@ -39,11 +39,15 @@ import {
 import {
   Popover,
   PopoverContent,
+  PopoverHeader,
+  PopoverTitle,
   PopoverTrigger,
 } from '@/components/ui/popover';
+import { Progress } from '@/components/ui/progress';
 import {
   Tooltip,
   TooltipContent,
+  TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { CHROME_CONTROLS } from '@/components/ui/surface';
@@ -60,6 +64,13 @@ export function formatBytes(bytes: number): string {
   if (kb < 1024) return `${Math.round(kb)} KB`;
   const mb = kb / 1024;
   return `${mb < 10 ? mb.toFixed(1) : Math.round(mb)} MB`;
+}
+
+/** Accessible name for the trigger — the dot's meaning, spelled out. */
+function filesLabel(fileCount: number, unreadCount: number): string {
+  const count = fileCount ? ` (${fileCount})` : '';
+  const unread = unreadCount ? `, ${unreadCount} unread` : '';
+  return `Files${count}${unread}`;
 }
 
 const EXT_ICON: Record<string, typeof File> = {
@@ -85,6 +96,27 @@ const EXT_ICON: Record<string, typeof File> = {
 // Sub-components
 // ---------------------------------------------------------------------------
 
+/**
+ * The unread mark: a filled disc notched out of whatever it sits on, so it
+ * reads as a badge pinned to the icon rather than as part of it.
+ *
+ * `ring-*` is the cutaway colour — it has to be whatever actually paints
+ * behind the dot (the chrome's `surface`, or the row's `panel` on hover), the
+ * same trick the avatar stack uses for overlapping discs.
+ */
+export function UnreadDot({ className }: { className?: string }) {
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        'pointer-events-none absolute size-2 rounded-full bg-danger ring-2',
+        'motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-50 motion-safe:duration-200 motion-safe:ease-[var(--ease-out-expo)]',
+        className,
+      )}
+    />
+  );
+}
+
 /** Ghost icon-button with tooltip — used for row-level actions. */
 function RowAction({
   label,
@@ -108,11 +140,8 @@ function RowAction({
             aria-label={label}
             onClick={onClick}
             className={cn(
-              // 32×32 ghost icon — colour on hover only
-              'size-8 rounded-md text-fg-muted transition-[background-color,color] duration-[80ms] ease-[cubic-bezier(0.2,0,0,1)]',
-              danger
-                ? 'hover:bg-danger-bg hover:text-danger'
-                : 'hover:bg-panel hover:text-fg',
+              'text-fg-muted',
+              danger && 'hover:bg-danger-bg hover:text-danger',
             )}
           />
         }
@@ -125,233 +154,135 @@ function RowAction({
 }
 
 // ---------------------------------------------------------------------------
-// Completed document row
+// Rows
 // ---------------------------------------------------------------------------
 
 function DocumentRow({
   meta,
+  unread,
   onDelete,
 }: {
   meta: BoardDocumentMeta;
+  unread: boolean;
   onDelete: () => void;
 }) {
   const href = documentUrl(meta);
   const opensInTab = INLINE_DOCUMENT_EXTS.has(meta.ext);
+  const ExtIcon = EXT_ICON[meta.ext] ?? File;
 
   const download = () => {
+    markDocumentOpened(meta.id);
     const a = document.createElement('a');
     a.href = href;
     a.download = meta.name;
     a.click();
   };
 
-  const ExtIcon = EXT_ICON[meta.ext] ?? File;
-
-  const dateLabel = new Date(meta.createdAt).toLocaleDateString(undefined, {
-    month: 'short',
-    day: 'numeric',
-  });
-
   return (
     <div
       className={cn(
-        // e0 in-flow card; hover changes surface only, no lift
-        'group/row flex items-center gap-2.5 rounded-lg px-3 py-2',
-        'transition-[background-color,border-color] duration-[80ms] ease-[cubic-bezier(0.2,0,0,1)]',
-        'hover:bg-panel',
+        'group/row flex items-center gap-2.5 rounded-md px-2 py-1.5',
+        'transition-colors duration-instant ease-out-quart',
+        'hover:bg-[var(--chrome-hover,var(--color-panel))]',
       )}
     >
-      {/* File-type icon */}
-      <ExtIcon
-        size={16}
-        strokeWidth={1.5}
-        className="shrink-0 text-fg-muted transition-colors duration-[80ms] group-hover/row:text-fg-secondary"
-      />
+      {/* File-type icon, with the unread mark pinned to its top-right */}
+      <span className="relative shrink-0">
+        <ExtIcon className="size-4 text-fg-muted" strokeWidth={1.5} />
+        {unread ? (
+          <UnreadDot className="-top-1 -right-1 ring-surface group-hover/row:ring-panel" />
+        ) : null}
+      </span>
 
-      {/* Name + meta — the link covers both lines */}
+      {/* The link covers both lines: name, then who brought it and how big */}
       <a
         href={href}
         target={opensInTab ? '_blank' : undefined}
         rel="noreferrer"
         download={opensInTab ? undefined : meta.name}
         className="min-w-0 flex-1 rounded-sm"
-        aria-label={`Open ${meta.name}`}
+        aria-label={`Open ${meta.name}${unread ? ' (unread)' : ''}`}
+        onClick={() => markDocumentOpened(meta.id)}
       >
-        {/* Primary label — sentence-case filename */}
-        <span className="block truncate text-sm font-medium text-fg leading-[20px]">
+        <span
+          className={cn(
+            'block truncate text-sm text-fg',
+            unread ? 'font-semibold' : 'font-medium',
+          )}
+        >
           {meta.name}
         </span>
-        {/* Secondary meta — size · uploader · date in tabular mono */}
-        <span className="block truncate text-xs leading-[16px] text-fg-muted">
+        <span className="block truncate text-xs text-fg-muted">
+          {meta.uploadedBy ? `${meta.uploadedBy} · ` : null}
           <span className="font-mono tabular-nums">
             {formatBytes(meta.size)}
           </span>
-          {meta.uploadedBy ? <span className="mx-1">·</span> : null}
-          {meta.uploadedBy ? <span>{meta.uploadedBy}</span> : null}
-          <span className="mx-1">·</span>
-          <span className="font-mono tabular-nums">{dateLabel}</span>
         </span>
       </a>
 
-      {/* Row actions — revealed on hover / always visible on focus inside */}
+      {/* Row actions — revealed on hover, always visible on touch and on focus */}
       <div
         className={cn(
-          'flex shrink-0 items-center gap-0.5',
-          // Hide for mouse users until the row is hovered; always show on touch
-          'opacity-0 transition-opacity duration-[80ms] group-hover/row:opacity-100 group-focus-within/row:opacity-100',
-          'touch-reveal',
+          'touch-reveal flex shrink-0 items-center',
+          'opacity-0 transition-opacity duration-instant group-hover/row:opacity-100 group-focus-within/row:opacity-100',
         )}
       >
         <RowAction label="Download" onClick={download}>
-          <Download size={14} strokeWidth={1.5} />
+          <Download className="size-3.5" />
         </RowAction>
         <RowAction label="Delete" onClick={onDelete} danger>
-          <Trash2 size={14} strokeWidth={1.5} />
+          <Trash2 className="size-3.5" />
         </RowAction>
       </div>
     </div>
   );
 }
 
-// ---------------------------------------------------------------------------
-// In-progress upload row
-// ---------------------------------------------------------------------------
-
 function UploadRow({
   uploadId,
   name,
-  size,
   progress,
   error,
   onRetry,
 }: {
   uploadId: string;
   name: string;
-  size: number;
   progress: number;
   error: string | null;
   onRetry: () => void;
 }) {
-  const pct = Math.round(progress * 100);
-  const uploaded = formatBytes(Math.round(size * progress));
-  const total = formatBytes(size);
-
   return (
-    <div
-      className={cn(
-        // Slightly sunken card — panel bg + border so it reads as an in-progress chip
-        'flex items-start gap-2.5 rounded-lg border px-3 py-2.5',
-        error ? 'border-danger-border bg-danger-bg' : 'border-border bg-panel',
-      )}
-    >
-      {/* Status icon */}
-      <div className="mt-0.5 shrink-0">
-        {error ? (
-          <AlertTriangle
-            size={14}
-            strokeWidth={1.75}
-            className="text-danger"
-            aria-hidden
-          />
-        ) : (
-          <Upload
-            size={14}
-            strokeWidth={1.5}
-            className="text-fg-muted"
-            aria-hidden
-          />
-        )}
-      </div>
+    <div className="flex items-center gap-2.5 rounded-md px-2 py-1.5">
+      <Upload className="size-4 shrink-0 text-fg-muted" strokeWidth={1.5} />
 
-      {/* Content */}
       <div className="min-w-0 flex-1">
-        {/* Filename */}
-        <p className="truncate text-xs font-medium leading-[16px] text-fg">
-          {name}
-        </p>
-
+        <p className="truncate text-sm font-medium text-fg">{name}</p>
         {error ? (
-          /* Error message */
-          <p className="mt-0.5 truncate text-xs leading-[16px] text-danger">
-            {error}
-          </p>
+          <p className="truncate text-xs text-danger">{error}</p>
         ) : (
-          /* Progress feedback */
-          <>
-            <p className="mt-0.5 font-mono text-xs tabular-nums leading-[16px] text-fg-muted">
-              {uploaded} of {total}
-            </p>
-            {/* Progress bar — inset radius = 0 (full pill) */}
-            <div
-              className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-panel"
-              role="progressbar"
-              aria-valuenow={pct}
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-label={`Uploading ${name}: ${pct}%`}
-            >
-              <div
-                className="h-full rounded-full bg-primary transition-[width] duration-[160ms] ease-[cubic-bezier(0.2,0,0,1)]"
-                style={{ width: `${pct}%` }}
-              />
-            </div>
-          </>
+          // The bar is the progress readout — a percentage beside it says the
+          // same thing twice.
+          <Progress
+            className="mt-1.5"
+            value={Math.round(progress * 100)}
+            aria-label={`Uploading ${name}`}
+          />
         )}
       </div>
 
-      {/* Actions */}
-      <div className="flex shrink-0 items-center gap-0.5">
+      <div className="flex shrink-0 items-center">
         {error ? (
-          <RowAction label="Retry upload" onClick={onRetry}>
-            <RefreshCw size={14} strokeWidth={1.5} />
+          <RowAction label="Retry" onClick={onRetry}>
+            <RefreshCw className="size-3.5" />
           </RowAction>
         ) : null}
         <RowAction
-          label={error ? 'Dismiss' : 'Cancel upload'}
+          label={error ? 'Dismiss' : 'Cancel'}
           onClick={() => cancelUpload(uploadId)}
         >
-          <X size={14} strokeWidth={1.5} />
+          <X className="size-3.5" />
         </RowAction>
       </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Empty state
-// ---------------------------------------------------------------------------
-
-function EmptyState() {
-  return (
-    <div className="flex flex-col items-center py-8 text-center">
-      <Folder
-        size={20}
-        strokeWidth={1.5}
-        className="mb-2 text-fg-muted"
-        aria-hidden
-      />
-      <p className="text-sm font-medium text-fg-secondary">No documents yet</p>
-      <p className="mt-1 max-w-[220px] text-xs leading-[18px] text-fg-muted">
-        Add a PDF, worksheet, or image to share it with everyone on this board.
-      </p>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Drop-zone overlay (shown while dragging a file over the popover)
-// ---------------------------------------------------------------------------
-
-function DropZoneOverlay() {
-  return (
-    <div className="flex flex-col items-center justify-center gap-2 px-4 py-10">
-      <Upload
-        size={20}
-        strokeWidth={1.5}
-        className="text-fg-secondary"
-        aria-hidden
-      />
-      <p className="text-sm font-medium text-fg-secondary">Drop to add</p>
     </div>
   );
 }
@@ -361,8 +292,11 @@ function DropZoneOverlay() {
 // ---------------------------------------------------------------------------
 
 /**
- * The board's shared document repository — a Files button in the chrome
- * opening a popover that everyone on the board can add to and remove from.
+ * The board's shared file repository — a Files button in the chrome opening a
+ * popover everyone on the board can add to and remove from.
+ *
+ * One flat surface: header, list, one way in. The list is newest-first, so a
+ * row carries who added it and how big it is and leaves the date to the order.
  */
 export function DocumentsPanel({
   identity,
@@ -375,6 +309,7 @@ export function DocumentsPanel({
 }) {
   const documents = useDocumentsStore((s) => s.documents);
   const uploads = useDocumentsStore((s) => s.uploads);
+  const unread = useDocumentsStore((s) => s.unread);
   const open = useDocumentsStore((s) => s.panelOpen);
   const setOpen = useDocumentsStore((s) => s.setPanelOpen);
 
@@ -389,18 +324,12 @@ export function DocumentsPanel({
     (a, b) => b.createdAt - a.createdAt,
   );
   const uploadList = Object.values(uploads);
-  const totalBytes = list.reduce((sum, meta) => sum + meta.size, 0);
   const fileCount = list.length;
+  const unreadCount = list.filter((meta) => unread.has(meta.id)).length;
+  const triggerLabel = filesLabel(fileCount, unreadCount);
 
   const add = (files: File[]) => {
     if (files.length) addFilesToRepository(files, uploaderName);
-  };
-
-  const onDrop = (e: DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragOver(false);
-    add(Array.from(e.dataTransfer.files));
   };
 
   const confirmDelete = () => {
@@ -410,40 +339,53 @@ export function DocumentsPanel({
 
   return (
     <>
-      {/* ------------------------------------------------------------------ */}
-      {/* Trigger + popover                                                    */}
-      {/* ------------------------------------------------------------------ */}
       <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger
-          render={
-            <Button
-              type="button"
-              variant="ghost"
-              size={showLabel ? 'sm' : 'icon-sm'}
-              data-toolbar-item={toolbarItem || undefined}
-              tabIndex={toolbarItem ? -1 : undefined}
-              aria-label={`Documents${fileCount ? ` (${fileCount})` : ''}`}
-              className={toolbarItem ? 'bg-surface' : undefined}
-            />
-          }
-        >
-          <Folder />
-          {showLabel ? <span>Documents</span> : null}
-        </PopoverTrigger>
+        <TooltipProvider delay={300}>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <PopoverTrigger
+                  data-toolbar-item={toolbarItem || undefined}
+                  tabIndex={toolbarItem ? -1 : undefined}
+                  aria-label={triggerLabel}
+                  className={cn(
+                    buttonVariants({
+                      variant: 'ghost',
+                      size: showLabel ? 'sm' : 'icon-sm',
+                    }),
+                    toolbarItem && 'bg-surface',
+                  )}
+                />
+              }
+            >
+              {/*
+               * The icon is wrapped so the dot can hang off *it* rather than
+               * off the button — in the labelled layout the button's own
+               * top-right corner is a whole label away from the icon. Wrapping
+               * costs the icon its automatic size, so it comes back here.
+               */}
+              <span className="relative flex shrink-0 items-center">
+                <Folder
+                  aria-hidden="true"
+                  className={showLabel ? 'size-3.5' : 'size-4'}
+                />
+                {unreadCount > 0 ? (
+                  <UnreadDot className="-top-1 -right-1 ring-surface group-hover/button:ring-[var(--chrome-hover,var(--color-panel))]" />
+                ) : null}
+              </span>
+              {showLabel ? <span>Files</span> : null}
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{triggerLabel}</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
 
-        {/*
-         * Popover: w-80 (320 px), rounded-2xl (16 px) per §7 card radius.
-         * p-0 so the internal layout can control its own padding precisely.
-         */}
         <PopoverContent
           align="end"
           side="bottom"
           sideOffset={10}
           className={cn(
             CHROME_CONTROLS,
-            'w-80 gap-0 overflow-hidden rounded-2xl border border-border bg-surface p-0',
-            'shadow-md',
-            // Enter: 160 ms out-quart zoom + slide; exit: 120 ms
+            'relative w-[min(20rem,calc(100vw-2rem))] gap-4 p-4',
             'data-[side=bottom]:origin-top-right',
           )}
           onDragOver={(e: DragEvent) => {
@@ -452,118 +394,98 @@ export function DocumentsPanel({
               setDragOver(true);
             }
           }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={onDrop}
+          onDragLeave={(e: DragEvent) => {
+            // Crossing between rows fires a leave on the way out of each child;
+            // only a pointer that has actually left the panel counts.
+            if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+              setDragOver(false);
+            }
+          }}
+          onDrop={(e: DragEvent) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setDragOver(false);
+            add(Array.from(e.dataTransfer.files));
+          }}
         >
-          {/* -------- Header strip -------- */}
-          {/*
-           * compound-card toolbar strip: bg-panel (panel-like), border-b,
-           * padding-x = 20 (same as body's px-5).
-           * Layout: title-group left, "Add files" action right.
-           */}
-          <div className="flex items-center gap-3 border-b border-border bg-panel px-4 py-2.5">
-            {/* Left: eyebrow + inline count — min-w-0 so it can compress */}
-            <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
-              {/* Eyebrow — mono, uppercase, tracked, muted */}
-              <span className="shrink-0 font-mono text-2xs font-medium uppercase tracking-[0.08em] text-fg-muted">
-                Files
+          <PopoverHeader className="flex-row items-center justify-between gap-3">
+            <PopoverTitle>Files</PopoverTitle>
+            {fileCount > 0 ? (
+              <span className="shrink-0 text-xs text-fg-muted">
+                <span className="font-mono tabular-nums">{fileCount}</span>{' '}
+                {fileCount === 1 ? 'file' : 'files'}
               </span>
-              {/* Count + size — inline, truncated, same mono weight */}
-              {fileCount > 0 ? (
-                <span className="truncate font-mono text-2xs tabular-nums text-fg-muted">
-                  · {fileCount} {fileCount === 1 ? 'file' : 'files'} ·{' '}
-                  {formatBytes(totalBytes)}
-                </span>
-              ) : null}
+            ) : null}
+          </PopoverHeader>
+
+          {fileCount === 0 && uploadList.length === 0 ? (
+            <div className="flex flex-col items-center gap-2 py-6">
+              <Folder
+                className="size-5 text-fg-subtle"
+                strokeWidth={1.5}
+                aria-hidden
+              />
+              <p className="text-sm text-fg-muted">Drop files here</p>
             </div>
+          ) : (
+            <div className="scrollbar-none -mx-2 flex max-h-72 flex-col overflow-y-auto px-2">
+              {/* Uploads in flight sit above the settled list */}
+              {uploadList.map((upload) => (
+                <UploadRow
+                  key={upload.id}
+                  uploadId={upload.id}
+                  name={upload.name}
+                  progress={upload.progress}
+                  error={upload.error}
+                  onRetry={() => retryUpload(upload.id, uploaderName)}
+                />
+              ))}
+              {list.map((meta) => (
+                <DocumentRow
+                  key={meta.id}
+                  meta={meta}
+                  unread={unread.has(meta.id)}
+                  onDelete={() => setPendingDelete(meta)}
+                />
+              ))}
+            </div>
+          )}
 
-            {/* Right: "Add files" — shrink-0 so it never collapses */}
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => inputRef.current?.click()}
-              className={cn(
-                'h-7 shrink-0 gap-1.5 rounded-md border-border bg-surface px-2.5 text-xs font-medium text-fg',
-                'shadow-none hover:border-strong hover:bg-panel',
-                'transition-[background-color,border-color] duration-[80ms] ease-[cubic-bezier(0.2,0,0,1)]',
-              )}
-            >
-              <Upload size={12} strokeWidth={1.5} aria-hidden />
-              Add files
-            </Button>
-            <input
-              ref={inputRef}
-              type="file"
-              multiple
-              className="hidden"
-              onChange={(e) => {
-                add(Array.from(e.target.files ?? []));
-                e.target.value = '';
-              }}
-            />
-          </div>
-
-          {/* -------- Scrollable body -------- */}
-          {/*
-           * Inner padding: px-3 py-2 so content aligns to a 12 px inset.
-           * r_inner = 16 (card) − 4 (p-1 approx) = 12  → child rows get rounded-lg
-           * Max-height capped so the popover never runs off-screen.
-           */}
-          <div
-            className={cn(
-              'flex max-h-72 flex-col gap-1 overflow-y-auto px-2 py-2',
-              // Drag-over ring — inset so it doesn't push layout
-              dragOver && 'ring-2 ring-inset ring-primary rounded-b-2xl',
-            )}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-9 w-full"
+            onClick={() => inputRef.current?.click()}
           >
-            {dragOver ? (
-              <DropZoneOverlay />
-            ) : (
-              <>
-                {/* Active uploads — rendered above completed files */}
-                {uploadList.map((upload) => (
-                  <UploadRow
-                    key={upload.id}
-                    uploadId={upload.id}
-                    name={upload.name}
-                    size={upload.size}
-                    progress={upload.progress}
-                    error={upload.error}
-                    onRetry={() => retryUpload(upload.id, uploaderName)}
-                  />
-                ))}
+            <Upload aria-hidden="true" />
+            Add files
+          </Button>
+          <input
+            ref={inputRef}
+            type="file"
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              add(Array.from(e.target.files ?? []));
+              e.target.value = '';
+            }}
+          />
 
-                {/* Completed files list */}
-                {list.length === 0 && uploadList.length === 0 ? (
-                  <EmptyState />
-                ) : (
-                  list.map((meta) => (
-                    <DocumentRow
-                      key={meta.id}
-                      meta={meta}
-                      onDelete={() => setPendingDelete(meta)}
-                    />
-                  ))
-                )}
-              </>
-            )}
-          </div>
-
-          {/* -------- Footer strip (shown only when there are files) -------- */}
-          {fileCount > 0 ? (
-            <div className="flex items-center justify-between border-t border-border bg-panel px-5 py-2.5">
-              <span className="text-xs leading-4 text-fg-muted">
-                Shared with everyone on the board
-              </span>
+          {/* Drag feedback covers the panel rather than replacing its contents,
+              so the list doesn't vanish out from under the cursor. */}
+          {dragOver ? (
+            <div
+              aria-hidden
+              className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 rounded-overlay border-2 border-dashed border-border-strong bg-surface/95"
+            >
+              <Upload className="size-5 text-fg-secondary" strokeWidth={1.5} />
+              <p className="text-sm text-fg-secondary">Drop to add</p>
             </div>
           ) : null}
         </PopoverContent>
       </Popover>
 
-      {/* ------------------------------------------------------------------ */}
-      {/* Delete confirmation dialog                                           */}
-      {/* ------------------------------------------------------------------ */}
       <AlertDialog
         open={pendingDelete !== null}
         onOpenChange={(isOpen) => {
@@ -572,12 +494,12 @@ export function DocumentsPanel({
       >
         <AlertDialogContent size="sm">
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete document?</AlertDialogTitle>
+            <AlertDialogTitle>Delete file?</AlertDialogTitle>
             <AlertDialogDescription>
               <strong className="font-medium text-fg">
-                "{pendingDelete?.name}"
+                {pendingDelete?.name}
               </strong>{' '}
-              will be removed for everyone on this board. This can't be undone.
+              will be removed for everyone. This can&apos;t be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -591,7 +513,7 @@ export function DocumentsPanel({
               Cancel
             </Button>
             <Button variant="destructive" onClick={confirmDelete}>
-              Delete document
+              Delete
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>

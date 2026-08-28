@@ -287,12 +287,11 @@ function SessionUtilities({
  * Right — session controls: connection, collaboration tools, share
  * Beside the right panel — participant avatars, floating free of any panel
  *
- * Both docked panels use the `docked` Surface mode (§2.2 panel surface), but
- * override its fill to `bg-surface` so they match the canvas rather than
- * stepping above it. Because they're flush to the screen edge they carry no
+ * Neither panel carries a fill: controls sit directly on the canvas rather
+ * than on a card. Because they're flush to the screen edge they carry no
  * shadow and no border either — the chrome reads as part of the window frame
  * rather than as a card hovering over it. Their ghost controls hover to `panel`
- * instead, since the hover fill has to stay one step off the surface it sits on.
+ * instead, since the hover fill has to stay one step off the canvas they sit on.
  *
  * The presence cluster is deliberately *not* panelled: who is on the board is
  * live state rather than a control, so the discs sit directly on the canvas.
@@ -376,7 +375,7 @@ export function BoardChrome({
         aria-label="Board navigation"
         mode="docked"
         chrome
-        className="absolute top-0 left-0 flex max-w-[calc(100vw-0.5rem)] items-center gap-1 rounded-none rounded-br-xl border-0 bg-surface p-1.5 pt-[calc(0.5rem+env(safe-area-inset-top))] pl-[calc(0.5rem+env(safe-area-inset-left))] [--chrome-hover:var(--color-panel)] md:max-w-[50vw]"
+        className="absolute top-0 left-0 flex max-w-[calc(100vw-0.5rem)] items-center gap-1 rounded-none rounded-br-xl border-0 bg-transparent p-1.5 pt-[calc(0.5rem+env(safe-area-inset-top))] pl-[calc(0.5rem+env(safe-area-inset-left))] [--chrome-hover:var(--color-panel)] md:max-w-[50vw]"
       >
         {/* Back — tutor-only: students join via shared link and aren't authenticated */}
         {identity?.isTutor && (
@@ -595,9 +594,9 @@ export function BoardChrome({
           </div>
         ) : null}
 
-        {/* No shared panel here: each control below carries its own
-            `bg-surface` chip (see their `toolbarItem` styling) so this row
-            just spaces them apart rather than backing them as one piece. */}
+        {/* No shared panel and no per-control chip either: every control
+            below sits unbacked, directly on the canvas, so this row just
+            spaces them apart rather than backing them as one piece. */}
         <div
           ref={sessionToolbar.ref}
           role="toolbar"
@@ -610,7 +609,7 @@ export function BoardChrome({
             'flex shrink-0 items-center gap-1.5 p-1.5 pr-[calc(0.5rem+env(safe-area-inset-right))] [--chrome-hover:var(--color-panel)] md:pt-[calc(0.5rem+env(safe-area-inset-top))]',
           )}
         >
-          <ConnectionIndicator toolbarItem />
+          <ConnectionIndicator />
           <SessionUtilities identity={identity} compact={isMobile} />
           <ShareButton />
         </div>

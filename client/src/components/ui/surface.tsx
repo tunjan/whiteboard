@@ -13,7 +13,7 @@ import { cn } from '@/lib/utils';
  * Restating the rule at that call site is how the two drifted apart.
  */
 export const CHROME_CONTROLS =
-  'touch-targets [&_svg:not([data-slot=avatar-fallback]_svg)]:stroke-[1.5]';
+  'touch-targets [&_svg:not([data-slot=avatar-fallback]_svg)]:stroke-[1.75]';
 
 const surfaceVariants = cva(
   'select-none rounded-panel border border-border bg-surface text-fg',

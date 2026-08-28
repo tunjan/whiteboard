@@ -259,7 +259,6 @@ export const VoiceControls = memo(function VoiceControls({
                     size: showLabel ? 'sm' : 'icon-sm',
                   }),
                   'relative border',
-                  toolbarItem && 'bg-surface',
                   engaged && 'border-border bg-panel text-fg',
                   engaged &&
                     muted &&

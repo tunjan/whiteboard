@@ -101,7 +101,7 @@ function SignalBars({
           fill="currentColor"
           height={bar.height}
           rx="1"
-          width="3"
+          width="3.5"
           x={bar.x}
           y={bar.y}
         />
@@ -111,11 +111,7 @@ function SignalBars({
 }
 
 /** Live collaboration quality shown as latency-sensitive signal bars. */
-export function ConnectionIndicator({
-  toolbarItem = false,
-}: {
-  toolbarItem?: boolean;
-} = {}) {
+export function ConnectionIndicator() {
   const status = useConnectionStore((state) => state.status);
   const latencyMs = useConnectionStore((state) => state.latencyMs);
   const quality = connectionQuality(status, latencyMs);
@@ -140,7 +136,6 @@ export function ConnectionIndicator({
               data-toolbar-item
               className={cn(
                 'flex size-8 items-center justify-center rounded-md select-none hover:bg-[var(--chrome-hover,var(--color-panel))]',
-                toolbarItem && 'bg-surface',
               )}
               role="status"
               tabIndex={-1}

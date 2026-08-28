@@ -4,6 +4,7 @@ import '@/canvas/tools/register';
 import { useToolStore } from '@/canvas/use-tool-store';
 import { Button } from '@/components/ui/button';
 import { Surface } from '@/components/ui/surface';
+import { ToolPropertiesSatellite } from '@/components/tool-properties-satellite';
 import {
   Tooltip,
   TooltipContent,
@@ -92,7 +93,7 @@ export function Toolbar() {
               'pointer-events-none translate-y-[calc(100%+0.75rem)] opacity-0',
           )}
         >
-          <div className="hidden items-center gap-2.5 sm:flex">
+          <div className="hidden items-center gap-0 sm:flex">
             {renderGroup('Navigate', NAVIGATE_TOOLS)}
 
             {renderGroup('Inking', INKING_TOOLS)}
@@ -151,7 +152,7 @@ export function Toolbar() {
           <div
             role="group"
             aria-label="Compact canvas tools"
-            className="flex items-center gap-2.5 sm:hidden"
+            className="flex items-center gap-0 sm:hidden"
           >
             <div className="flex items-center gap-1">
               {COMPACT_PRIMARY_TOOLS.map((id) => (
@@ -165,6 +166,8 @@ export function Toolbar() {
             />
             <CompactMoreMenu activeToolId={activeToolId} onHide={hideToolbar} />
           </div>
+
+          <ToolPropertiesSatellite activeToolId={activeToolId} />
         </Surface>
 
         <Tooltip>
