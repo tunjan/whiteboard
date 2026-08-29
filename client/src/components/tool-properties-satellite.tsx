@@ -1,10 +1,19 @@
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import {
   paletteColors,
   SIZE_OPTIONS,
   useStyleStore,
   type PaletteColor,
 } from '@/canvas/use-style-store';
+import { ToolbarDivider } from '@/components/toolbar/toolbar-constants';
+import {
+  Popover,
+  PopoverContent,
+  PopoverDescription,
+  PopoverHeader,
+  PopoverTitle,
+  PopoverTrigger,
+} from '@/components/ui/popover';
 import { Surface } from '@/components/ui/surface';
 import {
   Tooltip,
@@ -16,13 +25,18 @@ import { cn, swatchBorder } from '@/lib/utils';
 
 /**
  * The quick set, held as palette slot indices rather than hex values so it
- * follows the theme the way every other swatch in the app does. Slot 0 is the
- * ink swatch (black on the light canvas, white on the dark one), then blue,
- * green, red — the four a tutor reaches for without thinking. The remaining
- * eight stay in the style panel, which is where a deliberate color choice
- * belongs.
+ * follows the theme the way every other swatch in the app does.
+ *
+ * Slot 0 is the ink swatch (black on the light canvas, white on the dark one),
+ * then a spectrum — red, orange, yellow, green, blue, violet — and grey to
+ * close it. Ordered by hue rather than by how often each is reached for,
+ * because a row this long is scanned as a ramp: a swatch is found by where it
+ * falls in the rainbow, and any other ordering makes that search fail.
+ *
+ * The remaining four are one click away behind the wheel, and the full set —
+ * with fill, dash, opacity and type — stays in the style panel.
  */
-const QUICK_SLOTS = [0, 4, 8, 11];
+const QUICK_SLOTS = [0, 11, 7, 6, 9, 5, 3, 1];
 
 /**
  * Tools whose quick properties ride here. The wand draws pen strokes, so it
@@ -42,9 +56,9 @@ const SIZE_TOOLS = new Set(['draw', 'highlighter', 'wand']);
  * Dot diameters for the four stroke presets. Deliberately not the world-unit
  * widths: those run 2→10, and a ramp that literal either starts invisible or
  * ends wider than the key it sits in. These preserve the ordering and the sense
- * of acceleration at a size that reads inside a 32px target.
+ * of acceleration at a size that reads inside a 36px target.
  */
-const DOT_SIZES = [5, 7.5, 10, 13];
+const DOT_SIZES = [5, 7, 9, 11];
 
 const ARROW_KEYS = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'];
 
@@ -71,9 +85,138 @@ function arrowDelta(key: string): number {
   return 0;
 }
 
+/** One swatch, drawn as the color itself with the selection carried by a ring. */
+function Swatch({
+  swatch,
+  selected,
+  onSelect,
+  buttonRef,
+}: {
+  swatch: PaletteColor;
+  selected: boolean;
+  onSelect: () => void;
+  buttonRef?: (node: HTMLButtonElement | null) => void;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            ref={buttonRef}
+            type="button"
+            role="radio"
+            aria-label={swatch.name}
+            aria-checked={selected}
+            tabIndex={selected ? 0 : -1}
+            onClick={onSelect}
+            className={cn(
+              'flex size-7 items-center justify-center rounded-xl',
+              'transition-colors duration-fast ease-out-quart motion-reduce:transition-none',
+              'hover:bg-[var(--chrome-hover,var(--color-panel))]',
+            )}
+          />
+        }
+      >
+        <span
+          className={cn(
+            'size-4 rounded-full border',
+            // The ring is what marks the choice here, as it does in the panel's
+            // grid — a swatch cannot show selection with a fill of its own.
+            selected &&
+              'ring-2 ring-tb-accent-ring ring-offset-1 ring-offset-surface',
+          )}
+          style={{
+            backgroundColor: swatch.value,
+            borderColor: swatchBorder(swatch.value),
+          }}
+        />
+      </TooltipTrigger>
+      <TooltipContent side="top">{swatch.name}</TooltipContent>
+    </Tooltip>
+  );
+}
+
 /**
- * The active tool's two most-used properties — color, and stroke weight where
- * the tool has one — as a ribbon that rises out of the toolbar's top edge.
+ * The rest of the palette, behind a colour wheel — the last key in the row, as
+ * the ramp of quick colours runs out. It is the same twelve swatches the style
+ * panel grids, offered here so a colour outside the quick four costs a click
+ * rather than a trip across the screen.
+ */
+function ColorWheel({
+  color,
+  setColor,
+}: {
+  color: string;
+  setColor: (color: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const theme = useThemeStore((s) => s.theme);
+  const colors = paletteColors(theme);
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <PopoverTrigger
+              aria-label="More colors"
+              className={cn(
+                'flex size-7 items-center justify-center rounded-xl',
+                'transition-colors duration-fast ease-out-quart motion-reduce:transition-none',
+                'hover:bg-[var(--chrome-hover,var(--color-panel))]',
+              )}
+            />
+          }
+        >
+          <span
+            aria-hidden="true"
+            className="size-4 rounded-full border border-border-strong/60"
+            style={{
+              backgroundImage:
+                'conic-gradient(#e03131, #e16919, #f1ac4b, #4cb05e, #099268, #4ba1f1, #4465e9, #ae3ec9, #e03131)',
+            }}
+          />
+        </TooltipTrigger>
+        <TooltipContent side="top">More colors</TooltipContent>
+      </Tooltip>
+
+      <PopoverContent
+        side="top"
+        align="end"
+        sideOffset={8}
+        className="w-auto p-1.5"
+      >
+        <PopoverHeader className="sr-only">
+          <PopoverTitle>Colors</PopoverTitle>
+          <PopoverDescription>
+            Pick a color from the full palette
+          </PopoverDescription>
+        </PopoverHeader>
+        <div
+          role="radiogroup"
+          aria-label="All colors"
+          className="grid grid-cols-4"
+        >
+          {colors.map((swatch) => (
+            <Swatch
+              key={swatch.value}
+              swatch={swatch}
+              selected={swatch.value === color}
+              onSelect={() => {
+                setColor(swatch.value);
+                setOpen(false);
+              }}
+            />
+          ))}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/**
+ * The active tool's two most-used properties — stroke weight, where the tool
+ * has one, and colour — as a second bar floating just above the toolbar.
  *
  * It exists for the same reason the eraser's mode selector does: the setting
  * belongs to the tool, so it should land where the pointer already is instead
@@ -82,31 +225,16 @@ function arrowDelta(key: string): number {
  * place a considered choice is made; this is the fast path for the choice made
  * a dozen times a minute.
  *
- * It is a riser off the bar, not a pill above it. Four things do that work and
- * all four are load-bearing:
+ * It is a bar in its own right, not a flange off the toolbar: same slab, same
+ * corner, same shadow, separated from the toolbar by a real gap. Which means
+ * the pair reads as two instruments stacked — what you are drawing with,
+ * above what you are drawing with it — rather than as one tall control.
  *
- *  - Flush. `bottom-full` and nothing else: no gutter, and no overlap either.
- *    The ribbon carries no bottom border, so the bar's top border *is* its
- *    bottom edge, and the two outlines meet as one line.
- *  - The `docked` material, which is the whole of the depth cue. The bar is
- *    `surface`; the ribbon is `panel`, one step darker in both themes. Planes
- *    are separated by tone here, never by relief — a sheen and a lit rim would
- *    put a bevel on the seam and read as moulding rather than as distance. It
- *    also flips the ghost controls so they hover *forward* to `surface` instead
- *    of back into `panel`.
- *  - Square bottom corners, rounded top. It is narrower than the bar, so those
- *    square corners land mid-edge and never meet the bar's own rounding — the
- *    riser looks stamped from the same sheet.
- *
- * It opens by growing upward out of that edge, on `grid-template-rows` 0fr→1fr
- * so the height animates without measuring anything and the contents are
- * revealed rather than scaled. `bottom-full` pins the bottom edge to the bar,
- * which is what sends the growth upward.
- *
- * Horizontally it left-aligns to the bar's padding edge, which puts it over the
- * inking keys — the ones whose properties it carries. Alignment is desktop-only:
- * the compact bar is narrower than the ribbon, so the ribbon centres there
- * instead of hanging off the side of a phone screen.
+ * Two things keep it tied to the bar under it despite that gap. It is narrower,
+ * so it never squares up as an equal; and it left-aligns to the toolbar's
+ * padding edge, which lands it over the tray whose instruments it configures.
+ * Alignment is desktop-only: the compact bar is narrower than this pill, so
+ * below `sm` it centres instead of hanging off the side of a phone screen.
  *
  * Mounted at all times and hidden with opacity so it animates out as well as
  * in; `inert` keeps the hidden copy out of the tab order and off the a11y tree.
@@ -126,7 +254,7 @@ export function ToolPropertiesSatellite({
   const active = COLOR_TOOLS.has(activeToolId);
 
   // Which tool's controls to draw. Pinned to the last tool that had any, so
-  // switching to the select tool collapses the ribbon whole instead of dropping
+  // switching to the select tool fades the pill out whole instead of dropping
   // the stroke row on the first frame of the close.
   const shownTool = useRef(activeToolId);
   if (active) shownTool.current = activeToolId;
@@ -170,154 +298,136 @@ export function ToolPropertiesSatellite({
       aria-hidden={!active}
       inert={!active}
       className={cn(
-        'absolute bottom-full grid w-max',
-        // `left-1.5` is the bar's own `p-1.5`, so the ribbon's left edge lands
-        // exactly where the first tool key starts — a landmark on the bar
-        // rather than an offset from its middle. Centred below `sm`, where the
-        // ribbon is wider than the compact bar and would run off the screen.
+        'absolute bottom-full mb-2.5 w-max',
+        // `left-1.5` is the toolbar's own `p-1.5`, so the two left edges line
+        // up exactly — a landmark on the bar rather than an offset from its
+        // middle. Centred below `sm`, where this pill is wider than the
+        // compact bar and would otherwise run off the screen.
         'left-1/2 -translate-x-1/2 sm:left-1.5 sm:translate-x-0',
-        'transition-[grid-template-rows,opacity] duration-base ease-out-quart',
+        'origin-bottom transition-[opacity,transform] duration-base ease-out-quart',
         'motion-reduce:transition-none',
         active
-          ? 'grid-rows-[1fr] opacity-100'
-          : 'pointer-events-none grid-rows-[0fr] opacity-0',
+          ? 'translate-y-0 opacity-100'
+          : 'pointer-events-none translate-y-1.5 opacity-0',
       )}
     >
-      {/* The clip the height animation runs against. The bar's `p-1.5` is
-          matched inside it for a reason: focus is a 2px outline at 2px offset,
-          and anything tighter would clip it against this edge. */}
-      <div className="overflow-hidden">
-        <Surface
-          mode="docked"
-          chrome
-          role="group"
-          aria-label="Tool properties"
-          className="flex items-center rounded-xl rounded-b-none border-b-0 p-1.5"
-        >
+      <Surface
+        mode="floating"
+        chrome
+        role="group"
+        aria-label="Tool properties"
+        className={cn(
+          // `items-stretch` so the rules between the groups can run the full
+          // depth of the pill; each group re-centres its own contents.
+          'flex items-stretch rounded-toolbar py-1 px-1.5 [--tb-pad:0.25rem]',
+          'border-transparent bg-surface tb-shell dark:border-border',
+        )}
+      >
+        {showSize ? (
+          <>
+            <div
+              role="radiogroup"
+              aria-label="Stroke weight"
+              onKeyDown={onSizeKeyDown}
+              className="relative grid grid-cols-4 self-center rounded-2xl bg-tb-track"
+            >
+              {/* The chosen weight as a chip that slides across the four
+                  segments of its recess — one moving mark rather than four
+                  chips lighting up, which is what makes the row read as a
+                  single control. Same recess and same flat chip as a group
+                  of keys on the bar, so a selected weight and a selected tool
+                  are marked the same way.
+
+                  Inset on all four sides rather than filling the groove, so
+                  the recess still reads as a groove with something sitting in
+                  it. That inset is what the travel has to account for: the
+                  mark is a segment less the two insets, so one step along is
+                  its own width plus the gap it leaves, not a flat 100%. Widths
+                  stay in percentages because a coarse pointer grows every key
+                  here to 44px, and a fixed one would strand the mark half a
+                  key off. */}
+              <span
+                aria-hidden="true"
+                className={cn(
+                  'pointer-events-none absolute inset-y-[3px] left-[3px] w-[calc(25%-6px)] rounded-[13px] bg-tb-accent',
+                  'transition-transform duration-base ease-out-quart motion-reduce:transition-none',
+                  sizeIndex < 0 && 'opacity-0',
+                )}
+                style={{
+                  transform: `translateX(calc(${Math.max(sizeIndex, 0)} * (100% + 6px)))`,
+                }}
+              />
+              {SIZE_OPTIONS.map((option, index) => {
+                const selected = option.value === size;
+                const dot = DOT_SIZES[index] ?? 8;
+                return (
+                  <Tooltip key={option.name}>
+                    <TooltipTrigger
+                      render={
+                        <button
+                          ref={(node) => {
+                            sizeRefs.current[index] = node;
+                          }}
+                          type="button"
+                          role="radio"
+                          aria-label={`${option.name}, ${option.value} pixels`}
+                          aria-checked={selected}
+                          tabIndex={selected ? 0 : -1}
+                          onClick={() => setSize(option.value)}
+                          className="relative z-10 flex size-9 items-center justify-center rounded-xl"
+                        />
+                      }
+                    >
+                      {/* Painted in the live ink color, so the row previews
+                          both properties the bar carries at once. */}
+                      <span
+                        className="rounded-full border"
+                        style={{
+                          width: dot,
+                          height: dot,
+                          backgroundColor: color,
+                          borderColor: swatchBorder(color),
+                        }}
+                      />
+                    </TooltipTrigger>
+                    <TooltipContent side="top">
+                      {option.name} — {option.value}px
+                    </TooltipContent>
+                  </Tooltip>
+                );
+              })}
+            </div>
+
+            <ToolbarDivider />
+          </>
+        ) : null}
+
+        {/* The wheel closes the ramp inside the colour group rather than
+            standing behind a rule of its own: it is where the ramp runs out,
+            not a fifth thing the pill does. */}
+        <div className="flex items-center self-center">
           <div
             role="radiogroup"
             aria-label="Color"
             onKeyDown={onSwatchKeyDown}
             className="flex items-center"
           >
-            {swatches.map((swatch, index) => {
-              const selected = swatch.value === color;
-              return (
-                <Tooltip key={swatch.value}>
-                  <TooltipTrigger
-                    render={
-                      <button
-                        ref={(node) => {
-                          swatchRefs.current[index] = node;
-                        }}
-                        type="button"
-                        role="radio"
-                        aria-label={swatch.name}
-                        aria-checked={selected}
-                        tabIndex={selected ? 0 : -1}
-                        onClick={() => setColor(swatch.value)}
-                        className={cn(
-                          'flex size-8 items-center justify-center rounded-lg',
-                          'transition-colors duration-fast ease-out-quart motion-reduce:transition-none',
-                          'hover:bg-[var(--chrome-hover,var(--color-panel))]',
-                        )}
-                      />
-                    }
-                  >
-                    <span
-                      className={cn(
-                        'size-5 rounded-full border',
-                        // The ring is what marks the choice here, as it does in
-                        // the panel's grid — a swatch cannot show selection with
-                        // a fill of its own.
-                        selected &&
-                          'ring-2 ring-ring ring-offset-2 ring-offset-panel',
-                      )}
-                      style={{
-                        backgroundColor: swatch.value,
-                        borderColor: swatchBorder(swatch.value),
-                      }}
-                    />
-                  </TooltipTrigger>
-                  <TooltipContent side="top">{swatch.name}</TooltipContent>
-                </Tooltip>
-              );
-            })}
+            {swatches.map((swatch, index) => (
+              <Swatch
+                key={swatch.value}
+                swatch={swatch}
+                selected={swatch.value === color}
+                onSelect={() => setColor(swatch.value)}
+                buttonRef={(node) => {
+                  swatchRefs.current[index] = node;
+                }}
+              />
+            ))}
           </div>
 
-          {showSize ? (
-            <>
-              <span
-                aria-hidden="true"
-                className="mx-1 h-6 w-px shrink-0 bg-border/70"
-              />
-              <div
-                role="radiogroup"
-                aria-label="Stroke weight"
-                onKeyDown={onSizeKeyDown}
-                className="relative grid grid-cols-4"
-              >
-                {/* The chosen weight as a fill that slides across the four
-                  segments — one moving mark rather than four chips lighting
-                  up, which is what makes the row read as a single control.
-                  Sized in percentages, not pixels, because a coarse pointer
-                  grows every key here to 44px and a fixed width would strand
-                  the mark half a key off. */}
-                <span
-                  aria-hidden="true"
-                  className={cn(
-                    'pointer-events-none absolute inset-y-0 left-0 w-1/4 rounded-lg border border-border-strong/60 bg-surface',
-                    'transition-transform duration-base ease-out-quart motion-reduce:transition-none',
-                    sizeIndex < 0 && 'opacity-0',
-                  )}
-                  style={{
-                    transform: `translateX(${Math.max(sizeIndex, 0) * 100}%)`,
-                  }}
-                />
-                {SIZE_OPTIONS.map((option, index) => {
-                  const selected = option.value === size;
-                  const dot = DOT_SIZES[index] ?? 8;
-                  return (
-                    <Tooltip key={option.name}>
-                      <TooltipTrigger
-                        render={
-                          <button
-                            ref={(node) => {
-                              sizeRefs.current[index] = node;
-                            }}
-                            type="button"
-                            role="radio"
-                            aria-label={`${option.name}, ${option.value} pixels`}
-                            aria-checked={selected}
-                            tabIndex={selected ? 0 : -1}
-                            onClick={() => setSize(option.value)}
-                            className="relative z-10 flex size-8 items-center justify-center rounded-lg"
-                          />
-                        }
-                      >
-                        {/* Painted in the live ink color, so the row previews
-                          both properties the bar carries at once. */}
-                        <span
-                          className="rounded-full border"
-                          style={{
-                            width: dot,
-                            height: dot,
-                            backgroundColor: color,
-                            borderColor: swatchBorder(color),
-                          }}
-                        />
-                      </TooltipTrigger>
-                      <TooltipContent side="top">
-                        {option.name} — {option.value}px
-                      </TooltipContent>
-                    </Tooltip>
-                  );
-                })}
-              </div>
-            </>
-          ) : null}
-        </Surface>
-      </div>
+          <ColorWheel color={color} setColor={setColor} />
+        </div>
+      </Surface>
     </div>
   );
 }

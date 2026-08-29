@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { Shapes } from 'lucide-react';
 import type { PolygonKind } from '@whiteboard/shared';
 import { toolRegistry } from '@/canvas/tools/tool-registry';
 import { useStyleStore } from '@/canvas/use-style-store';
@@ -22,9 +21,15 @@ import {
 import { cn } from '@/lib/utils';
 import {
   FlyoutCaret,
+  INSTRUMENT_CLIP,
+  INSTRUMENT_SLOT,
+  INSTRUMENT_WELL,
   MiniShape,
   POLYGON_KINDS,
   SHAPE_TOOLS,
+  ShapeClusterGlyph,
+  ShapeClusterObject,
+  TOOL_ICON,
   TOOL_PRESSED,
   toolButtonClass,
 } from './toolbar-constants';
@@ -41,12 +46,21 @@ interface ShapeMenuProps {
   activeToolId: string;
   lastShapeId: string;
   onLastShapeChange: (toolId: string) => void;
+  /**
+   * `key` is a glyph on the bar, which is what the compact bar wants. `tray`
+   * stands the shapes in the instrument tray as an object at instrument
+   * scale — a square, an arrow and a circle lying with the pens — so the wide
+   * bar has one run of things you pick up rather than a run of pens and then
+   * a picture of some shapes.
+   */
+  variant?: 'key' | 'tray';
 }
 
 export function ShapeMenu({
   activeToolId,
   lastShapeId,
   onLastShapeChange,
+  variant = 'key',
 }: ShapeMenuProps) {
   const [open, setOpen] = useState(false);
   const setTool = useToolStore((state) => state.setTool);
@@ -61,7 +75,7 @@ export function ShapeMenu({
   // Compute dynamic trigger icon
   const isPolygon = currentOrLastId === 'polygon';
   const displayedTool = toolRegistry.get(currentOrLastId);
-  const FallbackIcon = displayedTool?.icon ?? Shapes;
+  const FallbackIcon = displayedTool?.icon ?? ShapeClusterGlyph;
 
   const currentLabel = isPolygon
     ? (POLYGON_KINDS.find((p) => p.kind === polygonKind)?.label ?? 'Polygon')
@@ -81,8 +95,57 @@ export function ShapeMenu({
     setOpen(false);
   };
 
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
+  // In the tray the resting state is the cluster drawn at instrument scale.
+  // Once a shape is chosen the cluster gives way to that shape alone, drawn
+  // large in the same slot — the tray always shows what it is holding.
+  // `pt-6` re-centres against the slot: the clipping window starts 24px above
+  // it and ends level with its foot, so the raw middle of that window sits
+  // high.
+  const trayArt = active ? (
+    <span className="relative flex h-full w-full items-center justify-center pt-6 text-fg">
+      {isPolygon ? (
+        <MiniShape kind={polygonKind} size={26} />
+      ) : (
+        <FallbackIcon className="size-7 stroke-[1.5]" />
+      )}
+    </span>
+  ) : (
+    <ShapeClusterObject className="relative translate-y-3.5 transition-transform duration-base ease-out-quart motion-reduce:transition-none" />
+  );
+
+  const trigger =
+    variant === 'tray' ? (
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <PopoverTrigger
+              data-toolbar-item
+              tabIndex={active ? 0 : -1}
+              aria-label={label}
+              aria-current={active ? 'true' : undefined}
+              className={INSTRUMENT_CLIP}
+            />
+          }
+        >
+          <span
+            className={cn(
+              INSTRUMENT_WELL,
+              active
+                ? 'bg-tb-accent'
+                : 'bg-transparent group-hover/slot:bg-tb-accent/60',
+            )}
+          />
+          {trayArt}
+          <FlyoutCaret active={active} />
+        </TooltipTrigger>
+        <TooltipContent side="top" className="flex items-center gap-2">
+          <span>{label}</span>
+          {active && displayedTool?.hotkey ? (
+            <Kbd className="font-mono uppercase">{displayedTool.hotkey}</Kbd>
+          ) : null}
+        </TooltipContent>
+      </Tooltip>
+    ) : (
       <Tooltip>
         <TooltipTrigger
           render={
@@ -96,9 +159,9 @@ export function ShapeMenu({
           }
         >
           {isPolygon ? (
-            <MiniShape kind={polygonKind} size={18} />
+            <MiniShape kind={polygonKind} size={20} />
           ) : (
-            <FallbackIcon className="size-4.5" />
+            <FallbackIcon className={TOOL_ICON} />
           )}
           <FlyoutCaret active={active} />
         </TooltipTrigger>
@@ -109,6 +172,15 @@ export function ShapeMenu({
           ) : null}
         </TooltipContent>
       </Tooltip>
+    );
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      {variant === 'tray' ? (
+        <div className={INSTRUMENT_SLOT}>{trigger}</div>
+      ) : (
+        trigger
+      )}
 
       <PopoverContent
         side="top"
@@ -146,7 +218,7 @@ export function ShapeMenu({
                       aria-label={tool.label}
                       aria-current={isSelected ? 'true' : undefined}
                       className={cn(
-                        'size-9 rounded-lg transition-colors duration-fast',
+                        'size-10 rounded-xl transition-colors duration-fast',
                         isSelected
                           ? TOOL_PRESSED
                           : 'text-fg-secondary hover:bg-panel hover:text-fg active:bg-panel/80',
@@ -154,7 +226,7 @@ export function ShapeMenu({
                     />
                   }
                 >
-                  {Icon ? <Icon className="size-4.5" /> : null}
+                  {Icon ? <Icon className={TOOL_ICON} /> : null}
                 </TooltipTrigger>
                 <TooltipContent
                   side="top"
@@ -185,7 +257,7 @@ export function ShapeMenu({
                       aria-label={polygonLabel}
                       aria-current={isSelected ? 'true' : undefined}
                       className={cn(
-                        'size-9 rounded-lg transition-colors duration-fast',
+                        'size-10 rounded-xl transition-colors duration-fast',
                         isSelected
                           ? TOOL_PRESSED
                           : 'text-fg-secondary hover:bg-panel hover:text-fg active:bg-panel/80',
@@ -193,7 +265,7 @@ export function ShapeMenu({
                     />
                   }
                 >
-                  <MiniShape kind={kind} size={16} />
+                  <MiniShape kind={kind} size={18} />
                 </TooltipTrigger>
                 <TooltipContent side="top">
                   <span>{polygonLabel}</span>

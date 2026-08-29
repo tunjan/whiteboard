@@ -1,10 +1,12 @@
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono } from 'hono';
+import type { Context } from 'hono';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { env } from './env';
+import { absolutePreviewUrls, requestOrigin } from './app-shell';
 import { aiRoutes } from './ai/routes';
 import { authRoutes } from './auth/routes';
 import { blobRoutes } from './blobs/routes';
@@ -30,11 +32,22 @@ const clientIndex = fileURLToPath(
   new URL('../../client/dist/index.html', import.meta.url),
 );
 
-app.use('/*', serveStatic({ root: clientDist }));
-app.get('*', async (c) => {
+/** The SPA shell, with its link-preview image pointed at this deployment. */
+const serveIndexHtml = async (c: Context) => {
   const index = await readFile(clientIndex, 'utf8');
-  return c.html(index);
-});
+  const origin = requestOrigin(
+    c.req.url,
+    c.req.header('x-forwarded-proto'),
+    c.req.header('x-forwarded-host'),
+  );
+  return c.html(absolutePreviewUrls(index, origin));
+};
+
+// Ahead of the static handler: it would otherwise answer '/' with the file on
+// disk, whose preview tags are still relative.
+app.get('/', serveIndexHtml);
+app.use('/*', serveStatic({ root: clientDist }));
+app.get('*', serveIndexHtml);
 
 const server = serve({ fetch: app.fetch, port: env.port }, (info) => {
   console.log(`[server] HTTP + collab listening on http://localhost:${info.port}`);

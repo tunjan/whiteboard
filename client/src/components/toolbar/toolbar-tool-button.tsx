@@ -9,7 +9,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-import { toolButtonClass } from './toolbar-constants';
+import { toolButtonClass, TOOL_ICON } from './toolbar-constants';
 
 interface ToolButtonProps {
   toolId: string;
@@ -41,7 +41,7 @@ export function ToolButton({ toolId }: ToolButtonProps) {
           />
         }
       >
-        {Icon ? <Icon className="size-4.5" /> : null}
+        {Icon ? <Icon className={TOOL_ICON} /> : null}
       </TooltipTrigger>
       <TooltipContent side="top" className="flex items-center gap-2">
         <span>{tool.label}</span>

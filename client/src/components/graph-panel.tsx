@@ -157,11 +157,17 @@ function GraphPanelContent({ shape }: { shape: GraphShape }) {
       </DropdownMenuContent>
     </DropdownMenu>
   );
+  // A tinted tray holding one inset white card, with the display toggles left
+  // on the tray itself — so the controls read as one object docked to the
+  // graph rather than as a stack of floating cards. `--anchor-max-h` is the
+  // room `useShapeAnchor` measured between the viewport edges; the fallback
+  // covers the frame before it has measured.
   return (
     <Surface
       role="region"
       aria-labelledby="graph-panel-title"
-      className="flex max-h-[calc(100dvh-9rem-env(safe-area-inset-top))] w-[min(24rem,calc(100vw-2rem))] flex-col gap-3.5 overflow-y-auto overscroll-contain p-3.5 shadow-e2 sm:max-h-[calc(100dvh-6.25rem-env(safe-area-inset-top))]"
+      mode="docked"
+      className="flex max-h-[var(--anchor-max-h,calc(100dvh-2rem))] w-[min(24rem,calc(100vw-2rem))] flex-col overflow-hidden p-1 shadow-e2"
     >
       <h2 id="graph-panel-title" className="sr-only">
         Graph
@@ -170,79 +176,82 @@ function GraphPanelContent({ shape }: { shape: GraphShape }) {
         {expressionCount} {expressionCount === 1 ? 'curve' : 'curves'}
       </p>
 
-      {/* ─── Expressions Card ──────────────────────────────────────────────── */}
-      <section aria-label="Expressions" className="flex flex-col gap-2">
-        <div className="flex flex-col divide-y divide-border/60 overflow-hidden rounded-xl border border-border bg-surface shadow-e1">
-          {props.expressions.map((expression, index) => (
-            <ExpressionRow
-              key={expression.id}
-              expression={expression}
-              index={index}
-              onPatch={(patch) => patchExpression(expression.id, patch)}
-              onDelete={() => deleteExpression(expression.id)}
-              onEnter={() => insertExpressionAfter(expression.id)}
-              onBackspaceEmpty={() => deleteEmptyExpression(expression.id)}
-              onMoveOut={(direction) => moveFocus(expression.id, direction)}
-              onEscape={releaseFocus}
-              registerField={(el) => {
-                if (el) fieldRefs.current.set(expression.id, el);
-                else fieldRefs.current.delete(expression.id);
-              }}
-              definitions={functionDefinitions}
-            />
-          ))}
-        </div>
-        <div className="flex items-center gap-2">
-          {functionMenu}
-          <Button
-            type="button"
-            variant="outline"
-            aria-label="Add expression"
-            title="Add expression"
-            onClick={addExpression}
-            className="h-9.5 flex-1 justify-center gap-2 rounded-lg text-sm font-medium"
-          >
-            <Plus className="size-4" data-icon="inline-start" aria-hidden="true" />
-            <span>Add Curve</span>
-          </Button>
-        </div>
-      </section>
-
-      {/* ─── Parameters / Sliders ──────────────────────────────────────────── */}
-      {parameterNames.length > 0 && (
-        <section aria-label="Sliders" className="flex flex-col gap-2">
-          <div className="flex flex-col divide-y divide-border/60 overflow-hidden rounded-xl border border-border bg-surface shadow-e1">
-            {parameterNames.map((name) => {
-              const parameter = props.parameters[name]!;
-              return (
-                <SliderRow
-                  key={name}
-                  shapeId={shape.id}
-                  name={name}
-                  parameter={parameter}
-                  onChange={(next) =>
-                    updateGraph({
-                      parameters: { ...props.parameters, [name]: next },
-                    })
-                  }
-                />
-              );
-            })}
+      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto overscroll-contain rounded-overlay border border-border bg-surface p-3 shadow-e1 [--chrome-hover:var(--color-panel)]">
+        {/* ─── Expressions Card ──────────────────────────────────────────────── */}
+        <section aria-label="Expressions" className="flex flex-col gap-2">
+          <div className="flex flex-col divide-y divide-border/60">
+            {props.expressions.map((expression, index) => (
+              <ExpressionRow
+                key={expression.id}
+                expression={expression}
+                index={index}
+                onPatch={(patch) => patchExpression(expression.id, patch)}
+                onDelete={() => deleteExpression(expression.id)}
+                onEnter={() => insertExpressionAfter(expression.id)}
+                onBackspaceEmpty={() => deleteEmptyExpression(expression.id)}
+                onMoveOut={(direction) => moveFocus(expression.id, direction)}
+                onEscape={releaseFocus}
+                registerField={(el) => {
+                  if (el) fieldRefs.current.set(expression.id, el);
+                  else fieldRefs.current.delete(expression.id);
+                }}
+                definitions={functionDefinitions}
+              />
+            ))}
+          </div>
+          <div className="flex items-center gap-2">
+            {functionMenu}
+            <Button
+              type="button"
+              variant="outline"
+              aria-label="Add expression"
+              title="Add expression"
+              onClick={addExpression}
+              className="h-9.5 flex-1 justify-center gap-2 rounded-lg text-sm font-medium"
+            >
+              <Plus className="size-4" data-icon="inline-start" aria-hidden="true" />
+              <span>Add Curve</span>
+            </Button>
           </div>
         </section>
-      )}
 
-      {/* ─── Viewport & Framing ────────────────────────────────────────────── */}
-      <section aria-label="Viewport framing" className="flex flex-col gap-1.5">
-        <ViewRange
-          viewport={props.viewport}
-          shapeProps={{ w: props.w, h: props.h }}
-          onChange={(viewport) => updateGraph({ viewport })}
-        />
-      </section>
+        {/* ─── Parameters / Sliders ──────────────────────────────────────────── */}
+        {parameterNames.length > 0 && (
+          <section aria-label="Sliders" className="flex flex-col gap-2">
+            <div className="flex flex-col divide-y divide-border/60 border-t border-border/60 pt-2">
+              {parameterNames.map((name) => {
+                const parameter = props.parameters[name]!;
+                return (
+                  <SliderRow
+                    key={name}
+                    shapeId={shape.id}
+                    name={name}
+                    parameter={parameter}
+                    onChange={(next) =>
+                      updateGraph({
+                        parameters: { ...props.parameters, [name]: next },
+                      })
+                    }
+                  />
+                );
+              })}
+            </div>
+          </section>
+        )}
 
-      {/* ─── Display Settings ──────────────────────────────────────────────── */}
-      <section aria-label="Display toggles">
+        {/* ─── Viewport & Framing ────────────────────────────────────────────── */}
+        <section aria-label="Viewport framing" className="flex flex-col gap-1.5">
+          <ViewRange
+            viewport={props.viewport}
+            shapeProps={{ w: props.w, h: props.h }}
+            onChange={(viewport) => updateGraph({ viewport })}
+          />
+        </section>
+
+      </div>
+
+      {/* ─── Display Settings, on the tray below the inset card ─────────────── */}
+      <section aria-label="Display toggles" className="shrink-0 px-2 py-1.5">
         <DisplaySettings
           showAxisLabels={showAxisLabels}
           showIntersections={props.showIntersections === true}
@@ -266,7 +275,7 @@ export function GraphPanel() {
   const panelVisible = Boolean(graphShape);
 
   return (
-    <ToolPanelPresence visible={panelVisible}>
+    <ToolPanelPresence visible={panelVisible} anchorShapeId={graphShape?.id ?? null}>
       {panelVisible && graphShape ? (
         <GraphPanelContent shape={graphShape} />
       ) : null}

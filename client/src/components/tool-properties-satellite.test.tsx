@@ -10,31 +10,52 @@ const render = (activeToolId: string) =>
   renderToStaticMarkup(<ToolPropertiesSatellite activeToolId={activeToolId} />);
 
 describe('quickSwatches', () => {
-  it('offers ink, blue, green and red', () => {
+  // Ordered as a rainbow, not by frequency: a row this long is found by where
+  // a colour falls in the ramp, so ink first and then hue order.
+  it('offers ink and a hue ramp closed by grey', () => {
     expect(
       quickSwatches(paletteColors('light'), '#1d1d1d').map((c) => c.name),
-    ).toEqual(['Black', 'Blue', 'Green', 'Red']);
+    ).toEqual([
+      'Black',
+      'Red',
+      'Orange',
+      'Yellow',
+      'Light green',
+      'Light blue',
+      'Violet',
+      'Grey',
+    ]);
   });
 
   // Held as palette slots, so slot 0 is whichever ink reads on this canvas.
   it('flips the ink swatch with the canvas rather than restating a hex', () => {
     const dark = quickSwatches(paletteColors('dark'), '#f3f3f3');
-    expect(dark.map((c) => c.name)).toEqual(['White', 'Blue', 'Green', 'Red']);
+    expect(dark[0]!.name).toBe('White');
     expect(dark[0]!.value).toBe(paletteColors('dark')[0]!.value);
+    expect(dark.map((c) => c.name).slice(1)).toEqual([
+      'Red',
+      'Orange',
+      'Yellow',
+      'Light green',
+      'Light blue',
+      'Violet',
+      'Grey',
+    ]);
   });
 
   // A row with nothing selected reads as "no color set", so a color picked in
   // the full panel joins the row instead of leaving it blank.
   it('appends a color chosen outside the quick set', () => {
-    const swatches = quickSwatches(paletteColors('light'), '#e16919');
-    expect(swatches).toHaveLength(5);
-    expect(swatches[4]).toEqual({ name: 'Current color', value: '#e16919' });
+    // Slot 8, 'Green' — in the palette, but not one of the eight quick hues.
+    const swatches = quickSwatches(paletteColors('light'), '#099268');
+    expect(swatches).toHaveLength(9);
+    expect(swatches[8]).toEqual({ name: 'Current color', value: '#099268' });
   });
 
   it('never appends a duplicate of a slot it already holds', () => {
     for (const color of quickSwatches(paletteColors('light'), '#1d1d1d')) {
       expect(quickSwatches(paletteColors('light'), color.value)).toHaveLength(
-        4,
+        8,
       );
     }
   });
@@ -76,43 +97,42 @@ describe('ToolPropertiesSatellite', () => {
     expect(render('draw').match(/aria-checked="true"/g)).toHaveLength(2);
   });
 
-  // Four segments, so the sliding mark is a quarter wide and steps by its own
-  // width. Percentages, because a coarse pointer grows every key to 44px.
+  // Four segments, so the sliding mark is a quarter wide — less the inset that
+  // holds it clear of its groove — and steps by that whole quarter, which is
+  // its own width plus the gap the inset leaves. Both stay percentages of the
+  // track, because a coarse pointer grows every key to 44px and a mark sized
+  // in fixed pixels would then sit half a key off.
   it('sizes the weight indicator in quarters, not pixels', () => {
     const html = render('draw');
-    expect(html).toContain('w-1/4');
-    expect(html).toMatch(/translateX\(\d+%\)/);
+    expect(html).toContain('w-[calc(25%-6px)]');
+    expect(html).toMatch(/translateX\(calc\(\d+ \* \(100% \+ 6px\)\)\)/);
   });
 });
 
-// The riser has to read as part of the toolbar rather than as a pill hovering
-// over it. Each of these is one of the things doing that work, so each is worth
-// failing a build over.
-describe('ToolPropertiesSatellite attachment to the bar', () => {
+// The pill has to read as a second bar stacked over the toolbar rather than as
+// a flange growing out of it. Each of these is one of the things doing that
+// work, so each is worth failing a build over.
+describe('ToolPropertiesSatellite as a bar in its own right', () => {
   const html = render('draw');
 
-  it('sits flush on the bar, with no gutter and no overlap', () => {
+  it('floats clear of the toolbar instead of sitting flush on it', () => {
     expect(html).toContain('bottom-full');
-    // A gutter would split the two apart; an overlap would show the bar's
-    // border through the ribbon's translucent fill.
-    expect(html).not.toMatch(/class="[^"]*\s-?mb-/);
+    // The gutter is what makes these two bars rather than one tall control.
+    expect(html).toMatch(/\bmb-2\.5\b/);
   });
 
-  // Depth by tone, never by relief: the bar is `surface`, the ribbon `panel`.
-  // A sheen or a lit rim would bevel the seam and read as moulding, and a drop
-  // shadow would put the ribbon in front of the bar rather than behind it.
-  it('separates from the bar by tone alone, with no relief at all', () => {
-    expect(html).toContain('data-mode="docked"');
-    expect(html).not.toMatch(/\btb-(shell|riser)\b/);
-    expect(html).not.toMatch(/shadow-(e\d|xs|sm|md|lg|panel)/);
+  it('is cut from the same slab: same corner, same shadow', () => {
+    expect(html).toContain('rounded-toolbar');
+    expect(html).toContain('tb-shell');
+    expect(html).toContain('data-mode="floating"');
+    // Both were how the old riser hid the seam it shared with the bar. A
+    // detached pill has no such seam, and a squared-off edge on one would
+    // read as a piece that had come loose.
+    expect(html).not.toContain('rounded-b-none');
+    expect(html).not.toContain('border-b-0');
   });
 
-  it('squares off the edge it shares with the bar', () => {
-    expect(html).toContain('rounded-b-none');
-    expect(html).toContain('border-b-0');
-  });
-
-  // `left-1.5` is the bar's own padding, so the two edges line up exactly.
+  // `left-1.5` is the toolbar's own padding, so the two left edges line up.
   it('left-aligns to the bar, but centres where the bar is narrower', () => {
     expect(html).toContain('sm:left-1.5');
     expect(html).toContain('sm:translate-x-0');
@@ -120,10 +140,15 @@ describe('ToolPropertiesSatellite attachment to the bar', () => {
     expect(html).toContain('-translate-x-1/2');
   });
 
-  it('grows out of that edge rather than popping in over it', () => {
-    expect(html).toContain('grid-rows-[1fr]');
-    expect(render('select')).toContain('grid-rows-[0fr]');
-    // Scaling would distort the swatches and read as a balloon, not a riser.
-    expect(html).not.toMatch(/\bscale-9\d/);
+  it('rises into place rather than unrolling out of the bar', () => {
+    expect(html).toContain('translate-y-0');
+    expect(render('select')).toContain('translate-y-1.5');
+    // Animating grid-template-rows was the flush riser's trick, and it looked
+    // like the bar extruding a flange. A separate pill has to arrive as one.
+    expect(html).not.toMatch(/grid-rows-\[[01]fr\]/);
+  });
+
+  it('offers the rest of the palette where the quick row runs out', () => {
+    expect(html).toContain('aria-label="More colors"');
   });
 });

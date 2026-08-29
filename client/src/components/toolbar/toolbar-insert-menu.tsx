@@ -34,6 +34,7 @@ import {
 import { cn } from '@/lib/utils';
 import {
   FlyoutCaret,
+  TOOL_ICON,
   TOOL_PRESSED,
   toolButtonClass,
 } from './toolbar-constants';
@@ -142,7 +143,7 @@ export function InsertMenu({ active }: InsertMenuProps) {
                 draggable={false}
               />
             ) : (
-              <TriggerIcon className="size-4.5" />
+              <TriggerIcon className={TOOL_ICON} />
             )}
             <FlyoutCaret active={active} />
           </TooltipTrigger>
@@ -186,7 +187,7 @@ export function InsertMenu({ active }: InsertMenuProps) {
                     setOpen(false);
                   }}
                   className={cn(
-                    'size-9 rounded-lg transition-colors duration-fast',
+                    'size-10 rounded-xl transition-colors duration-fast',
                     isSelected ? TOOL_PRESSED : 'hover:bg-panel',
                   )}
                 >

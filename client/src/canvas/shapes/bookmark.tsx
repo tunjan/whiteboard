@@ -8,35 +8,39 @@ import { layoutText, measureTextWidth, TEXT_FONT_FAMILY } from './text-measure';
 import type { ShapeUtil } from './types';
 
 /** Width every pasted link card starts at. */
-export const BOOKMARK_WIDTH = 300;
+export const BOOKMARK_WIDTH = 360;
 
 /**
  * Card heights, chosen from what the unfurl returned. A card is created at the
  * full height and shrinks if the metadata turns out to be thin, so the common
  * case (a site with a preview image) never visibly resizes.
  */
-export const BOOKMARK_LOADING_HEIGHT = 320;
-const BOOKMARK_TITLE_HEIGHT = 101;
+export const BOOKMARK_LOADING_HEIGHT = 300;
+const BOOKMARK_SUMMARY_HEIGHT = 136;
+const BOOKMARK_TITLE_HEIGHT = 94;
 const BOOKMARK_BARE_HEIGHT = 46;
 
 /** The height a card should take for the metadata it ended up with. */
 export function bookmarkHeight(meta: LinkUnfurl): number {
   if (meta.imageBlobId) return BOOKMARK_LOADING_HEIGHT;
-  return meta.title ? BOOKMARK_TITLE_HEIGHT : BOOKMARK_BARE_HEIGHT;
+  if (!meta.title) return BOOKMARK_BARE_HEIGHT;
+  return meta.description ? BOOKMARK_SUMMARY_HEIGHT : BOOKMARK_TITLE_HEIGHT;
 }
 
-const PADDING = 12;
-const GAP = 6;
+const PADDING = 14;
+const GAP = 7;
 const FOOTER_HEIGHT = 16;
-const TITLE_SIZE = 14;
-const TITLE_LINE = TITLE_SIZE * 1.25;
-const DESCRIPTION_SIZE = 11;
-const DESCRIPTION_LINE = DESCRIPTION_SIZE * 1.35;
+const TITLE_SIZE = 16;
+const TITLE_LINE = TITLE_SIZE * 1.3;
+const DESCRIPTION_SIZE = 12;
+const DESCRIPTION_LINE = DESCRIPTION_SIZE * 1.4;
 const FOOTER_SIZE = 11;
 const MAX_TITLE_LINES = 2;
 const MAX_DESCRIPTION_LINES = 2;
 /** Below this the preview image is a sliver; the card drops it instead. */
-const MIN_IMAGE_HEIGHT = 40;
+const MIN_IMAGE_HEIGHT = 48;
+/** The card's own corners; the inset image keeps the shared media radius. */
+const CARD_RADIUS = 22;
 
 const ELLIPSIS = '…';
 
@@ -78,9 +82,8 @@ function clampLines(
 
 interface CardLayout {
   /**
-   * Height of the band above the text: the preview image, or the placeholder
-   * that stands in for it while the metadata is loading. 0 when there is no
-   * room for either.
+   * Drawn height of the preview image, or of the placeholder that stands in for
+   * it while the metadata is loading. 0 when there is no room for either.
    */
   imageHeight: number;
   titleLines: string[];
@@ -96,7 +99,7 @@ interface CardLayout {
  * Lay the card out from its current size rather than from the height constants,
  * so a card the user resized still renders sensibly. Blocks stack upwards from
  * the bottom edge — footer, description, title — and whatever room is left over
- * becomes the image band.
+ * becomes the image band, inset from the card edge on all four sides.
  */
 function cardLayout(props: BookmarkProps): CardLayout {
   const loading = props.status === 'loading';
@@ -126,7 +129,8 @@ function cardLayout(props: BookmarkProps): CardLayout {
     : top;
   const titleTop = titleHeight ? (top -= GAP + titleHeight) : top;
 
-  const available = top - PADDING;
+  // Two paddings: the inset above the image and the gap below it.
+  const available = top - PADDING * 2;
   const imageHeight =
     (props.imageBlobId || loading) && available >= MIN_IMAGE_HEIGHT
       ? available
@@ -177,7 +181,12 @@ export const bookmarkUtil: ShapeUtil<'bookmark'> = {
 
     const host = linkHostname(props.url);
     const layout = cardLayout(props);
-    const radius = Math.min(MEDIA_CORNER_RADIUS, w / 4, h / 4);
+    const radius = Math.min(CARD_RADIUS, w / 4, h / 4);
+    const imageRadius = Math.min(
+      MEDIA_CORNER_RADIUS,
+      layout.contentWidth / 4,
+      layout.imageHeight / 4,
+    );
     const clipId = `bookmark-clip-${shape.id}`;
     const imageClipId = `bookmark-image-clip-${shape.id}`;
     const shadowId = `bookmark-shadow-${shape.id}`;
@@ -199,33 +208,31 @@ export const bookmarkUtil: ShapeUtil<'bookmark'> = {
           </clipPath>
           {layout.imageHeight > 0 && (
             <clipPath id={imageClipId}>
-              {/* Square off the bottom corners: only the card's own top corners
-                  are rounded, and the text sits directly under the image. */}
-              <path
-                d={`M ${shape.x} ${shape.y + layout.imageHeight}
-                    L ${shape.x} ${shape.y + radius}
-                    A ${radius} ${radius} 0 0 1 ${shape.x + radius} ${shape.y}
-                    L ${shape.x + w - radius} ${shape.y}
-                    A ${radius} ${radius} 0 0 1 ${shape.x + w} ${shape.y + radius}
-                    L ${shape.x + w} ${shape.y + layout.imageHeight} Z`}
+              <rect
+                x={shape.x + PADDING}
+                y={shape.y + PADDING}
+                width={layout.contentWidth}
+                height={layout.imageHeight}
+                rx={imageRadius}
+                ry={imageRadius}
               />
             </clipPath>
           )}
           {shadow && (
             <filter
               id={shadowId}
-              x={shape.x - 16}
-              y={shape.y - 16}
-              width={w + 32}
-              height={h + 32}
+              x={shape.x - 24}
+              y={shape.y - 24}
+              width={w + 48}
+              height={h + 48}
               filterUnits="userSpaceOnUse"
             >
               <feDropShadow
                 dx={0}
-                dy={1}
-                stdDeviation={1}
+                dy={2}
+                stdDeviation={3}
                 floodColor="#000000"
-                floodOpacity={0.08}
+                floodOpacity={0.1}
               />
             </filter>
           )}
@@ -246,18 +253,18 @@ export const bookmarkUtil: ShapeUtil<'bookmark'> = {
         {layout.imageHeight > 0 && (
           <g clipPath={`url(#${imageClipId})`}>
             <rect
-              x={shape.x}
-              y={shape.y}
-              width={w}
+              x={shape.x + PADDING}
+              y={shape.y + PADDING}
+              width={layout.contentWidth}
               height={layout.imageHeight}
               fill="var(--color-muted)"
             />
             {props.imageBlobId && (
               <image
                 href={blobUrl(props.imageBlobId)}
-                x={shape.x}
-                y={shape.y}
-                width={w}
+                x={shape.x + PADDING}
+                y={shape.y + PADDING}
+                width={layout.contentWidth}
                 height={layout.imageHeight}
                 preserveAspectRatio="xMidYMid slice"
               />
@@ -333,7 +340,7 @@ export const bookmarkUtil: ShapeUtil<'bookmark'> = {
           ry={radius}
           fill="none"
           stroke="var(--color-border)"
-          strokeWidth={1.5}
+          strokeWidth={1}
           vectorEffect="non-scaling-stroke"
           pointerEvents="none"
         />
@@ -354,8 +361,14 @@ function LoadingLines({
 }) {
   return (
     <g fill="var(--color-muted)">
-      <rect x={x} y={y + 3} width={width} height={9} rx={4} />
-      <rect x={x} y={y + 19} width={width * 0.6} height={9} rx={4} />
+      <rect x={x} y={y + 4} width={width} height={10} rx={5} />
+      <rect
+        x={x}
+        y={y + TITLE_LINE + 4}
+        width={width * 0.6}
+        height={10}
+        rx={5}
+      />
     </g>
   );
 }
@@ -391,7 +404,7 @@ function Favicon({
         y={y}
         width={FOOTER_HEIGHT}
         height={FOOTER_HEIGHT}
-        rx={4}
+        rx={5}
         fill="var(--color-muted)"
       />
       <text

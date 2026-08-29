@@ -1737,7 +1737,7 @@ export function Canvas() {
       aria-label="Whiteboard canvas"
       aria-describedby="canvas-keyboard-help"
       tabIndex={0}
-      className="wb-canvas-surface absolute inset-0 z-[var(--z-canvas)] overflow-hidden bg-surface"
+      className="wb-canvas-surface absolute inset-0 z-[var(--z-canvas)] overflow-hidden bg-canvas"
       style={{ touchAction: 'none', cursor }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}

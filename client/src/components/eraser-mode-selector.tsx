@@ -1,4 +1,7 @@
-import { useCanvasUiStore, type EraserMode } from '@/canvas/use-canvas-ui-store';
+import {
+  useCanvasUiStore,
+  type EraserMode,
+} from '@/canvas/use-canvas-ui-store';
 import { Surface } from '@/components/ui/surface';
 import {
   Tooltip,
@@ -83,7 +86,9 @@ export function EraserModeSelector({ active }: { active: boolean }) {
   // flip either way. This is also the eraser hotkey's behaviour (press E while
   // erasing), so the two paths agree.
   const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) {
+    if (
+      !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)
+    ) {
       return;
     }
     event.preventDefault();
@@ -102,14 +107,14 @@ export function EraserModeSelector({ active }: { active: boolean }) {
     // and `grid-cols-2` is minmax(0,1fr) — tracks that will collapse to nothing
     // and let their contents overlap rather than widen the box. Sizing to
     // max-content also keeps the -translate-x-1/2 centring honest.
-    <div className="absolute bottom-full left-1/2 mb-3.5 w-max -translate-x-1/2">
+    <div className="absolute bottom-full left-1/2 mb-2.5 w-max -translate-x-1/2">
       <Surface
         mode="floating"
         chrome
         aria-hidden={!active}
         inert={!active}
         className={cn(
-          'rounded-xl border border-border/80 bg-surface/92 p-1 shadow-e4',
+          'rounded-toolbar border-transparent bg-surface p-1 tb-shell dark:border-border',
           'origin-bottom transition-[opacity,transform] duration-base ease-out-quart',
           'motion-reduce:transition-none',
           active
@@ -121,19 +126,21 @@ export function EraserModeSelector({ active }: { active: boolean }) {
           role="radiogroup"
           aria-label="Eraser mode"
           onKeyDown={onKeyDown}
-          className="relative grid grid-cols-2"
+          className="relative grid grid-cols-2 rounded-2xl bg-tb-track"
         >
-          {/* The chosen mode as a fill that slides between the two segments:
-              one moving mark instead of two chips lighting up, which is what
-              makes the pair read as a single switch. It takes the quieter
-              pressed idiom — the accent chip is already spent on the eraser
-              button below, and only the active glyph carries the hue. */}
+          {/* The chosen mode as a chip that slides between the two segments of
+              its recess: one moving mark instead of two chips lighting up,
+              which is what makes the pair read as a single switch. Same recess
+              and same flat chip as a group of keys on the bar — every control
+              in this stack marks a choice the one way, and the eraser below
+              wearing it too is the pair reading as one tool. */}
           <span
             aria-hidden="true"
             className={cn(
-              'pointer-events-none absolute inset-y-0 left-0 w-1/2 rounded-lg border border-border-strong/60 bg-panel shadow-xs',
+              'pointer-events-none absolute inset-y-[3px] left-[3px] w-[calc(50%-6px)] rounded-[13px] bg-tb-accent',
               'transition-transform duration-base ease-out-quart motion-reduce:transition-none',
-              eraserMode === 'precision' && 'translate-x-full',
+              // A segment's width, which the inset makes wider than the mark.
+              eraserMode === 'precision' && 'translate-x-[calc(100%+6px)]',
             )}
           />
           {MODES.map(({ mode, label, Glyph }) => {
@@ -151,10 +158,10 @@ export function EraserModeSelector({ active }: { active: boolean }) {
                       tabIndex={selected ? 0 : -1}
                       onClick={() => setEraserMode(mode)}
                       className={cn(
-                        'relative z-10 flex size-8 items-center justify-center rounded-lg',
+                        'relative z-10 flex size-9 items-center justify-center rounded-xl',
                         'transition-colors duration-fast ease-out-quart motion-reduce:transition-none',
                         selected
-                          ? 'text-fg font-medium'
+                          ? 'text-tb-accent-fg font-medium'
                           : 'text-fg-muted hover:text-fg',
                       )}
                     />

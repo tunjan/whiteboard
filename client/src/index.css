@@ -51,8 +51,12 @@
   color-scheme: light;
 
   /* Surfaces, back to front. Warm neutrals keep the canvas quiet without
-       making cards and controls look grey or muddy. */
-  --bg-canvas: #f7f6f3;
+       making cards and controls look grey or muddy.
+       The canvas is a few steps down from white rather than a hair off it,
+       because it is now the only thing separating the toolbar from the board:
+       the bar casts no shadow, so the edge between #ffffff and this is the
+       entire boundary. */
+  --bg-canvas: #f9f8f5;
   --bg-panel: #f3f2ef;
   --bg-surface: #ffffff;
   --bg-surface-hover: #faf9f7;
@@ -111,28 +115,31 @@
   --s-overlay:
     0 16px 40px -16px rgba(12, 10, 9, 0.22),
     0 4px 12px -6px rgba(12, 10, 9, 0.1);
-
-  /* Toolbar relief. The bar is lit from above: a white rim along its top
-       edge, a warm shade along its bottom, and a contact shadow under it that
-       fades out into a wide ambient one. Keys borrow the same light — idle
-       ones sit flush, and engaging one presses it into the bar. */
-  --tb-sheen-top: rgba(255, 255, 255, 0.7);
-  --tb-sheen-bottom: rgba(12, 10, 9, 0.04);
-  --tb-rim: rgba(255, 255, 255, 0.9);
-  --tb-rim-soft: rgba(255, 255, 255, 0.75);
-  --tb-groove: rgba(12, 10, 9, 0.07);
+  /* Wide and low. The bar is a card lying above the board rather than a
+       control stuck to it, so the shadow is mostly a large soft pool with a
+       hairline contact shade under the edge to keep it from drifting. */
   --s-toolbar:
-    0 1px 1px rgba(12, 10, 9, 0.05), 0 3px 6px -3px rgba(12, 10, 9, 0.1),
-    0 10px 20px -10px rgba(12, 10, 9, 0.16),
-    0 22px 44px -22px rgba(12, 10, 9, 0.24);
-  --s-key-hover: 0 1px 2px rgba(12, 10, 9, 0.07);
-  --s-key-inset: inset 0 1px 3px rgba(12, 10, 9, 0.16);
-  /* The selected chip is a well cut into the bar. On this theme the chip is
-       near-black, so the shaded top of the well is lost in it and the cue
-       that reads is the light pooling along the bottom lip. */
-  --s-key-chip:
-    inset 0 1px 2px rgba(12, 10, 9, 0.5),
-    inset 0 -1px 0 0 rgba(255, 255, 255, 0.15);
+    0 18px 40px -16px rgba(12, 10, 9, 0.18),
+    0 4px 10px -6px rgba(12, 10, 9, 0.08), 0 1px 2px rgba(12, 10, 9, 0.04);
+
+  /* The groove a group of keys sits in. Grouping is done by giving each group
+       its own recess rather than by ruling between them: a container says
+       "these belong together" at any bar width, where a rule has to be read.
+       The step down from white is the whole difference the flat selection chip
+       has to read against, since there is no shadow under it doing half that
+       work — so this value is set by eye against the chip, not derived. */
+  --tb-track: #f1f0ed;
+
+  /* The selected key, and every other "this is the chosen one" mark in the
+       toolbar family. It is the track's inverse — the recess filled back in
+       to white — so selection is a change of plane, not of relief and not of
+       hue: nothing on this bar is raised, and the blue stays spoken for by
+       primary actions, links and focus. */
+  --tb-accent: #ffffff;
+  --tb-accent-hover: #ffffff;
+  --tb-accent-fg: #0c0a09;
+  --tb-accent-ring: #78716c;
+  --tb-divider: #eceae5;
 
   --grid-minor: rgba(12, 10, 9, 0.05);
   --grid-major: rgba(12, 10, 9, 0.1);
@@ -226,21 +233,19 @@
   --s-panel: 0 4px 16px -8px rgba(0, 0, 0, 0.4), 0 1px 3px rgba(0, 0, 0, 0.28);
   --s-overlay:
     0 18px 44px -14px rgba(0, 0, 0, 0.58), 0 6px 16px -8px rgba(0, 0, 0, 0.36);
-
-  /* See light theme. */
-  --tb-sheen-top: rgba(255, 255, 255, 0.055);
-  --tb-sheen-bottom: rgba(0, 0, 0, 0.18);
-  --tb-rim: rgba(255, 255, 255, 0.08);
-  --tb-rim-soft: rgba(255, 255, 255, 0.06);
-  --tb-groove: rgba(0, 0, 0, 0.35);
   --s-toolbar:
-    0 1px 2px rgba(0, 0, 0, 0.4), 0 4px 8px -4px rgba(0, 0, 0, 0.4),
-    0 12px 24px -10px rgba(0, 0, 0, 0.5), 0 26px 50px -22px rgba(0, 0, 0, 0.6);
-  --s-key-hover: 0 1px 2px rgba(0, 0, 0, 0.35);
-  --s-key-inset: inset 0 1px 3px rgba(0, 0, 0, 0.55);
-  /* Mirror of the light theme: the chip flips to near-white here, so the
-       bottom lip disappears into it and the shaded top edge is what reads. */
-  --s-key-chip: inset 0 1px 3px rgba(12, 10, 9, 0.3);
+    0 20px 44px -16px rgba(0, 0, 0, 0.62), 0 4px 12px -6px rgba(0, 0, 0, 0.4),
+    0 1px 2px rgba(0, 0, 0, 0.3);
+
+  /* Same two-part relationship as the light theme, run the other way: on a
+       near-black bar the recess is the darker of the pair and the chosen key
+       is the lighter fill that replaces it. */
+  --tb-track: #1c1917;
+  --tb-accent: #57534e;
+  --tb-accent-hover: #57534e;
+  --tb-accent-fg: #fafaf9;
+  --tb-accent-ring: #a8a29e;
+  --tb-divider: #3b3733;
 
   --grid-minor: rgba(250, 250, 249, 0.06);
   --grid-major: rgba(250, 250, 249, 0.12);
@@ -297,6 +302,11 @@
   --radius-control: 8px;
   --radius-overlay: 12px;
   --radius-panel: 16px;
+  /* The bar's own corner. Rounder than a panel because it is a free-floating
+     slab over the canvas rather than a rectangle docked to an edge, and set
+     so the bar's boxes nest concentrically at its 4px padding:
+     bar 20 - 4 = group track 16 - 4 = key 12. */
+  --radius-toolbar: 20px;
   --radius-full: 9999px;
 
   /* Compatibility aliases while component call sites move to role names. */
@@ -390,6 +400,14 @@
   --color-inverse: var(--bg-inverse);
   --color-inverse-hover: var(--bg-inverse-hover);
   --color-scrim: var(--c-scrim);
+
+  /* ---------- Toolbar ---------- */
+  --color-tb-track: var(--tb-track);
+  --color-tb-accent: var(--tb-accent);
+  --color-tb-accent-hover: var(--tb-accent-hover);
+  --color-tb-accent-fg: var(--tb-accent-fg);
+  --color-tb-accent-ring: var(--tb-accent-ring);
+  --color-tb-divider: var(--tb-divider);
 
   /* ---------- Foregrounds / Ink ---------- */
   --color-fg: var(--fg);
@@ -646,6 +664,19 @@
   z-index: 20;
 }
 
+/* Docked to a shape rather than to the viewport corner. `useShapeAnchor` writes
+   the `translate` property, which composes with — rather than overwrites — the
+   `transform` that `.t-panel-slide` animates, so tracking the shape stays
+   instant while the open/close slide keeps its easing. The origin follows the
+   side the panel flipped to, so it grows out of the shape's edge. */
+.tool-panel-anchored[data-anchor-side='left'] {
+  transform-origin: top right;
+}
+
+.tool-panel-anchored[data-anchor-side='right'] {
+  transform-origin: top left;
+}
+
 .t-panel-slide {
   transform: translateY(var(--panel-translate-y));
   opacity: 0;
@@ -845,7 +876,7 @@
 }
 
 .equation-preview-box {
-  --fade-to: var(--color-canvas);
+  --fade-to: var(--color-panel);
 }
 
 .equation-output-preview {
@@ -933,56 +964,34 @@
 }
 
 /* ==========================================================================
- * 8. Toolbar relief
+ * 8. Toolbar surface
  *
- * The floating toolbar reads as a physical slab rather than a painted
- * rectangle: a lit top rim, a shaded bottom edge, and a contact shadow that
- * fades into a wide ambient one. Its keys sit in that same light — a key
- * rises a little under the cursor, the active key stands proud of the bar,
- * and any key sinks into it while held. Colour values live in section 1.
+ * The floating toolbar is a flat sheet — no rim along the top edge, no
+ * groove along the bottom, no gradient down the face, no key pressed into or
+ * standing proud of the surface. The one bit of relief it does carry is a
+ * soft ambient shadow (`--s-toolbar`) lifting the whole bar off the board,
+ * kept low and diffuse so it reads as "floating slab" rather than moulded.
+ *
+ * The instruments are the only objects in the scene with any modelling on
+ * them: no rim, groove, or per-key relief competes with them, and no key is
+ * raised or sunk. The keys carry state by swapping flat planes — a group is a
+ * recess (`--tb-track`) and the chosen key in it is that recess filled back
+ * to white (`--tb-accent`) — so the only shadow anywhere is the one under the
+ * card itself. Values live in section 1.
+ *
+ * This rule is deliberately unlayered, so it beats the `shadow-panel` that
+ * `Surface mode="floating"` and the `shadow-e1` that `Button variant=
+ * "outline"` bring with them. One class governs the whole toolbar family —
+ * the bar, the properties pill, the eraser's mode switch, the show-toolbar
+ * pill — rather than four call sites each fighting a utility.
  * ========================================================================== */
 
 .tb-shell {
-  background-image: linear-gradient(
-    to bottom,
-    var(--tb-sheen-top),
-    transparent 42%,
-    var(--tb-sheen-bottom)
-  );
-  box-shadow:
-    inset 0 1px 0 0 var(--tb-rim),
-    inset 0 -1px 0 0 var(--tb-groove),
-    var(--s-toolbar);
+  box-shadow: var(--s-toolbar);
 }
 
 .tb-key {
-  transition-property:
-    color, background-color, border-color, box-shadow, transform;
-}
-
-.tb-key:hover {
-  box-shadow:
-    inset 0 1px 0 0 var(--tb-rim-soft),
-    var(--s-key-hover);
-}
-
-/* After `.tb-key:hover` so the engaged states keep their own relief while the
-   pointer is over them. Both sit *in* the bar rather than on it: idle keys are
-   flush, and engaging one presses it in. */
-.tb-key-chip,
-.tb-key-chip:hover {
-  box-shadow: var(--s-key-chip);
-}
-
-.tb-key-sunken,
-.tb-key-sunken:hover {
-  box-shadow: var(--s-key-inset);
-}
-
-/* Last: pressing anything sinks it, whatever it was doing before. Pairs with
-   the 1px downward nudge every Button already takes on `:active`. */
-.tb-key:active {
-  box-shadow: var(--s-key-inset);
+  transition-property: color, background-color, border-color;
 }
 
 @media (prefers-reduced-motion: reduce) {

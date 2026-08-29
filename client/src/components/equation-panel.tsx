@@ -61,6 +61,7 @@ import { useSelectionStore } from '@/canvas/use-selection-store';
 import { paletteColors } from '@/canvas/use-style-store';
 import { ToolPanelPresence } from '@/components/tool-panel-presence';
 import { Button } from '@/components/ui/button';
+import { PanelLabel } from '@/components/ui/panel-label';
 import { Surface } from '@/components/ui/surface';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui/toast';
@@ -100,6 +101,21 @@ const STYLES = [
     hint: 'Set to sit in a line of text: limits beside ∑, smaller fractions',
   },
 ] as const;
+
+/**
+ * A row of mutually exclusive choices — size, style — as a recess with the
+ * chosen segment filled back in to white. The same track and the same flat
+ * chip the toolbar marks a selected key with, so "this one is chosen" looks
+ * the same wherever the board says it. Radii are concentric: 12px track less
+ * its own 2px padding leaves 10px on the segment.
+ */
+const SEGMENTED_TRACK = 'w-auto flex-1 rounded-xl bg-tb-track p-0.5';
+
+const SEGMENTED_ITEM =
+  'h-8 grow basis-0 rounded-[10px] px-2.5 text-xs font-medium text-fg-muted ' +
+  'hover:bg-tb-accent/60 hover:text-fg ' +
+  'data-[state=on]:bg-tb-accent data-[state=on]:text-tb-accent-fg ' +
+  'aria-pressed:bg-tb-accent aria-pressed:text-tb-accent-fg';
 
 /**
  * Space between one line of a derivation and the next, as a fraction of the
@@ -373,6 +389,7 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
   const errorId = `equation-error-${shape.id}`;
   const listId = `equation-completions-${shape.id}`;
   const titleId = `equation-panel-title-${shape.id}`;
+  const sourceId = `equation-source-${shape.id}`;
   const currentKey = shape.props.latex.trim();
   const currentRender = useEquationRender(currentKey, inline);
 
@@ -741,413 +758,472 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
     });
   };
 
+  // A tinted tray holding two inset white cards: the equation itself above,
+  // and how it is set below. Same construction as the graph panel, so the two
+  // contextual panels read as one family — and so each group of controls is
+  // stated by a card it stands in rather than by the gap above it.
   return (
     <TooltipProvider delay={300}>
       <Surface
         role="region"
         aria-labelledby={titleId}
-        className="touch-targets flex max-h-[calc(100dvh-7rem-env(safe-area-inset-top))] w-[min(23rem,calc(100vw-2rem))] flex-col gap-3.5 overflow-y-auto overscroll-contain p-3.5 shadow-e2 sm:max-h-[calc(100dvh-6.25rem-env(safe-area-inset-top))]"
+        mode="docked"
+        className="touch-targets flex max-h-[calc(100dvh-7rem-env(safe-area-inset-top))] w-[min(23rem,calc(100vw-2rem))] flex-col gap-1 overflow-hidden p-1 shadow-e2 sm:max-h-[calc(100dvh-6.25rem-env(safe-area-inset-top))]"
       >
-        <h2 id={titleId} className="sr-only">
-          Equation
-        </h2>
-
-        <header className="flex items-center justify-end gap-0.5">
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label="Add equation below"
-                  disabled={!currentKey}
-                  onClick={addEquationBelow}
-                  className="rounded-lg text-fg-secondary hover:bg-panel hover:text-fg disabled:opacity-40"
-                />
-              }
-            >
-              <CornerDownLeft className="size-4" aria-hidden="true" />
-            </TooltipTrigger>
-            <TooltipContent side="top">
-              Add equation below (⌘/Ctrl + Enter)
-            </TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label={copied ? 'LaTeX copied' : 'Copy LaTeX'}
-                  disabled={!currentKey}
-                  onClick={(event) => void copyLatex(event.altKey)}
-                  className="rounded-lg text-fg-secondary hover:bg-panel hover:text-fg disabled:opacity-40"
-                />
-              }
-            >
-              {copied ? (
-                <Check className="size-4 text-success" aria-hidden="true" />
-              ) : (
-                <Copy className="size-4" aria-hidden="true" />
-              )}
-            </TooltipTrigger>
-            <TooltipContent side="top">
-              Copy as {inline ? 'inline' : 'display'} math (Alt: body only)
-            </TooltipContent>
-          </Tooltip>
-        </header>
-
-        {/* Plain-language description → LaTeX, via the model. Only shown where
-            the server is actually configured to answer it. */}
-        {aiEnabled ? (
-          <div className="flex items-start gap-1.5">
-            <Textarea
-              aria-label="Describe an equation to generate its LaTeX"
-              value={prompt}
-              onChange={(event) => setPrompt(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key !== 'Enter' || event.shiftKey) return;
-                event.preventDefault();
-                void generateFromPrompt();
-              }}
-              placeholder="Describe an equation… “quadratic equation”"
-              rows={1}
-              disabled={generating}
-              className="min-h-9 flex-1 resize-none py-2 text-sm text-fg"
-            />
+        {/* On the tray, above both cards: what this panel is, and the two
+            actions that are about the equation as a whole rather than about
+            anything inside one card. */}
+        <header className="flex shrink-0 items-center justify-between gap-2 px-2 pt-0.5">
+          <h2 id={titleId} className="type-panel-title">
+            Equation
+          </h2>
+          <div className="flex items-center gap-0.5">
             <Tooltip>
               <TooltipTrigger
                 render={
                   <Button
-                    variant="outline"
+                    variant="ghost"
                     size="icon-sm"
-                    aria-label="Generate LaTeX"
-                    disabled={!prompt.trim() || generating}
-                    onClick={() => void generateFromPrompt()}
-                    className="mt-0.5 shrink-0 rounded-lg"
+                    aria-label="Add equation below"
+                    disabled={!currentKey}
+                    onClick={addEquationBelow}
+                    className="rounded-lg disabled:opacity-40"
                   />
                 }
               >
-                {generating ? (
-                  <Loader2
-                    className="size-4 animate-spin"
-                    aria-hidden="true"
+                <CornerDownLeft className="size-4" aria-hidden="true" />
+              </TooltipTrigger>
+              <TooltipContent side="top">
+                Add equation below (⌘/Ctrl + Enter)
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={copied ? 'LaTeX copied' : 'Copy LaTeX'}
+                    disabled={!currentKey}
+                    onClick={(event) => void copyLatex(event.altKey)}
+                    className="rounded-lg disabled:opacity-40"
                   />
+                }
+              >
+                {copied ? (
+                  <Check className="size-4 text-success" aria-hidden="true" />
                 ) : (
-                  <Sparkles className="size-4" aria-hidden="true" />
+                  <Copy className="size-4" aria-hidden="true" />
                 )}
               </TooltipTrigger>
               <TooltipContent side="top">
-                Generate from description
+                Copy as {inline ? 'inline' : 'display'} math (Alt: body only)
               </TooltipContent>
             </Tooltip>
           </div>
-        ) : null}
+        </header>
 
-        {/* Source field, with the completion list hanging off its bottom edge. */}
-        <div className="relative">
-          <Textarea
-            ref={sourceRef}
-            id={`equation-source-${shape.id}`}
-            aria-label="LaTeX source"
-            aria-invalid={error ? true : undefined}
-            aria-describedby={messageId}
-            aria-autocomplete="list"
-            aria-expanded={suggestions.length > 0}
-            aria-controls={suggestions.length ? listId : undefined}
-            aria-activedescendant={
-              suggestions.length ? `${listId}-${activeSuggestion}` : undefined
-            }
-            value={shape.props.latex}
-            onChange={(event) => {
-              updateLatex(event.target.value);
-              refreshSuggestions(event.target);
-            }}
-            onKeyDown={handleKeyDown}
-            onBlur={closeSuggestions}
-            onPaste={(event) => {
-              const pasted = event.clipboardData.getData('text/plain');
-              const unwrapped = normalizePastedLatex(pasted);
-              if (unwrapped === pasted) return;
-              const target = event.currentTarget;
-              const start = target.selectionStart ?? target.value.length;
-              const end = target.selectionEnd ?? start;
-              event.preventDefault();
-              applyEdit({
-                value:
-                  target.value.slice(0, start) +
-                  unwrapped +
-                  target.value.slice(end),
-                caret: start + unwrapped.length,
-              });
-            }}
-            placeholder={String.raw`\frac{a}{b}`}
-            spellCheck={false}
-            rows={3}
-            className="min-h-24 w-full resize-y font-mono text-sm leading-5 text-fg"
-          />
-
-          {suggestions.length ? (
-            <ul
-              id={listId}
-              role="listbox"
-              aria-label="LaTeX commands"
-              className="absolute inset-x-0 top-full z-10 mt-1 overflow-hidden rounded-xl border border-border bg-surface py-1 shadow-e3"
+        {/* Card one: the equation. Source in, preview out, and anything wrong
+            with it named in between. This is the only part that scrolls. */}
+        <div className="flex min-h-0 flex-1 flex-col divide-y divide-border/60 overflow-y-auto overscroll-contain rounded-overlay border border-border bg-surface shadow-e1 [--chrome-hover:var(--color-panel)]">
+          {/* Plain-language description → LaTeX, via the model. Only shown where
+              the server is actually configured to answer it. */}
+          {aiEnabled ? (
+            <section
+              aria-label="Generate from a description"
+              className="flex flex-col gap-1.5 p-3"
             >
-              {suggestions.map((completion, index) => (
-                <li
-                  key={completion.command}
-                  id={`${listId}-${index}`}
-                  role="option"
-                  aria-selected={index === activeSuggestion}
-                  // Keep the caret in the field: a blur would close the list
-                  // before the click that chose from it landed.
-                  onPointerDown={(event) => event.preventDefault()}
-                  onPointerEnter={() => setActiveSuggestion(index)}
-                  onClick={() => acceptSuggestion(completion)}
-                  className={cn(
-                    'flex cursor-pointer items-baseline justify-between gap-3 px-2.5 py-1.5',
-                    index === activeSuggestion && 'bg-panel',
-                  )}
+              <PanelLabel>Describe</PanelLabel>
+              <div className="flex items-start gap-1.5">
+                <Textarea
+                  aria-label="Describe an equation to generate its LaTeX"
+                  value={prompt}
+                  onChange={(event) => setPrompt(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key !== 'Enter' || event.shiftKey) return;
+                    event.preventDefault();
+                    void generateFromPrompt();
+                  }}
+                  placeholder="Describe an equation… “quadratic equation”"
+                  rows={1}
+                  disabled={generating}
+                  className="min-h-9 flex-1 resize-none rounded-lg py-2 text-sm text-fg"
+                />
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        variant="outline"
+                        size="icon-sm"
+                        aria-label="Generate LaTeX"
+                        disabled={!prompt.trim() || generating}
+                        onClick={() => void generateFromPrompt()}
+                        className="mt-0.5 size-9 shrink-0 rounded-lg"
+                      />
+                    }
+                  >
+                    {generating ? (
+                      <Loader2
+                        className="size-4 animate-spin"
+                        aria-hidden="true"
+                      />
+                    ) : (
+                      <Sparkles className="size-4" aria-hidden="true" />
+                    )}
+                  </TooltipTrigger>
+                  <TooltipContent side="top">
+                    Generate from description
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+            </section>
+          ) : null}
+
+          {/* Source field, with the completion list hanging off its bottom edge. */}
+          <section
+            aria-label="LaTeX source"
+            className="flex flex-col gap-1.5 p-3"
+          >
+            <PanelLabel>LaTeX</PanelLabel>
+            <div className="relative">
+              <Textarea
+                ref={sourceRef}
+                id={sourceId}
+                aria-label="LaTeX source"
+                aria-invalid={error ? true : undefined}
+                aria-describedby={messageId}
+                aria-autocomplete="list"
+                aria-expanded={suggestions.length > 0}
+                aria-controls={suggestions.length ? listId : undefined}
+                aria-activedescendant={
+                  suggestions.length
+                    ? `${listId}-${activeSuggestion}`
+                    : undefined
+                }
+                value={shape.props.latex}
+                onChange={(event) => {
+                  updateLatex(event.target.value);
+                  refreshSuggestions(event.target);
+                }}
+                onKeyDown={handleKeyDown}
+                onBlur={closeSuggestions}
+                onPaste={(event) => {
+                  const pasted = event.clipboardData.getData('text/plain');
+                  const unwrapped = normalizePastedLatex(pasted);
+                  if (unwrapped === pasted) return;
+                  const target = event.currentTarget;
+                  const start = target.selectionStart ?? target.value.length;
+                  const end = target.selectionEnd ?? start;
+                  event.preventDefault();
+                  applyEdit({
+                    value:
+                      target.value.slice(0, start) +
+                      unwrapped +
+                      target.value.slice(end),
+                    caret: start + unwrapped.length,
+                  });
+                }}
+                placeholder={String.raw`\frac{a}{b}`}
+                spellCheck={false}
+                rows={3}
+                className="min-h-24 w-full resize-y rounded-lg font-mono text-sm leading-5 text-fg"
+              />
+
+              {suggestions.length ? (
+                <ul
+                  id={listId}
+                  role="listbox"
+                  aria-label="LaTeX commands"
+                  className="absolute inset-x-0 top-full z-10 mt-1 overflow-hidden rounded-overlay border border-border bg-surface p-1 shadow-e3"
                 >
-                  <code className="truncate font-mono text-xs text-fg">
-                    {completion.command}
-                  </code>
-                  <span className="shrink-0 text-2xs text-fg-muted">
-                    {completion.hint}
+                  {suggestions.map((completion, index) => (
+                    <li
+                      key={completion.command}
+                      id={`${listId}-${index}`}
+                      role="option"
+                      aria-selected={index === activeSuggestion}
+                      // Keep the caret in the field: a blur would close the list
+                      // before the click that chose from it landed.
+                      onPointerDown={(event) => event.preventDefault()}
+                      onPointerEnter={() => setActiveSuggestion(index)}
+                      onClick={() => acceptSuggestion(completion)}
+                      className={cn(
+                        'flex cursor-pointer items-baseline justify-between gap-3 rounded-md px-2 py-1.5',
+                        index === activeSuggestion && 'bg-panel',
+                      )}
+                    >
+                      <code className="truncate font-mono text-xs text-fg">
+                        {completion.command}
+                      </code>
+                      <span className="shrink-0 text-2xs text-fg-muted">
+                        {completion.hint}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          </section>
+
+          {/* Live canvas preview. */}
+          <section aria-label="Preview" className="flex flex-col gap-1.5 p-3">
+            <PanelLabel>Preview</PanelLabel>
+            <div
+              ref={previewRef}
+              data-overflow={previewOverflowing ? true : undefined}
+              aria-busy={previewStale || undefined}
+              className="equation-fade-end equation-preview-box scrollbar-none flex min-h-16 items-center justify-center overflow-x-auto rounded-lg bg-panel p-3 text-center"
+            >
+              {!ready && !loadError ? (
+                <span role="status" className="text-xs text-fg-muted">
+                  Preparing renderer — what you type is saved.
+                </span>
+              ) : !currentKey ? (
+                <span role="status" className="text-xs text-fg-muted">
+                  Start typing to preview the equation.
+                </span>
+              ) : previewRender ? (
+                <div
+                  role="img"
+                  aria-label={`Preview of equation: ${currentKey}`}
+                  className={cn(
+                    'equation-output-preview',
+                    previewStale && 'opacity-60',
+                  )}
+                  style={{ color: shape.props.color }}
+                  dangerouslySetInnerHTML={{ __html: previewRender.svg }}
+                />
+              ) : (
+                <span role="status" className="text-xs text-fg-muted">
+                  Rendering…
+                </span>
+              )}
+            </div>
+          </section>
+
+          {error ? (
+            <div className="p-3">
+              <div
+                id={errorId}
+                role="alert"
+                className="flex flex-col gap-1.5 rounded-lg border border-danger-border bg-danger-bg p-2.5 text-xs"
+              >
+                <div className="flex items-start gap-1.5">
+                  <AlertCircle
+                    className="mt-0.5 size-3.5 shrink-0 text-danger"
+                    aria-hidden="true"
+                  />
+                  <span className="min-w-0 text-danger">{error}</span>
+                </div>
+                {errorExcerpt ? (
+                  <button
+                    type="button"
+                    onClick={() => errorSpan && focusInput(errorSpan)}
+                    className="min-w-0 truncate rounded-md border border-danger-border/50 bg-surface/90 px-1.5 py-1 text-left font-mono text-2xs text-danger"
+                  >
+                    {errorExcerpt.clippedStart ? '…' : null}
+                    {errorExcerpt.before}
+                    <span className="rounded-xs bg-danger/15 px-0.5 font-semibold underline decoration-wavy underline-offset-2">
+                      {errorExcerpt.marked}
+                    </span>
+                    {errorExcerpt.after}
+                    {errorExcerpt.clippedEnd ? '…' : null}
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+
+          {/* A fault in the source, named while it is still being written.
+              Suppressed once MathJax has failed: the block above is then saying
+              the same thing with the renderer's own words. */}
+          {!error && problem && problemExcerpt ? (
+            <div className="p-3">
+              <div
+                id={problemId}
+                role="status"
+                className="flex flex-col gap-1.5 rounded-lg border border-warning-border bg-warning-bg p-2.5 text-xs"
+              >
+                <div className="flex items-start gap-1.5">
+                  <AlertCircle
+                    className="mt-0.5 size-3.5 shrink-0 text-warning"
+                    aria-hidden="true"
+                  />
+                  <span className="min-w-0 text-warning">
+                    {problem.message}
                   </span>
-                </li>
-              ))}
-            </ul>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => focusInput(problem.span)}
+                    className="min-w-0 flex-1 truncate rounded-md border border-warning-border/60 bg-surface/90 px-1.5 py-1 text-left font-mono text-2xs text-warning"
+                  >
+                    {problemExcerpt.clippedStart ? '…' : null}
+                    {problemExcerpt.before}
+                    <span className="rounded-xs bg-warning/15 px-0.5 font-semibold underline decoration-wavy underline-offset-2">
+                      {problemExcerpt.marked}
+                    </span>
+                    {problemExcerpt.after}
+                    {problemExcerpt.clippedEnd ? '…' : null}
+                  </button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    // Keep the caret in the field: the repair is written through
+                    // the field's own insertion path, which needs it focused to
+                    // land on the undo stack.
+                    onPointerDown={(event) => event.preventDefault()}
+                    onClick={() => applyEdit(problem.fix)}
+                    className="h-6 shrink-0 rounded-md px-2 text-2xs font-medium text-warning hover:bg-warning/10"
+                  >
+                    {problem.action}
+                  </Button>
+                </div>
+              </div>
+            </div>
           ) : null}
         </div>
 
-        {/* Live canvas preview. */}
-        <div
-          ref={previewRef}
-          data-overflow={previewOverflowing ? true : undefined}
-          aria-busy={previewStale || undefined}
-          className="equation-fade-end equation-preview-box scrollbar-none flex min-h-16 items-center justify-center overflow-x-auto rounded-xl bg-canvas/60 p-3 text-center"
-        >
-          {!ready && !loadError ? (
-            <span role="status" className="text-xs text-fg-muted">
-              Preparing renderer — what you type is saved.
-            </span>
-          ) : !currentKey ? (
-            <span role="status" className="text-xs text-fg-muted">
-              Start typing to preview the equation.
-            </span>
-          ) : previewRender ? (
+        {/* Card two: colour, size and style — the only things about an equation
+            that aren't in its source, and so the only controls left. Each is a
+            labelled row, ruled off from the next. */}
+        <div className="flex shrink-0 flex-col divide-y divide-border/60 rounded-overlay border border-border bg-surface shadow-e1 [--chrome-hover:var(--color-panel)]">
+          <section
+            aria-label="Color"
+            className="flex flex-col gap-1.5 px-3 pt-2.5 pb-3"
+          >
+            <PanelLabel>Color</PanelLabel>
             <div
-              role="img"
-              aria-label={`Preview of equation: ${currentKey}`}
-              className={cn(
-                'equation-output-preview',
-                previewStale && 'opacity-60',
-              )}
-              style={{ color: shape.props.color }}
-              dangerouslySetInnerHTML={{ __html: previewRender.svg }}
-            />
-          ) : (
-            <span role="status" className="text-xs text-fg-muted">
-              Rendering…
-            </span>
-          )}
-        </div>
+              role="radiogroup"
+              aria-label="Equation color"
+              className="grid grid-cols-4 gap-1.5"
+            >
+              {swatches.map((paletteColor, index) => {
+                const active = shape.props.color === paletteColor.value;
+                return (
+                  <Tooltip key={paletteColor.value}>
+                    <TooltipTrigger
+                      render={
+                        <button
+                          ref={(node) => {
+                            swatchRefs.current[index] = node;
+                          }}
+                          type="button"
+                          role="radio"
+                          aria-label={paletteColor.name}
+                          aria-checked={active}
+                          tabIndex={active ? 0 : -1}
+                          onClick={() => applyColor(paletteColor.value)}
+                          onKeyDown={(event) => {
+                            const delta =
+                              event.key === 'ArrowRight' ||
+                              event.key === 'ArrowDown'
+                                ? 1
+                                : event.key === 'ArrowLeft' ||
+                                    event.key === 'ArrowUp'
+                                  ? -1
+                                  : 0;
+                            if (!delta) return;
+                            event.preventDefault();
+                            moveSwatchFocus(index, delta);
+                          }}
+                          className="flex h-8 w-full items-center justify-center rounded-md transition-colors duration-150 ease-out hover:bg-panel active:scale-[0.98] motion-reduce:transition-none"
+                        />
+                      }
+                    >
+                      <span
+                        className={cn(
+                          'size-5 rounded-full border',
+                          active &&
+                            'ring-2 ring-ring ring-offset-2 ring-offset-surface',
+                        )}
+                        style={{
+                          backgroundColor: paletteColor.value,
+                          borderColor: swatchBorder(paletteColor.value),
+                        }}
+                      />
+                    </TooltipTrigger>
+                    <TooltipContent side="top">
+                      {paletteColor.name}
+                    </TooltipContent>
+                  </Tooltip>
+                );
+              })}
+            </div>
+          </section>
 
-        {error ? (
-          <div
-            id={errorId}
-            role="alert"
-            className="flex flex-col gap-1.5 rounded-xl border border-danger-border bg-danger-bg p-2.5 text-xs"
+          <section
+            aria-label="Size"
+            className="flex items-center justify-between gap-3 px-3 py-2"
           >
-            <div className="flex items-start gap-1.5">
-              <AlertCircle
-                className="mt-0.5 size-3.5 shrink-0 text-danger"
-                aria-hidden="true"
-              />
-              <span className="min-w-0 text-danger">{error}</span>
-            </div>
-            {errorExcerpt ? (
-              <button
-                type="button"
-                onClick={() => errorSpan && focusInput(errorSpan)}
-                className="min-w-0 truncate rounded-md border border-danger-border/50 bg-surface/90 px-1.5 py-1 text-left font-mono text-2xs text-danger"
-              >
-                {errorExcerpt.clippedStart ? '…' : null}
-                {errorExcerpt.before}
-                <span className="rounded-xs bg-danger/15 px-0.5 font-semibold underline decoration-wavy underline-offset-2">
-                  {errorExcerpt.marked}
-                </span>
-                {errorExcerpt.after}
-                {errorExcerpt.clippedEnd ? '…' : null}
-              </button>
-            ) : null}
-          </div>
-        ) : null}
+            <PanelLabel>Size</PanelLabel>
+            <ToggleGroup
+              className={SEGMENTED_TRACK}
+              spacing={0.5}
+              aria-label="Equation size"
+              value={[String(Math.round(shape.props.fontSize))]}
+              onValueChange={(values) => {
+                const next = values[0];
+                if (next) applyFontSize(Number(next));
+              }}
+            >
+              {FONT_SIZES.map((size) => (
+                <Tooltip key={size}>
+                  <TooltipTrigger
+                    render={
+                      <ToggleGroupItem
+                        className={SEGMENTED_ITEM}
+                        value={String(size)}
+                        aria-label={`Size ${size}`}
+                      />
+                    }
+                  >
+                    {size}
+                  </TooltipTrigger>
+                  <TooltipContent side="top">Size {size}</TooltipContent>
+                </Tooltip>
+              ))}
+            </ToggleGroup>
+          </section>
 
-        {/* A fault in the source, named while it is still being written.
-            Suppressed once MathJax has failed: the block above is then saying
-            the same thing with the renderer's own words. */}
-        {!error && problem && problemExcerpt ? (
-          <div
-            id={problemId}
-            role="status"
-            className="flex flex-col gap-1.5 rounded-xl border border-warning-border bg-warning-bg p-2.5 text-xs"
+          {/* Display or text style. Not a property of the source — the same
+              LaTeX is valid in both — so it belongs beside colour and size
+              rather than in the field. */}
+          <section
+            aria-label="Style"
+            className="flex items-center justify-between gap-3 px-3 py-2"
           >
-            <div className="flex items-start gap-1.5">
-              <AlertCircle
-                className="mt-0.5 size-3.5 shrink-0 text-warning"
-                aria-hidden="true"
-              />
-              <span className="min-w-0 text-warning">{problem.message}</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <button
-                type="button"
-                onClick={() => focusInput(problem.span)}
-                className="min-w-0 flex-1 truncate rounded-md border border-warning-border/60 bg-surface/90 px-1.5 py-1 text-left font-mono text-2xs text-warning"
-              >
-                {problemExcerpt.clippedStart ? '…' : null}
-                {problemExcerpt.before}
-                <span className="rounded-xs bg-warning/15 px-0.5 font-semibold underline decoration-wavy underline-offset-2">
-                  {problemExcerpt.marked}
-                </span>
-                {problemExcerpt.after}
-                {problemExcerpt.clippedEnd ? '…' : null}
-              </button>
-              <Button
-                variant="ghost"
-                size="sm"
-                // Keep the caret in the field: the repair is written through
-                // the field's own insertion path, which needs it focused to
-                // land on the undo stack.
-                onPointerDown={(event) => event.preventDefault()}
-                onClick={() => applyEdit(problem.fix)}
-                className="h-6 shrink-0 rounded-md px-2 text-2xs font-medium text-warning hover:bg-warning/10"
-              >
-                {problem.action}
-              </Button>
-            </div>
-          </div>
-        ) : null}
-
-        {/* Colour, size and style: the only things about an equation that
-            aren't in its source, and so the only controls left in the panel. */}
-        <div
-          role="radiogroup"
-          aria-label="Equation color"
-          className="grid grid-cols-4 gap-1.5"
-        >
-          {swatches.map((paletteColor, index) => {
-            const active = shape.props.color === paletteColor.value;
-            return (
-              <Tooltip key={paletteColor.value}>
-                <TooltipTrigger
-                  render={
-                    <button
-                      ref={(node) => {
-                        swatchRefs.current[index] = node;
-                      }}
-                      type="button"
-                      role="radio"
-                      aria-label={paletteColor.name}
-                      aria-checked={active}
-                      tabIndex={active ? 0 : -1}
-                      onClick={() => applyColor(paletteColor.value)}
-                      onKeyDown={(event) => {
-                        const delta =
-                          event.key === 'ArrowRight' ||
-                          event.key === 'ArrowDown'
-                            ? 1
-                            : event.key === 'ArrowLeft' ||
-                                event.key === 'ArrowUp'
-                              ? -1
-                              : 0;
-                        if (!delta) return;
-                        event.preventDefault();
-                        moveSwatchFocus(index, delta);
-                      }}
-                      className="flex h-8 w-full items-center justify-center rounded-md transition-colors duration-150 ease-out hover:bg-panel active:scale-[0.98] motion-reduce:transition-none"
-                    />
-                  }
-                >
-                  <span
-                    className={cn(
-                      'size-5 rounded-full border',
-                      active &&
-                        'ring-2 ring-ring ring-offset-2 ring-offset-surface',
-                    )}
-                    style={{
-                      backgroundColor: paletteColor.value,
-                      borderColor: swatchBorder(paletteColor.value),
-                    }}
-                  />
-                </TooltipTrigger>
-                <TooltipContent side="top">{paletteColor.name}</TooltipContent>
-              </Tooltip>
-            );
-          })}
+            <PanelLabel>Style</PanelLabel>
+            <ToggleGroup
+              className={SEGMENTED_TRACK}
+              spacing={0.5}
+              aria-label="Equation style"
+              value={[inline ? 'inline' : 'display']}
+              onValueChange={(values) => {
+                const next = values[0];
+                if (next) applyInline(next === 'inline');
+              }}
+            >
+              {STYLES.map((style) => (
+                <Tooltip key={style.label}>
+                  <TooltipTrigger
+                    render={
+                      <ToggleGroupItem
+                        className={SEGMENTED_ITEM}
+                        value={style.inline ? 'inline' : 'display'}
+                        aria-label={style.label}
+                      />
+                    }
+                  >
+                    {style.label}
+                  </TooltipTrigger>
+                  <TooltipContent side="top">{style.hint}</TooltipContent>
+                </Tooltip>
+              ))}
+            </ToggleGroup>
+          </section>
         </div>
-
-        <ToggleGroup
-          className="w-full"
-          spacing={1.5}
-          aria-label="Equation size"
-          value={[String(Math.round(shape.props.fontSize))]}
-          onValueChange={(values) => {
-            const next = values[0];
-            if (next) applyFontSize(Number(next));
-          }}
-        >
-          {FONT_SIZES.map((size) => (
-            <Tooltip key={size}>
-              <TooltipTrigger
-                render={
-                  <ToggleGroupItem
-                    className="grow basis-0"
-                    value={String(size)}
-                    aria-label={`Size ${size}`}
-                  />
-                }
-              >
-                {size}
-              </TooltipTrigger>
-              <TooltipContent side="top">Size {size}</TooltipContent>
-            </Tooltip>
-          ))}
-        </ToggleGroup>
-
-        {/* Display or text style. Not a property of the source — the same
-            LaTeX is valid in both — so it belongs beside colour and size
-            rather than in the field. */}
-        <ToggleGroup
-          className="w-full"
-          spacing={1.5}
-          aria-label="Equation style"
-          value={[inline ? 'inline' : 'display']}
-          onValueChange={(values) => {
-            const next = values[0];
-            if (next) applyInline(next === 'inline');
-          }}
-        >
-          {STYLES.map((style) => (
-            <Tooltip key={style.label}>
-              <TooltipTrigger
-                render={
-                  <ToggleGroupItem
-                    className="grow basis-0"
-                    value={style.inline ? 'inline' : 'display'}
-                    aria-label={style.label}
-                  />
-                }
-              >
-                {style.label}
-              </TooltipTrigger>
-              <TooltipContent side="top">{style.hint}</TooltipContent>
-            </Tooltip>
-          ))}
-        </ToggleGroup>
       </Surface>
     </TooltipProvider>
   );

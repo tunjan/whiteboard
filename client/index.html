@@ -11,6 +11,29 @@
     <meta name="description" content="A collaborative digital whiteboard for sketches, math equations, graphs, notes, and real-time tutoring." />
     <link rel="icon" type="image/png" href="/best-whiteboard-favicon.png" />
     <link rel="apple-touch-icon" href="/best-whiteboard-apple-touch-icon.png" />
+
+    <!--
+      Link previews. The image is written as a site-root path and made absolute
+      by the server for the origin the page was served from (see
+      `server/src/app-shell.ts`): unfurlers — Slack, iMessage, and this app's
+      own /api/links — do not reliably resolve a relative one. There is no
+      og:url on purpose, so a shared board link previews as itself rather than
+      as the site root.
+    -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Whiteboard" />
+    <meta property="og:title" content="Whiteboard — a collaborative canvas" />
+    <meta property="og:description" content="Sketches, math equations, graphs and notes on one infinite canvas, with voice and real-time collaboration." />
+    <meta property="og:image" content="/best-whiteboard-og.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Whiteboard — a collaborative canvas, with a hand-drawn sine graph and a second person's cursor." />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Whiteboard — a collaborative canvas" />
+    <meta name="twitter:description" content="Sketches, math equations, graphs and notes on one infinite canvas, with voice and real-time collaboration." />
+    <meta name="twitter:image" content="/best-whiteboard-og.png" />
+
     <title>Whiteboard</title>
   </head>
   <body>

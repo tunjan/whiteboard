@@ -42,7 +42,11 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
-import { COMPACT_MORE_TOOLS, toolButtonClass } from './toolbar-constants';
+import {
+  COMPACT_MORE_TOOLS,
+  toolButtonClass,
+  TOOL_ICON,
+} from './toolbar-constants';
 
 interface CompactMoreMenuProps {
   activeToolId: string;
@@ -84,7 +88,7 @@ export function CompactMoreMenu({
               />
             }
           >
-            <MoreHorizontal className="size-4.5" />
+            <MoreHorizontal className={TOOL_ICON} />
           </TooltipTrigger>
           <TooltipContent side="top">
             <span>{label}</span>
