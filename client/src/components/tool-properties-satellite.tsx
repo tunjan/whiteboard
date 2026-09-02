@@ -293,7 +293,7 @@ function StyleKey({
             <PopoverTrigger
               aria-label={label}
               className={cn(
-                'tb-key group/key relative flex size-9 items-center justify-center rounded-xl',
+                'tb-key tb-glyph group/key relative flex size-9 items-center justify-center rounded-full',
                 open ? 'text-tb-accent-fg' : 'text-fg-muted hover:text-fg',
               )}
             />
@@ -894,14 +894,18 @@ export function ToolPropertiesSatellite({
         className={cn(
           // `items-stretch` so the rules between the sections can run the full
           // depth of the pill; each section re-centres its own contents.
-          'flex items-stretch rounded-toolbar py-1 px-1.5 [--tb-pad:0.25rem]',
+          // Round, and with no card, like the bar it rides on: the two are
+          // one piece of chrome seen at two heights, so they cannot round or
+          // fill by different rules. What is left of the pill is its
+          // contents — the washes under the switches, and the glyphs.
+          'flex items-stretch rounded-full py-1 px-1.5 [--tb-pad:0.25rem]',
           // Below `sm` a wide subject (mixed selection, an arrow) can outrun a
           // phone's width, so the bar scrolls rather than reaching past the
           // screen. `overflow-y-hidden` is what keeps that from also opening a
           // vertical scroller for the 4px the rules bleed into the padding.
           'max-sm:overflow-x-auto max-sm:overflow-y-hidden',
           'max-sm:[scrollbar-width:none] max-sm:[&::-webkit-scrollbar]:hidden',
-          'border-transparent bg-surface tb-shell dark:border-border',
+          'border-transparent bg-transparent shadow-none dark:border-transparent',
         )}
       >
         {sections.map((section, index) => (

@@ -25,7 +25,7 @@ import {
   enableScreen,
 } from '@/collab/voice/video-session';
 import { Button } from '@/components/ui/button';
-import { Surface } from '@/components/ui/surface';
+import { HOVER_REVEAL, Surface } from '@/components/ui/surface';
 import { Toggle } from '@/components/ui/toggle';
 import { cn } from '@/lib/utils';
 import {
@@ -53,14 +53,6 @@ const MODE_SIZE: Record<VideoPanelMode, string> = {
   maximized:
     'top-[max(0.75rem,env(safe-area-inset-top))] right-[max(0.75rem,env(safe-area-inset-right))] bottom-[max(0.75rem,env(safe-area-inset-bottom))] left-[max(0.75rem,env(safe-area-inset-left))]',
 };
-
-/**
- * The video *is* the panel, so the controls ride on top of it and stay out of
- * the way until asked for — on hover for mice, and always for touch and for
- * anyone tabbing through them.
- */
-const REVEAL =
-  'touch-reveal opacity-0 transition-opacity duration-instant group-hover/panel:opacity-100 group-focus-within/panel:opacity-100';
 
 /**
  * Controls sitting directly on a frame, with no plate under them: white, and
@@ -226,7 +218,7 @@ export const VideoPanel = memo(function VideoPanel({
       role="region"
       aria-label="Video call"
       className={cn(
-        'group/panel absolute flex flex-col overflow-hidden bg-sunken',
+        'group/chrome absolute flex flex-col overflow-hidden bg-sunken',
         MODE_SIZE[mode],
         anchored && !maximized && ANCHOR,
       )}
@@ -307,7 +299,7 @@ export const VideoPanel = memo(function VideoPanel({
         className={cn(
           'pointer-events-none absolute inset-x-2 top-2 flex items-start justify-between gap-2',
           // Nothing to reveal over when there is no video to cover.
-          overVideo && REVEAL,
+          overVideo && HOVER_REVEAL,
         )}
       >
         {/* Who the one tile belongs to, when more than one view is on offer. */}

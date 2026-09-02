@@ -45,34 +45,37 @@ export const COMPACT_MORE_TOOLS = [
 ] as const;
 
 /**
- * A group of keys, and the whole reason the bar reads as grouped without a
- * rule anywhere on it: each group is a shallow recess cut into the slab, and
- * the keys stand in it. A container states the grouping at any bar width,
- * where a hairline has to be found and read first.
+ * A group of keys. No longer a recess: the grouping is carried by the space
+ * around it — keys sit 2px apart inside a group and 18px apart across one, and
+ * a gap that wide is read before a container is.
  *
- * `gap-0.5` rather than a wider gap, because inside a shared recess the keys
- * are one control with several positions, not several controls in a row.
+ * A container earns its place on this bar only where it holds one control
+ * whose positions have to be read against each other — the satellite's
+ * segmented switches. Around several separate controls it was only drawing a
+ * box to say "these three are near each other", which the space already said.
  *
- * Its 16px corner is the bar's 20px less the bar's 4px padding, and the keys'
- * 12px is this less its own 4px — the three boxes are concentric, so no corner
- * on the bar looks tighter or looser than the one outside it.
+ * The padding stays after the recess it used to describe: it is what keeps the
+ * row 44px tall, which is what the instrument slots size themselves off.
  */
-export const TOOL_GROUP =
-  'flex items-center gap-0.5 rounded-2xl bg-tb-track p-1';
+export const TOOL_GROUP = 'flex items-center gap-0.5 p-1';
 
 /**
- * The selected tool: its group's recess filled back in to white.
+ * The selected tool: the one key on the bar drawn as a solid chip, inverted
+ * out of the slab.
  *
- * Selection is a change of plane, not of relief and not of hue. Nothing on
- * this bar is raised or sunk — a shadow under the key would put it in
- * competition with the instruments, which are the only things here meant to
- * read as objects — and a chip that is simply lighter than what surrounds it
- * is found before it is read. It costs the bar no colour either, which
- * matters because the ink swatches, the instruments and the sticker key are
- * all spending colour already.
+ * Selection is still a change of plane — nothing here is raised or sunk, since
+ * a shadow under a key would compete with the instruments, the only things on
+ * the bar meant to read as objects. What changed is which way the plane moves.
+ * A selected key used to be its recess filled back to white; with the recesses
+ * gone there is nothing left to fill, and white on a white slab is nothing at
+ * all. So the fill goes the other way, to the darkest ink the theme has, and
+ * inverts the glyph on top of it.
+ *
+ * It still costs the bar no colour, which is the part that mattered: the ink
+ * swatches, the instruments and the sticker key are spending colour already.
  */
 export const TOOL_ACTIVE =
-  'border-transparent bg-tb-accent text-tb-accent-fg hover:bg-tb-accent-hover hover:text-tb-accent-fg active:bg-tb-accent-hover active:text-tb-accent-fg';
+  'border-transparent bg-fg text-surface hover:bg-fg hover:text-surface active:bg-fg active:text-surface';
 
 /**
  * Engaged but not selected — tool lock, and a shape already chosen inside the
@@ -86,30 +89,26 @@ export const TOOL_PRESSED =
   'border-border-strong bg-panel text-fg hover:bg-panel active:bg-panel/90';
 
 /**
- * Idle keys sit straight on the recess and go a step quieter in ink, so the
- * one key that has been filled is also the one drawn darkest. Hover is a
- * half-strength chip: the affordance is "this is what selecting looks like",
- * arrived at early.
+ * Idle keys carry nothing at all — no chip, no border, no card underneath.
+ * They are a glyph on the board, so they take the halo (`tb-glyph`) that keeps
+ * them off whatever has been drawn there, and they are drawn a step darker
+ * than they used to be: `fg-muted` was a tone chosen against a white slab, and
+ * there is no slab now. Hover fills a wash under the key.
+ *
+ * There is a single idle state now. It used to fork, because a key in a recess
+ * hovered toward white while a key on the bar's slab had to go the other way,
+ * and neither surface is left.
  */
 export const TOOL_IDLE =
-  'border-transparent bg-transparent text-fg-muted hover:bg-tb-accent/60 hover:text-fg active:bg-tb-accent/80';
+  'tb-glyph border-transparent bg-transparent text-fg-secondary hover:bg-tb-track hover:text-fg active:bg-tb-track';
 
 /**
- * A key standing on the bar's own slab rather than in a group recess: the
- * tool lock and the hide handle, which act on the bar rather than on the
- * board. They used to sit in a fourth recess of their own, which claimed the
- * bar had four kinds of thing on it when it has three plus its own controls.
- *
- * The one thing that cannot carry over from `TOOL_IDLE` is its hover, because
- * that hover is the recess filling toward white and out here the slab is
- * already white. Inverted instead: hovering pulls the groove *under* the key.
- * Same half-step toward the group treatment, read the other way round.
+ * Round, because the bar is. Every key is a circle on a pill, and the flyouts
+ * they open repeat it — one radius on the whole family instead of a ladder of
+ * four that only held while the boxes were nested.
  */
-export const TOOL_IDLE_SLAB =
-  'border-transparent bg-transparent text-fg-muted hover:bg-tb-track hover:text-fg active:bg-tb-track';
-
 export const TOOL_GEOMETRY =
-  'tb-key relative group/button size-9 min-w-9 rounded-xl p-0 duration-fast ease-out-quart';
+  'tb-key relative group/button size-9 min-w-9 rounded-full p-0 duration-fast ease-out-quart';
 
 export function toolButtonClass(active: boolean, pressed = false) {
   return cn(
@@ -124,7 +123,7 @@ export function chromeButtonClass(pressed = false) {
   return cn(
     buttonVariants({ variant: 'ghost', size: 'icon-md' }),
     TOOL_GEOMETRY,
-    pressed ? TOOL_PRESSED : TOOL_IDLE_SLAB,
+    pressed ? TOOL_PRESSED : TOOL_IDLE,
   );
 }
 
@@ -176,40 +175,37 @@ export function ToolbarDivider({ className }: { className?: string } = {}) {
  * The tray slot, shared by the drawn instruments and by the shape cluster that
  * stands with them.
  *
- * Three boxes, because an object in a tray needs each of them to do a
- * different job:
- *
  *   SLOT  a placeholder that takes a key's height, so an instrument can hang
  *         out of the bar without ever making the bar taller.
  *   CLIP  the button. It starts well above the bar's top edge and ends at the
- *         slot's foot, and it is the `overflow-hidden` that cuts the handle
- *         off flat there — behind the tray's own front lip, which is the strip
- *         of recess left below the slots. Its top sits clear of the tallest
- *         drawing, so nothing is ever cut at the top: the tip is meant to
- *         stand out over the canvas.
- *   WELL  the visible key, aligned to the slot, so the chip that marks a
- *         loaded instrument is the same box on the same recess as every other
- *         selected key on the bar — even though the object standing in it is
- *         not contained by either.
+ *         slot's foot. Its top sits clear of the tallest drawing, so nothing
+ *         is ever cut at the top: the tip is meant to stand out over the
+ *         canvas. The bottom is a mask rather than a hard edge — the handle
+ *         used to be sliced off flat behind the tray's front lip, and with the
+ *         groove gone there is no lip for it to be cut against, so it fades
+ *         out instead of ending in mid-air.
+ *
+ * The third box is gone with the groove. It was a chip filling the recess to
+ * mark the loaded instrument, and there is no recess to fill; the instruments
+ * say it themselves by standing up out of the row.
  */
 export const INSTRUMENT_SLOT = 'relative w-12 shrink-0 self-stretch';
 
 export const INSTRUMENT_CLIP =
-  'group/slot absolute inset-x-0 -top-6 bottom-0 flex items-start justify-center ' +
-  'overflow-hidden rounded-t-xl';
-
-export const INSTRUMENT_WELL =
-  'pointer-events-none absolute inset-x-0 bottom-0 top-6 rounded-xl ' +
-  'transition-[background-color,box-shadow] duration-fast ease-out-quart motion-reduce:transition-none';
+  'group/slot tb-glyph absolute inset-x-0 -top-6 bottom-0 flex items-start justify-center ' +
+  'overflow-hidden ' +
+  '[mask-image:linear-gradient(to_bottom,#000_calc(100%_-_12px),transparent)] ' +
+  '[-webkit-mask-image:linear-gradient(to_bottom,#000_calc(100%_-_12px),transparent)]';
 
 /**
- * The tray's own recess. The same groove the glyph groups stand in, so the
- * instruments read as lying in the bar's middle section rather than on a
- * separate fixture — but `items-stretch`, because the slots size themselves
- * off it.
+ * The row the instruments stand in. No fill and no corner: they lie on the
+ * board like everything else on this bar, and an object needs no container to
+ * be read as one.
+ *
+ * `items-stretch`, because the slots size themselves off it, and the padding
+ * stays because it is what keeps the row as deep as a key is tall.
  */
-export const INSTRUMENT_TRACK =
-  'flex items-stretch rounded-2xl bg-tb-track p-1';
+export const INSTRUMENT_TRACK = 'flex items-stretch p-1';
 
 /** The drawing itself: 36 x 72, 16px of it standing above the bar's top edge. */
 export const INSTRUMENT_ART_WIDTH = 36;

@@ -122,13 +122,12 @@
     0 18px 40px -16px rgba(12, 10, 9, 0.18),
     0 4px 10px -6px rgba(12, 10, 9, 0.08), 0 1px 2px rgba(12, 10, 9, 0.04);
 
-  /* The groove a group of keys sits in. Grouping is done by giving each group
-       its own recess rather than by ruling between them: a container says
-       "these belong together" at any bar width, where a rule has to be read.
-       The step down from white is the whole difference the flat selection chip
-       has to read against, since there is no shadow under it doing half that
-       work — so this value is set by eye against the chip, not derived. */
-  --tb-track: #f1f0ed;
+  /* The wash under a key: the instrument well, a hover chip, the track of a
+       segmented switch. Translucent rather than a flat tone, because the bar
+       it used to be cut into is gone — the controls sit straight on the board
+       now, so every fill in the family has to composite over whatever has
+       been drawn under it rather than over a known white slab. */
+  --tb-track: rgba(12, 10, 9, 0.07);
 
   /* The selected key, and every other "this is the chosen one" mark in the
        toolbar family. It is the track's inverse — the recess filled back in
@@ -140,6 +139,12 @@
   --tb-accent-fg: #0c0a09;
   --tb-accent-ring: #78716c;
   --tb-divider: #eceae5;
+
+  /* What separates a glyph from the drawing behind it, now that no slab does.
+       A light halo on the light board and a dark one on the dark board: the
+       same trick as a caption burned into video, which is the only thing that
+       keeps a control legible over content it cannot control. */
+  --tb-glyph-halo: rgba(255, 255, 255, 0.92);
 
   --grid-minor: rgba(12, 10, 9, 0.05);
   --grid-major: rgba(12, 10, 9, 0.1);
@@ -237,15 +242,15 @@
     0 20px 44px -16px rgba(0, 0, 0, 0.62), 0 4px 12px -6px rgba(0, 0, 0, 0.4),
     0 1px 2px rgba(0, 0, 0, 0.3);
 
-  /* Same two-part relationship as the light theme, run the other way: on a
-       near-black bar the recess is the darker of the pair and the chosen key
-       is the lighter fill that replaces it. */
-  --tb-track: #1c1917;
+  /* Same relationship as the light theme, run the other way: the wash lifts
+       off the dark board rather than sinking into a pale one. */
+  --tb-track: rgba(250, 250, 249, 0.12);
   --tb-accent: #57534e;
   --tb-accent-hover: #57534e;
   --tb-accent-fg: #fafaf9;
   --tb-accent-ring: #a8a29e;
   --tb-divider: #3b3733;
+  --tb-glyph-halo: rgba(12, 10, 9, 0.85);
 
   --grid-minor: rgba(250, 250, 249, 0.06);
   --grid-major: rgba(250, 250, 249, 0.12);
@@ -1010,6 +1015,21 @@
 
 .tb-shell {
   box-shadow: var(--s-toolbar);
+}
+
+/**
+ * A control with nothing under it. The toolbar family has no card left — the
+ * keys, the tray and the properties pill sit directly on the board — so each
+ * glyph carries its own separation: a tight halo in the board's own colour,
+ * and a soft ambient shadow under it.
+ *
+ * On the glyph rather than on the button, so a key that *is* filled (the
+ * selected one) reads as a flat chip and not as a lit one. Nothing here is
+ * raised; the shadow is doing legibility, not relief.
+ */
+.tb-glyph svg {
+  filter: drop-shadow(0 0 2px var(--tb-glyph-halo))
+    drop-shadow(0 1px 2px rgb(0 0 0 / 0.16));
 }
 
 .tb-key {

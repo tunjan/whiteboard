@@ -119,10 +119,14 @@ describe('ToolPropertiesSatellite as a bar in its own right', () => {
     expect(html).toMatch(/\bmb-2\.5\b/);
   });
 
-  it('is cut from the same slab: same corner, same shadow', () => {
-    expect(html).toContain('rounded-toolbar');
-    expect(html).toContain('tb-shell');
-    expect(html).toContain('data-mode="floating"');
+  it('is cut from the same nothing as the bar: no card under either', () => {
+    // The bar is a transparent pill, so the pill riding above it is one too:
+    // the controls are the chrome, and there is no slab behind them to match.
+    expect(html).toContain('rounded-full');
+    expect(html).toContain('bg-transparent');
+    expect(html).not.toContain('tb-shell');
+    // Its glyphs carry their own separation instead.
+    expect(html).toContain('tb-glyph');
     // Both were how the old riser hid the seam it shared with the bar. A
     // detached pill has no such seam, and a squared-off edge on one would
     // read as a piece that had come loose.

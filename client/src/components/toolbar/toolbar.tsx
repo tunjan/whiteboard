@@ -3,7 +3,7 @@ import { ChevronDown, ChevronUp } from 'lucide-react';
 import '@/canvas/tools/register';
 import { useToolStore } from '@/canvas/use-tool-store';
 import { Button } from '@/components/ui/button';
-import { Surface } from '@/components/ui/surface';
+import { HOVER_REVEAL, Surface } from '@/components/ui/surface';
 import { ToolPropertiesSatellite } from '@/components/tool-properties-satellite';
 import {
   Tooltip,
@@ -30,36 +30,31 @@ import { ShapeMenu } from './toolbar-shape-menu';
 import { ToolButton } from './toolbar-tool-button';
 
 /**
- * The canvas toolbar: a soft white card floating over the board, with the
- * inking tools lying in it as drawn instruments and everything else as glyph
- * keys either side of them.
+ * The canvas toolbar: one soft pill floating over the board, with the inking
+ * tools lying in it as drawn instruments and everything else as glyph keys
+ * either side of them.
  *
- * The bar reads left to right as three things you might reach for, each in a
- * shallow recess of its own with clear board between them, and then the bar's
- * own two controls standing on the bare slab past them:
+ * The bar is built the way the call panel is: the content is the thing you
+ * see, and the chrome around it takes up as little as it can get away with.
  *
- *   move the view · pick something up · place something   ·   lock  hide
- *
- * Grouping is by container rather than by rule. A recess is read at a glance
- * and at any bar width; a hairline has to be found first, and on a bar this
- * wide the one in the middle stopped separating anything. Every box on the
- * card is concentric with the one outside it — card 20, recess 16, key 12,
- * off the card's 4px padding — so the corners step down evenly rather than
- * each control rounding to its own taste.
- *
- * The absence of a fourth recess is the point of the right-hand end. A
- * container says "these belong together and apart from those", and a box
- * around lock-and-hide made that claim in the same vocabulary as the three
- * groups of tools — a fourth kind of tool, on a bar that has three. Leaving
- * them on the slab says the truer thing: they are not on the board at all.
- *
- * The tray is the middle because it is the reason the bar exists, and because
- * an object among glyphs is the one thing on a bar this wide that can be found
- * without reading. The instruments are drawn bigger than their slots and hung
- * so they break out at both ends — tip above the card's top edge and out over
- * the canvas, handle cut off flat behind the tray's front lip. Nothing else on
- * the bar leaves its recess, which is what makes the tray the thing the eye
- * lands on.
+ *   · No card, and nothing casting the shape of one. The bar has no fill, no
+ *     border and no shadow of its own; what separates a control from the
+ *     drawing under it is a halo on the glyph itself (`tb-glyph`), the way a
+ *     player's controls are burned into the picture rather than laid on a
+ *     panel over it.
+ *   · No recesses either. The three groups used to stand in grooves and the
+ *     instruments in a fourth; all four are gone, and the space between the
+ *     groups does the grouping. The instruments still break out of the row at
+ *     both ends — tip above it and out over the canvas, handle fading out
+ *     below — but they lie on the board now rather than in a tray.
+ *   · The bar's own controls fade out. Lock and hide act on the bar rather
+ *     than on the board, and at rest they are not there at all; they arrive
+ *     on hover, on focus, and permanently on touch. Nothing is hidden that
+ *     the pointer has not already reached.
+ *   · What is left that can be filled: a wash under a hovered key, and one
+ *     solid chip on the key being held. Menus stay opaque — a flyout over ink
+ *     is unreadable — so the rule is that controls are transparent and the
+ *     things they open are not.
  *
  * The active tool's quick properties ride above the bar in their own pill; see
  * `ToolPropertiesSatellite`.
@@ -114,19 +109,26 @@ export function Toolbar() {
           onKeyDown={toolbar.onKeyDown}
           onFocusCapture={toolbar.onFocusCapture}
           className={cn(
-            'relative flex w-max max-w-[calc(100vw-1rem)] items-center rounded-toolbar',
-            // Opaque, and unbordered on the light canvas. A rule around a card
-            // this pale only competes with its own shadow; on the dark canvas
-            // the shadow has nothing to fall on, so the border comes back to
-            // do the separating instead.
-            'border-transparent bg-surface p-1 tb-shell dark:border-border',
+            'group/chrome relative flex w-max max-w-[calc(100vw-1rem)] items-center rounded-full',
+            // No card. Not a translucent one either — the bar is the controls
+            // and nothing else, the way a player's controls are the controls
+            // and not a panel laid over the picture. What used to be the
+            // slab's job is done twice over: each glyph carries its own halo,
+            // and the one filled key is solid enough to read on any board.
+            //
+            // `shadow-none` explicitly: `Surface mode="floating"` brings a
+            // panel shadow, and a shadow cast by a box with nothing in it
+            // draws the outline of the card that was just removed.
+            'border-transparent bg-transparent p-1 shadow-none',
             'origin-bottom transition-[opacity,transform] duration-base ease-out-quart',
             'motion-reduce:transition-none',
             hidden &&
               'pointer-events-none translate-y-[calc(100%+0.75rem)] opacity-0',
           )}
         >
-          <div className="hidden items-stretch gap-1.5 sm:flex">
+          {/* Space is the grouping: 2px between keys in a group, 18px across
+              one, with no box anywhere on the bar to say it twice. */}
+          <div className="hidden items-stretch gap-2.5 sm:flex">
             <div role="group" aria-label="Navigate" className={TOOL_GROUP}>
               {NAVIGATE_TOOLS.map((id) => (
                 <ToolButton key={id} toolId={id} />
@@ -155,12 +157,16 @@ export function Toolbar() {
               <InsertMenu active={activeToolId === 'sticker'} />
             </div>
 
-            {/* No recess. The three groves either side hold things you do to
-                the board; these two do something to the bar, and boxing them
-                the same way claimed a fourth kind of tool that isn't there.
-                On the slab they read as the bar's own controls and give it an
-                end, at the cost of nothing but a container. */}
-            <div className="ms-0.5 flex items-center gap-0.5 self-center">
+            {/* The bar's own two controls, and the only things here that act
+                on the bar rather than on the board. They are not drawn at all
+                until the pointer is on the bar — by which time it has already
+                arrived at them — so at rest the bar is nothing but tools. */}
+            <div
+              className={cn(
+                'ms-0.5 flex items-center gap-0.5 self-center',
+                HOVER_REVEAL,
+              )}
+            >
               <ToolLockButton />
               <Tooltip>
                 <TooltipTrigger
@@ -220,10 +226,12 @@ export function Toolbar() {
                 tabIndex={hidden ? 0 : -1}
                 className={cn(
                   'absolute bottom-0 left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-full px-3.5 py-2',
-                  // Same slab as the bar, and `tb-shell` for the same reason:
-                  // it is what strips the shadow `Button variant="outline"`
-                  // would otherwise bring.
-                  'border-transparent bg-surface tb-shell hover:bg-panel dark:border-border',
+                  // The one control here that has to be found on an empty
+                  // board rather than recognised, so it keeps a wash under it
+                  // — the same wash a hovered key gets, no card. `tb-glyph`
+                  // for the chevron, and `tb-shell` only to strip the shadow
+                  // `Button variant="outline"` would otherwise bring.
+                  'tb-glyph border-transparent bg-tb-track tb-shell hover:bg-surface dark:border-transparent',
                   'transition-[opacity,transform] duration-base ease-out-quart motion-reduce:transition-none',
                   hidden
                     ? 'translate-y-0 opacity-100'

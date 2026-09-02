@@ -15,6 +15,19 @@ import { cn } from '@/lib/utils';
 export const CHROME_CONTROLS =
   'touch-targets [&_svg:not([data-slot=avatar-fallback]_svg)]:stroke-[1.75]';
 
+/**
+ * Chrome that stays out of the way until it is wanted: invisible at rest,
+ * present on hover, and permanently there for touch (`touch-reveal`) and for
+ * anyone tabbing into it. Stated once because the call panel and the toolbar
+ * both hang their secondary controls on it, and a restated rule is how two
+ * surfaces drift apart. The host names its group `chrome`.
+ *
+ * Only for controls that sit *on* something — a video frame, a slab — where a
+ * permanent glyph would be clutter. Never for the only control on a surface.
+ */
+export const HOVER_REVEAL =
+  'touch-reveal opacity-0 transition-opacity duration-instant group-hover/chrome:opacity-100 group-focus-within/chrome:opacity-100';
+
 const surfaceVariants = cva(
   'select-none rounded-panel border border-border bg-surface text-fg',
   {

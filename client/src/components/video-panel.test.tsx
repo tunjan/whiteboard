@@ -259,7 +259,7 @@ describe('VideoPanel', () => {
     expect(markup).not.toContain('<header');
     expect(markup).not.toContain('<footer');
     expect(markup).toContain('touch-reveal');
-    expect(markup).toContain('group-hover/panel:opacity-100');
+    expect(markup).toContain('group-hover/chrome:opacity-100');
   });
 
   it('keeps the controls up while there is no video to hide them over', () => {

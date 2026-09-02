@@ -18,12 +18,10 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-import { cn } from '@/lib/utils';
 import {
   FlyoutCaret,
   INSTRUMENT_CLIP,
   INSTRUMENT_SLOT,
-  INSTRUMENT_WELL,
   MiniShape,
   POLYGON_KINDS,
   SHAPE_TOOLS,
@@ -127,14 +125,6 @@ export function ShapeMenu({
             />
           }
         >
-          <span
-            className={cn(
-              INSTRUMENT_WELL,
-              active
-                ? 'bg-tb-accent'
-                : 'bg-transparent group-hover/slot:bg-tb-accent/60',
-            )}
-          />
           {trayArt}
           <FlyoutCaret active={active} />
         </TooltipTrigger>

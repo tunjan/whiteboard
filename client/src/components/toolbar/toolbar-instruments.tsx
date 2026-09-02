@@ -19,7 +19,6 @@ import {
   INSTRUMENT_SEAM,
   INSTRUMENT_SLOT,
   INSTRUMENT_TRACK,
-  INSTRUMENT_WELL,
 } from './toolbar-constants';
 
 /**
@@ -306,17 +305,6 @@ function InstrumentButton({ toolId }: { toolId: string }) {
           />
         }
       >
-        {/* The well stays inside the bar while the object leaves it. The same
-            flat chip filling the same recess that marks every other selected
-            key on the bar, so one vocabulary marks "loaded" everywhere. */}
-        <span
-          className={cn(
-            INSTRUMENT_WELL,
-            active
-              ? 'bg-tb-accent'
-              : 'bg-transparent group-hover/slot:bg-tb-accent/60',
-          )}
-        />
         <svg
           viewBox={VIEW_BOX}
           width={INSTRUMENT_ART_WIDTH}
@@ -327,7 +315,12 @@ function InstrumentButton({ toolId }: { toolId: string }) {
             // than under it.
             'relative transition-transform duration-base ease-out-quart overflow-visible',
             'motion-reduce:transition-none',
-            active ? 'translate-y-0' : 'translate-y-3.5',
+            // Standing up *is* the selection now that no chip marks it, and
+            // hover is that same movement begun: the instrument rises a
+            // little under the pointer and the rest of the way once held.
+            active
+              ? 'translate-y-0'
+              : 'translate-y-3.5 group-hover/slot:translate-y-2',
           )}
         >
           <Body ink={ink} active={active} />
