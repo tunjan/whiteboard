@@ -15,6 +15,7 @@ import { documentRoutes } from './documents/routes';
 import { hocuspocus } from './collab/hocuspocus';
 import { linkRoutes } from './links/routes';
 import { musicRoutes } from './music/routes';
+import { pageRoutes } from './collab/page-routes';
 
 const app = new Hono();
 
@@ -26,6 +27,7 @@ app.route('/api/blobs', blobRoutes);
 app.route('/api/docs', documentRoutes);
 app.route('/api/links', linkRoutes);
 app.route('/api/music', musicRoutes);
+app.route('/api/pages', pageRoutes);
 
 const clientDist = fileURLToPath(new URL('../../client/dist', import.meta.url));
 const clientIndex = fileURLToPath(

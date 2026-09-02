@@ -61,7 +61,6 @@ import { useSelectionStore } from '@/canvas/use-selection-store';
 import { paletteColors } from '@/canvas/use-style-store';
 import { ToolPanelPresence } from '@/components/tool-panel-presence';
 import { Button } from '@/components/ui/button';
-import { PanelLabel } from '@/components/ui/panel-label';
 import { Surface } from '@/components/ui/surface';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui/toast';
@@ -109,7 +108,7 @@ const STYLES = [
  * the same wherever the board says it. Radii are concentric: 12px track less
  * its own 2px padding leaves 10px on the segment.
  */
-const SEGMENTED_TRACK = 'w-auto flex-1 rounded-xl bg-tb-track p-0.5';
+const SEGMENTED_TRACK = 'w-full rounded-xl bg-tb-track p-0.5';
 
 const SEGMENTED_ITEM =
   'h-8 grow basis-0 rounded-[10px] px-2.5 text-xs font-medium text-fg-muted ' +
@@ -773,10 +772,10 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
         {/* On the tray, above both cards: what this panel is, and the two
             actions that are about the equation as a whole rather than about
             anything inside one card. */}
-        <header className="flex shrink-0 items-center justify-between gap-2 px-2 pt-0.5">
-          <h2 id={titleId} className="type-panel-title">
-            Equation
-          </h2>
+        <h2 id={titleId} className="sr-only">
+          Equation
+        </h2>
+        <header className="flex shrink-0 items-center justify-end gap-0.5 px-2 pt-0.5">
           <div className="flex items-center gap-0.5">
             <Tooltip>
               <TooltipTrigger
@@ -831,9 +830,8 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
           {aiEnabled ? (
             <section
               aria-label="Generate from a description"
-              className="flex flex-col gap-1.5 p-3"
+              className="p-3"
             >
-              <PanelLabel>Describe</PanelLabel>
               <div className="flex items-start gap-1.5">
                 <Textarea
                   aria-label="Describe an equation to generate its LaTeX"
@@ -882,9 +880,8 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
           {/* Source field, with the completion list hanging off its bottom edge. */}
           <section
             aria-label="LaTeX source"
-            className="flex flex-col gap-1.5 p-3"
+            className="p-3"
           >
-            <PanelLabel>LaTeX</PanelLabel>
             <div className="relative">
               <Textarea
                 ref={sourceRef}
@@ -966,8 +963,7 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
           </section>
 
           {/* Live canvas preview. */}
-          <section aria-label="Preview" className="flex flex-col gap-1.5 p-3">
-            <PanelLabel>Preview</PanelLabel>
+          <section aria-label="Preview" className="p-3">
             <div
               ref={previewRef}
               data-overflow={previewOverflowing ? true : undefined}
@@ -1091,9 +1087,8 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
         <div className="flex shrink-0 flex-col divide-y divide-border/60 rounded-overlay border border-border bg-surface shadow-e1 [--chrome-hover:var(--color-panel)]">
           <section
             aria-label="Color"
-            className="flex flex-col gap-1.5 px-3 pt-2.5 pb-3"
+            className="p-2.5"
           >
-            <PanelLabel>Color</PanelLabel>
             <div
               role="radiogroup"
               aria-label="Equation color"
@@ -1155,9 +1150,8 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
 
           <section
             aria-label="Size"
-            className="flex items-center justify-between gap-3 px-3 py-2"
+            className="flex items-center p-2.5"
           >
-            <PanelLabel>Size</PanelLabel>
             <ToggleGroup
               className={SEGMENTED_TRACK}
               spacing={0.5}
@@ -1192,9 +1186,8 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
               rather than in the field. */}
           <section
             aria-label="Style"
-            className="flex items-center justify-between gap-3 px-3 py-2"
+            className="flex items-center p-2.5"
           >
-            <PanelLabel>Style</PanelLabel>
             <ToggleGroup
               className={SEGMENTED_TRACK}
               spacing={0.5}

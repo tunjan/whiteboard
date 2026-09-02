@@ -4,6 +4,7 @@ import {
   ClipboardCopy,
   Download,
   EllipsisVertical,
+  Eye,
   Gauge,
   Keyboard,
   Magnet,
@@ -20,9 +21,12 @@ import {
   exportBoardToPng,
 } from '@/canvas/export-png';
 import {
+  ATTENTION_AWAY_RANGE,
+  ATTENTION_IDLE_RANGE,
   PNG_EXPORT_SCALES,
   useCanvasUiStore,
 } from '@/canvas/use-canvas-ui-store';
+import { formatAttentionDuration } from '@/collab/attention-state';
 import { useVoiceStore } from '@/collab/voice/use-voice-store';
 import { Button } from '@/components/ui/button';
 import {
@@ -287,6 +291,58 @@ function SoundSubmenu() {
   );
 }
 
+/**
+ * Tutor-only. Every client publishes its own attention facts, but the thresholds
+ * are applied by whoever is reading them — so these are the tutor's settings and
+ * they take effect immediately, with nothing to sync to the student's machine.
+ */
+function AttentionSubmenu() {
+  const enabled = useCanvasUiStore((s) => s.attentionAlertsEnabled);
+  const setEnabled = useCanvasUiStore((s) => s.setAttentionAlertsEnabled);
+  const idleSeconds = useCanvasUiStore((s) => s.attentionIdleSeconds);
+  const setIdleSeconds = useCanvasUiStore((s) => s.setAttentionIdleSeconds);
+  const awaySeconds = useCanvasUiStore((s) => s.attentionAwaySeconds);
+  const setAwaySeconds = useCanvasUiStore((s) => s.setAttentionAwaySeconds);
+
+  return (
+    <DropdownMenuSub>
+      <DropdownMenuSubTrigger>
+        <Eye />
+        Attention
+        <MenuValue>{enabled ? 'On' : 'Off'}</MenuValue>
+      </DropdownMenuSubTrigger>
+      <DropdownMenuSubContent className="w-60">
+        <DropdownMenuCheckboxItem
+          checked={enabled}
+          onCheckedChange={setEnabled}
+        >
+          Watch for drifting
+        </DropdownMenuCheckboxItem>
+        <MenuSliderItem
+          label="Idle after"
+          value={idleSeconds}
+          display={formatAttentionDuration(idleSeconds)}
+          min={ATTENTION_IDLE_RANGE.min}
+          max={ATTENTION_IDLE_RANGE.max}
+          step={ATTENTION_IDLE_RANGE.step}
+          disabled={!enabled}
+          onChange={setIdleSeconds}
+        />
+        <MenuSliderItem
+          label="Another window after"
+          value={awaySeconds}
+          display={formatAttentionDuration(awaySeconds)}
+          min={ATTENTION_AWAY_RANGE.min}
+          max={ATTENTION_AWAY_RANGE.max}
+          step={ATTENTION_AWAY_RANGE.step}
+          disabled={!enabled}
+          onChange={setAwaySeconds}
+        />
+      </DropdownMenuSubContent>
+    </DropdownMenuSub>
+  );
+}
+
 export function BoardActionsMenu({
   title,
   isTutor,
@@ -408,6 +464,7 @@ export function BoardActionsMenu({
           </DropdownMenuCheckboxItem>
           <PenSubmenu />
           <SoundSubmenu />
+          {isTutor && <AttentionSubmenu />}
           <DropdownMenuCheckboxItem
             checked={debugPerformance}
             onCheckedChange={setDebugPerformance}

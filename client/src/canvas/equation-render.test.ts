@@ -122,6 +122,21 @@ describe('equation SVG rendering', () => {
     });
   });
 
+  // A transcription of a printed page carries prose — step labels, "where",
+  // units — and `INK_SYSTEM_PROMPT` instructs the model to wrap it in \text
+  // precisely because everything here renders in math mode. That makes these
+  // commands part of the contract: the package filter in `equation-convert`
+  // must keep supplying them, or every transcription with a word in it fails.
+  it.each([
+    String.raw`\text{where } x = 1`,
+    String.raw`\textbf{Step 2} \quad a^2 + b^2 = c^2`,
+    String.raw`v = 3\,\text{m/s}`,
+    String.raw`\begin{aligned} \textbf{Given} &: x = 2 \\ \text{then} &: y = 3 \end{aligned}`,
+  ])('typesets prose wrapped in \\text / \\textbf: %s', async (latex) => {
+    const render = await typesetEquation(latex);
+    expect('error' in render ? render.error : null).toBeNull();
+  });
+
   // The panel typesets every keystroke, so an editing session used to leave one
   // retained SVG per abandoned prefix, forever.
   it('bounds the cache and evicts least-recently-read expressions', async () => {

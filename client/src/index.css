@@ -759,7 +759,29 @@
   animation: shape-vanish 180ms cubic-bezier(0.4, 0, 1, 1) both;
 }
 
+/* The tip of the laser tool glows like an energized optical diode. */
+@keyframes laser-tip-pulse {
+  0%, 100% {
+    opacity: 0.85;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1.1);
+  }
+}
+
+.laser-tip-glow {
+  transform-origin: 14px 5px;
+  animation: laser-tip-pulse 2s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .laser-tip-glow {
+    animation: none;
+  }
+
   .t-panel-slide {
     transition: none !important;
   }

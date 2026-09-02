@@ -48,6 +48,41 @@ export class SpatialIndex {
     this.byId.delete(id);
   }
 
+  /**
+   * Replace the whole index in one bulk load.
+   *
+   * rbush's `load` builds the tree bottom-up (OMT/STR packing) instead of
+   * descending and splitting once per item, so a page-sized rebuild is one
+   * linear pass rather than n insertions — and the resulting tree is better
+   * packed, which makes every later `search` cheaper too. Used wherever the
+   * index is rebuilt wholesale: loading a page, or re-deriving it after the
+   * real web fonts change text metrics.
+   */
+  loadAll(items: readonly IndexItem[]): void {
+    this.tree.clear();
+    this.byId.clear();
+    // rbush keeps the item objects it is given, and `getBounds` hands them out
+    // as the live entry, so copy rather than alias the caller's array contents.
+    const owned = items.map((item) => ({ ...item }));
+    this.tree.load(owned);
+    for (const item of owned) this.byId.set(item.id, item);
+  }
+
+  /**
+   * Take over `other`'s contents, leaving it empty.
+   *
+   * Swapping the internals is how an inactive page's index is parked and later
+   * brought back without rebuilding it: constant time, and the identity of this
+   * object survives, which matters because it is imported directly by tools,
+   * snapping and the Canvas.
+   */
+  adopt(other: SpatialIndex): void {
+    this.tree = other.tree;
+    this.byId = other.byId;
+    other.tree = new RBush<IndexItem>();
+    other.byId = new Map<string, IndexItem>();
+  }
+
   clear(): void {
     this.tree.clear();
     this.byId.clear();

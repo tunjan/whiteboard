@@ -16,7 +16,6 @@ export const NAVIGATE_TOOLS = ['select', 'hand'] as const;
 export const INKING_TOOLS = [
   'draw',
   'highlighter',
-  'wand',
   'eraser',
   'laser',
 ] as const;
@@ -39,7 +38,6 @@ export const COMPACT_PRIMARY_TOOLS = [
 export const COMPACT_MORE_TOOLS = [
   'hand',
   'highlighter',
-  'wand',
   'laser',
   'comment',
   'graph',
@@ -96,6 +94,20 @@ export const TOOL_PRESSED =
 export const TOOL_IDLE =
   'border-transparent bg-transparent text-fg-muted hover:bg-tb-accent/60 hover:text-fg active:bg-tb-accent/80';
 
+/**
+ * A key standing on the bar's own slab rather than in a group recess: the
+ * tool lock and the hide handle, which act on the bar rather than on the
+ * board. They used to sit in a fourth recess of their own, which claimed the
+ * bar had four kinds of thing on it when it has three plus its own controls.
+ *
+ * The one thing that cannot carry over from `TOOL_IDLE` is its hover, because
+ * that hover is the recess filling toward white and out here the slab is
+ * already white. Inverted instead: hovering pulls the groove *under* the key.
+ * Same half-step toward the group treatment, read the other way round.
+ */
+export const TOOL_IDLE_SLAB =
+  'border-transparent bg-transparent text-fg-muted hover:bg-tb-track hover:text-fg active:bg-tb-track';
+
 export const TOOL_GEOMETRY =
   'tb-key relative group/button size-9 min-w-9 rounded-xl p-0 duration-fast ease-out-quart';
 
@@ -104,6 +116,29 @@ export function toolButtonClass(active: boolean, pressed = false) {
     buttonVariants({ variant: 'ghost', size: 'icon-md' }),
     TOOL_GEOMETRY,
     active ? TOOL_ACTIVE : pressed ? TOOL_PRESSED : TOOL_IDLE,
+  );
+}
+
+/** A bar control on the slab. Never `active` — nothing out here is a tool. */
+export function chromeButtonClass(pressed = false) {
+  return cn(
+    buttonVariants({ variant: 'ghost', size: 'icon-md' }),
+    TOOL_GEOMETRY,
+    pressed ? TOOL_PRESSED : TOOL_IDLE_SLAB,
+  );
+}
+
+/**
+ * A key in one of the bar's flyouts — the shapes grid, the sticker grid.
+ * Stated once because it was stated four times, and three of those had drifted
+ * apart on radius, on hover ink and on whether they had a pressed state at all.
+ */
+export function menuItemClass(selected: boolean) {
+  return cn(
+    'size-10 rounded-xl transition-colors duration-fast',
+    selected
+      ? TOOL_PRESSED
+      : 'text-fg-secondary hover:bg-panel hover:text-fg active:bg-panel/80',
   );
 }
 
@@ -180,8 +215,20 @@ export const INSTRUMENT_TRACK =
 export const INSTRUMENT_ART_WIDTH = 36;
 export const INSTRUMENT_ART_HEIGHT = 72;
 
-/** The shade along a moulded edge. Shared so the tray's objects are lit alike. */
+/**
+ * The tray's flat palette. One line around every part, and one fill inside it.
+ *
+ * EDGE is that line — a soft shade rather than a black outline, so it draws
+ * the silhouette without turning the objects into a set of stickers. BODY,
+ * SEAM and DARK are the three neutrals every instrument is built from: the
+ * white of a barrel, the joint printed across it, and the moulded black of a
+ * cap or a grip. Shared so no two objects in the tray are white or black by
+ * slightly different amounts.
+ */
 export const INSTRUMENT_EDGE = 'rgba(12, 10, 9, 0.22)';
+export const INSTRUMENT_BODY = '#ffffff';
+export const INSTRUMENT_SEAM = '#e7e3de';
+export const INSTRUMENT_DARK = '#45403c';
 
 /**
  * The shape menu's object: a drafting template, drawn to the same 28 x 56 box
@@ -195,10 +242,10 @@ export const INSTRUMENT_EDGE = 'rgba(12, 10, 9, 0.22)';
  * is whatever the slot is doing underneath: the recess when it is idle, the
  * white chip when it is loaded.
  *
- * Amber translucent plastic, because the tray is read by silhouette first and
- * colour second, and every other hue here is taken — white pencil, pink
- * eraser, dark laser, and a marker that wears the live ink. A wide flat plate
- * among narrow barrels is unmistakable even before the colour lands.
+ * Amber plastic, because the tray is read by silhouette first and colour
+ * second, and every other hue here is taken — white pencil, pink eraser, dark
+ * laser, and a marker that wears the live ink. A wide flat plate among narrow
+ * barrels is unmistakable even before the colour lands.
  */
 export function ShapeClusterObject({ className }: { className?: string }) {
   const plate = 'M3.6 7.6Q3.6 5 6.2 5h15.6Q24.4 5 24.4 7.6V56H3.6Z';
@@ -211,22 +258,6 @@ export function ShapeClusterObject({ className }: { className?: string }) {
       aria-hidden="true"
     >
       <defs>
-        {/* Lit across the width the same way the pencil barrel is, so a flat
-            fill reads as a moulded plate rather than as a printed rectangle. */}
-        <linearGradient
-          id="tb-stencil-plate"
-          x1="3.6"
-          y1="0"
-          x2="24.4"
-          y2="0"
-          gradientUnits="userSpaceOnUse"
-        >
-          <stop offset="0" stopColor="#cf9d55" />
-          <stop offset="0.18" stopColor="#fbe2b8" />
-          <stop offset="0.48" stopColor="#f5d3a0" />
-          <stop offset="0.84" stopColor="#e4b878" />
-          <stop offset="1" stopColor="#c08f4d" />
-        </linearGradient>
         {/* Real holes rather than drawn ones: the mask punches them out of the
             plate so the slot behind shows through. */}
         <mask id="tb-stencil-holes">
@@ -234,35 +265,25 @@ export function ShapeClusterObject({ className }: { className?: string }) {
           <circle cx="14" cy="11" r="4" fill="#000000" />
           <path d="M14 16.6 18.5 24.6H9.5Z" fill="#000000" />
           <rect
-            x="9.9"
-            y="30"
-            width="8.2"
-            height="8.2"
+            x="10"
+            y="27.2"
+            width="8"
+            height="7.6"
             rx="1.3"
             fill="#000000"
           />
         </mask>
       </defs>
-      <path
-        d={plate}
-        fill="url(#tb-stencil-plate)"
-        mask="url(#tb-stencil-holes)"
-      />
-      <path
-        d={plate}
-        fill="none"
-        stroke={INSTRUMENT_EDGE}
-        strokeWidth={0.9}
-        strokeLinejoin="round"
-      />
-      {/* The cut edge of each hole, so the shapes read as punched through the
-          plate and not as marks lying on it. */}
+      <path d={plate} fill="#e3bd82" mask="url(#tb-stencil-holes)" />
+      {/* The cut edge of the plate and of each hole, so the shapes read as
+          punched through it and not as marks lying on it. */}
       <g
         fill="none"
         stroke={INSTRUMENT_EDGE}
         strokeWidth={0.9}
         strokeLinejoin="round"
       >
+        <path d="M3.6 7.6Q3.6 5 6.2 5h15.6Q24.4 5 24.4 7.6V56" />
         <circle cx="14" cy="11" r="4" />
         <path d="M14 16.6 18.5 24.6H9.5Z" />
         <rect x="10" y="27.2" width="8" height="7.6" rx="1.3" />

@@ -34,9 +34,19 @@ export const boards = pgTable('boards', {
     .defaultNow(),
 });
 
-/** One row per board: the opaque binary Yjs document state. */
+/**
+ * One row per collaboration document: the opaque binary Yjs state.
+ *
+ * Not one row per board — a board is a small tree of documents. The board's own
+ * document (named by its board id) holds the page registry and the board-level
+ * shared state; each page's shapes live in a document named
+ * `<boardId>/pages/<pageId>` (`pageDocumentName` in @whiteboard/shared), so a
+ * client loads only the pages it opens. The column is still `board_id` because
+ * renaming it would be a destructive `drizzle-kit push` against rows that hold
+ * every board's content; the property name is what the code reads.
+ */
 export const boardDocuments = pgTable('board_documents', {
-  boardId: text('board_id').primaryKey(),
+  documentName: text('board_id').primaryKey(),
   data: bytea('data').notNull(),
   // Which Yjs update encoding `data` holds. V1 keeps every superseded map write
   // at full width, so a board's row grows with edit *history* rather than with

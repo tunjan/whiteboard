@@ -12,12 +12,12 @@ import {
 const routeVoiceSignal = createVoiceSignalRouter();
 
 /**
- * Hocuspocus collaboration server. Persists each board's opaque Yjs state in a
- * single bytea row via Drizzle. Rooms are open: per our model the board id (the
+ * Hocuspocus collaboration server. Persists each document's opaque Yjs state in
+ * a bytea row via Drizzle, keyed by document name — a board's own document plus
+ * one per page (`pageDocumentName`), which is what lets a client sync a page
+ * only when it opens it. Rooms are open: per our model the board id (the
  * capability URL) is the secret, so students connect without auth. Tutor gating
  * is on the HTTP management surface, not here.
- *
- * Configured now; clients connect starting Phase 19.
  */
 export const hocuspocus = new Hocuspocus({
   beforeHandleAwareness: async ({ connection, document, states }) => {
@@ -39,7 +39,7 @@ export const hocuspocus = new Hocuspocus({
     const rows = await db
       .select()
       .from(boardDocuments)
-      .where(eq(boardDocuments.boardId, documentName))
+      .where(eq(boardDocuments.documentName, documentName))
       .limit(1);
     const row = rows[0];
     if (!row) return;
@@ -52,13 +52,13 @@ export const hocuspocus = new Hocuspocus({
     await db
       .insert(boardDocuments)
       .values({
-        boardId: documentName,
+        documentName,
         data,
         format: 'v2',
         updatedAt: new Date(),
       })
       .onConflictDoUpdate({
-        target: boardDocuments.boardId,
+        target: boardDocuments.documentName,
         set: { data, format: 'v2', updatedAt: new Date() },
       });
   },

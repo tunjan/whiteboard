@@ -36,16 +36,30 @@ A self-hostable, real-time collaborative whiteboard built for tutoring. Uses an 
 
 ### B. Yjs Document Structure
 
-- `shapes` (Y.Map): Default page (`page-default`) shapes.
-- `shapes:<pageId>` (Y.Map): Shapes for subsequent pages.
+A board is a **tree of documents**, not one. The board document holds the page
+registry and everything board-level; each page's shapes are a document of their
+own, synced only while that page is resident. Joining a 40-page board syncs the
+registry plus the page being looked at.
+
+**Board document** (Hocuspocus name: the board id):
+
 - `pages` (Y.Map): Page metadata (`id`, `name`, `index`).
-  - Page ops live in `use-document-store.ts`: `createPage`, `renamePage`, `deletePage`, `movePage(ToIndex)`, `duplicatePage`, `moveShapesToPage`.
-  - `duplicatePage` clones shapes with **fresh** ids, remapping `parentId` and connector bindings within the copy; `moveShapesToPage` **keeps** ids and world positions, re-rooting any moved shape whose parent stays behind.
-  - Undo is per page (one `Y.UndoManager` per page's shapes map). A cross-page move writes to two maps, so the initiating page's manager takes the target map into scope and `crossPageMoveOwner` makes exactly one manager capture the transaction — otherwise undo would restore the shapes on the source while the copies stayed on the target.
+  - Page ops live in `use-document-store.ts`: `createPage`, `renamePage`, `deletePage`, `movePage(ToIndex)`, `duplicatePage` (async — it awaits the source page's document), `moveShapesToPage`.
+  - `duplicatePage` clones shapes with **fresh** ids, remapping `parentId` and connector bindings within the copy; it copies with `Y.Map.clone()`, carrying ink chunks and text sequences across as structure rather than decoding and re-encoding them. `moveShapesToPage` **keeps** ids and world positions, re-rooting any moved shape whose parent stays behind.
 - `documents` (Y.Map): Shared file repository metadata.
 - `stickers` (Y.Array): Custom sticker library for the board.
 - `comments` (Y.Map): Canvas thread comments (not shapes, no undo).
 - `music` (Y.Map): Shared playlist playback state.
+- `shapes` / `shapes:<pageId>` (Y.Map): **Legacy only.** Where pages lived before the split. `page-migration.ts` moves one page at a time into its own document, the first time that page is opened, and empties the map behind it.
+
+**Page document** (Hocuspocus name: `<boardId>/pages/<pageId>`, from `pageDocumentName` in `@whiteboard/shared`):
+
+- `shapes` (Y.Map): That page's shapes, and nothing else.
+- Residency is managed by `page-docs.ts`: the open page and any page pinned for its undo history stay in memory, plus the two most recently used beyond them. Eviction is skipped entirely when a board has neither a local cache nor a server, since there would be nowhere to reload from.
+- A page document is created and written to before it has synced — the shapes carry their own ids, so a cross-page move into a page nobody has opened merges when it arrives, with no round trip.
+- Deleting a page removes it from the registry (every client then drops its local copy) and `DELETE /api/pages/:boardId/:pageId` deletes the stored row, which the CRDT protocol has no way to express.
+
+**Undo** is per page — one `Y.UndoManager` per page document. A cross-page move writes to two documents, which no single manager can revert, so only the outgoing half is tracked and the incoming half is recorded in `crossPageMoves` (keyed by the stack item) and replayed by hand in `undo`/`redo`. History cannot outlive its document, so an edited page is pinned resident, capped at `MAX_HISTORY_PAGES`.
 
 ### C. Fractional Indexing (Z-Order)
 
@@ -104,7 +118,7 @@ A self-hostable, real-time collaborative whiteboard built for tutoring. Uses an 
 | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `Canvas.tsx`                              | Main canvas controller: orchestrates SVG layers, pointer events, wheel/pinch zoom, keyboard shortcuts, paste/drop handlers, context menu, and active tool routing. |
 | `editor.ts`                               | `Editor` interface contract (`getShape`, `getShapes`, `createShape`, `updateShape`, `deleteShapes`, `transact`).                                                   |
-| `use-document-store.ts`                   | Zustand store + Yjs provider + UndoManager. Manages board lifecycle (`loadBoard`), shape CRUD, page navigation, spatial index synchronization, and document state. |
+| `use-document-store.ts`                   | Zustand store + Yjs providers + UndoManagers. Manages board lifecycle (`loadBoard`), shape CRUD, page navigation, spatial index synchronization, and document state. Leaving a page *parks* its derived state (shape cache, sorted array, spatial index, binding graph) so returning to it is a pointer swap; a peer's edit to a parked page marks it stale and the return re-derives instead. |
 | `ShapeView.tsx`                           | Polymorphic shape renderer invoking registered `ShapeUtil.Component`.                                                                                              |
 | `Background.tsx`                          | Dot grid, graph paper, line grid, or blank background renderer matching camera zoom/pan.                                                                           |
 | `SelectionLayer.tsx`                      | Selection bounding box, 8 resize handles, rotation handle, and custom shape handles.                                                                               |
@@ -126,7 +140,7 @@ A self-hostable, real-time collaborative whiteboard built for tutoring. Uses an 
 | --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
 | `camera.ts`                                                           | Screen $\leftrightarrow$ World transforms, discrete zoom calculation (`nextDiscreteZoom`).                              |
 | `use-camera-store.ts`                                                 | Camera Zustand store (`x`, `y`, `zoom`).                                                                                |
-| `spatial-index.ts`                                                    | RBush R-tree index wrapping all shapes on the page for fast $O(\log N)$ viewport culling and hit-testing.               |
+| `spatial-index.ts`                                                    | RBush R-tree index wrapping all shapes on the page for fast $O(\log N)$ viewport culling and hit-testing. `loadAll` bulk-builds it for a page; `adopt` swaps a parked page's index back in without rebuilding. |
 | `snapping.ts` / `snap-geometry.ts` / `snap-targets.ts`                | Alignment guide calculation (center lines, bounding edges, 15° rotation snap).                                          |
 | `selection-geometry.ts`                                               | Bounds calculation for multi-selection, rigid body rotation/scaling.                                                    |
 | `shape-bounds.ts`                                                     | Rotated AABB and OBB bounding box extractors.                                                                           |
@@ -135,18 +149,21 @@ A self-hostable, real-time collaborative whiteboard built for tutoring. Uses an 
 | `commands.ts`                                                         | Composite canvas actions: duplicate, group, ungroup, delete with cascade.                                               |
 | `hierarchy.ts`                                                        | Parent-child tree traversal for groups and frames.                                                                      |
 | `page-names.ts`                                                       | Collision-free page naming (`getIncrementedName`): reuses a trailing counter instead of stacking suffixes.              |
+| `page-docs.ts`                                                        | The board's pages as separate CRDT documents: lazy creation, one shared websocket, pinning, and LRU residency.          |
+| `page-migration.ts`                                                   | Legacy boards, whose pages lived inside the board document. Moves one page into its own document, idempotently.         |
 | `clipboard.ts` / `board/clipboard-os.ts`                              | Internal and OS clipboard serialization for shapes, images, and text.                                                   |
 | `export-png.tsx` / `png-phys.ts`                                      | Headless SVG-to-Canvas PNG exporter with DPI scaling and physical metadata.                                             |
 | `graph-parser.ts` / `graph-sampler.ts` / `graph-intersections.ts`     | 2D graphing engine: parses expressions/parameters, samples curve vertices, computes Newton-Raphson curve intersections. |
 | `equation-render.ts` / `equation-source.ts`                           | MathJax display-equation SVG compilation and caching.                                                                   |
 | `equation-complete.ts` / `equation-shortcuts.ts`                      | LaTeX command catalog for the panel's autocomplete, plus pure typing edits (auto-brackets, Tab slots, environment rows). |
-| `ink-to-latex.ts`                                                     | Handwriting → equation: rasterize the strokes, transcribe them via `/api/ai/latex/ink`, swap ink for a typeset shape in one undo step. |
+| `ink-to-latex.ts`                                                     | Handwriting or pasted image → equation: rasterize the selection, transcribe it via `/api/ai/latex/ink`, swap the source for a typeset shape in one undo step. |
 | `link-url.ts` / `place-image.ts` / `place-link.ts` / `place-video.ts` | Asset drop and paste placement handlers.                                                                                |
 
 #### Canvas Zustand Stores & Hooks
 
 - `use-selection-store.ts` — Selected shape IDs (`selectedIds: string[]`).
 - `use-style-store.ts` — Active stroke color, fill style, dash style, stroke size, font settings.
+- `use-style-controls.ts` — The one answer to "which style controls apply right now, and what does each one write?": derives the visibility flags from the active tool plus the selection, and returns setters that update the style store *and* every selected shape carrying that property. Consumed by `tool-properties-satellite.tsx`.
 - `use-canvas-ui-store.ts` — Canvas HUD visibility, grid mode, performance stats toggles.
 - `use-tool-store.ts` / `use-tool-lock-store.ts` — Active tool ID and tool lock state.
 - `use-eraser-store.ts` / `use-eraser-cut-store.ts` — Precision path cutting state.
@@ -192,7 +209,6 @@ All tools implement `Tool` (registered in `register.ts`):
 | `hand`                  | `hand-tool.ts`                                            | Hotkey `h` / `Space`. Click-drag canvas panning.                                                                                                       |
 | `draw`                  | `draw-tool.ts`                                            | Hotkey `d` / `p` / `b`. Freehand ink drawing with hardware coalesced samples. `createDrawTool(config)` also backs the highlighter.                                                                          |
 | `highlighter`           | `draw-tool.ts`                                            | Hotkey `i`. The same freehand state machine laying marker ink: constant width, translucent, stacked under the drawing.                                  |
-| `wand`                  | `wand-tool.ts`                                            | Hotkey `w`. Gesture-recognizing pen that auto-converts strokes to neat shapes.                                                                         |
 | `line` / `arrow`        | `line-tool.ts`                                            | Hotkey `l` / `a`. Drag to create line/arrow; snaps endpoints to shape anchor points.                                                                   |
 | `rectangle` / `ellipse` | `box-tool.ts`                                             | Hotkey `r` / `o`. Drag to create boxes/ellipses (Shift for 1:1 square/circle).                                                                         |
 | `polygon`               | `polygon-tool.ts`                                         | Drag to create regular polygons.                                                                                                                       |
@@ -217,6 +233,9 @@ All tools implement `Tool` (registered in `register.ts`):
 | `use-presence-store.ts`                       | Zustand store tracking all active peers in the room.                                                         |
 | `use-follow-store.ts` / `follow-controls.tsx` | Viewport follow mode (smoothly locks camera to target peer's viewport).                                      |
 | `latency.ts` / `latency-warning-toast.tsx`    | Heartbeat latency ping/pong monitoring.                                                                      |
+| `attention.ts`                                | Publishes this client's own attention facts (input counter + tab visibility/focus) over awareness. No heartbeat: readers time the changes. |
+| `attention-state.ts`                          | Pure fold from those facts to `attentive`/`idle`/`away` on the reader's clock, plus the once-per-episode alert edge. |
+| `use-attention-store.ts` / `attention-toast.tsx` | Tutor-only read of every student's attention, and the toast it raises. Inert for students and when alerts are off. |
 | `voice/voice-session.ts`                      | WebRTC Mesh audio room manager: creates peer connections, coordinates SDP offers/answers over Yjs awareness. |
 | `voice/voice-gate.ts`                         | Web Audio API Voice Activity Detection (VAD) / noise gate.                                                   |
 | `voice/use-voice-store.ts`                    | Audio state store (mute, deafen, speaking indicators, active speakers).                                      |
@@ -230,14 +249,16 @@ All tools implement `Tool` (registered in `register.ts`):
 | `board-ui-layer.tsx`      | Click-through shell holding every floating panel; one stacking band + one wheel forwarder.         |
 | `toolbar.tsx`             | Main floating tool palette (docked bottom or top).                                                 |
 | `board-chrome.tsx`        | Top header bar: board title, back button, share button, page navigation, voice HUD, presence list. |
-| `style-panel.tsx`         | Floating property inspector: stroke color, fill type, stroke width, opacity, font size, align.     |
+| `tool-properties-satellite.tsx` | **The style surface.** Every style control, as a second bar above the toolbar: stroke weight and colour inline, and fill / stroke style / opacity / text / arrow / line behind keys that preview their current value. Drives both the active tool's defaults and the selection. |
+| `style-previews.tsx`      | Shared option tables and glyphs for those controls (fill, dash, spline, typeface, weight, align, arrow route).                                       |
+| `style-panel.tsx`         | *Legacy, not mounted.* The top-right property inspector the satellite bar replaced; still reads `use-style-controls.ts`, so it cannot disagree with the live UI. |
 | `graph-panel.tsx`         | Graph equation list, function curves, slider variables, viewport range bounds.                     |
 | `equation-panel.tsx`      | LaTeX source editor: command autocomplete, Quick-LaTeX typing shortcuts, and "describe an equation" generation. |
 | `documents-panel.tsx`     | Drawer for uploading, downloading, and viewing board file attachments; carries the unread dot.     |
 | `page-menu.tsx`           | Multi-page list switcher, reordering, creation, and deletion.                                      |
 | `canvas-context-menu.tsx` | Right-click context menu (Cut, Copy, Paste, Bring to Front, Send to Back, Group, Lock).            |
 | `board-notes-dialog.tsx`  | Tutor-only private student notes.                                                                  |
-| `board-actions-menu.tsx`  | Board ⋯ menu: dialogs, PNG copy/export + resolution, and all board preferences (theme, snapping, pen, sound, perf overlay). |
+| `board-actions-menu.tsx`  | Board ⋯ menu: dialogs, PNG copy/export + resolution, and all board preferences (theme, snapping, pen, sound, perf overlay, tutor-only attention thresholds). |
 | `music/music-player.tsx`  | Whiteboard background music audio player and playlist selector.                                    |
 
 ---

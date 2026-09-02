@@ -50,6 +50,16 @@ interface CanvasUiStore {
   /** Whether the on-canvas performance overlay (FPS/frame time) is shown. */
   debugPerformance: boolean;
   /**
+   * Whether the tutor is shown when a student stops paying attention. Tutor-only
+   * in effect: every client publishes its own attention facts, but nothing is
+   * rendered except in a tutor's participant list and toasts.
+   */
+  attentionAlertsEnabled: boolean;
+  /** Seconds without input before a present student reads as idle. */
+  attentionIdleSeconds: number;
+  /** Seconds in another window before a student reads as away. */
+  attentionAwaySeconds: number;
+  /**
    * Resolution multiplier for exported and copied PNGs, in raster pixels per
    * board unit. PNG is lossless, so this — not a compression quality — is the
    * only thing that trades file size against sharpness.
@@ -66,9 +76,21 @@ interface CanvasUiStore {
   setPencilEndTaper: (pencilEndTaper: boolean) => void;
   setPencilPrediction: (pencilPrediction: boolean) => void;
   setDebugPerformance: (debugPerformance: boolean) => void;
+  setAttentionAlertsEnabled: (attentionAlertsEnabled: boolean) => void;
+  setAttentionIdleSeconds: (attentionIdleSeconds: number) => void;
+  setAttentionAwaySeconds: (attentionAwaySeconds: number) => void;
   setPngExportScale: (pngExportScale: number) => void;
   resetPencil: () => void;
 }
+
+/**
+ * Bounds for the attention thresholds. Idle starts high because a student
+ * working something out on paper is still in the lesson; away starts low
+ * because switching windows is unambiguous, but not so low that a glance at
+ * another app trips it.
+ */
+export const ATTENTION_IDLE_RANGE = { min: 30, max: 300, step: 15 } as const;
+export const ATTENTION_AWAY_RANGE = { min: 5, max: 120, step: 5 } as const;
 
 /** Offered PNG export resolutions, as a multiplier of the board's own units. */
 export const PNG_EXPORT_SCALES = [1, 2, 3, 4] as const;
@@ -122,6 +144,9 @@ export const useCanvasUiStore = create<CanvasUiStore>()(
       snappingEnabled: true,
       eraserMode: 'object',
       debugPerformance: false,
+      attentionAlertsEnabled: true,
+      attentionIdleSeconds: 90,
+      attentionAwaySeconds: 15,
       pngExportScale: DEFAULT_PNG_EXPORT_SCALE,
       ...PENCIL_DEFAULTS,
       setBackground: (background) => set({ background }),
@@ -137,6 +162,12 @@ export const useCanvasUiStore = create<CanvasUiStore>()(
       setPencilEndTaper: (pencilEndTaper) => set({ pencilEndTaper }),
       setPencilPrediction: (pencilPrediction) => set({ pencilPrediction }),
       setDebugPerformance: (debugPerformance) => set({ debugPerformance }),
+      setAttentionAlertsEnabled: (attentionAlertsEnabled) =>
+        set({ attentionAlertsEnabled }),
+      setAttentionIdleSeconds: (attentionIdleSeconds) =>
+        set({ attentionIdleSeconds }),
+      setAttentionAwaySeconds: (attentionAwaySeconds) =>
+        set({ attentionAwaySeconds }),
       setPngExportScale: (pngExportScale) => set({ pngExportScale }),
       resetPencil: () => set({ ...PENCIL_DEFAULTS }),
     }),

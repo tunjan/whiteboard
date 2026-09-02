@@ -31,6 +31,12 @@ interface VideoStore {
   mode: VideoPanelMode;
   /** Null until the panel is dragged; the panel is edge-anchored until then. */
   position: PanelPosition | null;
+  /**
+   * The tile shown large — the spotlight when maximized, and the one view the
+   * minimised panel gives its single tile to. It survives a mode change: the
+   * person you picked to watch is the person you still want when the panel
+   * shrinks back down.
+   */
   spotlightKey: string | null;
   setSelfView: (selfView: SelfView) => void;
   setCameraEnabled: (enabled: boolean) => void;
@@ -116,7 +122,7 @@ export const useVideoStore = create<VideoStore>((set) => ({
         ? { remoteCameras: next }
         : { remoteScreens: next };
     }),
-  setMode: (mode) => set(mode === 'maximized' ? { mode } : { mode, spotlightKey: null }),
+  setMode: (mode) => set({ mode }),
   setPosition: (position) => set({ position }),
   setSpotlightKey: (spotlightKey) => set({ spotlightKey }),
   resetSession: () =>

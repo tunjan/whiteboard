@@ -1,4 +1,5 @@
 import { useEffect, type RefObject } from 'react';
+import { noteActivity } from '@/collab/attention';
 import { stopFollowingForManualCameraChange } from '@/collab/use-follow-store';
 import { useCameraStore } from './use-camera-store';
 
@@ -75,6 +76,7 @@ export function useWheel(
       // page out from under the canvas.
       e.preventDefault();
       if (disabled) return;
+      noteActivity();
       stopFollowingForManualCameraChange();
 
       anchorClientX = e.clientX;

@@ -22,11 +22,13 @@ import { UndoControls } from './UndoControls';
 import { cameraToTransform, nextDiscreteZoom, screenToWorld } from './camera';
 import { quantizedCullRegion, viewportWorldBounds } from './geometry';
 import { PerformanceOverlay } from '@/components/performance-overlay';
+import { noteActivity } from '@/collab/attention';
 import { CursorsLayer } from '@/collab/CursorsLayer';
 import { PeerSelectionLayer } from '@/collab/PeerSelectionLayer';
 import { CommentsLayer } from './CommentsLayer';
 import { DrawingCursor } from './DrawingCursor';
 import { EraserCursor } from './EraserCursor';
+import { LaserCursor } from './LaserCursor';
 import { EraserTrail } from './EraserTrail';
 import { LaserLayer } from './LaserLayer';
 import {
@@ -96,6 +98,11 @@ import { useCameraStore } from './use-camera-store';
 import { subscribeCanvasZoomToBounds } from './camera-requests';
 import { useCameraInteraction } from './use-camera-interaction';
 import { useCanvasUiStore } from './use-canvas-ui-store';
+import {
+  getContainerRect,
+  invalidateContainerRect,
+  useContainerRect,
+} from './container-rect';
 import { useElementSize } from './use-element-size';
 import { useSafariGestures } from './use-safari-gestures';
 import { copySelectionToPngClipboard } from './export-png';
@@ -225,6 +232,9 @@ function CanvasSelectionStatus() {
 
 export function Canvas() {
   const [containerRef, size] = useElementSize<HTMLDivElement>();
+  // Keeps the container's viewport rectangle measured, so turning a pointer
+  // sample into canvas coordinates doesn't force a layout on every move.
+  useContainerRect(containerRef);
   const sizeRef = useRef(size);
   sizeRef.current = size;
   const camera = useCameraStore((s) => s.camera);
@@ -578,13 +588,13 @@ export function Canvas() {
   const toInfo = useCallback(
     (
       e: ReactPointerEvent | ReactMouseEvent | PointerEvent,
-      // Optional pre-read container rect. `getBoundingClientRect` forces a
-      // synchronous reflow while React is committing shape frames, so callers
-      // that process many coalesced samples per event read it once and pass it
-      // in rather than paying that cost on every sample.
+      // Optional pre-read container rect. `getContainerRect` serves a cache
+      // (see `container-rect.ts`), so this is now a lookup rather than the
+      // forced reflow it used to be; callers processing many coalesced samples
+      // per event still pass their rect in to skip even that.
       rect?: DOMRect,
     ): ToolPointerInfo => {
-      const r = rect ?? containerRef.current?.getBoundingClientRect();
+      const r = rect ?? getContainerRect(containerRef.current);
       const screen = {
         x: e.clientX - (r?.left ?? 0),
         y: e.clientY - (r?.top ?? 0),
@@ -718,7 +728,7 @@ export function Canvas() {
   // A pointer position in container (canvas-relative) pixels.
   const screenPointOf = useCallback(
     (e: { clientX: number; clientY: number }) => {
-      const rect = containerRef.current?.getBoundingClientRect();
+      const rect = getContainerRect(containerRef.current);
       return {
         x: e.clientX - (rect?.left ?? 0),
         y: e.clientY - (rect?.top ?? 0),
@@ -731,7 +741,7 @@ export function Canvas() {
   // after it moves. This keeps a peer marker visible for clicks and taps too.
   const publishCursorPosition = useCallback(
     (clientX: number, clientY: number, rect?: DOMRect) => {
-      const r = rect ?? containerRef.current?.getBoundingClientRect();
+      const r = rect ?? getContainerRect(containerRef.current);
       if (
         !r ||
         clientX < r.left ||
@@ -743,6 +753,7 @@ export function Canvas() {
       }
       const screen = { x: clientX - r.left, y: clientY - r.top };
       pointerRef.current = screen;
+      noteActivity();
       setLocalCursor(screenToWorld(screen, useCameraStore.getState().camera));
     },
     [containerRef],
@@ -871,6 +882,10 @@ export function Canvas() {
 
   const onPointerDown = useCallback(
     (e: ReactPointerEvent) => {
+      // One measurement per gesture, so a rectangle that went stale for a
+      // reason the invalidation listeners don't cover cannot mislocate a whole
+      // stroke — only the moment before the hand landed.
+      invalidateContainerRect();
       publishCursorPosition(e.clientX, e.clientY);
 
       // Touch: drive the active tool with one finger; two fingers = pinch/pan.
@@ -941,7 +956,7 @@ export function Canvas() {
   const onPointerMove = useCallback(
     (e: ReactPointerEvent) => {
       if (isTouchPointer(e) && penActive.current) return;
-      const rect = containerRef.current?.getBoundingClientRect();
+      const rect = getContainerRect(containerRef.current);
       if (rect) {
         pointerRef.current = {
           x: e.clientX - rect.left,
@@ -1321,6 +1336,7 @@ export function Canvas() {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (isTypingTarget(e.target)) return;
+      noteActivity();
       const mod = e.metaKey || e.ctrlKey;
       const ids = useSelectionStore.getState().selectedIds;
       const isModifierKey =
@@ -1655,7 +1671,7 @@ export function Canvas() {
       }
       if (!images.length) return;
 
-      const rect = containerRef.current?.getBoundingClientRect();
+      const rect = getContainerRect(containerRef.current);
       const world = screenToWorld(
         { x: e.clientX - (rect?.left ?? 0), y: e.clientY - (rect?.top ?? 0) },
         useCameraStore.getState().camera,
@@ -1720,12 +1736,13 @@ export function Canvas() {
   const rotationCursor = useSelectionStore((state) => state.rotationCursor);
   const showDrawingCursor = activeToolId === 'draw' && !pan.isSpaceDown;
   const showEraserCursor = activeToolId === 'eraser' && !pan.isSpaceDown;
+  const showLaserCursor = activeToolId === 'laser' && !pan.isSpaceDown;
   const cursor =
     pan.isPanning || handDragging
       ? 'grabbing'
       : pan.isSpaceDown
         ? 'grab'
-        : showDrawingCursor || showEraserCursor
+        : showDrawingCursor || showEraserCursor || showLaserCursor
           ? 'none'
           : (rotationCursor ?? toolCursor);
 
@@ -1750,7 +1767,7 @@ export function Canvas() {
       onDrop={onDrop}
       onPointerEnter={(e) => publishCursorPosition(e.clientX, e.clientY)}
       onPointerLeave={(e) => {
-        const rect = containerRef.current?.getBoundingClientRect();
+        const rect = getContainerRect(containerRef.current);
         const stillInsideViewport =
           rect &&
           e.clientX >= rect.left &&
@@ -1777,7 +1794,15 @@ export function Canvas() {
         height={size.height}
       />
 
-      <svg className="absolute inset-0 z-[var(--z-canvas-shapes)] h-full w-full">
+      {/* Not hit-testable, like the active-stroke and vanish layers that share
+          its z-band. Every pointer
+          event makes the browser resolve a target, and a page of ink is the
+          worst thing to resolve one against: a single long stroke serializes to
+          kilobytes of path data, and the walk happens again for every coalesced
+          sample of every move. Nothing is lost by opting out — no shape util
+          registers a DOM handler, and hit-testing runs on the spatial index and
+          `ShapeUtil.hitTest`, never on the event target. */}
+      <svg className="pointer-events-none absolute inset-0 z-[var(--z-canvas-shapes)] h-full w-full">
         <g transform={cameraToTransform(camera)}>{renderedShapes}</g>
       </svg>
 
@@ -1791,8 +1816,10 @@ export function Canvas() {
       <VanishLayer camera={camera} />
 
       {/* While the camera moves, an invisible blocker captures pointer hit-tests
-          so the browser doesn't walk the SVG shape tree every frame. Pointer and
-          wheel events still bubble to the container's handlers below it. */}
+          so the browser doesn't walk the overlay trees — selection handles,
+          comment pins, peer cursors — every frame. The shape layer above opts
+          out of hit-testing outright and never needed this. Pointer and wheel
+          events still bubble to the container's handlers below it. */}
       {cameraMoving && (
         <div className="absolute inset-0 z-[var(--z-canvas-blocker)]" />
       )}
@@ -1810,6 +1837,7 @@ export function Canvas() {
       <CommentsLayer camera={camera} />
       {showDrawingCursor && <DrawingCursor containerRef={containerRef} />}
       {showEraserCursor && <EraserCursor containerRef={containerRef} />}
+      {showLaserCursor && <LaserCursor containerRef={containerRef} />}
 
       {editingShape?.type === 'text' && (
         <TextEditorOverlay shape={editingShape} camera={camera} />

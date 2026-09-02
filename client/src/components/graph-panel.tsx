@@ -167,7 +167,7 @@ function GraphPanelContent({ shape }: { shape: GraphShape }) {
       role="region"
       aria-labelledby="graph-panel-title"
       mode="docked"
-      className="flex max-h-[var(--anchor-max-h,calc(100dvh-2rem))] w-[min(24rem,calc(100vw-2rem))] flex-col overflow-hidden p-1 shadow-e2"
+      className="flex max-h-[var(--anchor-max-h,calc(100dvh-2rem))] w-[min(24rem,calc(100vw-2rem))] flex-col overflow-hidden p-1 shadow-e3"
     >
       <h2 id="graph-panel-title" className="sr-only">
         Graph

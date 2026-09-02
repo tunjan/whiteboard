@@ -348,13 +348,10 @@ export function DocumentsPanel({
                   data-toolbar-item={toolbarItem || undefined}
                   tabIndex={toolbarItem ? -1 : undefined}
                   aria-label={triggerLabel}
-                  className={cn(
-                    buttonVariants({
-                      variant: 'ghost',
-                      size: showLabel ? 'sm' : 'icon-sm',
-                    }),
-                    toolbarItem && 'bg-surface',
-                  )}
+                  className={buttonVariants({
+                    variant: 'ghost',
+                    size: showLabel ? 'sm' : 'icon-sm',
+                  })}
                 />
               }
             >

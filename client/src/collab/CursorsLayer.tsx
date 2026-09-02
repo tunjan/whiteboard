@@ -24,7 +24,7 @@ import { cn } from '@/lib/utils';
 // 24px disc is centred here and its wedge reaches 18px beyond that centre.
 const EDGE_INDICATOR_INSET = 22;
 
-function CursorIcon({ color }: { color: string }) {
+export function CursorIcon({ color }: { color: string }) {
   // The wide round-joined outer stroke doubles as the darker border and rounds
   // off the pointer's sharp corners. The slim inner stroke keeps roughly a
   // one-pixel outline visible after the fill is layered on top.

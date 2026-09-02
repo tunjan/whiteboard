@@ -34,7 +34,10 @@ import {
   exportSelectionToPng,
 } from './export-png';
 import { deleteTargetIds } from './hierarchy';
-import { convertInkToEquation, inkStrokeIds } from './ink-to-latex';
+import {
+  convertSelectionToEquation,
+  convertibleShapeIds,
+} from './ink-to-latex';
 import { getSelectionInfo } from './selection-geometry';
 
 /** Stable empty array for the non-group selection path (see `hasGroup`). */
@@ -153,10 +156,10 @@ export function SelectionToolbar({ camera }: SelectionToolbarProps) {
     editor.getShape(selectedIds[0]!)?.type === 'image'
       ? selectedIds[0]!
       : null;
-  const inkIds = inkStrokeIds(selectedIds);
+  const convertibleIds = convertibleShapeIds(selectedIds);
   const canConvertToEquation =
     aiEnabled &&
-    inkIds !== null &&
+    convertibleIds !== null &&
     !selectedIds.some((id) => editor.getShape(id)?.locked);
 
   // Position above the topmost (rotated) corner, centered on the bounds center.
@@ -187,10 +190,10 @@ export function SelectionToolbar({ camera }: SelectionToolbarProps) {
     alignShapes(editor, selectedIds, edge);
 
   const convertToEquation = async () => {
-    if (!inkIds || converting) return;
+    if (!convertibleIds || converting) return;
     setConverting(true);
     try {
-      await convertInkToEquation(inkIds);
+      await convertSelectionToEquation(convertibleIds);
     } catch (err) {
       toast.add({
         title: err instanceof Error ? err.message : 'Conversion failed',

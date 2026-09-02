@@ -74,6 +74,7 @@ const CONSTANTS = new Set(['e', 'pi']);
 const RESERVED_SYMBOLS = new Set([
   'x',
   'y',
+  'sum',
   ...CONSTANTS,
   ...FUNCTION_ALIASES.keys(),
   ...FUNCTION_ALIASES.values(),
@@ -112,12 +113,34 @@ type TokenType =
   | 'operator'
   | 'lparen'
   | 'rparen'
-  | 'comma';
+  | 'comma'
+  | 'equals';
 
-interface Token {
+interface BasicToken {
   type: TokenType;
   value: string;
 }
+
+/**
+ * The limits of a `sum_(i=1)^(5)`, already parsed. The body it adds up is the
+ * run of tokens that follows, which {@link expandSums} splices out.
+ */
+interface SumToken {
+  type: 'sum';
+  value: string;
+  index: string;
+  from: number;
+  to: number;
+}
+
+type Token = BasicToken | SumToken;
+
+/**
+ * A sum is expanded term by term, so its length is bounded: past a couple of
+ * thousand terms mathjs overflows the stack compiling the tree, and long before
+ * that the per-sample cost is what makes the curve crawl.
+ */
+const MAX_SUM_TERMS = 200;
 
 export interface ParsedGraphFunction {
   ok: true;
@@ -237,6 +260,159 @@ function canStartFactor(token: Token): boolean {
   );
 }
 
+const SUM_LIMITS_MESSAGE =
+  'Sum needs whole-number limits, for example a sum from n=1 to 5';
+
+function skipSpace(source: string, start: number): number {
+  let index = start;
+  while (index < source.length && /\s/.test(source[index]!)) index += 1;
+  return index;
+}
+
+/** One limit of a sum: `(i=0)`, or a bare `5` where MathLive drops the parens. */
+function readSumBound(
+  source: string,
+  start: number,
+): { text: string; next: number } | null {
+  const from = skipSpace(source, start);
+  if (source[from] === '(') {
+    let depth = 0;
+    for (let index = from; index < source.length; index += 1) {
+      if (source[index] === '(') depth += 1;
+      else if (source[index] === ')') {
+        depth -= 1;
+        if (depth === 0) {
+          return { text: source.slice(from + 1, index), next: index + 1 };
+        }
+      }
+    }
+    return null;
+  }
+  const match = source.slice(from).match(/^-?\d+/);
+  return match ? { text: match[0], next: from + match[0].length } : null;
+}
+
+/**
+ * Read `_(i=0)^(10)` — MathLive writes `\sum_{i=0}^{10}` out in that form, with
+ * the subscript first whichever order it was typed in.
+ */
+function readSumLimits(
+  source: string,
+  start: number,
+): { token: SumToken; next: number } {
+  const underscore = skipSpace(source, start);
+  if (source[underscore] !== '_') throw new Error(SUM_LIMITS_MESSAGE);
+  const lower = readSumBound(source, underscore + 1);
+  if (!lower) throw new Error(SUM_LIMITS_MESSAGE);
+  const caret = skipSpace(source, lower.next);
+  if (source[caret] !== '^') throw new Error(SUM_LIMITS_MESSAGE);
+  const upper = readSumBound(source, caret + 1);
+  if (!upper) throw new Error(SUM_LIMITS_MESSAGE);
+
+  const from = lower.text.match(
+    /^\s*([A-Za-z][A-Za-z0-9_]*)\s*=\s*(-?\d+)\s*$/,
+  );
+  const to = upper.text.match(/^\s*(-?\d+)\s*$/);
+  if (!from || !to) throw new Error(SUM_LIMITS_MESSAGE);
+
+  const index = from[1]!;
+  if (!isVariableName(index) || index === PARAMETRIC_VARIABLE) {
+    throw new Error(`Sum index "${index}" is not allowed`);
+  }
+  return {
+    token: {
+      type: 'sum',
+      value: 'sum',
+      index,
+      from: Number(from[2]),
+      to: Number(to[1]),
+    },
+    next: upper.next,
+  };
+}
+
+/**
+ * How far a sum reaches: over the factors that follow it, stopping at the next
+ * top-level `+` or `-`. `sum_(n=1)^(5)n + 1` adds 1 to the sum, matching both
+ * the usual convention and Desmos.
+ */
+function sumBodyEnd(tokens: Token[], start: number): number {
+  let depth = 0;
+  for (let index = start; index < tokens.length; index += 1) {
+    const token = tokens[index]!;
+    if (token.type === 'lparen') depth += 1;
+    else if (token.type === 'rparen') {
+      if (depth === 0) return index;
+      depth -= 1;
+    } else if (depth === 0) {
+      if (token.type === 'equals' || token.type === 'comma') return index;
+      if (
+        index > start &&
+        token.type === 'operator' &&
+        (token.value === '+' || token.value === '-')
+      ) {
+        return index;
+      }
+    }
+  }
+  return tokens.length;
+}
+
+function substituteSumIndex(
+  body: Token[],
+  index: string,
+  value: number,
+): Token[] {
+  // Parenthesised when negative so it stays one factor: `x^i` with i = -2 has
+  // to normalize to `x^(-2)`, not `x^-2`.
+  const replacement: Token[] =
+    value < 0
+      ? [
+          { type: 'lparen', value: '(' },
+          { type: 'operator', value: '-' },
+          { type: 'number', value: String(-value) },
+          { type: 'rparen', value: ')' },
+        ]
+      : [{ type: 'number', value: String(value) }];
+  return body.flatMap((token) =>
+    token.type === 'identifier' && token.value === index ? replacement : [token],
+  );
+}
+
+function expandSum(sum: SumToken, body: Token[]): Token[] {
+  const terms = sum.to - sum.from + 1;
+  if (terms <= 0) return [{ type: 'number', value: '0' }];
+  if (terms > MAX_SUM_TERMS) {
+    throw new Error(`A sum is limited to ${MAX_SUM_TERMS} terms`);
+  }
+
+  const expanded: Token[] = [{ type: 'lparen', value: '(' }];
+  for (let value = sum.from; value <= sum.to; value += 1) {
+    if (value > sum.from) expanded.push({ type: 'operator', value: '+' });
+    expanded.push(...substituteSumIndex(body, sum.index, value));
+  }
+  expanded.push({ type: 'rparen', value: ')' });
+  return expanded;
+}
+
+/**
+ * Write every sum out as its terms, so the rest of the pipeline — normalizing,
+ * validating, compiling, slider discovery — never has to know about them. The
+ * scan runs right to left, which leaves a nested sum already expanded by the
+ * time the sum around it claims its body.
+ */
+function expandSums(tokens: Token[]): Token[] {
+  for (let index = tokens.length - 1; index >= 0; index -= 1) {
+    const token = tokens[index]!;
+    if (token.type !== 'sum') continue;
+    const end = sumBodyEnd(tokens, index + 1);
+    const body = tokens.slice(index + 1, end);
+    if (!body.length) throw new Error('Sum needs an expression to add up');
+    tokens.splice(index, end - index, ...expandSum(token, body));
+  }
+  return tokens;
+}
+
 function tokenize(
   source: string,
   userFunctions: ReadonlySet<string> = new Set(),
@@ -267,6 +443,13 @@ function tokenize(
       const name = rawName.toLowerCase();
       const nextNonSpace = source.slice(end).match(/\S/)?.[0] ?? '';
       const functionName = FUNCTION_ALIASES.get(name);
+
+      if (name === 'sum') {
+        const limits = readSumLimits(source, end);
+        tokens.push(limits.token);
+        i = limits.next;
+        continue;
+      }
 
       if (functionName) {
         tokens.push({
@@ -301,6 +484,7 @@ function tokenize(
     if (char === '(') tokens.push({ type: 'lparen', value: char });
     else if (char === ')') tokens.push({ type: 'rparen', value: char });
     else if (char === ',') tokens.push({ type: 'comma', value: char });
+    else if (char === '=') tokens.push({ type: 'equals', value: char });
     else if ('+-*/^%'.includes(char)) {
       tokens.push({ type: 'operator', value: char });
     } else {
@@ -309,7 +493,7 @@ function tokenize(
     i += 1;
   }
 
-  return tokens;
+  return expandSums(tokens);
 }
 
 function normalizeTokens(tokens: Token[]): string {
@@ -369,13 +553,24 @@ function splitCoordinate(tokens: Token[]): [Token[], Token[]] | null {
   return x.length && y.length ? [x, y] : null;
 }
 
-function containsY(
-  source: string,
-  userFunctions: ReadonlySet<string>,
-): boolean {
-  return tokenize(source, userFunctions).some(
+function containsY(tokens: Token[]): boolean {
+  return tokens.some(
     (token) => token.type === 'identifier' && token.value === 'y',
   );
+}
+
+/**
+ * Split on the equals signs. Tokenizing first rather than splitting the raw
+ * text keeps the `=` inside a sum's lower limit out of the count — by this
+ * point it has been consumed into the sum's expansion.
+ */
+function splitOnEquals(tokens: Token[]): Token[][] {
+  const sides: Token[][] = [[]];
+  for (const token of tokens) {
+    if (token.type === 'equals') sides.push([]);
+    else sides[sides.length - 1]!.push(token);
+  }
+  return sides;
 }
 
 export function normalizeGraphExpression(
@@ -383,19 +578,17 @@ export function normalizeGraphExpression(
   definitions: GraphFunctionDefinitions = EMPTY_GRAPH_FUNCTIONS,
 ): string {
   const userFunctions = new Set(definitions.keys());
-  const sides = source.split('=');
+  const sides = splitOnEquals(tokenize(source.trim(), userFunctions));
   if (sides.length > 2) throw new Error('Use a single equals sign');
-  if (sides.length === 1) {
-    return normalizeGraphExpressionSide(sides[0]!, userFunctions);
-  }
+  if (sides.length === 1) return normalizeTokens(sides[0]!);
 
-  const left = normalizeGraphExpressionSide(sides[0]!, userFunctions);
-  const right = normalizeGraphExpressionSide(sides[1]!, userFunctions);
+  const left = normalizeTokens(sides[0]!);
+  const right = normalizeTokens(sides[1]!);
   if (!left || !right) throw new Error('Enter both sides of the equation');
 
   // Keep ordinary functions on the cheaper, higher-resolution 1D sampler.
-  if (left === 'y' && !containsY(right, userFunctions)) return right;
-  if (right === 'y' && !containsY(left, userFunctions)) return left;
+  if (left === 'y' && !containsY(sides[1]!)) return right;
+  if (right === 'y' && !containsY(sides[0]!)) return left;
   return `${left}=${right}`;
 }
 

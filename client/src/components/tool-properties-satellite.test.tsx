@@ -64,16 +64,14 @@ describe('quickSwatches', () => {
 describe('ToolPropertiesSatellite', () => {
   it('offers the swatches and the stroke row to the pen', () => {
     const html = render('draw');
-    expect(html).toContain('aria-label="Tool properties"');
+    expect(html).toContain('aria-label="Style controls"');
     expect(html).toContain('aria-label="Color"');
     expect(html).toContain('aria-label="Stroke weight"');
     expect(html).not.toContain('inert=""');
   });
 
-  it('carries the same controls for the highlighter and the wand', () => {
-    for (const tool of ['highlighter', 'wand']) {
-      expect(render(tool)).toContain('aria-label="Stroke weight"');
-    }
+  it('carries the same controls for the highlighter', () => {
+    expect(render('highlighter')).toContain('aria-label="Stroke weight"');
   });
 
   // Text has no stroke width to set — `fontSize` lives on the shape, not in the
@@ -84,7 +82,7 @@ describe('ToolPropertiesSatellite', () => {
     expect(html).not.toContain('aria-label="Stroke weight"');
   });
 
-  it('hides itself, inertly, on a tool with no quick properties', () => {
+  it('hides itself, inertly, on a tool with no properties to set', () => {
     for (const tool of ['select', 'hand', 'eraser', 'laser', 'graph']) {
       const html = render(tool);
       expect(html).toContain('aria-hidden="true"');
@@ -150,5 +148,81 @@ describe('ToolPropertiesSatellite as a bar in its own right', () => {
 
   it('offers the rest of the palette where the quick row runs out', () => {
     expect(html).toContain('aria-label="More colors"');
+  });
+});
+
+// The bar replaced the top-right style panel, so every control that panel
+// carried has to be reachable here — inline where it is reached for constantly,
+// and behind a key that previews its value where it is not.
+describe('ToolPropertiesSatellite as the only style surface', () => {
+  /** The `aria-label`s of the popover keys, in bar order. */
+  const keys = (html: string) =>
+    [...html.matchAll(/aria-label="([^"]+)"/g)]
+      .map((match) => match[1]!)
+      .filter((label) =>
+        ['Fill', 'Stroke style', 'Opacity', 'Text', 'Arrow', 'Line'].includes(
+          label,
+        ),
+      );
+
+  it('offers the pen everything the panel gave it', () => {
+    expect(keys(render('draw'))).toEqual(['Fill', 'Stroke style', 'Opacity']);
+  });
+
+  it('gives the arrow its route, heads and label behind one key', () => {
+    expect(keys(render('arrow'))).toEqual(['Stroke style', 'Opacity', 'Arrow']);
+    expect(keys(render('line'))).toEqual(['Stroke style', 'Opacity', 'Line']);
+  });
+
+  it('gives text its typeface, weight and alignment behind one key', () => {
+    expect(keys(render('text'))).toEqual(['Opacity', 'Text']);
+  });
+
+  // The highlighter fixes its own translucency and takes no dash or fill, so
+  // it is the one inking tool that ends up with nothing behind a key at all.
+  it('shows no keys where no key would do anything', () => {
+    expect(keys(render('highlighter'))).toEqual([]);
+  });
+
+  // A rule earns its place by having a section on both sides of it. Sections
+  // drop out per subject, so the count has to follow rather than be fixed.
+  it('rules between the sections it has, never against its own edge', () => {
+    const rules = (html: string) =>
+      (html.match(/bg-tb-divider/g) ?? []).length;
+    // weight · colour · keys
+    expect(rules(render('draw'))).toBe(2);
+    // weight · colour
+    expect(rules(render('highlighter'))).toBe(1);
+    // colour · keys
+    expect(rules(render('text'))).toBe(1);
+  });
+
+  // Wide subjects can outrun a phone, and the fix has to stay on one axis: a
+  // vertical scroller would open for the 4px the rules bleed into the padding.
+  it('scrolls sideways rather than reaching past a narrow screen', () => {
+    const html = render('draw');
+    expect(html).toContain('max-w-[calc(100vw-1rem)]');
+    expect(html).toContain('max-sm:overflow-x-auto');
+    expect(html).toContain('max-sm:overflow-y-hidden');
+  });
+});
+
+// The bar states its nesting rule in `index.css`: bar 20 - 4 = track 16 - 4 =
+// key 12, each box concentric with the one outside it. The keys stand in a
+// recess that takes no padding, so at that corner the rule reads 16 - 3 = 13,
+// and a key painting its own 12px corner there leaves a crescent of track
+// showing. That is a hairline mistake to make and an obvious one to see.
+describe('ToolPropertiesSatellite corner nesting', () => {
+  const html = render('draw');
+
+  it('insets the key fill instead of rounding the key itself into the track', () => {
+    expect(html).toContain('inset-[3px] rounded-[13px]');
+  });
+
+  it('uses the same inset and corner as the weight chip beside it', () => {
+    // The weight chip is the bar's other flush recess. Two constructions for
+    // one corner on one bar is how the pair drifts apart.
+    expect(html).toContain('inset-y-[3px] left-[3px] w-[calc(25%-6px)]');
+    expect(html).toContain('rounded-[13px]');
   });
 });

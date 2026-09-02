@@ -11,7 +11,7 @@ import {
   VideoOff,
 } from 'lucide-react';
 import { useElementSize } from '@/canvas/use-element-size';
-import { type Identity, textOnColor } from '@/collab/identity';
+import type { Identity } from '@/collab/identity';
 import { usePresenceStore } from '@/collab/use-presence-store';
 import {
   useVideoStore,
@@ -31,6 +31,7 @@ import { cn } from '@/lib/utils';
 import {
   clampPanelPosition,
   LOCAL_CLIENT_ID,
+  mainTileKey,
   selfCameraTile,
   spotlightOrder,
   videoGridLayout,
@@ -47,11 +48,27 @@ const ANCHOR =
   'right-[max(0.75rem,env(safe-area-inset-right))] bottom-[calc(3.25rem+env(safe-area-inset-bottom))] max-sm:bottom-[calc(7.25rem+env(safe-area-inset-bottom))] [@media(pointer:coarse)]:bottom-[calc(11rem+env(safe-area-inset-bottom))]';
 
 const MODE_SIZE: Record<VideoPanelMode, string> = {
-  bar: 'w-[min(18rem,calc(100vw-1.5rem))]',
+  bar: 'max-w-[calc(100vw-1.5rem)]',
   floating: 'w-[min(22rem,calc(100vw-1.5rem))]',
   maximized:
     'top-[max(0.75rem,env(safe-area-inset-top))] right-[max(0.75rem,env(safe-area-inset-right))] bottom-[max(0.75rem,env(safe-area-inset-bottom))] left-[max(0.75rem,env(safe-area-inset-left))]',
 };
+
+/**
+ * The video *is* the panel, so the controls ride on top of it and stay out of
+ * the way until asked for — on hover for mice, and always for touch and for
+ * anyone tabbing through them.
+ */
+const REVEAL =
+  'touch-reveal opacity-0 transition-opacity duration-instant group-hover/panel:opacity-100 group-focus-within/panel:opacity-100';
+
+/**
+ * Controls sitting directly on a frame, with no plate under them: white, and
+ * legible over a bright frame through a shadow on the glyph itself. Only ever
+ * applied over video — over the panel's own surface it would be invisible.
+ */
+const OVER_VIDEO =
+  'text-white hover:bg-white/15 hover:text-white aria-pressed:bg-white/25 [&_svg]:drop-shadow-[0_1px_3px_rgb(0_0_0/0.7)]';
 
 export const VideoPanel = memo(function VideoPanel({
   identity,
@@ -106,38 +123,35 @@ export const VideoPanel = memo(function VideoPanel({
     return () => window.removeEventListener('resize', onResize);
   }, [position]);
 
-  const startDrag = useCallback(
-    (event: React.PointerEvent) => {
-      const panel = panelRef.current;
-      // Let the buttons in the header keep their own clicks.
-      if (!panel || event.button !== 0 || event.target !== event.currentTarget) {
-        return;
-      }
-      event.stopPropagation();
-      const rect = panel.getBoundingClientRect();
-      const size = { width: rect.width, height: rect.height };
-      const grabX = event.clientX - rect.left;
-      const grabY = event.clientY - rect.top;
+  const startDrag = useCallback((event: React.PointerEvent) => {
+    const panel = panelRef.current;
+    // Let the controls layered over the video keep their own presses.
+    if (!panel || event.button !== 0 || event.target !== event.currentTarget) {
+      return;
+    }
+    event.stopPropagation();
+    const rect = panel.getBoundingClientRect();
+    const size = { width: rect.width, height: rect.height };
+    const grabX = event.clientX - rect.left;
+    const grabY = event.clientY - rect.top;
 
-      const onMove = (moveEvent: PointerEvent) => {
-        useVideoStore.getState().setPosition(
-          clampPanelPosition(
-            { x: moveEvent.clientX - grabX, y: moveEvent.clientY - grabY },
-            size,
-            { width: window.innerWidth, height: window.innerHeight },
-            DRAG_MARGIN,
-          ),
-        );
-      };
-      const onUp = () => {
-        window.removeEventListener('pointermove', onMove);
-        window.removeEventListener('pointerup', onUp);
-      };
-      window.addEventListener('pointermove', onMove);
-      window.addEventListener('pointerup', onUp);
-    },
-    [],
-  );
+    const onMove = (moveEvent: PointerEvent) => {
+      useVideoStore.getState().setPosition(
+        clampPanelPosition(
+          { x: moveEvent.clientX - grabX, y: moveEvent.clientY - grabY },
+          size,
+          { width: window.innerWidth, height: window.innerHeight },
+          DRAG_MARGIN,
+        ),
+      );
+    };
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  }, []);
 
   if (!identity || status !== 'joined') return null;
 
@@ -150,19 +164,59 @@ export const VideoPanel = memo(function VideoPanel({
   };
   const tiles = videoTiles({ local, peers });
   const selfTile = selfCameraTile(local, selfView);
-  const { hero, filmstrip } = spotlightOrder(
-    tiles,
-    maximized ? spotlightKey : null,
-  );
+  const viewCount = tiles.length + (selfTile ? 1 : 0);
+  // Dragging replaces the edge anchor outright; until then the panel tracks the
+  // zoom controls through their own breakpoints.
+  const anchored = maximized || !position;
+  // With a frame behind them the controls go white and hide until hovered;
+  // with only the panel's own surface behind them they cannot do either.
+  const overVideo = tiles.length > 0;
+  const anchorStyle = anchored ? undefined : { left: position.x, top: position.y };
+
+  if (collapsed) {
+    return (
+      <Surface
+        ref={panelRef}
+        mode="floating"
+        shape="pill"
+        chrome
+        role="region"
+        aria-label="Video call"
+        className={cn(
+          'absolute flex items-center gap-1 p-1 pl-3',
+          MODE_SIZE.bar,
+          anchored && ANCHOR,
+        )}
+        style={anchorStyle}
+        onPointerDown={startDrag}
+      >
+        <span className="mr-1 truncate text-fg-muted text-sm">
+          {viewCount === 0
+            ? 'No video'
+            : `${viewCount} ${viewCount === 1 ? 'view' : 'views'}`}
+        </span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Show video"
+          onClick={() => useVideoStore.getState().setMode('floating')}
+        >
+          <ChevronUp />
+        </Button>
+      </Surface>
+    );
+  }
+
+  // Maximized keeps its grid — that is the view for seeing everyone. The
+  // minimised panel gives its one tile to the view you picked.
+  const heroKey = maximized ? spotlightKey : mainTileKey(tiles, spotlightKey);
+  const { hero, filmstrip } = spotlightOrder(tiles, heroKey);
   const gridTiles = hero ? filmstrip : tiles;
   const { columns } = videoGridLayout(
     gridTiles.length,
     gridSize.height > 0 ? gridSize.width / gridSize.height : 0,
   );
-  const viewCount = tiles.length + (selfTile ? 1 : 0);
-  // Dragging replaces the edge anchor outright; until then the panel tracks the
-  // zoom controls through their own breakpoints.
-  const anchored = maximized || !position;
 
   return (
     <Surface
@@ -172,173 +226,201 @@ export const VideoPanel = memo(function VideoPanel({
       role="region"
       aria-label="Video call"
       className={cn(
-        'absolute flex flex-col overflow-hidden',
+        'group/panel absolute flex flex-col overflow-hidden bg-sunken',
         MODE_SIZE[mode],
         anchored && !maximized && ANCHOR,
       )}
-      style={
-        anchored ? undefined : { left: position.x, top: position.y }
-      }
+      style={anchorStyle}
     >
-      <header
-        onPointerDown={dragging ? startDrag : undefined}
-        className={cn(
-          'flex items-center gap-1 border-border border-b p-1.5 pl-3',
-          dragging && 'touch-none',
-        )}
-      >
-        <span className="mr-auto truncate text-fg-muted text-sm">
-          {viewCount === 0
-            ? 'No video'
-            : `${viewCount} ${viewCount === 1 ? 'view' : 'views'}`}
-        </span>
-        {cameraEnabled && !collapsed ? (
-          <Toggle
-            pressed={selfView === 'pip'}
-            onPressedChange={(next) =>
-              useVideoStore.getState().setSelfView(next ? 'pip' : 'hidden')
-            }
-            size="sm"
-            className="min-w-8 px-1.5"
-            aria-label={
-              selfView === 'pip' ? 'Hide your own camera' : 'Show your own camera'
+      {maximized ? (
+        <div className="relative flex min-h-0 flex-1 flex-col gap-1.5 p-1.5">
+          {hero ? (
+            <VideoTileView
+              tile={hero}
+              spotlit
+              onSpotlight={() => useVideoStore.getState().setSpotlightKey(null)}
+            />
+          ) : null}
+          <div
+            ref={gridRef}
+            className={cn(
+              'grid min-h-0 gap-1.5',
+              hero ? 'h-24 shrink-0 auto-cols-[8rem] grid-flow-col' : 'flex-1',
+            )}
+            style={
+              hero || columns === 0
+                ? undefined
+                : { gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }
             }
           >
-            <PictureInPicture2 aria-hidden="true" />
-          </Toggle>
-        ) : null}
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          aria-label={collapsed ? 'Show video' : 'Collapse video'}
-          onClick={() =>
-            useVideoStore.getState().setMode(collapsed ? 'floating' : 'bar')
-          }
-        >
-          {collapsed ? <ChevronUp /> : <ChevronDown />}
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          aria-label={maximized ? 'Restore video panel' : 'Maximize video panel'}
-          onClick={() =>
-            useVideoStore
-              .getState()
-              .setMode(maximized ? 'floating' : 'maximized')
-          }
-        >
-          {maximized ? <Minimize2 /> : <Maximize2 />}
-        </Button>
-      </header>
-
-      {collapsed ? null : (
-        <>
-          <div className="relative flex min-h-0 flex-1 flex-col gap-1.5 p-1.5">
-            {hero ? (
+            {gridTiles.map((tile) => (
               <VideoTileView
-                tile={hero}
-                spotlit
+                key={tile.key}
+                tile={tile}
+                spotlit={false}
                 onSpotlight={() =>
-                  useVideoStore.getState().setSpotlightKey(null)
+                  useVideoStore.getState().setSpotlightKey(tile.key)
                 }
               />
-            ) : null}
-            <div
-              ref={gridRef}
-              className={cn(
-                'grid min-h-0 gap-1.5',
-                hero ? 'h-24 shrink-0 grid-flow-col auto-cols-[8rem]' : 'flex-1',
-              )}
-              style={
-                hero || columns === 0
-                  ? undefined
-                  : { gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }
-              }
-            >
-              {gridTiles.map((tile) => (
-                <VideoTileView
-                  key={tile.key}
-                  tile={tile}
-                  spotlit={false}
-                  onSpotlight={
-                    maximized
-                      ? () =>
-                          useVideoStore.getState().setSpotlightKey(tile.key)
-                      : undefined
-                  }
-                />
-              ))}
-              {gridTiles.length === 0 && !hero ? (
-                <p className="self-center text-center text-fg-muted text-sm">
-                  {selfTile
-                    ? 'Waiting for someone else to turn on their camera.'
-                    : 'Turn on your camera or share your screen to start.'}
-                </p>
-              ) : null}
-            </div>
-            {selfTile ? (
-              <div
-                className={cn(
-                  'pointer-events-none absolute right-3 bottom-3 rounded-md border border-border shadow-e2',
-                  maximized ? 'w-48' : 'w-28',
-                )}
-              >
-                <VideoTileView
-                  tile={selfTile}
-                  spotlit={false}
-                  className="aspect-video"
-                />
-              </div>
-            ) : null}
+            ))}
           </div>
-
-          <footer className="flex items-center gap-2.5 border-border border-t p-1.5">
-            <Toggle
-              pressed={cameraEnabled}
-              onPressedChange={(next) =>
-                next ? void enableCamera() : disableCamera()
-              }
-              variant="outline"
-              size="sm"
-              className="h-9 flex-1"
-              aria-label={cameraEnabled ? 'Turn off camera' : 'Turn on camera'}
-            >
-              {cameraEnabled ? (
-                <Video aria-hidden="true" data-icon="inline-start" />
-              ) : (
-                <VideoOff aria-hidden="true" data-icon="inline-start" />
-              )}
-              Camera
-            </Toggle>
-            <Toggle
-              pressed={screenEnabled}
-              onPressedChange={(next) =>
-                next ? void enableScreen() : disableScreen()
-              }
-              variant="outline"
-              size="sm"
-              className="h-9 flex-1"
-              aria-label={
-                screenEnabled ? 'Stop sharing screen' : 'Share your screen'
-              }
-            >
-              {screenEnabled ? (
-                <Monitor aria-hidden="true" data-icon="inline-start" />
-              ) : (
-                <MonitorOff aria-hidden="true" data-icon="inline-start" />
-              )}
-              Screen
-            </Toggle>
-          </footer>
-          {error ? (
-            <p role="status" className="px-3 pb-2 text-danger-fg text-sm">
-              {error}
-            </p>
-          ) : null}
-        </>
+        </div>
+      ) : hero ? (
+        <VideoTileView
+          tile={hero}
+          spotlit={false}
+          className="aspect-video w-full rounded-none"
+        />
+      ) : (
+        <p className="flex aspect-video items-center justify-center px-6 text-center text-fg-muted text-sm">
+          {selfTile
+            ? 'Waiting for someone else to turn on their camera.'
+            : 'Turn on your camera or share your screen to start.'}
+        </p>
       )}
+
+      {/* The whole surface is the drag handle now that there is no header. An
+          empty layer, so a press on it is never a press on something else. */}
+      {dragging ? (
+        <div
+          onPointerDown={startDrag}
+          className="absolute inset-0 cursor-grab touch-none"
+        />
+      ) : null}
+
+      {selfTile ? (
+        <div
+          className={cn(
+            'pointer-events-none absolute right-2 bottom-2 overflow-hidden rounded-md border border-border shadow-e2',
+            maximized ? 'w-48' : 'w-24',
+          )}
+        >
+          <VideoTileView
+            tile={selfTile}
+            spotlit={false}
+            className="aspect-video"
+          />
+        </div>
+      ) : null}
+
+      <div
+        className={cn(
+          'pointer-events-none absolute inset-x-2 top-2 flex items-start justify-between gap-2',
+          // Nothing to reveal over when there is no video to cover.
+          overVideo && REVEAL,
+        )}
+      >
+        {/* Who the one tile belongs to, when more than one view is on offer. */}
+        <div className="pointer-events-auto flex min-w-0 gap-1 overflow-x-auto">
+          {maximized
+            ? null
+            : filmstrip.map((tile) => (
+                <Button
+                  key={tile.key}
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  className={cn(
+                    'shrink-0 rounded-full px-2',
+                    overVideo && OVER_VIDEO,
+                  )}
+                  onClick={() =>
+                    useVideoStore.getState().setSpotlightKey(tile.key)
+                  }
+                >
+                  <TileName tile={tile} />
+                </Button>
+              ))}
+        </div>
+
+        {/* No plate: the frame shows through, and the controls carry their own
+            shadow. Touch targets and icon weight come from the panel Surface,
+            whose `chrome` rules reach every button inside it. */}
+        <div className="pointer-events-auto flex shrink-0 items-center gap-0.5">
+          <Toggle
+            pressed={cameraEnabled}
+            onPressedChange={(next) =>
+              next ? void enableCamera() : disableCamera()
+            }
+            size="sm"
+            className={cn('min-w-8 px-1.5', overVideo && OVER_VIDEO)}
+            aria-label={cameraEnabled ? 'Turn off camera' : 'Turn on camera'}
+          >
+            {cameraEnabled ? (
+              <Video aria-hidden="true" />
+            ) : (
+              <VideoOff aria-hidden="true" />
+            )}
+          </Toggle>
+          <Toggle
+            pressed={screenEnabled}
+            onPressedChange={(next) =>
+              next ? void enableScreen() : disableScreen()
+            }
+            size="sm"
+            className={cn('min-w-8 px-1.5', overVideo && OVER_VIDEO)}
+            aria-label={
+              screenEnabled ? 'Stop sharing screen' : 'Share your screen'
+            }
+          >
+            {screenEnabled ? (
+              <Monitor aria-hidden="true" />
+            ) : (
+              <MonitorOff aria-hidden="true" />
+            )}
+          </Toggle>
+          {cameraEnabled ? (
+            <Toggle
+              pressed={selfView === 'pip'}
+              onPressedChange={(next) =>
+                useVideoStore.getState().setSelfView(next ? 'pip' : 'hidden')
+              }
+              size="sm"
+              className={cn('min-w-8 px-1.5', overVideo && OVER_VIDEO)}
+              aria-label={
+                selfView === 'pip'
+                  ? 'Hide your own camera'
+                  : 'Show your own camera'
+              }
+            >
+              <PictureInPicture2 aria-hidden="true" />
+            </Toggle>
+          ) : null}
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            className={cn(overVideo && OVER_VIDEO)}
+            aria-label="Collapse video"
+            onClick={() => useVideoStore.getState().setMode('bar')}
+          >
+            <ChevronDown />
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            className={cn(overVideo && OVER_VIDEO)}
+            aria-label={maximized ? 'Restore video panel' : 'Maximize video panel'}
+            onClick={() =>
+              useVideoStore
+                .getState()
+                .setMode(maximized ? 'floating' : 'maximized')
+            }
+          >
+            {maximized ? <Minimize2 /> : <Maximize2 />}
+          </Button>
+        </div>
+      </div>
+
+      {error ? (
+        <p
+          role="status"
+          className="-translate-x-1/2 absolute bottom-2 left-1/2 max-w-[calc(100%-1rem)] rounded-full border border-danger-border bg-surface px-3 py-1 text-danger-fg text-sm"
+        >
+          {error}
+        </p>
+      ) : null}
     </Surface>
   );
 });
@@ -367,12 +449,8 @@ function VideoTileView({
   }, [stream]);
 
   const label = (
-    <span
-      className="pointer-events-none absolute bottom-1 left-1 max-w-[calc(100%-0.5rem)] truncate rounded-xs px-1.5 py-0.5 text-xs"
-      style={{ backgroundColor: tile.color, color: textOnColor(tile.color) }}
-    >
-      {tile.isLocal ? 'You' : tile.name}
-      {tile.kind === 'screen' ? "'s screen" : ''}
+    <span className="pointer-events-none absolute inset-x-2 bottom-1.5 flex items-center gap-1.5 text-white text-xs drop-shadow-[0_1px_3px_rgb(0_0_0/0.7)]">
+      <TileName tile={tile} />
     </span>
   );
 
@@ -398,8 +476,10 @@ function VideoTileView({
     </>
   );
 
+  // Black, not a themed surface: a letterboxed screen share pads with bars, and
+  // white labels have to stay readable on them in either theme.
   const shell = cn(
-    'relative min-h-0 overflow-hidden rounded-md bg-sunken',
+    'relative min-h-0 overflow-hidden rounded-md bg-black',
     spotlit && 'flex-1',
     className,
   );
@@ -420,6 +500,27 @@ function VideoTileView({
     >
       {body}
     </button>
+  );
+}
+
+/**
+ * Who a view belongs to: their presence colour as a dot, and the name in the
+ * same white-on-frame treatment as the controls. A filled chip in the identity
+ * colour shouted over every tile; the dot carries the same signal quietly.
+ */
+function TileName({ tile }: { tile: VideoTile }) {
+  return (
+    <>
+      <span
+        aria-hidden="true"
+        className="size-1.5 shrink-0 rounded-full"
+        style={{ backgroundColor: tile.color }}
+      />
+      <span className="truncate">
+        {tile.isLocal ? 'You' : tile.name}
+        {tile.kind === 'screen' ? "'s screen" : ''}
+      </span>
+    </>
   );
 }
 

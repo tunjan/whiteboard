@@ -7,10 +7,11 @@
  */
 
 /**
- * Ceiling on the rasterized ink a client may post, counted in characters of the
- * data URL. The image travels as a string in a JSON body, so this is the limit
- * that actually bounds the request. Comfortably above what a screen's worth of
- * handwriting rasterizes to.
+ * Ceiling on the rasterized selection a client may post, counted in characters
+ * of the data URL. The image travels as a string in a JSON body, so this is the
+ * limit that actually bounds the request. Comfortably above what a screen's
+ * worth of handwriting rasterizes to; the client caps the raster's longest side
+ * (`RECOGNITION_MAX_PX`) so a pasted photograph stays under it too.
  */
 export const MAX_INK_IMAGE_CHARS = 6 * 1024 * 1024;
 

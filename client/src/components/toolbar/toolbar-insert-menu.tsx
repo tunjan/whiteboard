@@ -34,8 +34,8 @@ import {
 import { cn } from '@/lib/utils';
 import {
   FlyoutCaret,
+  menuItemClass,
   TOOL_ICON,
-  TOOL_PRESSED,
   toolButtonClass,
 } from './toolbar-constants';
 
@@ -57,10 +57,7 @@ function CustomStickerItem({
         aria-label={meta.label}
         aria-current={selected ? 'true' : undefined}
         onClick={onPick}
-        className={cn(
-          'w-full rounded-lg transition-colors duration-fast',
-          selected ? TOOL_PRESSED : 'hover:bg-panel',
-        )}
+        className={cn('w-full', menuItemClass(selected))}
       >
         <img
           src={blobUrl(meta.blobId)}
@@ -139,7 +136,7 @@ export function InsertMenu({ active }: InsertMenuProps) {
               <img
                 src={blobUrl(custom.blobId)}
                 alt=""
-                className="size-5 object-contain"
+                className="size-4.5 object-contain"
                 draggable={false}
               />
             ) : (
@@ -186,10 +183,7 @@ export function InsertMenu({ active }: InsertMenuProps) {
                     setTool('sticker');
                     setOpen(false);
                   }}
-                  className={cn(
-                    'size-10 rounded-xl transition-colors duration-fast',
-                    isSelected ? TOOL_PRESSED : 'hover:bg-panel',
-                  )}
+                  className={menuItemClass(isSelected)}
                 >
                   <StickerPreview def={definition} size={22} />
                 </Button>

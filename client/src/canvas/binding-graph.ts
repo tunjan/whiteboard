@@ -76,6 +76,16 @@ export class BindingGraph {
     this.targetsByArrow.delete(id);
   }
 
+  /** Take over `other`'s edges, leaving it empty. Pairs with
+   *  {@link SpatialIndex.adopt} to park and restore an inactive page's derived
+   *  state in constant time without changing this object's identity. */
+  adopt(other: BindingGraph): void {
+    this.arrowsByTarget = other.arrowsByTarget;
+    this.targetsByArrow = other.targetsByArrow;
+    other.arrowsByTarget = new Map();
+    other.targetsByArrow = new Map();
+  }
+
   clear(): void {
     this.arrowsByTarget.clear();
     this.targetsByArrow.clear();

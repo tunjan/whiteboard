@@ -9,11 +9,18 @@ import { extendTailwindMerge } from "tailwind-merge"
  * the override silently does nothing — which is how docked chrome panels ended
  * up with four rounded corners instead of one. Teaching the merger about the
  * custom value makes `rounded-none` and `rounded-<corner>-panel` override it.
+ *
+ * Same story for the elevation aliases: `Surface`'s `mode="docked"` variant
+ * sets `shadow-none`, and a caller overriding it with `shadow-e2`/`shadow-e3`
+ * etc. silently lost — `.shadow-none` happened to land later in the compiled
+ * sheet, so it won regardless of class order. Teaching the merger these
+ * custom shadow keys lets the later class win instead.
  */
 const twMerge = extendTailwindMerge({
   extend: {
     theme: {
       radius: ["panel"],
+      shadow: ["e0", "e1", "e2", "e3", "e4", "e5", "control", "panel", "overlay", "hover", "floating"],
     },
   },
 })

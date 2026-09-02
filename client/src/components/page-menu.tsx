@@ -326,7 +326,10 @@ export function PageMenu() {
                           // the editor the moment the row swaps it in.
                           window.setTimeout(() => setEditingId(page.id), 0);
                         }}
-                        onDuplicate={() => duplicatePage(page.id)}
+                        // Duplicating waits on the source page's document when
+                        // it is not the page on screen; nothing here depends on
+                        // the result, and the switch to the copy is what shows.
+                        onDuplicate={() => void duplicatePage(page.id)}
                         onMoveUp={() => movePage(page.id, 'up')}
                         onMoveDown={() => movePage(page.id, 'down')}
                         onDelete={() => {

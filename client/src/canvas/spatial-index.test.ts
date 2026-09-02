@@ -53,6 +53,56 @@ describe('SpatialIndex', () => {
     }
   });
 
+  it('replaces the whole index in one bulk load', () => {
+    const index = new SpatialIndex();
+    index.insert('stale', box(0, 0, 5, 5));
+
+    index.loadAll([
+      { ...box(0, 0, 10, 10), id: 'a' },
+      { ...box(20, 20, 30, 30), id: 'b' },
+    ]);
+
+    expect(index.size).toBe(2);
+    expect(index.has('stale')).toBe(false);
+    expect(index.search(box(5, 5, 6, 6))).toEqual(['a']);
+    expect(index.search(box(0, 0, 100, 100)).sort()).toEqual(['a', 'b']);
+    // A bulk-loaded entry is a normal one: removable, and re-insertable.
+    index.remove('a');
+    expect(index.search(box(5, 5, 6, 6))).toEqual([]);
+  });
+
+  it('does not alias the caller\'s items when bulk loading', () => {
+    const index = new SpatialIndex();
+    const item = { ...box(0, 0, 10, 10), id: 'a' };
+    index.loadAll([item]);
+
+    // `getBounds` hands out the live tree entry; mutating the array the caller
+    // passed in must not move what is indexed.
+    item.maxX = 999;
+    expect(index.getBounds('a')).toMatchObject(box(0, 0, 10, 10));
+  });
+
+  it('takes over another index and leaves it empty', () => {
+    const parked = new SpatialIndex();
+    parked.insert('a', box(0, 0, 10, 10));
+    parked.insert('b', box(20, 20, 30, 30));
+
+    const live = new SpatialIndex();
+    live.insert('old', box(50, 50, 60, 60));
+    live.adopt(parked);
+
+    expect(live.size).toBe(2);
+    expect(live.search(box(5, 5, 6, 6))).toEqual(['a']);
+    expect(live.has('old')).toBe(false);
+    expect(parked.size).toBe(0);
+    expect(parked.search(box(0, 0, 100, 100))).toEqual([]);
+
+    // The emptied index is still usable, not a husk sharing the other's tree.
+    parked.insert('c', box(0, 0, 10, 10));
+    expect(parked.search(box(5, 5, 6, 6))).toEqual(['c']);
+    expect(live.size).toBe(2);
+  });
+
   it('still removes and clears', () => {
     const index = new SpatialIndex();
     index.insert('a', box(0, 0, 10, 10));

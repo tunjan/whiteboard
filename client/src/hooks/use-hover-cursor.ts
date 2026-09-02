@@ -1,4 +1,5 @@
 import { useEffect, type RefObject } from 'react';
+import { getContainerRect } from '@/canvas/container-rect';
 
 /**
  * Drive an absolutely-positioned element as a custom cursor over `container`.
@@ -33,7 +34,7 @@ export function useHoverCursor(
         return;
       }
 
-      const rect = container.getBoundingClientRect();
+      const rect = getContainerRect(container);
       const x = event.clientX - rect.left;
       const y = event.clientY - rect.top;
       if (x < 0 || x >= rect.width || y < 0 || y >= rect.height) {

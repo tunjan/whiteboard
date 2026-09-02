@@ -19,10 +19,13 @@ import {
   moveShapesToPage,
   redo,
   setCurrentPage,
+  spatialIndex,
   setCurrentPageForFollow,
   undo,
   useDocumentStore,
 } from './use-document-store';
+import * as Y from 'yjs';
+import { residentPageDoc } from './page-docs';
 import { useCameraStore } from './use-camera-store';
 import { beginLiveStroke, endLiveStroke } from './use-live-stroke-store';
 import { useEnteredGroupStore } from './use-entered-group-store';
@@ -150,6 +153,13 @@ const drawnPoints = (id: string): DrawPoint[] => {
 
 const ids = () => useDocumentStore.getState().shapes.map((s) => s.id);
 
+const box = (minX: number, minY: number, maxX: number, maxY: number) => ({
+  minX,
+  minY,
+  maxX,
+  maxY,
+});
+
 function memoryStorage(): Storage {
   const values = new Map<string, string>();
   return {
@@ -257,6 +267,81 @@ describe('page transitions', () => {
     expect(editor.getShape('rect-a')).toBeDefined();
   });
 
+  it('brings a page back with its derived state, still live', () => {
+    const firstPageId = useDocumentStore.getState().currentPageId;
+    editor.createShape(rect('rect-a', 'a1'));
+    editor.createShape({ ...rect('rect-b', 'a2'), x: 100, y: 100 });
+
+    const secondPageId = createPage('Page 2');
+    // Each page has its own document: page 2 sees none of page 1's shapes, and
+    // nothing of page 1 is left in the spatial index behind it.
+    expect(ids()).toEqual([]);
+    expect(spatialIndex.size).toBe(0);
+
+    setCurrentPage(firstPageId);
+    expect(ids()).toEqual(['rect-a', 'rect-b']);
+    expect(spatialIndex.search(box(-5, -5, 5, 5))).toEqual(['rect-a']);
+
+    // Restored, not frozen: the page picks up edits where it left off.
+    editor.updateShape('rect-a', { x: 200, y: 200 });
+    expect(spatialIndex.search(box(-5, -5, 5, 5))).toEqual([]);
+    expect(spatialIndex.search(box(195, 195, 205, 205))).toEqual(['rect-a']);
+
+    setCurrentPage(secondPageId);
+    expect(spatialIndex.size).toBe(0);
+  });
+
+  it('publishes the shape lookup of the page that is open', () => {
+    const firstPageId = useDocumentStore.getState().currentPageId;
+    editor.createShape(rect('rect-a', 'a1'));
+    const firstLookup = useDocumentStore.getState().shapesById;
+    expect(firstLookup.get('rect-a')).toBeDefined();
+
+    const secondPageId = createPage('Page 2');
+    // Consumers read shapes through this map; left pointing at the page just
+    // left, every lookup would answer for the wrong page.
+    expect(
+      useDocumentStore.getState().shapesById.get('rect-a'),
+    ).toBeUndefined();
+    editor.createShape(rect('rect-b', 'a1'));
+    expect(useDocumentStore.getState().shapesById.get('rect-b')).toBeDefined();
+
+    setCurrentPage(firstPageId);
+    expect(useDocumentStore.getState().shapesById.get('rect-a')).toBeDefined();
+    expect(
+      useDocumentStore.getState().shapesById.get('rect-b'),
+    ).toBeUndefined();
+
+    // Stable within a page, so a plain reference check keeps consumers from
+    // re-rendering on every mutation.
+    const before = useDocumentStore.getState().shapesById;
+    editor.updateShape('rect-a', { x: 5 });
+    expect(useDocumentStore.getState().shapesById).toBe(before);
+    expect(secondPageId).not.toBe(firstPageId);
+  });
+
+  it('keeps each page undo history separate across switches', () => {
+    const firstPageId = useDocumentStore.getState().currentPageId;
+    editor.createShape(rect('rect-a', 'a1'));
+
+    const secondPageId = createPage('Page 2');
+    editor.createShape(rect('rect-b', 'a1'));
+    undo();
+    expect(editor.getShape('rect-b')).toBeUndefined();
+
+    setCurrentPage(firstPageId);
+    // Page 1's own history is untouched by what happened on page 2.
+    expect(editor.getShape('rect-a')).toBeDefined();
+    undo();
+    expect(editor.getShape('rect-a')).toBeUndefined();
+    redo();
+    expect(editor.getShape('rect-a')).toBeDefined();
+
+    setCurrentPage(secondPageId);
+    redo();
+    expect(editor.getShape('rect-b')).toBeDefined();
+  });
+
   it('falls back to the previous page and purges the deleted camera', () => {
     const firstPageId = useDocumentStore.getState().currentPageId;
     const secondPageId = createPage('Page 2');
@@ -288,12 +373,12 @@ describe('page transitions', () => {
 });
 
 describe('duplicatePage', () => {
-  it('copies the shapes onto a new page placed right after the source', () => {
+  it('copies the shapes onto a new page placed right after the source', async () => {
     const firstPageId = useDocumentStore.getState().currentPageId;
     editor.createShape(rect('rect-a', 'a1'));
     editor.createShape(rect('rect-b', 'a2'));
 
-    const copyId = duplicatePage(firstPageId);
+    const copyId = await duplicatePage(firstPageId);
 
     expect(copyId).not.toBe('');
     expect(useDocumentStore.getState().currentPageId).toBe(copyId);
@@ -320,11 +405,11 @@ describe('duplicatePage', () => {
     );
   });
 
-  it('leaves the source page untouched when the copy is edited', () => {
+  it('leaves the source page untouched when the copy is edited', async () => {
     const firstPageId = useDocumentStore.getState().currentPageId;
     editor.createShape(rect('rect-a', 'a1'));
 
-    duplicatePage(firstPageId);
+    await duplicatePage(firstPageId);
     const copyShapeId = useDocumentStore.getState().shapes[0]!.id;
     editor.updateShape(copyShapeId, { x: 999 });
 
@@ -332,7 +417,7 @@ describe('duplicatePage', () => {
     expect(editor.getShape('rect-a')?.x).toBe(0);
   });
 
-  it('remaps parents and bindings onto the copies', () => {
+  it('remaps parents and bindings onto the copies', async () => {
     const firstPageId = useDocumentStore.getState().currentPageId;
     editor.createShape(group('group-a'));
     editor.createShape({ ...rect('rect-a', 'a1'), parentId: 'group-a' });
@@ -342,7 +427,7 @@ describe('duplicatePage', () => {
       }),
     );
 
-    duplicatePage(firstPageId);
+    await duplicatePage(firstPageId);
 
     const copied = useDocumentStore.getState().shapes;
     const copiedGroup = copied.find((shape) => shape.type === 'group')!;
@@ -356,15 +441,15 @@ describe('duplicatePage', () => {
     );
   });
 
-  it('mirrors the source camera and increments a name that is already taken', () => {
+  it('mirrors the source camera and increments a name that is already taken', async () => {
     const firstPageId = useDocumentStore.getState().currentPageId;
     useCameraStore.getState().setCamera({ x: 12, y: 34, z: 0.5 });
 
-    const firstCopy = duplicatePage(firstPageId);
+    const firstCopy = await duplicatePage(firstPageId);
     expect(useCameraStore.getState().camera).toEqual({ x: 12, y: 34, z: 0.5 });
 
     setCurrentPage(firstPageId);
-    const secondCopy = duplicatePage(firstPageId);
+    const secondCopy = await duplicatePage(firstPageId);
     expect(useDocumentStore.getState().doc.pages[firstCopy]?.name).toBe(
       'Page 1 Copy',
     );
@@ -373,8 +458,8 @@ describe('duplicatePage', () => {
     );
   });
 
-  it('ignores an unknown page id', () => {
-    expect(duplicatePage('page-does-not-exist')).toBe('');
+  it('ignores an unknown page id', async () => {
+    expect(await duplicatePage('page-does-not-exist')).toBe('');
     expect(useDocumentStore.getState().doc.pageOrder).toHaveLength(1);
   });
 });
@@ -733,6 +818,120 @@ describe('the stroke the local pointer is drawing', () => {
       .getState()
       .shapes.find((s) => s.id === 'live');
     expect(shape?.type === 'draw' && shape.props.points).toHaveLength(41);
+  });
+});
+
+describe('edits arriving from outside this client', () => {
+  // Frames the paced publish is queued against. Node has no rAF, and without
+  // one the store publishes immediately — which is the fallback, not the
+  // behaviour under test.
+  let frames: FrameRequestCallback[] = [];
+  beforeEach(() => {
+    frames = [];
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
+      frames.push(cb);
+      return frames.length;
+    });
+    vi.stubGlobal('cancelAnimationFrame', (handle: number) => {
+      frames[handle - 1] = () => {};
+    });
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+  const paint = () => {
+    const due = frames;
+    frames = [];
+    for (const cb of due) cb(0);
+  };
+
+  /** Apply `edit` to the current page the way a peer's update would arrive. */
+  const fromPeer = (edit: (shapes: Y.Map<unknown>) => void) => {
+    const page = residentPageDoc(useDocumentStore.getState().currentPageId)!;
+    const peer = new Y.Doc();
+    Y.applyUpdate(peer, Y.encodeStateAsUpdate(page.doc));
+    peer.transact(() => edit(peer.getMap('shapes')));
+    // A plain object origin stands in for the provider: what the store keys on
+    // is that the origin is not one of its own string constants.
+    Y.applyUpdate(
+      page.doc,
+      Y.encodeStateAsUpdate(peer, Y.encodeStateVector(page.doc)),
+      {},
+    );
+    peer.destroy();
+  };
+
+  it('is readable at once but publishes at most once a frame', () => {
+    // Someone else's pen writes a frame of their stroke per animation frame of
+    // *their* machine, which is not this one's. Ten arrive here between paints.
+    for (let n = 0; n < 10; n++) {
+      const published = useDocumentStore.getState().shapes;
+      fromPeer((shapes) => {
+        const m = new Y.Map<unknown>();
+        m.set('id', `peer-${n}`);
+        m.set('type', 'rectangle');
+        m.set('x', n);
+        m.set('y', 0);
+        m.set('rotation', 0);
+        m.set('index', `a${n}`);
+        m.set('props', {
+          w: 10,
+          h: 10,
+          color: '#000000',
+          fillStyle: 'none',
+          dash: 'solid',
+          size: 2,
+        });
+        shapes.set(`peer-${n}`, m);
+      });
+      // Hit-testing, the spatial index and `getShape` are never behind the
+      // document — only the React publish waits.
+      expect(editor.getShape(`peer-${n}`)?.x).toBe(n);
+      expect(spatialIndex.search(box(-1, -1, 100, 100))).toContain(`peer-${n}`);
+      expect(useDocumentStore.getState().shapes).toBe(published);
+    }
+
+    paint();
+    expect(ids()).toHaveLength(10);
+  });
+
+  it('does not delay a local edit, or leave one queued behind it', () => {
+    fromPeer((shapes) => {
+      const m = new Y.Map<unknown>();
+      m.set('id', 'peer');
+      m.set('type', 'rectangle');
+      m.set('x', 0);
+      m.set('y', 0);
+      m.set('rotation', 0);
+      m.set('index', 'a1');
+      m.set('props', {
+        w: 10,
+        h: 10,
+        color: '#000000',
+        fillStyle: 'none',
+        dash: 'solid',
+        size: 2,
+      });
+      shapes.set('peer', m);
+    });
+
+    // The local edit publishes now, and carries the peer's shape with it —
+    // both are read off the same live caches.
+    editor.createShape(rect('mine', 'a2'));
+    expect(ids()).toEqual(['peer', 'mine']);
+
+    // ...so the frame the peer's update queued has nothing left to say.
+    const published = useDocumentStore.getState().shapes;
+    paint();
+    expect(useDocumentStore.getState().shapes).toBe(published);
+  });
+
+  it('publishes an undo immediately', () => {
+    editor.createShape(rect('a', 'a1'));
+    undo();
+    // Yjs tags an undo with the UndoManager itself, which is an object like a
+    // provider is — but it is this client's own hand, and waits for nothing.
+    expect(ids()).toEqual([]);
   });
 });
 

@@ -29,8 +29,8 @@ import {
   SHAPE_TOOLS,
   ShapeClusterGlyph,
   ShapeClusterObject,
+  menuItemClass,
   TOOL_ICON,
-  TOOL_PRESSED,
   toolButtonClass,
 } from './toolbar-constants';
 
@@ -158,8 +158,11 @@ export function ShapeMenu({
             />
           }
         >
+          {/* Both arms at the same 18px as every other glyph on the bar: the
+              trigger changes what it draws when you pick a shape, not how
+              heavy it is. */}
           {isPolygon ? (
-            <MiniShape kind={polygonKind} size={20} />
+            <MiniShape kind={polygonKind} size={18} />
           ) : (
             <FallbackIcon className={TOOL_ICON} />
           )}
@@ -217,12 +220,7 @@ export function ShapeMenu({
                       onClick={() => selectBasicShape(tool.id)}
                       aria-label={tool.label}
                       aria-current={isSelected ? 'true' : undefined}
-                      className={cn(
-                        'size-10 rounded-xl transition-colors duration-fast',
-                        isSelected
-                          ? TOOL_PRESSED
-                          : 'text-fg-secondary hover:bg-panel hover:text-fg active:bg-panel/80',
-                      )}
+                      className={menuItemClass(isSelected)}
                     />
                   }
                 >
@@ -256,12 +254,7 @@ export function ShapeMenu({
                       onClick={() => selectPolygon(kind)}
                       aria-label={polygonLabel}
                       aria-current={isSelected ? 'true' : undefined}
-                      className={cn(
-                        'size-10 rounded-xl transition-colors duration-fast',
-                        isSelected
-                          ? TOOL_PRESSED
-                          : 'text-fg-secondary hover:bg-panel hover:text-fg active:bg-panel/80',
-                      )}
+                      className={menuItemClass(isSelected)}
                     />
                   }
                 >

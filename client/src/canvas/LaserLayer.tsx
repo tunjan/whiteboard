@@ -28,6 +28,14 @@ const GLOW_LAYERS = [
 const LASER_BODY_WIDTH = 7;
 const LASER_CORE_WIDTH = 2.5;
 
+// The tip of the laser stroke shines as a concentrated laser spot.
+const TIP_BLOOM_LAYERS = [
+  { r: 12, opacity: 0.12 },
+  { r: 6, opacity: 0.25 },
+];
+const TIP_BODY_RADIUS = 3.5;
+const TIP_CORE_RADIUS = 1.25;
+
 function pathFor(points: Point[]): string {
   const first = points[0];
   if (!first) return '';
@@ -117,6 +125,7 @@ export function LaserLayer({ camera }: { camera: Camera }) {
             if (opacity <= 0) return null;
           }
           const d = pathFor(stroke.points);
+          const tip = stroke.points[stroke.points.length - 1];
           return (
             <g
               key={stroke.id}
@@ -146,6 +155,31 @@ export function LaserLayer({ camera }: { camera: Camera }) {
                 strokeWidth={LASER_CORE_WIDTH}
                 vectorEffect="non-scaling-stroke"
               />
+              {tip && (
+                <g
+                  transform={`translate(${tip.x}, ${tip.y}) scale(${1 / camera.z})`}
+                  stroke="none"
+                >
+                  {TIP_BLOOM_LAYERS.map((layer) => (
+                    <circle
+                      key={layer.r}
+                      r={layer.r}
+                      fill={LASER_COLOR}
+                      opacity={layer.opacity}
+                    />
+                  ))}
+                  <circle
+                    r={TIP_BODY_RADIUS}
+                    fill={LASER_COLOR}
+                    opacity={0.9}
+                  />
+                  <circle
+                    r={TIP_CORE_RADIUS}
+                    fill={LASER_CORE_COLOR}
+                    opacity={1}
+                  />
+                </g>
+              )}
             </g>
           );
         })}

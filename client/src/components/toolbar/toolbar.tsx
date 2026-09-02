@@ -15,14 +15,13 @@ import { useRovingToolbar } from '@/hooks/use-roving-toolbar';
 import { cn } from '@/lib/utils';
 import { CompactMoreMenu } from './toolbar-compact-menu';
 import {
+  chromeButtonClass,
   COMPACT_PRIMARY_TOOLS,
   INKING_TOOLS,
   NAVIGATE_TOOLS,
   SHAPE_TOOLS,
   STEM_TOOLS,
-  toolButtonClass,
   TOOL_GROUP,
-  TOOL_ICON,
 } from './toolbar-constants';
 import { InsertMenu } from './toolbar-insert-menu';
 import { InstrumentTray } from './toolbar-instruments';
@@ -35,10 +34,11 @@ import { ToolButton } from './toolbar-tool-button';
  * inking tools lying in it as drawn instruments and everything else as glyph
  * keys either side of them.
  *
- * The bar reads left to right as four things you might reach for, each in a
- * shallow recess of its own with clear board between them:
+ * The bar reads left to right as three things you might reach for, each in a
+ * shallow recess of its own with clear board between them, and then the bar's
+ * own two controls standing on the bare slab past them:
  *
- *   move the view · pick something up · place something · bar
+ *   move the view · pick something up · place something   ·   lock  hide
  *
  * Grouping is by container rather than by rule. A recess is read at a glance
  * and at any bar width; a hairline has to be found first, and on a bar this
@@ -46,6 +46,12 @@ import { ToolButton } from './toolbar-tool-button';
  * card is concentric with the one outside it — card 20, recess 16, key 12,
  * off the card's 4px padding — so the corners step down evenly rather than
  * each control rounding to its own taste.
+ *
+ * The absence of a fourth recess is the point of the right-hand end. A
+ * container says "these belong together and apart from those", and a box
+ * around lock-and-hide made that claim in the same vocabulary as the three
+ * groups of tools — a fourth kind of tool, on a bar that has three. Leaving
+ * them on the slab says the truer thing: they are not on the board at all.
  *
  * The tray is the middle because it is the reason the bar exists, and because
  * an object among glyphs is the one thing on a bar this wide that can be found
@@ -149,7 +155,12 @@ export function Toolbar() {
               <InsertMenu active={activeToolId === 'sticker'} />
             </div>
 
-            <div role="group" aria-label="Utilities" className={TOOL_GROUP}>
+            {/* No recess. The three groves either side hold things you do to
+                the board; these two do something to the bar, and boxing them
+                the same way claimed a fourth kind of tool that isn't there.
+                On the slab they read as the bar's own controls and give it an
+                end, at the cost of nothing but a container. */}
+            <div className="ms-0.5 flex items-center gap-0.5 self-center">
               <ToolLockButton />
               <Tooltip>
                 <TooltipTrigger
@@ -161,11 +172,15 @@ export function Toolbar() {
                       tabIndex={-1}
                       aria-label="Hide toolbar"
                       onClick={hideToolbar}
-                      className={toolButtonClass(false)}
+                      className={chromeButtonClass()}
                     />
                   }
                 >
-                  <ChevronDown className={TOOL_ICON} />
+                  {/* Drawn under tool weight, on a full-size target. It is a
+                      handle on the bar, not a thing on the board, and the one
+                      key here that is neither should not be the same size as
+                      an icon that is. */}
+                  <ChevronDown className="size-3.5" />
                 </TooltipTrigger>
                 <TooltipContent side="top">Hide toolbar</TooltipContent>
               </Tooltip>

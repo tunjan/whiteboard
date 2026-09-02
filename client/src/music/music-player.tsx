@@ -95,7 +95,8 @@ export function MusicPlayer({
 
   const playlists = library?.playlists ?? [];
   const activeTracks =
-    playlists.find((playlist) => playlist.name === activePlaylist)?.tracks ?? [];
+    playlists.find((playlist) => playlist.name === activePlaylist)?.tracks ??
+    [];
   const tracksById = useMemo(() => {
     const tracks = new Map<string, MusicTrack>();
     for (const playlist of playlists) {
@@ -104,7 +105,7 @@ export function MusicPlayer({
     return tracks;
   }, [playlists]);
   const currentTrack = playback.trackId
-    ? tracksById.get(playback.trackId) ?? null
+    ? (tracksById.get(playback.trackId) ?? null)
     : null;
   const isPlaying = playback.status === 'playing' && currentTrack !== null;
   const displayTime = isPlaying ? localTime : playback.position;
@@ -266,7 +267,7 @@ export function MusicPlayer({
     <>
       {/* Trigger — playing takes the chrome's quiet pressed idiom (hairline +
           recessed fill); colour is reserved for status, and "playing" is an
-          on/off state. As a toolbar item it carries its own `bg-surface` chip. */}
+          on/off state. */}
       <Popover>
         <TooltipProvider delay={300}>
           <Tooltip>
@@ -282,7 +283,6 @@ export function MusicPlayer({
                       variant: 'ghost',
                       size: showLabel ? 'sm' : 'icon-sm',
                     }),
-                    toolbarItem && 'bg-surface',
                     isPlaying && 'border-border bg-panel text-fg',
                   )}
                 />
@@ -569,9 +569,16 @@ function LibraryNotice({
   );
 }
 
-function sharedPosition(playback: { status: string; position: number; updatedAt: number }) {
+function sharedPosition(playback: {
+  status: string;
+  position: number;
+  updatedAt: number;
+}) {
   if (playback.status !== 'playing') return playback.position;
-  return Math.max(0, playback.position + (Date.now() - playback.updatedAt) / 1000);
+  return Math.max(
+    0,
+    playback.position + (Date.now() - playback.updatedAt) / 1000,
+  );
 }
 
 function seekToSharedPosition(

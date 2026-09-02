@@ -137,13 +137,51 @@ describe('VideoPanel', () => {
     ).toHaveLength(1);
   });
 
-  it('shows a tile per source a peer publishes', () => {
+  it('shows a tile per source a peer publishes when maximized', () => {
     joined();
+    videoState.mode = 'maximized';
     presenceState.peers = [peer(9, { camera: true, screen: true })];
     const markup = render();
 
     expect(markup.match(/<video[^>]*>/g) ?? []).toHaveLength(2);
-    expect(markup).toContain("Student&#x27;s screen");
+    expect(markup).toContain('Student&#x27;s screen');
+  });
+
+  it('spends the minimised panel on one view, and offers the rest', () => {
+    joined();
+    presenceState.peers = [
+      peer(9, { camera: true, screen: true }),
+      peer(11, { camera: true }),
+    ];
+    const markup = render();
+
+    // Three views, one tile: the panel stays the size of a single camera.
+    expect(markup.match(/<video[^>]*>/g) ?? []).toHaveLength(1);
+    // Screens lead, so the unpicked views are the two cameras.
+    expect(markup).toContain('Student&#x27;s screen');
+    expect(markup.match(/<button[^>]*>/g) ?? []).not.toHaveLength(0);
+  });
+
+  it('gives the minimised tile to the view you pick', () => {
+    joined();
+    presenceState.peers = [peer(9, { camera: true, screen: true })];
+    videoState.spotlightKey = '9:camera';
+    const markup = render();
+
+    expect(markup.match(/<video[^>]*>/g) ?? []).toHaveLength(1);
+    // The label belongs to the camera now, and the screen is the offer.
+    expect(markup.indexOf('Student&#x27;s screen')).toBeGreaterThan(
+      markup.indexOf('Student</span>'),
+    );
+  });
+
+  it('falls back to the first view when the pick leaves the call', () => {
+    joined();
+    presenceState.peers = [peer(9, { camera: true })];
+    videoState.spotlightKey = '11:camera';
+
+    // A stale pick must not blank the panel.
+    expect(render().match(/<video[^>]*>/g) ?? []).toHaveLength(1);
   });
 
   it('hides the tiles and controls when collapsed to a bar', () => {
@@ -209,6 +247,25 @@ describe('VideoPanel', () => {
 
     videoState.mode = 'maximized';
     expect(render()).toContain("aria-label=\"Spotlight Student&#x27;s camera\"");
+  });
+
+  it('lays the controls over the video instead of framing it', () => {
+    joined();
+    presenceState.peers = [peer(9, { camera: true })];
+    const markup = render();
+
+    // No header or footer band: the controls hide until the panel is hovered,
+    // and stay put for touch and keyboard users.
+    expect(markup).not.toContain('<header');
+    expect(markup).not.toContain('<footer');
+    expect(markup).toContain('touch-reveal');
+    expect(markup).toContain('group-hover/panel:opacity-100');
+  });
+
+  it('keeps the controls up while there is no video to hide them over', () => {
+    joined();
+
+    expect(render()).not.toContain('touch-reveal');
   });
 
   it('drops the edge anchor once the panel has been dragged', () => {

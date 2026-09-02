@@ -1,6 +1,9 @@
 import * as Y from 'yjs';
 import { IndexeddbPersistence } from 'y-indexeddb';
-import { HocuspocusProvider } from '@hocuspocus/provider';
+import {
+  HocuspocusProvider,
+  HocuspocusProviderWebsocket,
+} from '@hocuspocus/provider';
 import { create } from 'zustand';
 import {
   DEFAULT_MUSIC_PLAYBACK,
@@ -34,6 +37,7 @@ import {
 } from './shapes/graph-storage';
 import { shapeRegistry } from './shapes/shape-registry';
 import { shapeRotatedBounds } from './shape-bounds';
+import type { Bounds } from './geometry';
 import { BindingGraph } from './binding-graph';
 import { SpatialIndex } from './spatial-index';
 import {
@@ -52,6 +56,7 @@ import { resolveOpacity } from './opacity';
 import { clearVanishing, vanishShapes } from './use-vanish-store';
 import { useConnectionStore } from '@/collab/use-connection-store';
 import { startLatencyMonitor } from '@/collab/latency';
+import { noteActivity, startAttentionMonitor } from '@/collab/attention';
 import { bindVoiceProvider } from '@/collab/voice/voice-session';
 import {
   setActiveAwareness,
@@ -67,15 +72,31 @@ import {
   leavePageInteractionState,
   resetPageInteractionStates,
 } from './page-interaction-state';
+import {
+  acquirePageDoc,
+  closePageDocs,
+  deleteStoredPage,
+  destroyPageDoc,
+  openPageDocs,
+  pinPageDoc,
+  residentPageDoc,
+  unpinPageDoc,
+  type PageDoc,
+} from './page-docs';
+import { legacyShapesMap, migrateLegacyShapes } from './page-migration';
 import { getIncrementedName } from './page-names';
 import { readPageSession, writePageSession } from './page-session-state';
 import { completeInteractionBeforePageSwitch } from './page-transition';
 
-// page-default's shapes live at the doc root map `shapes` (unchanged from Pass 1),
-// which keeps the Yjs structure idempotent across IndexedDB + server sync. Every
-// other page stores its shapes in its own top-level map `shapes:<pageId>` —
-// top-level named maps converge across clients with no migration. Page metadata
-// (name + fractional order index) lives in the `pages` registry map.
+// A board is a small tree of CRDT documents. This one — the board document —
+// holds the page registry (name + fractional order index per page) and the
+// board-level shared state; each page's shapes live in a document of their own,
+// synced only while that page is resident. See page-docs.ts for why.
+//
+// Boards written before that split kept every page's shapes in this document:
+// page-default at the root map `shapes`, the rest at `shapes:<pageId>`. Those
+// maps are still read, and the first time such a page is opened its shapes move
+// into the page's own document and the legacy map is emptied.
 const DEFAULT_PAGE_ID = 'page-default';
 const DEFAULT_PAGE_NAME = 'Page 1';
 
@@ -96,6 +117,13 @@ const STICKERS_ORIGIN = 'stickers';
 // excluded from the UndoManager so a gesture that leaves nothing behind also
 // leaves no undo entry behind.
 const EPHEMERAL_ORIGIN = 'ephemeral';
+// The receiving half of a cross-page move. Untracked so the target page's own
+// history is not disturbed by shapes arriving from elsewhere: the move belongs
+// to the page it was made from, and is undone from there (see `undo`).
+const CROSS_PAGE_ORIGIN = 'cross-page';
+// Relocating a legacy board's shapes into their page documents. Untracked: it
+// is a change of storage, not an edit anyone made or should be able to undo.
+const MIGRATION_ORIGIN = 'migration';
 
 /** Room name for a board's Yjs content (IndexedDB + Hocuspocus). */
 export function boardRoom(boardId: string): string {
@@ -173,15 +201,6 @@ interface PageMeta {
   id: string;
   name: string;
   index: string;
-}
-
-/** Name of the Yjs map holding a page's shapes. page-default lives at the root. */
-function shapesMapName(pageId: string): string {
-  return pageId === DEFAULT_PAGE_ID ? 'shapes' : `shapes:${pageId}`;
-}
-
-function getShapesMap(doc: Y.Doc, pageId: string): Y.Map<YShape> {
-  return doc.getMap(shapesMapName(pageId)) as Y.Map<YShape>;
 }
 
 /** Read the page registry, sorted by fractional order index. */
@@ -386,9 +405,23 @@ interface Session {
   documents: Y.Map<BoardDocumentMeta>;
   /** The board's custom sticker library; the artwork lives at /api/blobs. */
   stickers: Y.Map<CustomStickerMeta>;
-  /** Shapes map for the active page (root `shapes` for page-default). */
+  /** The active page's document and its `shapes` map. Both are swapped on a
+   *  page switch; `shapesDoc` is what shape mutations transact on, while `doc`
+   *  above stays the board document (registry, comments, stickers, music). */
+  pageDoc: PageDoc;
+  shapesDoc: Y.Doc;
   currentShapes: Y.Map<YShape>;
   currentPageId: string;
+  /** Derived state for pages left behind but still resident, keyed by page id.
+   *  A switch back to one of these restores it instead of re-deriving the page
+   *  from the CRDT — see {@link parkActivePage}. */
+  parked: Map<string, ParkedPage>;
+  /** Pages pinned resident because their undo history is worth keeping, most
+   *  recently edited last. */
+  pagesWithHistory: Set<string>;
+  /** Shared by the board document's provider and every page's, so a resident
+   *  page costs sync scope rather than another socket. */
+  socket: HocuspocusProviderWebsocket | null;
   /** True until stored local session state is restored or user navigation wins. */
   pageRestorePending: boolean;
   undo: Y.UndoManager;
@@ -410,7 +443,9 @@ interface Session {
 
 let session: Session | null = null;
 
-const shapeCache = new Map<string, Shape>();
+// The active page's decoded shapes. Reassigned (not cleared) on a page switch,
+// so a page left behind keeps its own map to come back to — see `ParkedPage`.
+let shapeCache = new Map<string, Shape>();
 // Lazily-built, z-sorted view of `shapeCache` for `editor.getShapes()`. The
 // cache stays in sync with `shapeCache` (invalidated wherever it mutates), so
 // reads avoid re-deserializing the whole Yjs map and re-sorting on every call —
@@ -432,6 +467,100 @@ let sortedPositionById: Map<string, number> | null = null;
 // collections at O(page) cost per frame. Almost every real page is that page.
 let parentedCount = 0;
 let equationCount = 0;
+
+/**
+ * Everything derived from a page that is no longer the active one.
+ *
+ * A page switch used to throw all of this away and rebuild it from the CRDT on
+ * the way back — decode every shape, re-insert every bound into the R-tree —
+ * which is the bulk of what a switch costs. Flipping between two pages is the
+ * common case (a worked example on one, the exercise on the other), so the last
+ * few pages keep their derived state and a switch back is a pointer swap.
+ *
+ * `stale` is how that stays honest: while a page is parked its document is
+ * still syncing, and a peer's edit invalidates the snapshot. Rather than apply
+ * changes to a page nobody is looking at, the watcher just marks it, and the
+ * switch back falls through to a full re-derivation.
+ */
+interface ParkedPage {
+  shapes: Map<string, Shape>;
+  sorted: Shape[] | null;
+  positions: Map<string, number> | null;
+  index: SpatialIndex;
+  bindings: BindingGraph;
+  parented: number;
+  equations: number;
+  stale: boolean;
+  detach: () => void;
+}
+
+/** Hand the active page's derived state to `parked`, leaving the live ones empty. */
+function parkActivePage(): void {
+  if (!session) return;
+  const pageId = session.currentPageId;
+  const page = session.pageDoc;
+  const entry: ParkedPage = {
+    shapes: shapeCache,
+    sorted: sortedShapesCache,
+    positions: sortedPositionById,
+    index: new SpatialIndex(),
+    bindings: new BindingGraph(),
+    parented: parentedCount,
+    equations: equationCount,
+    stale: false,
+    detach: () => {},
+  };
+  entry.index.adopt(spatialIndex);
+  entry.bindings.adopt(bindingGraph);
+
+  const watcher = () => {
+    entry.stale = true;
+  };
+  page.shapes.observeDeep(watcher);
+  entry.detach = () => page.shapes.unobserveDeep(watcher);
+
+  session.parked.set(pageId, entry);
+  shapeCache = new Map();
+  sortedShapesCache = null;
+  sortedPositionById = null;
+  parentedCount = 0;
+  equationCount = 0;
+}
+
+/** Drop a parked page's snapshot and its stale watcher. */
+function discardParkedPage(pageId: string): void {
+  const entry = session?.parked.get(pageId);
+  if (!entry) return;
+  entry.detach();
+  session!.parked.delete(pageId);
+}
+
+/**
+ * Make a parked page's derived state live again. False when there is nothing
+ * usable to restore and the caller must re-derive the page from its document.
+ */
+function unparkPage(pageId: string): boolean {
+  const entry = session?.parked.get(pageId);
+  if (!entry) return false;
+  entry.detach();
+  session!.parked.delete(pageId);
+  if (entry.stale) return false;
+
+  clearVanishing();
+  shapeCache = entry.shapes;
+  sortedShapesCache = entry.sorted;
+  sortedPositionById = entry.positions;
+  parentedCount = entry.parented;
+  equationCount = entry.equations;
+  spatialIndex.adopt(entry.index);
+  bindingGraph.adopt(entry.bindings);
+  // The Canvas resolves connectors against the page it is rendering, so the
+  // page coming back needs the same full rescan a freshly derived one gets.
+  pendingBindingDirty = null;
+  rebuildPagesCache();
+  rebuildSnapshot();
+  return true;
+}
 
 /** Current page's shapes, z-sorted. One shared array for `getShapes()` and the
  *  store snapshot, so consumers never re-sort the document themselves. */
@@ -459,8 +588,9 @@ interface DocStore {
   /**
    * The live shape cache, for consumers that look one shape up by id.
    *
-   * Its identity never changes: the map is mutated in place, and every reader
-   * is a zustand selector, which re-runs on every store write anyway. That is
+   * Its identity is stable for the life of a page: the map is mutated in place,
+   * and every reader is a zustand selector, which re-runs on every store write
+   * anyway (a page switch is one such write). That is
    * the whole point — publishing lookups as a fresh `Record` copied the entire
    * page on every mutation, which is O(n) per frame of a drag and allocates a
    * hash entry per shape, to answer questions of the form `get(oneId)`.
@@ -561,7 +691,57 @@ function rebuildPagesCache(): void {
   cachedDoc = { pages: cachedPages, pageOrder: cachedPageOrder };
 }
 
+// A snapshot publish deferred to the next frame. See `publishSnapshotSoon`.
+let queuedSnapshotFrame: number | null = null;
+
+/** Drop a deferred publish, because one has just happened or the page is gone. */
+function cancelQueuedSnapshot(): void {
+  if (queuedSnapshotFrame === null) return;
+  cancelAnimationFrame(queuedSnapshotFrame);
+  queuedSnapshotFrame = null;
+}
+
+/**
+ * Publish at most one snapshot per frame, for edits that did not come from this
+ * client's own input.
+ *
+ * A peer draws at the rate of their own digitizer, and the draw tool writes a
+ * frame of the stroke per animation frame, so a 120 Hz tablet emits 120
+ * document updates a second — each one its own message, its own transaction,
+ * and until now its own `rebuildSnapshot`, Canvas render and reconciliation of
+ * every visible shape. Two or three people drawing at once therefore drove the
+ * receiver's React tree several times faster than it could paint, and all but
+ * the last render of each frame was discarded before it ever reached the
+ * screen.
+ *
+ * Everything in `applyAffected` above this still runs synchronously on every
+ * update, so `getShape`, hit-testing, the spatial index and the binding graph
+ * are never behind the document. Only the React publish waits, and it waits at
+ * most one frame — which is as often as the result could have been seen.
+ *
+ * This is the same bargain the local live stroke already makes, in the other
+ * direction: there the ink is on screen before the snapshot would have been, so
+ * the publish is skipped outright; here the publish is what puts it on screen,
+ * so it is kept and merely paced.
+ */
+function publishSnapshotSoon(): void {
+  // No frames to schedule against (node, tests, SSR): publish now. Pacing is an
+  // optimization, never a correctness requirement.
+  if (typeof requestAnimationFrame !== 'function') {
+    rebuildSnapshot();
+    return;
+  }
+  if (queuedSnapshotFrame !== null) return;
+  queuedSnapshotFrame = requestAnimationFrame(() => {
+    queuedSnapshotFrame = null;
+    rebuildSnapshot();
+  });
+}
+
 function rebuildSnapshot(): void {
+  // Whatever a deferred publish was going to say, this one says at least as
+  // much: both read the same live caches, and this is the later of the two.
+  cancelQueuedSnapshot();
   if (!session) return;
   // Nothing here is proportional to the number of shapes on the page. The
   // sorted array is maintained incrementally by `applyAffected`, page metadata
@@ -569,6 +749,11 @@ function rebuildSnapshot(): void {
   useDocumentStore.setState({
     doc: cachedDoc,
     shapes: currentSortedShapes(),
+    // Republished because the cache belongs to the page, not to the board: a
+    // switch swaps in the target page's map, and a consumer still holding the
+    // one it had would be looking shapes up on the page it just left. Within a
+    // page the reference never changes, so this costs subscribers nothing.
+    shapesById: shapeCache,
     hasHierarchy: parentedCount > 0,
     hasEquations: equationCount > 0,
     currentPageId: session.currentPageId,
@@ -683,7 +868,7 @@ function startVanish(removed: Shape[]): void {
   vanishShapes(entries);
 }
 
-function applyAffected(ids: Set<string>): void {
+function applyAffected(ids: Set<string>, paced = false): void {
   if (!session) return;
   // A stroke or drag mutates a shape's props/position but never its z-`index`
   // or the set of shapes, so the sorted order is unchanged. Track whether any
@@ -749,7 +934,8 @@ function applyAffected(ids: Set<string>): void {
   // usual, so remote work is never held up behind a local gesture.
   const live = getLiveStrokeShapeId();
   if (live !== null && ids.size === 1 && ids.has(live)) return;
-  rebuildSnapshot();
+  if (paced) publishSnapshotSoon();
+  else rebuildSnapshot();
 }
 
 function fullResync(): void {
@@ -764,17 +950,23 @@ function fullResync(): void {
   pendingBindingDirty = null;
   parentedCount = 0;
   equationCount = 0;
+  // Collected and handed to the R-tree in one bulk load rather than inserted
+  // one by one: the tree is built in a single packing pass instead of n
+  // descend-and-split insertions, and comes out better balanced for every
+  // later query.
+  const bounds: (Bounds & { id: string })[] = [];
   for (const [id, m] of session.currentShapes) {
     const shape = yToShape(m);
     shapeCache.set(id, shape);
     const util = shapeRegistry.getFor(shape);
     // Groups have no geometry of their own — keep them out of the index.
     if (util && shape.type !== 'group')
-      spatialIndex.insert(id, shapeRotatedBounds(shape));
+      bounds.push({ ...shapeRotatedBounds(shape), id });
     bindingGraph.update(shape);
     if (shape.parentId) parentedCount++;
     if (shape.type === 'equation') equationCount++;
   }
+  spatialIndex.loadAll(bounds);
   rebuildPagesCache();
   rebuildSnapshot();
 }
@@ -789,11 +981,36 @@ subscribeToTextMetrics(() => {
 });
 watchFontLoading();
 
+/**
+ * Whether a transaction came from somewhere other than this client's own input,
+ * and so may have its React publish paced to the frame — see
+ * {@link publishSnapshotSoon}.
+ *
+ * Every origin this module writes under is a string constant, and the only
+ * other origin raised from a local gesture is the page's own `Y.UndoManager`
+ * (Yjs tags an undo with the manager itself). What is left is the providers:
+ * Hocuspocus applying a peer's update, and the IndexedDB cache replaying the
+ * page on open. A whitelist rather than a blacklist, so an origin nobody
+ * anticipated keeps the immediate publish it has today.
+ */
+function isPaceable(origin: unknown): boolean {
+  return (
+    typeof origin === 'object' &&
+    origin !== null &&
+    !(origin instanceof Y.UndoManager)
+  );
+}
+
 function makeShapesObserver(): (
   events: Y.YEvent<Y.AbstractType<unknown>>[],
 ) => void {
   return (events) => {
     const affected = new Set<string>();
+    // One transaction raises one batch of events, so every event here shares an
+    // origin; `every` reads that off the batch without assuming its length.
+    const paced =
+      events.length > 0 &&
+      events.every((e) => isPaceable(e.transaction.origin));
     for (const e of events) {
       if (e.target === session?.currentShapes) {
         for (const key of e.keys.keys()) affected.add(key);
@@ -801,7 +1018,7 @@ function makeShapesObserver(): (
         affected.add(e.path[0]);
       }
     }
-    applyAffected(affected);
+    applyAffected(affected, paced);
   };
 }
 
@@ -833,6 +1050,9 @@ export function loadBoard(
   const storedPageId = readPageSession(boardId);
   session?.cleanup();
   session = null;
+  // A publish still queued for the outgoing board would land after the state
+  // below, describing caches this call is about to empty.
+  cancelQueuedSnapshot();
   resetPageInteractionStates();
   shapeCache.clear();
   sortedShapesCache = null;
@@ -864,12 +1084,6 @@ export function loadBoard(
   const comments = doc.getMap<CommentMessage>('comments');
   const documents = doc.getMap<BoardDocumentMeta>('documents');
   const stickers = doc.getMap<CustomStickerMeta>('stickers');
-  const currentShapes = getShapesMap(doc, DEFAULT_PAGE_ID);
-  const undo = makeUndoManager(DEFAULT_PAGE_ID, currentShapes);
-  const undoByPage = new Map([[DEFAULT_PAGE_ID, undo]]);
-
-  const shapesObserver = makeShapesObserver();
-  currentShapes.observeDeep(shapesObserver);
 
   let restorePageFromSession = () => {};
   const pagesObserver = () => {
@@ -914,24 +1128,51 @@ export function loadBoard(
     ? new IndexeddbPersistence(boardRoom(boardId), doc)
     : null;
 
+  let socket: HocuspocusProviderWebsocket | null = null;
   let provider: HocuspocusProvider | null = null;
   let stopLatencyMonitor = () => {};
+  let stopAttentionMonitor = () => {};
   let stopVoiceProvider = () => {};
   if (opts.collab) {
+    // One socket for the board document and every page document on it. Each
+    // provider syncs its own document over it, so opening a page adds sync
+    // scope rather than another connection.
+    socket = new HocuspocusProviderWebsocket({ url: collabUrl() });
     provider = new HocuspocusProvider({
-      url: collabUrl(),
+      websocketProvider: socket,
       name: boardId,
       document: doc,
     });
+    // A provider given a socket to share does not attach to it on its own —
+    // only one that made its own socket does. Without this it connects and
+    // then sits there, never syncing.
+    provider.attach();
     provider.on('status', (event: { status: string }) => {
       useConnectionStore.getState().setStatus(event.status);
     });
     stopLatencyMonitor = startLatencyMonitor(provider, setLocalLatency);
+    stopAttentionMonitor = startAttentionMonitor();
     stopVoiceProvider = bindVoiceProvider(provider);
     setActiveAwareness(provider.awareness ?? null);
   } else {
     useConnectionStore.getState().setStatus('disconnected');
   }
+
+  openPageDocs({
+    boardId,
+    persist: Boolean(opts.persist),
+    socket,
+    onEvict: releasePageState,
+  });
+
+  const pageDoc = acquirePageDoc(DEFAULT_PAGE_ID);
+  // The open page is never evicted from under the user.
+  pinPageDoc(DEFAULT_PAGE_ID);
+  const currentShapes = pageDoc.shapes;
+  const undo = makeUndoManager(DEFAULT_PAGE_ID, currentShapes);
+  const undoByPage = new Map([[DEFAULT_PAGE_ID, undo]]);
+  const shapesObserver = makeShapesObserver();
+  currentShapes.observeDeep(shapesObserver);
 
   session = {
     boardId,
@@ -941,8 +1182,13 @@ export function loadBoard(
     comments,
     documents,
     stickers,
+    pageDoc,
+    shapesDoc: pageDoc.doc,
     currentShapes,
     currentPageId: DEFAULT_PAGE_ID,
+    parked: new Map(),
+    pagesWithHistory: new Set(),
+    socket,
     pageRestorePending: true,
     undo,
     undoByPage,
@@ -957,6 +1203,7 @@ export function loadBoard(
     provider,
     cleanup: () => {
       stopVoiceProvider();
+      cancelQueuedSnapshot();
       setActiveAwareness(null);
       session?.currentShapes.unobserveDeep(session.shapesObserver);
       pages.unobserveDeep(pagesObserver);
@@ -968,8 +1215,12 @@ export function loadBoard(
       for (const manager of session?.undoByPage.values() ?? []) {
         manager.destroy();
       }
+      // Tears down every resident page, which releases their parked state.
+      closePageDocs();
       stopLatencyMonitor();
+      stopAttentionMonitor();
       provider?.destroy();
+      socket?.destroy();
       persistence?.destroy();
       doc.destroy();
       useMusicPlaybackStore.getState().reset();
@@ -1015,20 +1266,29 @@ export function loadBoard(
   // Seed page-default once the board's existing state is known. We only seed
   // when the registry is still empty after sync, so a deliberately deleted
   // page-default is never resurrected (other pages keep the registry non-empty).
+  // Legacy content can only be spotted once the board document has arrived, so
+  // the open page is re-checked after every source syncs. A no-op once there is
+  // nothing left in the legacy maps, which is every board written since.
+  const migrateOpenPage = () => {
+    if (session?.doc === doc) migrateLegacyPageShapes(session.currentPageId);
+  };
   maybeSeedDefaultPage();
   persistence?.on('synced', maybeSeedDefaultPage);
   provider?.on('synced', maybeSeedDefaultPage);
   persistence?.on('synced', () => {
     persistenceReady = true;
     restorePageFromSession();
+    migrateOpenPage();
   });
   provider?.on('synced', () => {
     providerReady = true;
     restorePageFromSession();
+    migrateOpenPage();
   });
   restorePageFromSession();
 
   fullResync();
+  migrateOpenPage();
   publishMusicPlayback();
   publishComments();
   publishDocuments();
@@ -1043,57 +1303,164 @@ export function loadBoard(
   };
 }
 
-export function undo(): void {
-  session?.undo.undo();
+/**
+ * The far half of a cross-page move, hung off the undo entry that owns it.
+ *
+ * A move writes to two documents — shapes out of this page, shapes into the
+ * target's — and a Yjs UndoManager only ever reverts its own. So only the
+ * outgoing half is tracked, and the incoming half is recorded here against the
+ * stack item it belongs to; {@link undo} and {@link redo} replay it by hand so
+ * the two halves stay one step. Keyed on the stack item so that an entry
+ * dropped from the stack takes its payload with it.
+ */
+interface CrossPageMove {
+  targetPageId: string;
+  shapes: Shape[];
 }
+const crossPageMoves = new WeakMap<object, CrossPageMove>();
+
+/** Add (redo) or remove (undo) the target-page half of a recorded move. */
+function replayCrossPageMove(
+  move: CrossPageMove,
+  direction: 'undo' | 'redo',
+): void {
+  const page = residentPageDoc(move.targetPageId);
+  // The target is pinned resident for as long as an entry referencing it can be
+  // reached, so this is only null once the board itself is gone.
+  if (!page) return;
+  page.doc.transact(() => {
+    for (const shape of move.shapes) {
+      if (direction === 'undo') page.shapes.delete(shape.id);
+      else page.shapes.set(shape.id, shapeToY(shape));
+    }
+  }, CROSS_PAGE_ORIGIN);
+}
+
+/**
+ * Undo one step, carrying the far half of a cross-page move with it.
+ *
+ * The stack item is read before the call and the payload re-hung on the redo
+ * item after it, rather than listening for the manager's own events: Yjs emits
+ * `stack-item-added` for the inverse entry *before* `stack-item-popped` for the
+ * one being undone, so an event-driven handoff would have nothing to copy yet.
+ */
+export function undo(): void {
+  if (!session) return;
+  const manager = session.undo;
+  const item = manager.undoStack.at(-1);
+  const move = item ? crossPageMoves.get(item) : undefined;
+  manager.undo();
+  if (!move) return;
+  replayCrossPageMove(move, 'undo');
+  const inverse = manager.redoStack.at(-1);
+  if (inverse) crossPageMoves.set(inverse, move);
+}
+
 /** Force the next mutation to start a new undo entry (gesture boundary). */
 export function breakUndoCapture(): void {
   session?.undo.stopCapturing();
 }
+
 export function redo(): void {
-  session?.undo.redo();
+  if (!session) return;
+  const manager = session.undo;
+  const item = manager.redoStack.at(-1);
+  const move = item ? crossPageMoves.get(item) : undefined;
+  manager.redo();
+  if (!move) return;
+  replayCrossPageMove(move, 'redo');
+  const inverse = manager.undoStack.at(-1);
+  if (inverse) crossPageMoves.set(inverse, move);
 }
 
 /**
- * Page whose undo manager owns the transaction currently being applied, while a
- * cross-page move is in flight. A move writes to two pages' shape maps at once,
- * and both managers can see it; without this only-one-owner rule each would
- * capture half the move, so undoing on the source page would restore the shapes
- * there while the copies stayed on the target.
+ * How many edited pages stay resident for their undo history.
+ *
+ * History addresses the content of one document and cannot outlive it, so a
+ * page the user has edited is held in memory to keep Ctrl+Z working there.
+ * Bounded, because "every page visited this session" is how a long lesson ends
+ * up holding the whole board again.
  */
-let crossPageMoveOwner: string | null = null;
+const MAX_HISTORY_PAGES = 8;
 
-/**
- * Undo history for one page. Scope grows when a cross-page move needs the
- * target page's map to be revertible from here, so capture is gated on the
- * transaction actually concerning this page rather than on scope alone.
- */
+/** Note that `pageId` now has undo history worth keeping it resident for. */
+function notePageHistory(pageId: string): void {
+  if (!session) return;
+  const pages = session.pagesWithHistory;
+  if (pages.has(pageId)) {
+    // Re-insert so insertion order stays "least recently edited first".
+    pages.delete(pageId);
+    pages.add(pageId);
+    return;
+  }
+  pages.add(pageId);
+  pinPageDoc(pageId);
+  if (pages.size > MAX_HISTORY_PAGES) {
+    const oldest = pages.values().next().value;
+    if (oldest !== undefined) {
+      pages.delete(oldest);
+      unpinPageDoc(oldest);
+    }
+  }
+}
+
+/** Undo history for one page, scoped to that page's own document. */
 function makeUndoManager(pageId: string, map: Y.Map<YShape>): Y.UndoManager {
-  // Yjs keys its changed-type maps by the invariant `AbstractType`, which a
-  // `Y.Map<YShape>` does not structurally satisfy.
-  type ChangedKey = Parameters<Y.Transaction['changed']['has']>[0];
-  const scoped = map as unknown as ChangedKey;
-  return new Y.UndoManager(map, {
+  const manager = new Y.UndoManager(map, {
     trackedOrigins: new Set([LOCAL_ORIGIN]),
-    captureTransaction: (tr) =>
-      crossPageMoveOwner === null
-        ? tr.changed.has(scoped) || tr.changedParentTypes.has(scoped)
-        : crossPageMoveOwner === pageId,
   });
+  manager.on('stack-item-added', () => notePageHistory(pageId));
+  return manager;
 }
 
 // --- Pages API ---
+
+/**
+ * Release everything hanging off a page whose document is being dropped.
+ *
+ * Called by the resident set when it evicts a page: the shapes that state was
+ * derived from are about to leave memory, and undo history addresses the
+ * content of that document, so neither can outlive it.
+ */
+function releasePageState(pageId: string): void {
+  if (!session) return;
+  discardParkedPage(pageId);
+  const manager = session.undoByPage.get(pageId);
+  if (manager) manager.destroy();
+  session.undoByPage.delete(pageId);
+  session.pagesWithHistory.delete(pageId);
+}
 
 function cleanupDeletedPageState(pageId: string): void {
   if (!session) return;
   // If the registry is temporarily empty, keep the active manager/camera alive
   // until a valid fallback arrives and the transition can complete.
   if (session.currentPageId === pageId) return;
-  const manager = session.undoByPage.get(pageId);
-  if (manager) manager.destroy();
-  session.undoByPage.delete(pageId);
+  releasePageState(pageId);
+  destroyPageDoc(pageId);
   useCameraStore.getState().deletePage(session.boardId, pageId);
   deletePageInteractionState(pageId);
+}
+
+/**
+ * Move a legacy board's page content into that page's own document, once.
+ *
+ * Runs behind the page document's own sync so an empty page document is known
+ * to be empty rather than merely unsynced. Two clients doing this at the same
+ * time converge: every shape is written under the id it already had, and
+ * emptying the legacy map is idempotent.
+ */
+function migrateLegacyPageShapes(pageId: string): void {
+  if (!session) return;
+  const legacy = legacyShapesMap(session.doc, pageId);
+  if (!legacy || legacy.size === 0) return;
+  const page = residentPageDoc(pageId);
+  if (!page) return;
+  const boardDoc = session.doc;
+  void page.whenSynced.then(() => {
+    if (!session || session.doc !== boardDoc) return;
+    migrateLegacyShapes(boardDoc, legacy, page, MIGRATION_ORIGIN);
+  });
 }
 
 type PageSwitchSource = 'user' | 'follow' | 'restore' | 'integrity';
@@ -1123,8 +1490,16 @@ function switchToPageInternal(
 
   session.currentShapes.unobserveDeep(session.shapesObserver);
   session.unbindUndoState();
+  // Park before releasing the pin: the page just left is the one most likely to
+  // be asked for next, and this is what makes coming back to it free.
+  parkActivePage();
+  unpinPageDoc(previousPageId);
 
-  const map = getShapesMap(session.doc, pageId);
+  pinPageDoc(pageId);
+  const page = acquirePageDoc(pageId);
+  const map = page.shapes;
+  session.pageDoc = page;
+  session.shapesDoc = page.doc;
   session.currentShapes = map;
   session.currentPageId = pageId;
   session.shapesObserver = makeShapesObserver();
@@ -1135,7 +1510,11 @@ function switchToPageInternal(
 
   useCameraStore.getState().switchTo(session.boardId, pageId);
   setLocalPage(pageId);
-  fullResync();
+  // Nothing to rebuild when the page was parked intact; otherwise derive it
+  // from the document, which may still be arriving — the observer publishes
+  // each batch as it lands.
+  if (!unparkPage(pageId)) fullResync();
+  migrateLegacyPageShapes(pageId);
   enterPageInteractionState(pageId, (id) => shapeCache.get(id));
   if (source !== 'integrity' || !session.pageRestorePending) {
     writePageSession(session.boardId, pageId);
@@ -1194,6 +1573,11 @@ export function createPage(name?: string): string {
  * Copy a page and everything on it to a new page placed just after it, then
  * switch to the copy.
  *
+ * Asynchronous because the source need not be the page on screen — the page
+ * menu offers this on any row — and a page that is not open is not in memory.
+ * Awaiting its document is the whole of the wait; when it is the open page (the
+ * usual case) that resolves immediately.
+ *
  * Shapes are cloned with fresh ids: the source and the copy are independent
  * pages, so sharing ids would make the two indistinguishable to anything keyed
  * by shape id (selection restore, presence, comments). `parentId` and connector
@@ -1201,68 +1585,94 @@ export function createPage(name?: string): string {
  * arrows keep pointing at their counterparts on the new page rather than
  * reaching back across to the original.
  *
- * Returns the new page id, or `''` when the source page does not exist.
+ * Resolves to the new page id, or `''` when the source page does not exist.
  */
-export function duplicatePage(id: string): string {
-  if (!session || !session.pages.has(id)) return '';
-  const metas = readPages(session.pages);
-  const source = metas.find((m) => m.id === id);
-  if (!source) return '';
+export async function duplicatePage(id: string): Promise<string> {
+  const boardDoc = session?.doc;
+  if (!session || !boardDoc || !session.pages.has(id)) return '';
 
-  const newId = genId();
-  const name = getIncrementedName(
-    `${source.name} Copy`,
-    metas.map((m) => m.name),
-  );
-  const index = indexAfterPage(metas, id);
+  pinPageDoc(id);
+  try {
+    const sourcePage = acquirePageDoc(id);
+    migrateLegacyPageShapes(id);
+    await sourcePage.whenSynced;
+    // The board may have been closed or the page deleted while we waited.
+    if (!session || session.doc !== boardDoc || !session.pages.has(id))
+      return '';
 
-  const sourceShapes = getShapesMap(session.doc, id);
-  const idMap = new Map<string, string>();
-  for (const shapeId of sourceShapes.keys()) idMap.set(shapeId, genId());
+    const metas = readPages(session.pages);
+    const source = metas.find((m) => m.id === id);
+    if (!source) return '';
 
-  session.doc.transact(() => {
-    putPageMeta(newId, name, index);
-    const target = getShapesMap(session!.doc, newId);
-    for (const [shapeId, m] of sourceShapes) {
-      const shape = yToShape(m);
-      const clone = {
-        ...shape,
-        id: idMap.get(shapeId)!,
-        parentId: shape.parentId ? (idMap.get(shape.parentId) ?? null) : null,
-        props: structuredClone(shape.props),
-      } as Shape;
-      remapClonedBindings(clone, idMap);
-      target.set(clone.id, shapeToY(clone));
-    }
-  }, LOCAL_ORIGIN);
+    const newId = genId();
+    const name = getIncrementedName(
+      `${source.name} Copy`,
+      metas.map((m) => m.name),
+    );
+    const index = indexAfterPage(metas, id);
 
-  // Land the copy on the same view of the same drawing, not at the origin.
-  useCameraStore.getState().copyPage(session.boardId, id, newId);
-  switchToPageInternal(newId);
-  return newId;
+    const idMap = new Map<string, string>();
+    for (const shapeId of sourcePage.shapes.keys()) idMap.set(shapeId, genId());
+
+    session.doc.transact(() => {
+      putPageMeta(newId, name, index);
+    });
+
+    const target = acquirePageDoc(newId);
+    target.doc.transact(() => {
+      for (const [shapeId, m] of sourcePage.shapes) {
+        // `clone` carries the CRDT structure across as it stands — ink point
+        // chunks, text sequences, graph rows — where decoding each shape and
+        // re-encoding it on the other side would rebuild all of it, and cost
+        // the most on exactly the pages worth duplicating.
+        const clone = m.clone();
+        const cloneId = idMap.get(shapeId)!;
+        // Inserted before it is patched: a clone is unintegrated until it lands
+        // in a document, and reading one back before then sees nothing.
+        target.shapes.set(cloneId, clone);
+        clone.set('id', cloneId);
+        const parentId = m.get('parentId');
+        clone.set(
+          'parentId',
+          typeof parentId === 'string' ? (idMap.get(parentId) ?? null) : null,
+        );
+        remapClonedBindings(clone, idMap);
+      }
+    }, LOCAL_ORIGIN);
+
+    // Land the copy on the same view of the same drawing, not at the origin.
+    useCameraStore.getState().copyPage(session.boardId, id, newId);
+    switchToPageInternal(newId);
+    return newId;
+  } finally {
+    unpinPageDoc(id);
+  }
 }
+
+/** One endpoint of a cloned connector, as stored in `props.bindings`. */
+type StoredBinding = { shapeId: string } | null | undefined;
 
 /**
  * Point a cloned connector's bindings at the clones of its targets. A target
  * outside `idMap` was not copied, so the binding is dropped rather than left
  * addressing a shape on another page.
  */
-function remapClonedBindings(shape: Shape, idMap: Map<string, string>): void {
-  if (shape.type !== 'arrow') return;
-  const bindings = shape.props.bindings;
+function remapClonedBindings(clone: YShape, idMap: Map<string, string>): void {
+  if (clone.get('type') !== 'arrow') return;
+  const props = clone.get('props') as
+    { bindings?: { start: StoredBinding; end: StoredBinding } } | undefined;
+  const bindings = props?.bindings;
   if (!bindings) return;
-  shape.props.bindings = {
-    start: bindings.start
-      ? idMap.has(bindings.start.shapeId)
-        ? { ...bindings.start, shapeId: idMap.get(bindings.start.shapeId)! }
+  const remap = (binding: StoredBinding): StoredBinding =>
+    binding
+      ? idMap.has(binding.shapeId)
+        ? { ...binding, shapeId: idMap.get(binding.shapeId)! }
         : null
-      : bindings.start,
-    end: bindings.end
-      ? idMap.has(bindings.end.shapeId)
-        ? { ...bindings.end, shapeId: idMap.get(bindings.end.shapeId)! }
-        : null
-      : bindings.end,
-  };
+      : binding;
+  clone.set('props', {
+    ...props,
+    bindings: { start: remap(bindings.start), end: remap(bindings.end) },
+  });
 }
 
 /**
@@ -1288,41 +1698,47 @@ export function moveShapesToPage(
   const moving = collectSubtree(editor, ids);
   if (moving.length === 0) return [];
   const movingIds = new Set(moving.map((s) => s.id));
-
-  const target = getShapesMap(session.doc, targetPageId);
   const movedIds = moving.map((s) => s.id);
+  const arriving = moving.map(
+    (shape) =>
+      ({
+        ...shape,
+        parentId:
+          shape.parentId && movingIds.has(shape.parentId)
+            ? shape.parentId
+            : null,
+      }) as Shape,
+  );
 
-  // Undo has to put the shapes back on this page *and* take them off the
-  // target, so the target's map joins this page's undo scope for good. Capture
-  // stays correct because `makeUndoManager` gates on the transaction, not the
-  // scope. The bracketing `stopCapturing` calls keep the move a step of its
-  // own rather than merging with an edit made moments before or after.
-  const undo = session.undo;
-  undo.addToScope([target]);
-  undo.stopCapturing();
-  crossPageMoveOwner = session.currentPageId;
-  try {
-    transactLocal(() => {
-      for (const shape of moving) {
-        const keepsParent = shape.parentId
-          ? movingIds.has(shape.parentId)
-          : false;
-        target.set(
-          shape.id,
-          shapeToY({
-            ...shape,
-            parentId: keepsParent ? shape.parentId : null,
-          } as Shape),
-        );
-      }
-      // `movedIds`, not `ids`: `deleteShapes` does not cascade, so passing the
-      // roots alone would strand their children on this page. Groups the move
-      // empties out are pruned here too.
-      deleteShapesWithCleanup(editor, movedIds);
-    });
-  } finally {
-    crossPageMoveOwner = null;
-    undo.stopCapturing();
+  // Held resident for the rest of the session: undoing the move here has to
+  // take the shapes back off the target, which needs its document in memory.
+  pinPageDoc(targetPageId);
+  const target = acquirePageDoc(targetPageId);
+
+  // The two halves live in different documents, so they cannot be one
+  // transaction. Only the outgoing half is tracked; `crossPageMoves` carries
+  // the other so undo and redo move both (see `undo`). The bracketing
+  // `stopCapturing` calls keep the move a step of its own rather than merging
+  // with an edit made moments before or after.
+  const undoManager = session.undo;
+  undoManager.stopCapturing();
+  const depthBefore = undoManager.undoStack.length;
+  // Writing into a page that has not synced yet is safe: each shape carries the
+  // id it will keep, so the write merges with whatever the page already held.
+  target.doc.transact(() => {
+    for (const shape of arriving) target.shapes.set(shape.id, shapeToY(shape));
+  }, CROSS_PAGE_ORIGIN);
+  // `movedIds`, not `ids`: `deleteShapes` does not cascade, so passing the
+  // roots alone would strand their children on this page. Groups the move
+  // empties out are pruned here too.
+  transactLocal(() => {
+    deleteShapesWithCleanup(editor, movedIds);
+  });
+  undoManager.stopCapturing();
+
+  const item = undoManager.undoStack.at(-1);
+  if (item && undoManager.undoStack.length > depthBefore) {
+    crossPageMoves.set(item, { targetPageId, shapes: arriving });
   }
 
   return movedIds;
@@ -1347,10 +1763,15 @@ export function deletePage(id: string): void {
     const neighbor = at > 0 ? metas[at - 1] : metas[at + 1];
     if (neighbor) switchToPageInternal(neighbor.id);
   }
+  const boardId = session.boardId;
   session.doc.transact(() => {
     session!.pages.delete(id);
-    getShapesMap(session!.doc, id).clear();
+    // A board still holding this page's shapes in the legacy map loses them
+    // here too; a migrated page's content is a document of its own, dropped by
+    // `cleanupDeletedPageState` as the registry change is observed.
+    legacyShapesMap(session!.doc, id)?.clear();
   });
+  deleteStoredPage(boardId, id);
 }
 
 /** Move a page to a resolved list position with one fractional-index write. */
@@ -1547,15 +1968,19 @@ export function removeCustomSticker(id: string): void {
 }
 
 /**
- * Encoded size of the whole board document, in bytes.
+ * Encoded size of the board document plus the open page's, in bytes.
  *
  * Every edit is retained by the CRDT, so this measures accumulated write cost,
  * not just live content — which makes it the direct way to check that drawing a
- * stroke stays linear in its point count rather than quadratic.
+ * stroke stays linear in its point count rather than quadratic. Pages that are
+ * not open are not counted: they are separate documents and not in memory.
  */
 export function documentByteSize(): number {
   if (!session) return 0;
-  return Y.encodeStateAsUpdate(session.doc).byteLength;
+  return (
+    Y.encodeStateAsUpdate(session.doc).byteLength +
+    Y.encodeStateAsUpdate(session.shapesDoc).byteLength
+  );
 }
 
 // --- Editor (stable; mutates the current page's Yjs map) ---
@@ -1567,9 +1992,11 @@ export function documentByteSize(): number {
 let transactDepth = 0;
 
 function transactLocal(fn: () => void): void {
+  noteActivity();
   transactDepth++;
   try {
-    session?.doc.transact(fn, LOCAL_ORIGIN);
+    // The active page's document: shapes live there, not in the board document.
+    session?.shapesDoc.transact(fn, LOCAL_ORIGIN);
   } finally {
     transactDepth--;
   }
@@ -1581,8 +2008,8 @@ function transactLocal(fn: () => void): void {
  * `editor` join this one and inherit `EPHEMERAL_ORIGIN` — which the UndoManager
  * does not track. Peers still receive the changes; only Ctrl+Z ignores them.
  *
- * For shapes that exist only for the duration of a gesture (the wand's lasso
- * stroke), where an undo entry would be a step that undoes nothing.
+ * For shapes that exist only for the duration of a gesture, where an undo
+ * entry would be a step that undoes nothing.
  */
 export function withoutUndo(fn: () => void): void {
   // No board session in unit tests — the caller's mutations still have to run.
@@ -1592,7 +2019,7 @@ export function withoutUndo(fn: () => void): void {
   }
   transactDepth++;
   try {
-    session.doc.transact(fn, EPHEMERAL_ORIGIN);
+    session.shapesDoc.transact(fn, EPHEMERAL_ORIGIN);
   } finally {
     transactDepth--;
   }

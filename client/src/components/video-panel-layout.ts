@@ -137,6 +137,21 @@ export function clampPanelPosition(
 }
 
 /**
+ * The tile the minimised panel shows large: the one picked, or the first tile
+ * when nothing is picked — or when the pick has left the call. The minimised
+ * panel is one tile tall by design, so it always needs a subject.
+ */
+export function mainTileKey(
+  tiles: VideoTile[],
+  spotlightKey: string | null,
+): string | null {
+  if (spotlightKey && tiles.some((tile) => tile.key === spotlightKey)) {
+    return spotlightKey;
+  }
+  return tiles[0]?.key ?? null;
+}
+
+/**
  * Split tiles into the spotlit one and the rest. A key that no longer matches a
  * live tile — the peer left, or stopped sharing — falls back to the plain grid
  * instead of blanking the panel.

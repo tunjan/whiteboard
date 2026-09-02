@@ -1,6 +1,10 @@
 import { Hono } from 'hono';
-import { desc, eq } from 'drizzle-orm';
-import { type BoardMeta, genBoardId } from '@whiteboard/shared';
+import { desc, eq, or, sql } from 'drizzle-orm';
+import {
+  type BoardMeta,
+  genBoardId,
+  pageDocumentPrefix,
+} from '@whiteboard/shared';
 import { requireTutor } from '../auth/middleware';
 import { db } from '../db/client';
 import { boardDocuments, boards } from '../db/schema';
@@ -107,7 +111,17 @@ boardRoutes.put('/:id/notes', async (c) => {
 
 boardRoutes.delete('/:id', async (c) => {
   const id = c.req.param('id');
-  await db.delete(boardDocuments).where(eq(boardDocuments.boardId, id));
+  // A board is stored as several documents: its own, plus one per page (see
+  // `pageDocumentName`). `starts_with` rather than a LIKE pattern because a
+  // board id may legitimately contain `_`, which LIKE would read as a wildcard.
+  await db
+    .delete(boardDocuments)
+    .where(
+      or(
+        eq(boardDocuments.documentName, id),
+        sql`starts_with(${boardDocuments.documentName}, ${pageDocumentPrefix(id)})`,
+      ),
+    );
   await db.delete(boards).where(eq(boards.id, id));
   return c.json({ ok: true });
 });

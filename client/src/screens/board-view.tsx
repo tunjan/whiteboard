@@ -19,9 +19,9 @@ import { BoardChrome } from '@/components/board-chrome';
 import { BoardTitleDialog } from '@/components/board-title-dialog';
 import { BoardUiLayer } from '@/components/board-ui-layer';
 import { CanvasContextMenu } from '@/components/canvas-context-menu';
+import { AttentionToast } from '@/components/attention-toast';
 import { LatencyWarningToast } from '@/components/latency-warning-toast';
 import { NameDialog } from '@/components/name-dialog';
-import { StylePanel } from '@/components/style-panel';
 import { Toolbar } from '@/components/toolbar';
 import { Toaster } from '@/components/ui/toast';
 import { VideoPanel } from '@/components/video-panel';
@@ -131,11 +131,12 @@ export function BoardView({ boardId }: { boardId: string }) {
           <GraphPanel />
           <EquationPanel />
         </Suspense>
-        <StylePanel />
         {/* Last, so a maximized call paints over the toolbar and side panels. */}
         <VideoPanel identity={identity} />
       </BoardUiLayer>
       <LatencyWarningToast />
+      {/* Tutor-only, and silent by design: the student is told nothing. */}
+      {identity?.isTutor ? <AttentionToast /> : null}
       {/* Bottom-right, clear of the latency warning's top-left viewport. */}
       <Toaster />
 
@@ -154,6 +155,7 @@ export function BoardView({ boardId }: { boardId: string }) {
           setNeedsName(false);
           setEditingIdentity(false);
         }}
+        onCancel={() => setEditingIdentity(false)}
       />
       <BoardTitleDialog
         open={renamingBoard}

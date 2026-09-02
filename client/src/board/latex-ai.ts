@@ -66,8 +66,13 @@ function toDataUrl(png: Blob): Promise<string> {
   });
 }
 
-/** Transcribe rasterized handwriting into a LaTeX body. */
-export async function latexFromInk(png: Blob): Promise<string> {
+/**
+ * Transcribe a rasterized selection — handwriting, a pasted picture, or both —
+ * into a LaTeX body. The endpoint keeps its original `/ink` path: it is the
+ * same transcription either way, and renaming a route costs a deploy where the
+ * two builds disagree.
+ */
+export async function latexFromImage(png: Blob): Promise<string> {
   return requestLatex('/api/ai/latex/ink', { image: await toDataUrl(png) });
 }
 

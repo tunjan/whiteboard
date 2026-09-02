@@ -110,7 +110,7 @@ aiRoutes.post('/latex/ink', async (c) => {
     {
       role: 'user',
       content: [
-        { type: 'text', text: 'Transcribe the handwritten mathematics in this image.' },
+        { type: 'text', text: 'Transcribe the mathematics in this image.' },
         { type: 'image_url', image_url: { url: image } },
       ],
     },

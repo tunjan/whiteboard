@@ -36,14 +36,14 @@ describe('useVideoStore', () => {
     expect(useVideoStore.getState().remoteScreens.get(9)).toBe(screen);
   });
 
-  it('clears the spotlight when leaving the maximized view', () => {
+  it('keeps the picked view across a mode change', () => {
     useVideoStore.getState().setMode('maximized');
     useVideoStore.getState().setSpotlightKey('9:camera');
     expect(useVideoStore.getState().spotlightKey).toBe('9:camera');
 
-    // A spotlight only means anything against the maximized layout.
+    // The minimised panel spends its one tile on the same pick.
     useVideoStore.getState().setMode('floating');
-    expect(useVideoStore.getState().spotlightKey).toBeNull();
+    expect(useVideoStore.getState().spotlightKey).toBe('9:camera');
   });
 
   it('drops every trace of the call on reset', () => {

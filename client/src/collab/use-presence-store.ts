@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { Point, VoicePresence } from '@whiteboard/shared';
 import type { Camera } from '@/canvas/camera';
 import type { LaserStroke } from '@/canvas/use-laser-store';
+import type { AttentionPresence } from './attention-state';
 
 export interface ViewportPresence {
   camera: Camera;
@@ -18,6 +19,7 @@ export interface TextSelectionPresence {
 }
 
 export type { VoicePresence } from '@whiteboard/shared';
+export type { AttentionPresence } from './attention-state';
 
 export interface PeerPresence {
   clientId: number;
@@ -50,6 +52,13 @@ export interface PeerPresence {
   laser: LaserStroke[] | null;
   /** This peer's current in-board voice membership and mute state. */
   voice: VoicePresence | null;
+  /**
+   * Raw attention facts — an input counter and whether this peer's tab is
+   * frontmost — or null from a peer that has not published any yet. Deliberately
+   * carries no durations: the reader times the changes on its own clock (see
+   * `attention-state.ts`).
+   */
+  attention: AttentionPresence | null;
 }
 
 interface PresenceStore {

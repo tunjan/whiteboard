@@ -12,7 +12,6 @@ import { createSelectTool } from './select-tool';
 import { createHandTool } from './hand-tool';
 import { createBoxTool } from './box-tool';
 import { createDrawTool } from './draw-tool';
-import { createWandTool } from './wand-tool';
 import { createLineTool } from './line-tool';
 import { createEraserTool } from './eraser-tool';
 import { createLaserTool } from './laser-tool';
@@ -37,7 +36,6 @@ toolRegistry.register(
     ink: 'marker',
   }),
 );
-toolRegistry.register(createWandTool());
 toolRegistry.register(createTextTool());
 toolRegistry.register(createGraphTool());
 toolRegistry.register(createEquationTool());

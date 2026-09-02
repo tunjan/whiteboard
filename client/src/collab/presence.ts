@@ -10,6 +10,10 @@ import { setCurrentPage } from '@/canvas/use-document-store';
 import { useCameraStore } from '@/canvas/use-camera-store';
 import { stopFollowingForManualCameraChange } from '@/collab/use-follow-store';
 import {
+  parseAttentionPresence,
+  type AttentionPresence,
+} from './attention-state';
+import {
   type PeerPresence,
   type TextSelectionPresence,
   type VoicePresence,
@@ -33,6 +37,7 @@ let localFollowing = false;
 let localLatencyMs: number | null = null;
 let localTextSelection: TextSelectionPresence | null = null;
 let localVoice: VoicePresence | null = null;
+let localAttention: AttentionPresence | null = null;
 let lastCursorSent = 0;
 let lastViewportSent = 0;
 let lastSummonSent = 0;
@@ -86,6 +91,14 @@ function publishPeers(a: Awareness): void {
     const selection = (state.selection as string[] | null) ?? null;
     const erasing = (state.erasing as string[] | null) ?? null;
     const prev = prevPeers.get(clientId);
+    const parsedAttention = parseAttentionPresence(state.attention);
+    const attention =
+      parsedAttention &&
+      prev?.attention &&
+      parsedAttention.activity === prev.attention.activity &&
+      parsedAttention.away === prev.attention.away
+        ? prev.attention
+        : parsedAttention;
     const parsedVoice = parseVoicePresence(state.voice);
     const voice =
       parsedVoice &&
@@ -113,7 +126,8 @@ function publishPeers(a: Awareness): void {
       prev.laser === laser &&
       prev.selection === selection &&
       prev.erasing === erasing &&
-      prev.voice === voice
+      prev.voice === voice &&
+      prev.attention === attention
         ? prev
         : {
             clientId,
@@ -131,6 +145,7 @@ function publishPeers(a: Awareness): void {
             selection,
             erasing,
             voice,
+            attention,
           };
     next.set(clientId, peer);
     peers.push(peer);
@@ -177,6 +192,7 @@ function publishLocalState(a: Awareness): void {
   a.setLocalStateField('latencyMs', localLatencyMs);
   a.setLocalStateField('textSelection', localTextSelection);
   a.setLocalStateField('voice', localVoice);
+  a.setLocalStateField('attention', localAttention);
   a.setLocalStateField(
     'selection',
     localSelection.length > 0 ? localSelection : null,
@@ -233,6 +249,16 @@ export function setLocalLatency(latencyMs: number | null): void {
 export function setLocalVoice(voice: VoicePresence | null): void {
   localVoice = voice;
   awareness?.setLocalStateField('voice', voice);
+}
+
+/**
+ * Publish this client's own attention facts for the tutor's view. Sticky rather
+ * than momentary: the last value has to stand while a hidden tab's timers are
+ * frozen, which is exactly when it matters.
+ */
+export function setLocalAttention(attention: AttentionPresence | null): void {
+  localAttention = attention;
+  awareness?.setLocalStateField('attention', attention);
 }
 
 export function setLocalCursor(point: Point | null): void {

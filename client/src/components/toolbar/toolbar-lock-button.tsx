@@ -7,7 +7,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-import { toolButtonClass, TOOL_ICON } from './toolbar-constants';
+import { chromeButtonClass, TOOL_ICON } from './toolbar-constants';
 
 export function ToolLockButton() {
   const locked = useToolLockStore((state) => state.locked);
@@ -27,7 +27,7 @@ export function ToolLockButton() {
             aria-pressed={locked}
             aria-label="Tool lock"
             aria-keyshortcuts="Q"
-            className={toolButtonClass(false, locked)}
+            className={chromeButtonClass(locked)}
           />
         }
       >

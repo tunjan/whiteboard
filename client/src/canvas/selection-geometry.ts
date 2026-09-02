@@ -312,36 +312,6 @@ export function matchesMarquee(
 }
 
 /**
- * Whether a shape lies entirely inside a freeform loop — the magic wand's
- * lasso rule. Enclosure only, never intersection: circling something is a
- * deliberate act, while a stroke that merely crosses a shape on its way round
- * is not a request to select that shape.
- *
- * Stroke widths are ignored (unlike the marquee's contained test, which insets
- * by the stroke radius), so a loop drawn snugly around thick ink still selects
- * it — the hand drew round what it could see, not round the centerline.
- */
-export function isEnclosedByPolygon(
-  shape: Shape,
-  polygon: readonly Point[],
-): boolean {
-  const geometry = marqueeGeometry(shape);
-  if (!geometry) return false;
-  if (geometry.kind === 'region') {
-    return (
-      geometry.outline.length > 0 &&
-      geometry.outline.every((point) => pointInPolygon(point, polygon))
-    );
-  }
-  return (
-    geometry.segments.length > 0 &&
-    geometry.segments.every(
-      ([a, b]) => pointInPolygon(a, polygon) && pointInPolygon(b, polygon),
-    )
-  );
-}
-
-/**
  * Whether a marquee reaches a shape-backed clipping mask. The current shape
  * model uses frames as masks, but keeping this geometry-based avoids assuming
  * they will always remain unrotated axis-aligned boxes.

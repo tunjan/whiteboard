@@ -164,9 +164,21 @@ export async function exportSelectionToPng(
 const RECOGNITION_TARGET_PX = 1024;
 
 /**
- * Rasterize `ids` as an image for handwriting recognition, or null when they
- * render to nothing. Shares the export pipeline so what the model reads is
- * exactly what the board draws.
+ * Hard ceiling on that longest side.
+ *
+ * Sizing up stops at the target, but a shape already larger than it was
+ * previously rasterized at the board's own scale — fine for ink, which is line
+ * art whatever its size, and a payload problem for a pasted photograph, whose
+ * PNG grows with every pixel and has `MAX_INK_IMAGE_CHARS` waiting for it at
+ * the server. Nothing is lost by capping here: a vision model resamples past
+ * roughly this resolution anyway.
+ */
+const RECOGNITION_MAX_PX = 1600;
+
+/**
+ * Rasterize `ids` as an image for recognition — handwriting or a pasted
+ * picture — or null when they render to nothing. Shares the export pipeline so
+ * what the model reads is exactly what the board draws.
  */
 export async function renderShapesForRecognition(
   ids: string[],
@@ -176,9 +188,14 @@ export async function renderShapesForRecognition(
   const w = scene.bounds.maxX - scene.bounds.minX + scene.padding * 2;
   const h = scene.bounds.maxY - scene.bounds.minY + scene.padding * 2;
   const longest = Math.max(w, h, 1);
-  // Never below 1: downscaling ink that is already large loses the fine strokes
-  // that separate a prime from a comma.
-  const scale = Math.min(4, Math.max(1, RECOGNITION_TARGET_PX / longest));
+  // Never below 1 for sizing up: downscaling ink that is already large loses
+  // the fine strokes that separate a prime from a comma. The ceiling still
+  // wins, so the output lands in [longest, 4x longest] and never past the cap.
+  const scale = Math.min(
+    4,
+    Math.max(1, RECOGNITION_TARGET_PX / longest),
+    RECOGNITION_MAX_PX / longest,
+  );
   return renderPngBlob(scene, scale);
 }
 

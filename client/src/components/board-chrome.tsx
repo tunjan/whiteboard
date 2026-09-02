@@ -7,6 +7,8 @@ import {
   type VoicePresence,
   usePresenceStore,
 } from '@/collab/use-presence-store';
+import type { AttentionState } from '@/collab/attention-state';
+import { useAttentionStore } from '@/collab/use-attention-store';
 import { useVoiceStore } from '@/collab/voice/use-voice-store';
 import { BoardActionsMenu } from '@/components/board-actions-menu';
 import { BoardNotesDialog } from '@/components/board-notes-dialog';
@@ -69,9 +71,18 @@ interface Participant {
   isLocal: boolean;
   peer: PeerPresence | null;
   voice: VoiceDisplayState | null;
+  /** Always `attentive` unless this is a tutor watching a student. */
+  attention: AttentionState;
 }
 
 type VoiceDisplayState = Pick<VoicePresence, 'inCall' | 'muted' | 'speaking'>;
+
+/** How the tutor's participant list words each attention state. */
+function attentionLabel(attention: AttentionState): string | null {
+  if (attention === 'away') return 'In another window';
+  if (attention === 'idle') return 'Idle';
+  return null;
+}
 
 function peerLatencyLabel(peer: PeerPresence): string {
   return peer.latencyMs === null ? 'Measuring…' : `${peer.latencyMs} ms`;
@@ -81,11 +92,13 @@ function ParticipantAvatar({
   color,
   name,
   voice,
+  attention,
   overlapping = false,
 }: {
   color: string;
   name: string;
   voice: VoiceDisplayState | null;
+  attention: AttentionState;
   overlapping?: boolean;
 }) {
   return (
@@ -108,6 +121,16 @@ function ParticipantAvatar({
         // only has to recolour it and nothing changes size under the cursor.
         'ring-2',
         overlapping ? 'ring-surface' : 'ring-transparent',
+        // Drifting is a fade, not a badge. The corner is already spoken for by
+        // voice, and a second marker there would collide; more to the point a
+        // lapse in attention is a lull, so it should read as the disc receding
+        // rather than as something new arriving. Idle dims; away drains the
+        // identity colour out entirely, which is unmistakably "not here".
+        // The words are in the tooltip and the trigger's label, so neither
+        // state depends on reading the fade.
+        'transition-[opacity,filter] duration-fast motion-reduce:transition-none',
+        attention === 'idle' && 'opacity-55',
+        attention === 'away' && 'opacity-55 grayscale',
       )}
     >
       {/* The identity colour at full strength, with the initial reversed out
@@ -195,11 +218,18 @@ function OverflowParticipants({
               {participant.name}
               {participant.isLocal ? ' (you)' : ''}
             </span>
-            {participant.peer ? (
-              <span className="min-w-14 text-right font-mono tabular-nums">
-                {peerLatencyLabel(participant.peer)}
-              </span>
-            ) : null}
+            <span className="flex items-center gap-2">
+              {attentionLabel(participant.attention) ? (
+                <span className="text-fg-secondary">
+                  {attentionLabel(participant.attention)}
+                </span>
+              ) : null}
+              {participant.peer ? (
+                <span className="min-w-14 text-right font-mono tabular-nums">
+                  {peerLatencyLabel(participant.peer)}
+                </span>
+              ) : null}
+            </span>
           </div>
         ))}
       </TooltipContent>
@@ -318,6 +348,9 @@ export function BoardChrome({
   const sessionToolbar = useRovingToolbar<HTMLDivElement>();
   const presenceToolbar = useRovingToolbar<HTMLDivElement>();
   const peers = usePresenceStore((s) => s.peers);
+  // Empty for everyone but a tutor with attention alerts on, so every other
+  // client renders `attentive` for all of them and nothing is shown.
+  const attention = useAttentionStore((s) => s.peers);
   const voiceStatus = useVoiceStore((s) => s.status);
   const voiceMuted = useVoiceStore((s) => s.muted);
   const voiceSpeaking = useVoiceStore((s) => s.speaking);
@@ -337,6 +370,7 @@ export function BoardChrome({
       isLocal: false,
       peer,
       voice: peer.voice,
+      attention: attention.get(peer.clientId)?.state ?? 'attentive',
     })),
     ...(identity
       ? [
@@ -347,6 +381,9 @@ export function BoardChrome({
             isLocal: true,
             peer: null,
             voice: localVoice,
+            // Deliberately never self-reported: this is the tutor's read of
+            // other people, not a mirror anyone sees pointed at themselves.
+            attention: 'attentive' as const,
           },
         ]
       : []),
@@ -509,6 +546,7 @@ export function BoardChrome({
                           color={participant.color}
                           name={participant.name}
                           voice={participant.voice}
+                          attention={participant.attention}
                           overlapping={avatarsOverlap}
                         />
                       </TooltipTrigger>
@@ -524,7 +562,11 @@ export function BoardChrome({
                             tabIndex={-1}
                             onClick={() => jumpToPeerViewport(peer)}
                             className={AVATAR_TRIGGER_CLASS}
-                            aria-label={`Jump to ${participant.name}'s view`}
+                            aria-label={
+                              attentionLabel(participant.attention)
+                                ? `Jump to ${participant.name}'s view — ${attentionLabel(participant.attention)}`
+                                : `Jump to ${participant.name}'s view`
+                            }
                             style={triggerStyle}
                           />
                         }
@@ -533,6 +575,7 @@ export function BoardChrome({
                           color={participant.color}
                           name={participant.name}
                           voice={participant.voice}
+                          attention={participant.attention}
                           overlapping={avatarsOverlap}
                         />
                       </TooltipTrigger>
@@ -553,6 +596,7 @@ export function BoardChrome({
                           color={participant.color}
                           name={participant.name}
                           voice={participant.voice}
+                          attention={participant.attention}
                           overlapping={avatarsOverlap}
                         />
                       </TooltipTrigger>
@@ -563,6 +607,12 @@ export function BoardChrome({
                       {trigger}
                       <TooltipContent side="bottom">
                         <span>{label}</span>
+                        {attentionLabel(participant.attention) ? (
+                          <span>
+                            {' '}
+                            · {attentionLabel(participant.attention)}
+                          </span>
+                        ) : null}
                         {latencyLabel ? (
                           <span className="font-mono tabular-nums">
                             · {latencyLabel}

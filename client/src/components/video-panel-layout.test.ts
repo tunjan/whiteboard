@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { PeerPresence } from '@/collab/use-presence-store';
 import {
   clampPanelPosition,
+  mainTileKey,
   selfCameraTile,
   spotlightOrder,
   videoGridLayout,
@@ -186,5 +187,23 @@ describe('spotlightOrder', () => {
       hero: null,
       filmstrip: tiles,
     });
+  });
+});
+
+describe('mainTileKey', () => {
+  const tiles = [{ key: '9:screen' }, { key: '9:camera' }] as VideoTile[];
+
+  it('keeps the picked view', () => {
+    expect(mainTileKey(tiles, '9:camera')).toBe('9:camera');
+  });
+
+  it('leads with the first view when nothing is picked', () => {
+    expect(mainTileKey(tiles, null)).toBe('9:screen');
+  });
+
+  it('falls back when the pick has left the call', () => {
+    // The one-tile panel must never be left with nothing in it.
+    expect(mainTileKey(tiles, '42:camera')).toBe('9:screen');
+    expect(mainTileKey([], '9:camera')).toBeNull();
   });
 });

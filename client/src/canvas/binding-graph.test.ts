@@ -201,6 +201,23 @@ describe('BindingGraph', () => {
     });
   });
 
+  it('takes over another graph and leaves it empty', () => {
+    const parked = new BindingGraph();
+    parked.update(arrow('a', { start: bindTo('box') }));
+
+    const live = new BindingGraph();
+    live.update(arrow('other', { start: bindTo('elsewhere') }));
+    live.adopt(parked);
+
+    expect(live.arrowsBoundTo('box')).toEqual(['a']);
+    expect(live.arrowsBoundTo('elsewhere')).toEqual([]);
+    expect(parked.isEmpty).toBe(true);
+
+    // Both sides keep their own maps: writing to one must not reach the other.
+    parked.update(arrow('c', { start: bindTo('box') }));
+    expect(live.arrowsBoundTo('box')).toEqual(['a']);
+  });
+
   it('accepts a heterogeneous shape stream without special-casing at the call site', () => {
     const g = new BindingGraph();
     const stream: Shape[] = [

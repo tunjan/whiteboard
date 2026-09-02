@@ -62,6 +62,40 @@ describe('graph expressions', () => {
     ).toBeCloseTo(18);
   });
 
+  it('plots a summation written in the equation field', () => {
+    // What MathLive hands back for \sum_{i=0}^{10}x^{i}=y.
+    const parsed = parseGraphExpression(' sum  _(i=0)^(10)x^i=y');
+
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok || isCoordinateExpression(parsed)) return;
+    expect(parsed.kind).toBe('explicit');
+    expect(parsed.variables).toEqual([]);
+    expect(parsed.evaluate(1, {})).toBeCloseTo(11);
+    expect(parsed.evaluate(2, {})).toBeCloseTo(2 ** 11 - 1);
+  });
+
+  it('ends a summation at the next top-level term', () => {
+    const parsed = parseGraphExpression(' sum  _(n=1)^5n+1');
+
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok || isCoordinateExpression(parsed)) return;
+    expect(parsed.normalized).toBe('(1+2+3+4+5)+1');
+  });
+
+  it('shadows the outer index in a nested summation', () => {
+    const parsed = parseGraphExpression(' sum  _(n=1)^(3) sum  _(k=1)^(2)n*k*x');
+
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok || isCoordinateExpression(parsed)) return;
+    expect(parsed.evaluate(1, {})).toBeCloseTo(18);
+  });
+
+  it('rejects summation limits it cannot expand', () => {
+    expect(parseGraphExpression(' sum  _(n=1)^(500)n').ok).toBe(false);
+    expect(parseGraphExpression(' sum  _(n=a)^(3)n').ok).toBe(false);
+    expect(parseGraphExpression(' sum  _(x=1)^(3)x').ok).toBe(false);
+  });
+
   it('rejects assignments and other unsupported expression forms', () => {
     const parsed = parseGraphExpression('a = x + 1');
 
