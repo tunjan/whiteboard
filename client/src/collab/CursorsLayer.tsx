@@ -1,6 +1,6 @@
 import { Fragment } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { MousePointer2 } from 'lucide-react';
+import { Crosshair, MousePointer2 } from 'lucide-react';
 import { rotatePoint, type Shape, type TextShape } from '@whiteboard/shared';
 import type { Camera } from '@/canvas/camera';
 import { worldToScreen } from '@/canvas/camera';
@@ -48,6 +48,26 @@ export function CursorIcon({ color }: { color: string }) {
         strokeWidth={0.5}
         strokeLinecap="round"
         strokeLinejoin="round"
+      />
+    </span>
+  );
+}
+
+function CrossCursorIcon({ color }: { color: string }) {
+  return (
+    <span
+      aria-hidden="true"
+      className="relative block size-5 -translate-x-1/2 -translate-y-1/2"
+    >
+      <Crosshair
+        className="absolute inset-0 size-5"
+        stroke={outlineColor(color)}
+        strokeWidth={4}
+      />
+      <Crosshair
+        className="absolute inset-0 size-5"
+        stroke={color}
+        strokeWidth={2}
       />
     </span>
   );
@@ -161,66 +181,69 @@ export function CursorsLayer({
         const selection = p.textSelection;
         const textShape = selection ? shapes?.[selection.shapeId] : undefined;
         const textOverlay =
-          textShape?.type === 'text' && selection ? (() => {
-            const layout = layoutTextProps(textShape.props);
-            const rects = textSelectionRects(
-              layout,
-              selection.anchor,
-              selection.head,
-            );
-            const caret = caretForTextIndex(layout, selection.head);
-            const caretStart = textLocalToScreen(
-              textShape,
-              layout,
-              { x: caret.x, y: caret.y },
-              camera,
-            );
-            const caretEnd = textLocalToScreen(
-              textShape,
-              layout,
-              { x: caret.x, y: caret.y + caret.height },
-              camera,
-            );
-            return (
-              <svg className="absolute inset-0 size-full overflow-visible">
-                {rects.map((rect, index) => {
-                  const corners = [
-                    { x: rect.x, y: rect.y },
-                    { x: rect.x + rect.width, y: rect.y },
-                    { x: rect.x + rect.width, y: rect.y + rect.height },
-                    { x: rect.x, y: rect.y + rect.height },
-                  ].map((point) =>
-                    textLocalToScreen(textShape, layout, point, camera),
-                  );
-                  return (
-                    <polygon
-                      // eslint-disable-next-line react/no-array-index-key -- line rectangles are positional
-                      key={index}
-                      points={corners.map((point) => `${point.x},${point.y}`).join(' ')}
-                      fill={p.color}
-                      fillOpacity={0.14}
+          textShape?.type === 'text' && selection
+            ? (() => {
+                const layout = layoutTextProps(textShape.props);
+                const rects = textSelectionRects(
+                  layout,
+                  selection.anchor,
+                  selection.head,
+                );
+                const caret = caretForTextIndex(layout, selection.head);
+                const caretStart = textLocalToScreen(
+                  textShape,
+                  layout,
+                  { x: caret.x, y: caret.y },
+                  camera,
+                );
+                const caretEnd = textLocalToScreen(
+                  textShape,
+                  layout,
+                  { x: caret.x, y: caret.y + caret.height },
+                  camera,
+                );
+                return (
+                  <svg className="absolute inset-0 size-full overflow-visible">
+                    {rects.map((rect, index) => {
+                      const corners = [
+                        { x: rect.x, y: rect.y },
+                        { x: rect.x + rect.width, y: rect.y },
+                        { x: rect.x + rect.width, y: rect.y + rect.height },
+                        { x: rect.x, y: rect.y + rect.height },
+                      ].map((point) =>
+                        textLocalToScreen(textShape, layout, point, camera),
+                      );
+                      return (
+                        <polygon
+                          // eslint-disable-next-line react/no-array-index-key -- line rectangles are positional
+                          key={index}
+                          points={corners
+                            .map((point) => `${point.x},${point.y}`)
+                            .join(' ')}
+                          fill={p.color}
+                          fillOpacity={0.14}
+                        />
+                      );
+                    })}
+                    <line
+                      x1={caretStart.x}
+                      y1={caretStart.y}
+                      x2={caretEnd.x}
+                      y2={caretEnd.y}
+                      stroke={p.color}
+                      strokeWidth={1.5}
+                      strokeLinecap="round"
                     />
-                  );
-                })}
-                <line
-                  x1={caretStart.x}
-                  y1={caretStart.y}
-                  x2={caretEnd.x}
-                  y2={caretEnd.y}
-                  stroke={p.color}
-                  strokeWidth={1.5}
-                  strokeLinecap="round"
-                />
-              </svg>
-            );
-          })() : null;
+                  </svg>
+                );
+              })()
+            : null;
 
         const s = p.cursor ? worldToScreen(p.cursor, camera) : null;
         const edgeIndicator = s
           ? cursorEdgeIndicator(s, viewportSize, EDGE_INDICATOR_INSET)
           : null;
-        const placeLabelAbove =
-          s !== null && s.y > viewportSize.height - 44;
+        const placeLabelAbove = s !== null && s.y > viewportSize.height - 44;
         return (
           <Fragment key={p.clientId}>
             {textOverlay}
@@ -244,7 +267,11 @@ export function CursorsLayer({
                   transform: `translate3d(${Math.round(s.x)}px, ${Math.round(s.y)}px, 0)`,
                 }}
               >
-                <CursorIcon color={p.color} />
+                {p.cursorType === 'cross' ? (
+                  <CrossCursorIcon color={p.color} />
+                ) : (
+                  <CursorIcon color={p.color} />
+                )}
                 <span
                   className={cn(
                     'absolute left-3 flex h-6 max-w-40 items-center gap-1.5 rounded-lg border border-border bg-surface/95 px-2 text-2xs font-medium leading-none text-fg shadow-e2',

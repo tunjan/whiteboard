@@ -1,76 +1,135 @@
-import { useEffect, useRef } from 'react';
-import type { Point } from '@whiteboard/shared';
+import { memo, useEffect, useMemo, useRef } from 'react';
+import { usePresenceStore } from '@/collab/use-presence-store';
 import { cameraToTransform, type Camera } from './camera';
-import { ERASER_SCREEN_RADIUS } from './tools/eraser-tool';
-import { useEraserTrailStore } from './use-eraser-trail-store';
+import { getInkPathData } from './shapes/ink';
+import { useDocumentStore } from './use-document-store';
+import {
+  type EraserScribble,
+  useEraserTrailStore,
+} from './use-eraser-trail-store';
 
-/** Midpoint-quadratic smoothing, so a sparse trail still reads as a curve. */
-function pathFor(points: readonly Point[]): string {
-  const first = points[0];
-  if (!first) return '';
-  if (points.length === 1) return `M ${first.x} ${first.y} L ${first.x} ${first.y}`;
-  let d = `M ${first.x} ${first.y}`;
-  for (let i = 1; i < points.length - 1; i++) {
-    const p = points[i]!;
-    const next = points[i + 1]!;
-    d += ` Q ${p.x} ${p.y} ${(p.x + next.x) / 2} ${(p.y + next.y) / 2}`;
-  }
-  const last = points[points.length - 1]!;
-  d += ` L ${last.x} ${last.y}`;
-  return d;
+function circlePath(x: number, y: number, radius: number): string {
+  return [
+    `M ${x - radius} ${y}`,
+    `A ${radius} ${radius} 0 1 0 ${x + radius} ${y}`,
+    `A ${radius} ${radius} 0 1 0 ${x - radius} ${y}`,
+    'Z',
+  ].join(' ');
 }
 
+/** One cached procedural ribbon, shared by local and collaborator overlays. */
+export const EraserScribblePath = memo(function EraserScribblePath({
+  scribble,
+  zoom,
+  color,
+  opacity,
+}: {
+  scribble: EraserScribble;
+  zoom: number;
+  color: string;
+  opacity: number;
+}) {
+  const d = useMemo(() => {
+    const last = scribble.points[scribble.points.length - 1];
+    if (!last) return '';
+    const size = scribble.size / Math.max(zoom, 0.05);
+    // The full outline needs a few samples to infer tangents. Until then, the
+    // visible tip is a circle with the same physical diameter.
+    if (scribble.points.length < 4) {
+      return circlePath(last.x, last.y, size / 2);
+    }
+    return getInkPathData(scribble.points, size, scribble.state !== 'active', {
+      simulatePressure: false,
+      thinning: 0.5,
+      smoothing: 0.5,
+      streamline: 0.32,
+      startTaper: scribble.taper,
+      endTaper: scribble.taper,
+      pressureEasing: 'linear',
+    });
+  }, [scribble, zoom]);
+
+  if (!d) return null;
+  return <path d={d} fill={color} opacity={opacity} />;
+});
+
 /**
- * The eraser's swipe trail (see {@link useEraserTrailStore}).
+ * Local eraser feedback plus collaborators' awareness-only scribbles.
  *
- * The tail is eaten here rather than in the tool because it is time that drives
- * it, not input: a stroke held still still shortens. One point per frame is
- * consumed whenever the pointer did not move since the last frame, and
- * unconditionally once the pointer has lifted, which drains the ribbon in about
- * eight frames.
+ * The local trail is the stronger muted ribbon. Peers use the same geometry in
+ * their identity color at low alpha, making intent visible without pretending
+ * the remote client's local pending-delete set is shared document state.
  */
 export function EraserTrail({ camera }: { camera: Camera }) {
-  const points = useEraserTrailStore((s) => s.points);
-  const active = useEraserTrailStore((s) => s.active);
+  const localScribbles = useEraserTrailStore((s) => s.scribbles);
   const seq = useEraserTrailStore((s) => s.seq);
+  const peers = usePresenceStore((s) => s.peers);
+  const currentPageId = useDocumentStore((s) => s.currentPageId);
   const lastSeq = useRef(seq);
 
-  const running = points.length > 0;
+  const running = localScribbles.length > 0;
   useEffect(() => {
     if (!running) return;
     let raf = requestAnimationFrame(function loop() {
       const store = useEraserTrailStore.getState();
-      if (!store.active || store.seq === lastSeq.current) store.consume();
+      const pointerIdle = store.seq === lastSeq.current;
+      store.tick(pointerIdle);
       lastSeq.current = store.seq;
       raf = requestAnimationFrame(loop);
     });
     return () => cancelAnimationFrame(raf);
   }, [running]);
 
-  if (!running) return null;
+  const remote = peers.flatMap((peer) =>
+    peer.scribbles && (!peer.page || peer.page === currentPageId)
+      ? peer.scribbles.map((scribble) => ({
+          key: `${peer.clientId}:${scribble.id}`,
+          color: peer.color,
+          scribble,
+        }))
+      : [],
+  );
+
+  if (!running && remote.length === 0) return null;
 
   return (
-    <svg
-      aria-hidden="true"
-      className="pointer-events-none absolute inset-0 z-[var(--z-canvas-indicator)] h-full w-full"
-    >
-      <g transform={cameraToTransform(camera)}>
-        <path
-          d={pathFor(points)}
-          fill="none"
-          stroke="currentColor"
-          // Matches the collision ring's diameter, so the trail covers the
-          // ground the eraser actually swept rather than a line through it.
-          strokeWidth={ERASER_SCREEN_RADIUS * 2}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          vectorEffect="non-scaling-stroke"
-          className="text-muted-foreground"
-          // Faint: it marks what was just erased, and must not be mistaken for
-          // ink that survived. Fades out as the ribbon drains after a lift.
-          opacity={active ? 0.22 : 0.22 * (points.length / 8)}
-        />
-      </g>
-    </svg>
+    <>
+      {running && (
+        <svg
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 z-[var(--z-canvas-indicator)] h-full w-full"
+        >
+          <g transform={cameraToTransform(camera)}>
+            {localScribbles.map((scribble) => (
+              <EraserScribblePath
+                key={scribble.id}
+                scribble={scribble}
+                zoom={camera.z}
+                color="var(--color-muted-foreground)"
+                opacity={scribble.opacity}
+              />
+            ))}
+          </g>
+        </svg>
+      )}
+      {remote.length > 0 && (
+        <svg
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 z-[var(--z-canvas-collaborator)] h-full w-full"
+        >
+          <g transform={cameraToTransform(camera)}>
+            {remote.map(({ key, color, scribble }) => (
+              <EraserScribblePath
+                key={key}
+                scribble={scribble}
+                zoom={camera.z}
+                color={color}
+                opacity={0.1}
+              />
+            ))}
+          </g>
+        </svg>
+      )}
+    </>
   );
 }

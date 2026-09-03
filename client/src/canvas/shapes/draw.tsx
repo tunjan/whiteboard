@@ -13,6 +13,7 @@ import {
   EMPTY_INK_CENTERLINE,
   getInkCenterlineGeometry,
   getInkPathData,
+  maxInkRadius,
 } from './ink';
 import { buildInkCenterline, type InkCenterline } from './ink-engine';
 import type { DashProps } from './perfect-dash';
@@ -119,6 +120,7 @@ export function buildInkRender(
       endTaper: props.endTaper,
       pressureEasing: props.pressureEasing,
       pressureWarmup: props.pressureWarmup,
+      tiltAmount: props.tiltAmount,
     }),
     dash: null,
     fillPath: filled ? `${centerline.path} Z` : null,
@@ -163,12 +165,9 @@ export const drawUtil: ShapeUtil<'draw'> = {
 
   getBounds: (s) => {
     const b = pointsBounds(s.props.points);
-    // Negative thinning can expand a low-pressure stroke to the full brush
+    // Thinning in either direction can expand the stroke past half the brush
     // width, so reserve that largest possible radius for indexing/culling.
-    const pad =
-      s.props.thinning !== undefined && s.props.thinning < 0
-        ? s.props.size
-        : s.props.size / 2;
+    const pad = maxInkRadius(s.props.size, s.props);
     return {
       minX: s.x + b.minX - pad,
       minY: s.y + b.minY - pad,
@@ -189,11 +188,7 @@ export const drawUtil: ShapeUtil<'draw'> = {
     const wp = s.rotation ? rotatePoint(p, center, -s.rotation) : p;
     const local = { x: wp.x - s.x, y: wp.y - s.y };
 
-    const radius =
-      s.props.thinning !== undefined && s.props.thinning < 0
-        ? s.props.size
-        : s.props.size / 2;
-    const r = tol + radius;
+    const r = tol + maxInkRadius(s.props.size, s.props);
     if (pts.length === 1) return distance(local, pts[0]!) <= r;
     // Test against the engine's own conditioned centerline, not the raw
     // samples: at high stabilization the rendered outline can sit several

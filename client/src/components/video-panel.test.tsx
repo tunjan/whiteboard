@@ -119,6 +119,19 @@ describe('VideoPanel', () => {
     expect(markup).toContain('Turn on your camera or share your screen');
   });
 
+  it('keeps panel, control, and media motion reduced-motion safe', () => {
+    joined();
+    presenceState.peers = [peer(9, { camera: true })];
+    const markup = render();
+
+    expect(markup).toContain('data-video-panel-mode="floating"');
+    expect(markup).toContain('data-phase="open"');
+    expect(markup).toContain('video-panel-motion');
+    expect(markup).toContain('video-tile-motion');
+    expect(markup).toContain('transition-[opacity,scale,filter]');
+    expect(markup).toContain('motion-reduce:transition-none');
+  });
+
   it('mutes every tile and mirrors only the local camera', () => {
     joined();
     videoState.cameraEnabled = true;

@@ -12,6 +12,7 @@ import {
 } from '@whiteboard/shared';
 import {
   getSelectionInfo,
+  HANDLE_HIT_SCREEN,
   marqueeIntersectsMask,
   matchesMarquee,
   ROTATION_HANDLE_HIT_SCREEN,
@@ -66,7 +67,7 @@ import { spatialIndex } from '../use-document-store';
 import { useCameraStore } from '../use-camera-store';
 import { useCanvasUiStore } from '../use-canvas-ui-store';
 import { useSelectionStore } from '../use-selection-store';
-import { useStyleStore } from '../use-style-store';
+import { styleGroupForShape, useStyleStore } from '../use-style-store';
 import { useTextEditingStore } from '../use-text-editing-store';
 import { useFrameEditingStore } from '../use-frame-editing-store';
 import { useVideoPlayingStore } from '../use-video-playing-store';
@@ -74,7 +75,6 @@ import { useImageCroppingStore } from '../use-image-cropping-store';
 import type { Editor } from '../editor';
 import type { Tool, ToolContext, ToolPointerInfo } from './types';
 
-const HANDLE_HIT_SCREEN = 10;
 const SHAPE_HIT_SCREEN = 4;
 const DRAG_SLOP_SCREEN = 3;
 const ROTATE_SNAP = (15 * Math.PI) / 180;
@@ -89,6 +89,14 @@ interface GroupItem {
   util: ShapeUtil;
   /** The shape's unrotated bounds at gesture start. */
   b0: Bounds;
+  /** Page centre of `b0`, which is also the point the shape rotates about. */
+  center0: Point;
+  /**
+   * Quarter turns between the shape's own rotation and the selection axis:
+   * 0 and 2 scale width by sx, 1 and 3 swap the axes. `null` means the shape
+   * sits off-axis, where a per-axis scale would shear it.
+   */
+  quarterTurns: number | null;
 }
 
 interface RotationItem {
@@ -155,6 +163,8 @@ type SelectState =
       handle: ResizeHandleId;
       initial: Shape;
       util: ShapeUtil;
+      /** Pointer offset from the handle's exact position when grabbed. */
+      grabOffset: Point;
       targets: BoundsSnapTarget[];
       /** Descendant page positions used by normal (non-crop) frame resize. */
       frameChildren: Map<string, { x: number; y: number }> | null;
@@ -162,7 +172,16 @@ type SelectState =
   | {
       type: 'group-resize';
       handle: ResizeHandleId;
-      bounds0: Bounds;
+      /** Selection box at gesture start, in its own axis-aligned frame. */
+      aligned0: Bounds;
+      /** Shared rotation of the selection: the axes the scale runs along. */
+      rotation: number;
+      /**
+       * How far the pointer sat from the handle's exact position when it was
+       * grabbed, in the selection frame. Subtracting it keeps the box from
+       * jumping to the cursor on the first move.
+       */
+      grabOffset: Point;
       items: GroupItem[];
       targets: BoundsSnapTarget[];
     }
@@ -245,6 +264,109 @@ function axisAlignedResize(
   return { minX, minY, maxX, maxY };
 }
 
+const OPPOSITE_HANDLE: Record<ResizeHandleId, ResizeHandleId> = {
+  nw: 'se',
+  n: 's',
+  ne: 'sw',
+  e: 'w',
+  se: 'nw',
+  s: 'n',
+  sw: 'ne',
+  w: 'e',
+};
+
+/**
+ * Rotate about the page origin: the map between page space and the frame in
+ * which an oriented selection box is axis-aligned.
+ */
+function rotateAboutOrigin(point: Point, angle: number): Point {
+  if (!angle) return point;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  return {
+    x: point.x * cos - point.y * sin,
+    y: point.x * sin + point.y * cos,
+  };
+}
+
+/** Where a handle sits on a box: a corner, or the midpoint of an edge. */
+function handlePoint(bounds: Bounds, handle: ResizeHandleId): Point {
+  return {
+    x: handle.includes('w')
+      ? bounds.minX
+      : handle.includes('e')
+        ? bounds.maxX
+        : (bounds.minX + bounds.maxX) / 2,
+    y: handle.includes('n')
+      ? bounds.minY
+      : handle.includes('s')
+        ? bounds.maxY
+        : (bounds.minY + bounds.maxY) / 2,
+  };
+}
+
+/**
+ * Scale factors for dragging `handle` to `pointer`, both given in the box's own
+ * frame. The opposite handle anchors the gesture, so the far edge stays put. An
+ * edge handle has no extent along its other axis, which falls out of the
+ * division as leaving that axis alone; locking the aspect ratio lets whichever
+ * axis moved further drive both.
+ */
+function resizeScale(
+  b0: Bounds,
+  handle: ResizeHandleId,
+  pointer: Point,
+  lockAspect: boolean,
+): { sx: number; sy: number } {
+  const anchor = handlePoint(b0, OPPOSITE_HANDLE[handle]);
+  const start = handlePoint(b0, handle);
+  const dx0 = start.x - anchor.x;
+  const dy0 = start.y - anchor.y;
+  const w0 = b0.maxX - b0.minX || 1;
+  const h0 = b0.maxY - b0.minY || 1;
+  let sx = dx0 === 0 ? 1 : (pointer.x - anchor.x) / dx0;
+  let sy = dy0 === 0 ? 1 : (pointer.y - anchor.y) / dy0;
+  // Shapes have no way to express a mirrored result, so a handle dragged past
+  // its anchor collapses the box to a sliver instead of turning it inside out.
+  // Only the axes the handle actually drives are floored; an edge handle leaves
+  // its other axis at 1, which a floor above 1 would silently grow.
+  if (dx0 !== 0) sx = Math.max(sx, MIN_RESIZE / w0);
+  if (dy0 !== 0) sy = Math.max(sy, MIN_RESIZE / h0);
+  if (lockAspect) {
+    if (dx0 === 0) sx = sy;
+    else if (dy0 === 0) sy = sx;
+    else if (sx > sy) sy = sx;
+    else sx = sy;
+  }
+  return { sx, sy };
+}
+
+function scaleBounds(
+  b0: Bounds,
+  anchor: Point,
+  sx: number,
+  sy: number,
+): Bounds {
+  return {
+    minX: anchor.x + (b0.minX - anchor.x) * sx,
+    maxX: anchor.x + (b0.maxX - anchor.x) * sx,
+    minY: anchor.y + (b0.minY - anchor.y) * sy,
+    maxY: anchor.y + (b0.maxY - anchor.y) * sy,
+  };
+}
+
+/**
+ * Quarter turns from `axis` to `rotation`, or null when the two are not a
+ * multiple of 90° apart. Only shapes square to the selection axis can take a
+ * per-axis scale; anything else would have to shear to follow the box.
+ */
+function quarterTurnsFrom(rotation: number, axis: number): number | null {
+  const turns = (rotation - axis) / (Math.PI / 2);
+  const nearest = Math.round(turns);
+  if (Math.abs(turns - nearest) > 1e-6) return null;
+  return ((nearest % 4) + 4) % 4;
+}
+
 /** New unrotated world bounds for a resize, corrected for the shape's rotation. */
 function computeResizeBounds(
   initial: Shape,
@@ -307,11 +429,14 @@ function syncStyleFromSelection(editor: Editor): void {
     spline?: LineSpline;
   };
   const style = useStyleStore.getState();
-  style.setOpacity(typeof first.opacity === 'number' ? first.opacity : 1);
-  if (typeof props.color === 'string') style.setColor(props.color);
-  if (typeof props.size === 'number') style.setSize(props.size);
-  if (props.fillStyle) style.setFill(props.fillStyle);
-  if (props.dash) style.setDash(props.dash);
+  // Picked up into the group the shape belongs to, so eyedropping a heading
+  // sets the text tool's colour and leaves the pen on the colour it was on.
+  const group = styleGroupForShape(first.type);
+  style.setOpacity(group, typeof first.opacity === 'number' ? first.opacity : 1);
+  if (typeof props.color === 'string') style.setColor(group, props.color);
+  if (typeof props.size === 'number') style.setSize(group, props.size);
+  if (props.fillStyle) style.setFill(group, props.fillStyle);
+  if (props.dash) style.setDash(group, props.dash);
   if (props.kind) style.setPolygonKind(props.kind);
   if (first.type === 'arrow') {
     if (typeof props.arrowStart === 'boolean')
@@ -830,6 +955,10 @@ export function createSelectTool(): Tool {
                 handle: handle.id,
                 initial,
                 util,
+                grabOffset: {
+                  x: info.point.x - handle.point.x,
+                  y: info.point.y - handle.point.y,
+                },
                 frameChildren:
                   initial.type === 'frame'
                     ? new Map(
@@ -853,21 +982,36 @@ export function createSelectTool(): Tool {
               const shape = ctx.editor.getShape(id);
               if (!shape || shape.locked) continue;
               const util = shapeRegistry.getFor(shape);
-              if (util?.canResize)
+              if (util?.canResize) {
+                const b0 = util.getBounds(shape as never);
                 items.push({
                   initial: shape,
                   util,
-                  b0: util.getBounds(shape as never),
+                  b0,
+                  center0: boundsCenter(b0),
+                  quarterTurns: quarterTurnsFrom(
+                    shape.rotation,
+                    selectionInfo.rotation,
+                  ),
                 });
+              }
             }
             if (items.length) {
               const movingIds = new Set(
                 moveTargetIds(shapes, selectionInfo.ids),
               );
+              const aligned0 = selectionInfo.alignedBounds;
+              const grabbed = rotateAboutOrigin(
+                info.point,
+                -selectionInfo.rotation,
+              );
+              const on = handlePoint(aligned0, handle.id);
               state = {
                 type: 'group-resize',
                 handle: handle.id,
-                bounds0: selectionInfo.bounds,
+                aligned0,
+                rotation: selectionInfo.rotation,
+                grabOffset: { x: grabbed.x - on.x, y: grabbed.y - on.y },
                 items,
                 targets: snapTargetBounds(
                   ctx.editor,
@@ -1067,7 +1211,10 @@ export function createSelectTool(): Tool {
             state.initial,
             state.util,
             state.handle,
-            info.point,
+            {
+              x: info.point.x - state.grabOffset.x,
+              y: info.point.y - state.grabOffset.y,
+            },
             lockAspect,
           );
           if (useCanvasUiStore.getState().snappingEnabled && !info.altKey) {
@@ -1146,17 +1293,36 @@ export function createSelectTool(): Tool {
           return;
         }
         case 'group-resize': {
-          let bounds = axisAlignedResize(
-            state.bounds0,
+          // Work in the selection's own frame: an oriented box scales along the
+          // axes it is drawn on, not the page's.
+          const aligned = rotateAboutOrigin(info.point, -state.rotation);
+          const pointer = {
+            x: aligned.x - state.grabOffset.x,
+            y: aligned.y - state.grabOffset.y,
+          };
+          const anchor = handlePoint(
+            state.aligned0,
+            OPPOSITE_HANDLE[state.handle],
+          );
+          const w0 = state.aligned0.maxX - state.aligned0.minX;
+          const h0 = state.aligned0.maxY - state.aligned0.minY;
+          let { sx, sy } = resizeScale(
+            state.aligned0,
             state.handle,
-            info.point,
+            pointer,
             info.shiftKey,
           );
-          if (useCanvasUiStore.getState().snappingEnabled && !info.altKey) {
+          // Alignment guides are page-axis features, so they only mean
+          // something while the box still shares those axes.
+          if (
+            state.rotation === 0 &&
+            useCanvasUiStore.getState().snappingEnabled &&
+            !info.altKey
+          ) {
             const camera = useCameraStore.getState().camera;
             const background = useCanvasUiStore.getState().background;
             const snapped = snapResizeBounds(
-              bounds,
+              scaleBounds(state.aligned0, anchor, sx, sy),
               state.handle,
               state.targets,
               info.metaKey || info.ctrlKey
@@ -1164,34 +1330,46 @@ export function createSelectTool(): Tool {
                 : getSnapGridStep(background, camera),
               SNAP_SCREEN / camera.z,
               info.shiftKey,
-              (state.bounds0.maxX - state.bounds0.minX) /
-                (state.bounds0.maxY - state.bounds0.minY || 1),
+              w0 / (h0 || 1),
             );
-            bounds = snapped.bounds;
+            sx = (snapped.bounds.maxX - snapped.bounds.minX) / (w0 || 1);
+            sy = (snapped.bounds.maxY - snapped.bounds.minY) / (h0 || 1);
             useSelectionStore.getState().setSnapGuides(snapped.guides);
           } else {
             useSelectionStore.getState().setSnapGuides([]);
           }
-          const sx =
-            (bounds.maxX - bounds.minX) /
-            (state.bounds0.maxX - state.bounds0.minX || 1);
-          const sy =
-            (bounds.maxY - bounds.minY) /
-            (state.bounds0.maxY - state.bounds0.minY || 1);
-          const fixedX = state.handle.includes('w')
-            ? state.bounds0.maxX
-            : state.bounds0.minX;
-          const fixedY = state.handle.includes('n')
-            ? state.bounds0.maxY
-            : state.bounds0.minY;
           const items = state.items;
+          const rotation = state.rotation;
           ctx.editor.transact(() => {
             for (const item of items) {
+              const iw = item.b0.maxX - item.b0.minX;
+              const ih = item.b0.maxY - item.b0.minY;
+              // A shape turns about its own bounds centre, so that is the one
+              // point the page frame and the shape's frame agree on: scale the
+              // centre, then rebuild the box around it.
+              const c = rotateAboutOrigin(item.center0, -rotation);
+              const moved = rotateAboutOrigin(
+                {
+                  x: anchor.x + (c.x - anchor.x) * sx,
+                  y: anchor.y + (c.y - anchor.y) * sy,
+                },
+                rotation,
+              );
+              const swapped =
+                item.quarterTurns === 1 || item.quarterTurns === 3;
+              // Off-axis shapes take the smaller factor on both axes: scaling
+              // their two axes apart would shear them, and the shape model has
+              // no way to hold a shear.
+              const uniform = Math.min(sx, sy);
+              const w =
+                item.quarterTurns === null ? uniform : swapped ? sy : sx;
+              const h =
+                item.quarterTurns === null ? uniform : swapped ? sx : sy;
               const scaled: Bounds = {
-                minX: fixedX + (item.b0.minX - fixedX) * sx,
-                maxX: fixedX + (item.b0.maxX - fixedX) * sx,
-                minY: fixedY + (item.b0.minY - fixedY) * sy,
-                maxY: fixedY + (item.b0.maxY - fixedY) * sy,
+                minX: moved.x - (iw * w) / 2,
+                maxX: moved.x + (iw * w) / 2,
+                minY: moved.y - (ih * h) / 2,
+                maxY: moved.y + (ih * h) / 2,
               };
               const resized = item.util.resize(item.initial as never, scaled);
               ctx.editor.updateShape(item.initial.id, {

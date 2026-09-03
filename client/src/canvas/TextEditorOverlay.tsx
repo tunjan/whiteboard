@@ -4,6 +4,7 @@ import { setLocalTextSelection } from '@/collab/presence';
 import type { Camera } from './camera';
 import { worldToScreen } from './camera';
 import { deleteShapesWithCleanup } from './commands';
+import { inkPaint } from './ink-color';
 import {
   fontStack,
   fontWeight,
@@ -184,7 +185,7 @@ export function TextEditorOverlay({
               : 'left',
         whiteSpace: fixed ? 'pre-wrap' : 'pre',
         overflowWrap: fixed ? 'anywhere' : 'normal',
-        color: shape.props.color,
+        color: inkPaint(shape.props.color),
         caretColor: 'currentColor',
         transform: shape.rotation ? `rotate(${shape.rotation}rad)` : undefined,
         transformOrigin: 'center center',

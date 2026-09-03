@@ -11,6 +11,7 @@ import { Pencil } from 'lucide-react';
 import type { DrawPoint, DrawProps, Shape } from '@whiteboard/shared';
 import '../shapes/register';
 import type { Editor } from '../editor';
+import type { EndTaperMode } from '../shapes/ink';
 import { useCanvasUiStore } from '../use-canvas-ui-store';
 import {
   endLiveStroke,
@@ -203,6 +204,20 @@ describe('draw tool stroke lifecycle', () => {
     expect(shapes.size).toBe(0);
   });
 
+  it('onCancel discards every chunk the gesture committed', () => {
+    // `id` only ever names the chunk being drawn. A gesture past the point cap
+    // has already committed the ones before it, and they were left behind.
+    const { ctx, shapes } = context();
+    const tool = createDrawTool();
+
+    tool.onPointerDown?.(pointer(0, 0), ctx);
+    for (let i = 1; i <= 650; i++) tool.onPointerMove?.(pointer(i * 2, 0), ctx);
+    expect(shapes.size).toBe(2);
+    tool.onCancel?.(ctx);
+
+    expect(shapes.size).toBe(0);
+  });
+
   it('applies the stylus pressure gain exactly once at ingestion', () => {
     const { ctx, shapes } = context();
     const tool = createDrawTool();
@@ -328,6 +343,23 @@ describe('auto-closure', () => {
 
   const closed = (shape: Shape | undefined) =>
     shape?.type === 'draw' ? shape.props.isClosed : undefined;
+
+  it('closes a loop that ends exactly on the press point', () => {
+    // Landing on the start is the clearest statement of intent there is, and
+    // it was the one case refused: an exact coordinate match returned early
+    // before the distance test could accept it.
+    expect(
+      closed(
+        trace([
+          [0, 0],
+          [40, 0],
+          [40, 40],
+          [0, 40],
+          [0, 0],
+        ]),
+      ),
+    ).toBe(true);
+  });
 
   it('closes a loop that ends back near where it began', () => {
     // A 40-unit box lifted 5 units from the press — inside the ~10-unit
@@ -481,7 +513,7 @@ describe('long-stroke chunking', () => {
     const ui = useCanvasUiStore.getState();
     const before = { start: ui.pencilStartTaper, end: ui.pencilEndTaper };
     ui.setPencilStartTaper(20);
-    ui.setPencilEndTaper(true);
+    ui.setPencilEndTaper('full');
     try {
       const { ctx, shapes } = context();
       const tool = createDrawTool();
@@ -1172,7 +1204,9 @@ describe('highlighter (marker ink)', () => {
   });
 
   it('is wider than the pen at the same size, and translucent', () => {
-    useStyleStore.setState({ size: 2, opacity: 1 });
+    useStyleStore.getState().setSize('pen', 2);
+    useStyleStore.getState().setSize('marker', 2);
+    useStyleStore.getState().setOpacity('pen', 1);
     const pen = context();
     createDrawTool().onPointerDown?.(pointer(0, 0), pen.ctx);
     createDrawTool().onPointerUp?.(pointer(0, 0), pen.ctx);
@@ -1188,6 +1222,25 @@ describe('highlighter (marker ink)', () => {
     expect(markerShape.props.size).toBeGreaterThan(penShape.props.size);
     expect(markerShape.opacity).toBeLessThan(1);
     expect(penShape.opacity).toBe(1);
+  });
+
+  // The two instruments remember their own colour. Sharing one slot meant
+  // reaching for the highlighter after writing in black laid a black wash.
+  it('inks from the marker slot, leaving the pen on its own colour', () => {
+    useStyleStore.getState().setColor('pen', '#1d1d1d');
+    useStyleStore.getState().setColor('marker', '#f1ac4b');
+
+    const wash = context();
+    marker().onPointerDown?.(pointer(0, 0), wash.ctx);
+    const washShape = only(wash.shapes);
+
+    const pen = context();
+    createDrawTool().onPointerDown?.(pointer(0, 0), pen.ctx);
+    const penShape = only(pen.shapes);
+
+    if (washShape.type !== 'draw' || penShape.type !== 'draw') return;
+    expect(washShape.props.color).toBe('#f1ac4b');
+    expect(penShape.props.color).toBe('#1d1d1d');
   });
 
   it('lands under the drawing, where the pen lands on top of it', () => {
@@ -1234,5 +1287,88 @@ describe('highlighter (marker ink)', () => {
     marker().onPointerDown?.(pointer(0, 0, { shiftKey: true }), ctx);
     expect(shapes.size).toBe(2);
     expect(drawPoints(shapes.get('ink'))).toHaveLength(1);
+  });
+});
+
+describe('velocity-driven lift taper', () => {
+  /** Draw one straight stroke, `step` world units and `ms` apart per sample. */
+  function drawAndLift(step: number, ms: number): Shape | undefined {
+    const { ctx, shapes } = context();
+    const tool = createDrawTool();
+    tool.onPointerDown?.(pointer(0, 0, { timestamp: 0 }), ctx);
+    for (let i = 1; i <= 30; i++) {
+      tool.onPointerMove?.(pointer(i * step, 0, { timestamp: i * ms }), ctx);
+    }
+    tool.onPointerUp?.(pointer(30 * step, 0, { timestamp: 30 * ms }), ctx);
+    return [...shapes.values()][0];
+  }
+
+  function withEndTaper(mode: EndTaperMode, run: () => void): void {
+    const ui = useCanvasUiStore.getState();
+    const before = ui.pencilEndTaper;
+    ui.setPencilEndTaper(mode);
+    try {
+      run();
+    } finally {
+      ui.setPencilEndTaper(before);
+    }
+  }
+
+  it('tapers a stroke lifted at speed and not one lifted at rest', () => {
+    withEndTaper('velocity', () => {
+      // Same path, same length, same brush — the only thing separating these
+      // two is how fast the hand was going when it left the page, which is the
+      // whole claim the mode makes.
+      const flicked = drawAndLift(30, 8);
+      const settled = drawAndLift(30, 400);
+      if (flicked?.type !== 'draw' || settled?.type !== 'draw')
+        throw new Error('n/a');
+
+      expect(flicked.props.endTaper).toBeGreaterThan(0);
+      expect(settled.props.endTaper).toBe(0);
+    });
+  });
+
+  it('leaves the other two modes alone', () => {
+    withEndTaper('off', () => {
+      const shape = drawAndLift(30, 8);
+      if (shape?.type !== 'draw') throw new Error('n/a');
+      expect(shape.props.endTaper).toBe(false);
+    });
+    withEndTaper('full', () => {
+      const shape = drawAndLift(30, 400);
+      if (shape?.type !== 'draw') throw new Error('n/a');
+      expect(shape.props.endTaper).toBe(true);
+    });
+  });
+});
+
+describe('stylus tilt capture', () => {
+  function drawWith(overrides: Partial<ToolPointerInfo>): Shape | undefined {
+    const { ctx, shapes } = context();
+    const tool = createDrawTool();
+    tool.onPointerDown?.(pointer(0, 0, overrides), ctx);
+    for (let i = 1; i <= 10; i++) {
+      tool.onPointerMove?.(
+        pointer(i * 4, 0, { ...overrides, timestamp: i * 8 }),
+        ctx,
+      );
+    }
+    tool.onPointerUp?.(pointer(40, 0, { ...overrides, timestamp: 88 }), ctx);
+    return [...shapes.values()][0];
+  }
+
+  it('records the lean of a pen and nothing for a mouse', () => {
+    const pen = drawWith({ pointerType: 'pen', tiltX: 0.4, tiltY: -0.6 });
+    if (pen?.type !== 'draw') throw new Error('n/a');
+    const sample = pen.props.points[pen.props.points.length - 1]!;
+    expect(sample.tiltX).toBeCloseTo(0.4, 5);
+    expect(sample.tiltY).toBeCloseTo(-0.6, 5);
+
+    // A mouse reports a tilt of nothing; storing it as a measured zero would
+    // widen every mouse stroke to five channels to say so.
+    const mouse = drawWith({ pointerType: 'mouse', pressure: 0.5 });
+    if (mouse?.type !== 'draw') throw new Error('n/a');
+    expect(mouse.props.points[0]).not.toHaveProperty('tiltX');
   });
 });

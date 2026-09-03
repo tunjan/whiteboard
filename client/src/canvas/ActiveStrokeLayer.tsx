@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef } from 'react';
 import { cameraToTransform, type Camera } from './camera';
+import { inkPaint } from './ink-color';
 import { isBelowPatternDetail, useDotLength } from './lod';
 import { buildInkRender } from './shapes/draw';
 import {
@@ -52,7 +53,11 @@ export function ActiveStrokeLayer({ camera }: { camera: Camera }) {
         ink.removeAttribute('d');
         return;
       }
-      const { color, size } = frame.props;
+      // Ink follows the viewer's theme here exactly as it will once the shape
+      // is committed (`ShapeView`), or the stroke would change color under the
+      // hand at pointer-up.
+      const color = inkPaint(frame.props.color);
+      const { size } = frame.props;
       // `isClosed` is only ever written by the tool's `finalize`, after this
       // layer is gone, so a live stroke is never filled — the ink is all there
       // is to draw.

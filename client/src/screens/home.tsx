@@ -8,10 +8,11 @@ import {
   ArrowUpDown,
   Check,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   ExternalLink,
   Library,
   LogOut,
-  MoreHorizontal,
   Moon,
   Pencil,
   Plus,
@@ -26,7 +27,14 @@ import { type AuthState, getAuth, logout } from '@/board/auth';
 import { boardRepository } from '@/board/server-board-repository';
 import { BrandMark } from '@/components/brand-mark';
 import { BoardTitleDialog } from '@/components/board-title-dialog';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
+import {
+  Card,
+  CardContent,
+  CardHeader,
+} from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -46,6 +54,14 @@ import {
 } from '@/components/ui/empty';
 import { Kbd, KbdGroup } from '@/components/ui/kbd';
 import { Skeleton } from '@/components/ui/skeleton';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -67,6 +83,10 @@ type LibraryView = 'all' | 'favorites';
 type SortMode = 'activity' | 'created' | 'name';
 
 const FAVORITES_KEY = 'whiteboard:favorite-board-ids';
+
+const PAGE_SIZE = 10;
+
+const HEAD_CLASS = 'font-mono text-2xs uppercase tracking-wider text-fg-subtle';
 
 const RELATIVE_UNITS: [Intl.RelativeTimeFormatUnit, number][] = [
   ['year', 31_536_000_000],
@@ -116,6 +136,16 @@ function absoluteTimestamp(ts: number): string {
     dateStyle: 'medium',
     timeStyle: 'short',
   });
+}
+
+function boardInitials(name: string): string {
+  const initials = name
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((word) => word[0]?.toUpperCase() ?? '')
+    .join('');
+  return initials || '#';
 }
 
 function boardHref(id: string): string {
@@ -208,6 +238,7 @@ export function Home() {
     new Set(),
   );
   const [favoriteIds, setFavoriteIds] = useState(loadFavoriteIds);
+  const [page, setPage] = useState(1);
   const searchRef = useRef<HTMLInputElement>(null);
   const { theme, toggle: toggleTheme } = useThemeStore();
 
@@ -222,6 +253,10 @@ export function Home() {
   useEffect(() => {
     if (auth?.authenticated) refresh();
   }, [auth?.authenticated]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [searchQuery, activeView, sortMode]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -285,11 +320,15 @@ export function Home() {
     });
 
   const isFiltered = query.length > 0;
-  const visibleSelectedCount = filteredBoards.filter((board) =>
+  const pageCount = Math.max(1, Math.ceil(filteredBoards.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount);
+  const pageStart = (currentPage - 1) * PAGE_SIZE;
+  const pageBoards = filteredBoards.slice(pageStart, pageStart + PAGE_SIZE);
+  const visibleSelectedCount = pageBoards.filter((board) =>
     selectedBoardIds.has(board.id),
   ).length;
   const allVisibleSelected =
-    filteredBoards.length > 0 && visibleSelectedCount === filteredBoards.length;
+    pageBoards.length > 0 && visibleSelectedCount === pageBoards.length;
 
   const persistFavorites = (next: Set<string>) => {
     setFavoriteIds(next);
@@ -307,7 +346,7 @@ export function Home() {
   const toggleSelectAll = () => {
     setSelectedBoardIds((previous) => {
       const next = new Set(previous);
-      for (const board of filteredBoards) {
+      for (const board of pageBoards) {
         if (allVisibleSelected) next.delete(board.id);
         else next.add(board.id);
       }
@@ -376,17 +415,22 @@ export function Home() {
         render={
           <Button
             variant="ghost"
-            size="icon-sm"
+            size="sm"
             onClick={(e) => e.stopPropagation()}
-            aria-label={`More actions for ${board.name}`}
-            className="size-8 rounded-lg text-fg-muted hover:text-fg hover:bg-sunken"
+            aria-label={`Actions for ${board.name}`}
+            className="h-8 px-2.5 text-sm text-fg-muted hover:bg-sunken hover:text-fg"
           >
-            <MoreHorizontal className="size-4" />
+            Actions
+            <ChevronDown data-icon="inline-end" className="size-3 opacity-60" />
           </Button>
         }
       />
       <DropdownMenuContent align="end" className="w-48">
         <DropdownMenuGroup>
+          <DropdownMenuItem onClick={() => navigate(boardHref(board.id))}>
+            <ExternalLink data-icon="inline-start" />
+            Open canvas
+          </DropdownMenuItem>
           <DropdownMenuItem onClick={() => toggleFavorite(board.id)}>
             <Star
               data-icon="inline-start"
@@ -546,300 +590,372 @@ export function Home() {
         className="mx-auto flex w-full max-w-6xl flex-1 flex-col px-4 py-8 sm:px-6 sm:py-10 lg:px-8"
         aria-busy={loading}
       >
-        <section className="mb-8 flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
-          <div className="space-y-1.5">
-            <h1 className="text-balance text-2xl font-semibold text-fg">
-              Canvases
-            </h1>
-            <p className="max-w-lg text-pretty text-base text-fg-muted">
-              Spacious, interactive boards for sketching, diagrams, notes, and
-              collaboration.
-            </p>
-          </div>
-
-          <div className="flex items-center gap-1 self-start rounded-lg border border-border bg-panel p-1 sm:self-auto">
-            <button
-              type="button"
-              onClick={() => setActiveView('all')}
-              aria-pressed={activeView === 'all'}
-              className={cn(
-                'flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
-                activeView === 'all'
-                  ? 'bg-surface text-fg shadow-e1'
-                  : 'text-fg-muted hover:text-fg',
-              )}
-            >
-              <Library className="size-3.5" />
-              <span>All Canvases</span>
-              <span className="font-mono text-2xs opacity-60">
-                {allBoards.length}
-              </span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveView('favorites')}
-              aria-pressed={activeView === 'favorites'}
-              className={cn(
-                'flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
-                activeView === 'favorites'
-                  ? 'bg-surface text-fg shadow-e1'
-                  : 'text-fg-muted hover:text-fg',
-              )}
-            >
-              <Star className="size-3.5" />
-              <span>Favorites</span>
-              {favoriteCount > 0 ? (
-                <span className="font-mono text-2xs opacity-60">
-                  {favoriteCount}
-                </span>
-              ) : null}
-            </button>
-          </div>
-        </section>
-
-        <section
-          aria-label="Canvas controls"
-          className="mb-3 flex flex-wrap items-center justify-between gap-4 border-b border-border pb-3 text-sm text-fg-muted"
-        >
-          <div className="flex items-center gap-3">
-            <label className="flex size-6 items-center justify-center cursor-pointer">
-              <span className="sr-only">Select all visible canvases</span>
-              <input
-                type="checkbox"
-                checked={allVisibleSelected}
-                ref={(element) => {
-                  if (element) {
-                    element.indeterminate =
-                      visibleSelectedCount > 0 && !allVisibleSelected;
-                  }
-                }}
-                onChange={toggleSelectAll}
-                className="size-4 rounded-xs accent-action"
-              />
-            </label>
-
-            <span className="tabular-nums">
-              {isFiltered
-                ? `${filteredBoards.length} of ${viewBoards.length} shown`
-                : `${filteredBoards.length} canvases`}
-            </span>
-          </div>
-
-          <div className="flex items-center gap-4">
-            <div className="hidden items-center gap-10 font-mono text-xs text-fg-subtle sm:flex">
-              <span className="w-36">Last opened</span>
-              <span className="hidden md:inline w-28">Created</span>
-            </div>
-
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-8 gap-1.5 px-2 text-sm text-fg-muted hover:bg-panel hover:text-fg"
+        <section aria-labelledby="canvases-heading" className="flex-1 pb-2">
+          <Card className="gap-0 pt-6 pb-0 shadow-e2">
+            <CardHeader className="gap-0 border-b border-border">
+              <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+                <div className="space-y-1.5">
+                  <h1
+                    id="canvases-heading"
+                    className="text-balance text-2xl font-semibold tracking-tight text-fg"
                   >
-                    <ArrowUpDown className="size-3" />
-                    <span>{SORT_DETAILS[sortMode]}</span>
-                    <ChevronDown className="size-3 opacity-60" />
-                  </Button>
-                }
-              />
-              <DropdownMenuContent align="end" className="w-44">
-                <DropdownMenuGroup>
-                  <DropdownMenuLabel>Sort by</DropdownMenuLabel>
-                  {(Object.keys(SORT_DETAILS) as SortMode[]).map((mode) => (
-                    <DropdownMenuItem
-                      key={mode}
-                      onClick={() => setSortMode(mode)}
-                    >
-                      {sortMode === mode ? (
-                        <Check data-icon="inline-start" className="size-3.5" />
-                      ) : (
-                        <span className="size-3.5" />
-                      )}
-                      {SORT_DETAILS[mode]}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuGroup>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-        </section>
-
-        {/* Content Area */}
-        <section aria-labelledby="canvases-heading" className="flex-1">
-          <h2 id="canvases-heading" className="sr-only">
-            {activeView === 'favorites' ? 'Favorite canvases' : 'All canvases'}
-          </h2>
-
-          {loading ? (
-            <div className="flex flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-e2">
-              {[1, 2, 3, 4, 5, 6].map((i) => (
-                <div
-                  key={i}
-                  className="flex items-center gap-4 border-b border-border p-4 last:border-b-0"
-                >
-                  <Skeleton className="size-5 rounded-md" />
-                  <div className="space-y-2 flex-1">
-                    <Skeleton className="h-5 w-48 rounded-md" />
-                    <Skeleton className="h-3 w-32 rounded-md" />
-                  </div>
-                  <Skeleton className="h-4 w-28 rounded-md hidden sm:block" />
+                    {activeView === 'favorites' ? 'Favorites' : 'Canvases'}
+                  </h1>
+                  <p className="max-w-lg text-pretty text-base text-fg-muted">
+                    Spacious, interactive boards for sketching, diagrams, notes,
+                    and collaboration.
+                  </p>
                 </div>
-              ))}
-            </div>
-          ) : filteredBoards.length === 0 ? (
-            <Empty className="min-h-[360px] rounded-xl border border-dashed border-border-strong bg-surface p-8 sm:p-10">
-              <EmptyHeader>
-                <EmptyMedia
-                  variant="icon"
-                  className="size-12 rounded-lg bg-panel text-fg-muted"
-                >
-                  {isFiltered ? (
-                    <Search className="size-6" />
-                  ) : activeView === 'favorites' ? (
-                    <Star className="size-6" />
-                  ) : (
-                    <Library className="size-6" />
-                  )}
-                </EmptyMedia>
-                <EmptyTitle className="mt-4 text-balance text-xl font-semibold text-fg">
-                  {isFiltered
-                    ? 'No canvases found'
-                    : activeView === 'favorites'
-                      ? 'No favorite canvases yet'
-                      : 'No canvases in your workspace'}
-                </EmptyTitle>
-                <EmptyDescription className="mx-auto mt-1 max-w-md text-pretty text-base text-fg-muted">
-                  {isFiltered
-                    ? `No canvas matched "${searchQuery.trim()}". Try checking your spelling or clear the filter.`
-                    : activeView === 'favorites'
-                      ? 'Star important canvases to keep them easily accessible here.'
-                      : 'Create your first canvas to start sketching, diagramming, and creating.'}
-                </EmptyDescription>
-              </EmptyHeader>
-              <EmptyContent className="mt-5">
-                {isFiltered ? (
-                  <Button
-                    variant="secondary"
-                    size="md"
-                    onClick={() => {
-                      setSearchQuery('');
-                      searchRef.current?.focus();
-                    }}
-                  >
-                    <X data-icon="inline-start" className="size-4" />
-                    Clear search
-                  </Button>
-                ) : activeView === 'favorites' ? (
-                  <Button
-                    variant="secondary"
-                    size="md"
-                    onClick={() => setActiveView('all')}
-                  >
-                    <Library data-icon="inline-start" className="size-4" />
-                    Browse all canvases
-                  </Button>
-                ) : (
-                  <Button
-                    variant="default"
-                    size="md"
-                    onClick={() => setTitleDialog({ mode: 'create' })}
-                  >
-                    <Plus data-icon="inline-start" className="size-4" />
-                    Create your first canvas
-                  </Button>
-                )}
-              </EmptyContent>
-            </Empty>
-          ) : (
-            <div className="flex flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-e2">
-              {filteredBoards.map((board) => {
-                const selected = selectedBoardIds.has(board.id);
-                const favorite = favoriteIds.has(board.id);
 
-                return (
-                  <article
-                    key={board.id}
+                <div className="flex items-center gap-1 self-start rounded-lg border border-border bg-panel p-1 sm:self-auto">
+                  <button
+                    type="button"
+                    onClick={() => setActiveView('all')}
+                    aria-pressed={activeView === 'all'}
                     className={cn(
-                      'group/row flex items-center gap-3 border-b border-border p-4 transition-colors last:border-b-0 hover:bg-panel sm:gap-4',
-                      selected && 'bg-panel',
+                      'flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
+                      activeView === 'all'
+                        ? 'bg-surface text-fg shadow-e1'
+                        : 'text-fg-muted hover:text-fg',
                     )}
                   >
-                    {/* Checkbox */}
-                    <label className="flex size-7 shrink-0 items-center justify-center cursor-pointer">
-                      <span className="sr-only">Select {board.name}</span>
-                      <input
-                        type="checkbox"
-                        checked={selected}
-                        onChange={(e) =>
-                          toggleSelectBoard(
-                            board.id,
-                            e as unknown as ReactMouseEvent,
-                          )
-                        }
-                        className="size-4 rounded-xs accent-action"
-                      />
-                    </label>
-
-                    {/* Title & Info */}
-                    <div className="min-w-0 flex-1">
-                      <a
-                        href={boardHref(board.id)}
-                        onClick={(e) => openBoardLink(e, board.id)}
-                        className="block truncate text-base font-medium text-fg hover:underline"
-                        title={board.name}
-                      >
-                        {board.name}
-                      </a>
-                      <p className="mt-0.5 truncate font-mono text-xs text-fg-muted sm:hidden">
-                        Opened {relativeTime(board.lastOpenedAt)}
-                      </p>
-                    </div>
-
-                    {/* Timestamps (Desktop) */}
-                    <div className="hidden sm:block w-36 text-xs text-fg-muted font-mono tabular-nums">
-                      <span title={absoluteTimestamp(board.lastOpenedAt)}>
-                        {relativeTime(board.lastOpenedAt)}
+                    <Library className="size-3.5" />
+                    <span>All Canvases</span>
+                    <span className="font-mono text-2xs opacity-60">
+                      {allBoards.length}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveView('favorites')}
+                    aria-pressed={activeView === 'favorites'}
+                    className={cn(
+                      'flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
+                      activeView === 'favorites'
+                        ? 'bg-surface text-fg shadow-e1'
+                        : 'text-fg-muted hover:text-fg',
+                    )}
+                  >
+                    <Star className="size-3.5" />
+                    <span>Favorites</span>
+                    {favoriteCount > 0 ? (
+                      <span className="font-mono text-2xs opacity-60">
+                        {favoriteCount}
                       </span>
-                    </div>
+                    ) : null}
+                  </button>
+                </div>
+              </div>
+            </CardHeader>
 
-                    <div className="hidden md:block w-28 text-xs text-fg-muted font-mono tabular-nums">
-                      {absoluteDate(board.createdAt)}
-                    </div>
+            <CardContent className="p-0">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-2 text-sm text-fg-muted">
+                <span className="tabular-nums">
+                  {selectedBoardIds.size > 0
+                    ? `${selectedBoardIds.size} selected`
+                    : isFiltered
+                      ? `${filteredBoards.length} of ${viewBoards.length} shown`
+                      : `${filteredBoards.length} canvases`}
+                </span>
 
-                    {/* Actions */}
-                    <div className="flex shrink-0 items-center gap-1">
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    render={
                       <Button
                         variant="ghost"
-                        size="icon-sm"
-                        aria-label={
-                          favorite
-                            ? 'Remove from favorites'
-                            : 'Add to favorites'
-                        }
-                        aria-pressed={favorite}
-                        onClick={(e) => toggleFavorite(board.id, e)}
-                        className={cn(
-                          'size-8 rounded-lg text-fg-muted hover:text-fg',
-                          favorite && 'text-fg',
-                        )}
+                        size="sm"
+                        className="h-8 gap-1.5 px-2 text-sm text-fg-muted hover:bg-panel hover:text-fg"
                       >
-                        <Star
-                          className="size-4"
-                          fill={favorite ? 'currentColor' : 'none'}
+                        <ArrowUpDown className="size-3" />
+                        <span>{SORT_DETAILS[sortMode]}</span>
+                        <ChevronDown className="size-3 opacity-60" />
+                      </Button>
+                    }
+                  />
+                  <DropdownMenuContent align="end" className="w-44">
+                    <DropdownMenuGroup>
+                      <DropdownMenuLabel>Sort by</DropdownMenuLabel>
+                      {(Object.keys(SORT_DETAILS) as SortMode[]).map((mode) => (
+                        <DropdownMenuItem
+                          key={mode}
+                          onClick={() => setSortMode(mode)}
+                        >
+                          {sortMode === mode ? (
+                            <Check
+                              data-icon="inline-start"
+                              className="size-3.5"
+                            />
+                          ) : (
+                            <span className="size-3.5" />
+                          )}
+                          {SORT_DETAILS[mode]}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuGroup>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+
+              {loading ? (
+                <Table>
+                  <TableBody>
+                    {[1, 2, 3, 4, 5, 6].map((i) => (
+                      <TableRow key={i} className="hover:bg-transparent">
+                        <TableCell className="w-12">
+                          <Skeleton className="size-4 rounded-xs" />
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-3">
+                            <Skeleton className="size-10 rounded-lg" />
+                            <Skeleton className="h-4 w-48 rounded-md" />
+                          </div>
+                        </TableCell>
+                        <TableCell className="hidden sm:table-cell">
+                          <Skeleton className="h-4 w-24 rounded-md" />
+                        </TableCell>
+                        <TableCell className="hidden md:table-cell">
+                          <Skeleton className="h-4 w-20 rounded-md" />
+                        </TableCell>
+                        <TableCell>
+                          <Skeleton className="ml-auto h-8 w-20 rounded-md" />
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              ) : filteredBoards.length === 0 ? (
+                <Empty className="min-h-[360px] p-8 sm:p-10">
+                  <EmptyHeader>
+                    <EmptyMedia
+                      variant="icon"
+                      className="size-12 rounded-lg bg-panel text-fg-muted"
+                    >
+                      {isFiltered ? (
+                        <Search className="size-6" />
+                      ) : activeView === 'favorites' ? (
+                        <Star className="size-6" />
+                      ) : (
+                        <Library className="size-6" />
+                      )}
+                    </EmptyMedia>
+                    <EmptyTitle className="mt-4 text-balance text-xl font-semibold text-fg">
+                      {isFiltered
+                        ? 'No canvases found'
+                        : activeView === 'favorites'
+                          ? 'No favorite canvases yet'
+                          : 'No canvases in your workspace'}
+                    </EmptyTitle>
+                    <EmptyDescription className="mx-auto mt-1 max-w-md text-pretty text-base text-fg-muted">
+                      {isFiltered
+                        ? `No canvas matched "${searchQuery.trim()}". Try checking your spelling or clear the filter.`
+                        : activeView === 'favorites'
+                          ? 'Star important canvases to keep them easily accessible here.'
+                          : 'Create your first canvas to start sketching, diagramming, and creating.'}
+                    </EmptyDescription>
+                  </EmptyHeader>
+                  <EmptyContent className="mt-5">
+                    {isFiltered ? (
+                      <Button
+                        variant="secondary"
+                        size="md"
+                        onClick={() => {
+                          setSearchQuery('');
+                          searchRef.current?.focus();
+                        }}
+                      >
+                        <X data-icon="inline-start" className="size-4" />
+                        Clear search
+                      </Button>
+                    ) : activeView === 'favorites' ? (
+                      <Button
+                        variant="secondary"
+                        size="md"
+                        onClick={() => setActiveView('all')}
+                      >
+                        <Library data-icon="inline-start" className="size-4" />
+                        Browse all canvases
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="default"
+                        size="md"
+                        onClick={() => setTitleDialog({ mode: 'create' })}
+                      >
+                        <Plus data-icon="inline-start" className="size-4" />
+                        Create your first canvas
+                      </Button>
+                    )}
+                  </EmptyContent>
+                </Empty>
+              ) : (
+                <>
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="hover:bg-transparent">
+                        <TableHead className={cn(HEAD_CLASS, 'w-12')}>
+                          <Checkbox
+                            checked={allVisibleSelected}
+                            indeterminate={
+                              visibleSelectedCount > 0 && !allVisibleSelected
+                            }
+                            onCheckedChange={toggleSelectAll}
+                            aria-label="Select all canvases on this page"
+                          />
+                        </TableHead>
+                        <TableHead className={HEAD_CLASS}>Canvas</TableHead>
+                        <TableHead className={cn(HEAD_CLASS, 'w-20')}>
+                          Favorite
+                        </TableHead>
+                        <TableHead
+                          className={cn(HEAD_CLASS, 'hidden w-40 sm:table-cell')}
+                        >
+                          Last opened
+                        </TableHead>
+                        <TableHead
+                          className={cn(HEAD_CLASS, 'hidden w-32 md:table-cell')}
+                        >
+                          Created
+                        </TableHead>
+                        <TableHead
+                          className={cn(HEAD_CLASS, 'w-28 text-right')}
+                        >
+                          Actions
+                        </TableHead>
+                      </TableRow>
+                    </TableHeader>
+
+                    <TableBody>
+                      {pageBoards.map((board) => {
+                        const selected = selectedBoardIds.has(board.id);
+                        const favorite = favoriteIds.has(board.id);
+
+                        return (
+                          <TableRow
+                            key={board.id}
+                            data-state={selected ? 'selected' : undefined}
+                          >
+                            <TableCell className="w-12">
+                              <Checkbox
+                                checked={selected}
+                                onCheckedChange={() =>
+                                  toggleSelectBoard(board.id)
+                                }
+                                aria-label={`Select ${board.name}`}
+                              />
+                            </TableCell>
+
+                            <TableCell className="max-w-0">
+                              <div className="flex items-center gap-3">
+                                <Avatar
+                                  size="lg"
+                                  className="rounded-lg after:rounded-lg"
+                                >
+                                  <AvatarFallback className="rounded-lg font-mono text-xs">
+                                    {boardInitials(board.name)}
+                                  </AvatarFallback>
+                                </Avatar>
+                                <div className="min-w-0">
+                                  <a
+                                    href={boardHref(board.id)}
+                                    onClick={(e) => openBoardLink(e, board.id)}
+                                    className="block truncate text-base font-medium text-fg hover:underline"
+                                    title={board.name}
+                                  >
+                                    {board.name}
+                                  </a>
+                                  <p className="mt-0.5 truncate font-mono text-xs text-fg-muted sm:hidden">
+                                    Opened {relativeTime(board.lastOpenedAt)}
+                                  </p>
+                                </div>
+                              </div>
+                            </TableCell>
+
+                            <TableCell>
+                              <Button
+                                variant="ghost"
+                                size="icon-sm"
+                                aria-label={
+                                  favorite
+                                    ? 'Remove from favorites'
+                                    : 'Add to favorites'
+                                }
+                                aria-pressed={favorite}
+                                onClick={(e) => toggleFavorite(board.id, e)}
+                                className={cn(
+                                  'size-8 rounded-lg text-fg-subtle hover:text-fg',
+                                  favorite && 'text-fg',
+                                )}
+                              >
+                                <Star
+                                  className="size-4"
+                                  fill={favorite ? 'currentColor' : 'none'}
+                                />
+                              </Button>
+                            </TableCell>
+
+                            <TableCell className="hidden font-mono text-xs tabular-nums text-fg-muted sm:table-cell">
+                              <span title={absoluteTimestamp(board.lastOpenedAt)}>
+                                {relativeTime(board.lastOpenedAt)}
+                              </span>
+                            </TableCell>
+
+                            <TableCell className="hidden font-mono text-xs tabular-nums text-fg-muted md:table-cell">
+                              {absoluteDate(board.createdAt)}
+                            </TableCell>
+
+                            <TableCell className="text-right">
+                              {renderBoardMenu(board)}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+
+                  <nav
+                    aria-label="Canvas pagination"
+                    className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3 text-sm text-fg-muted"
+                  >
+                    <span className="tabular-nums">
+                      Showing {pageStart + 1}–{pageStart + pageBoards.length} of{' '}
+                      {filteredBoards.length}
+                    </span>
+
+                    <div className="flex items-center gap-2">
+                      <span className="mr-1 hidden font-mono text-xs tabular-nums sm:inline">
+                        Page {currentPage} of {pageCount}
+                      </span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={currentPage <= 1}
+                        onClick={() => setPage(currentPage - 1)}
+                      >
+                        <ChevronLeft
+                          data-icon="inline-start"
+                          className="size-3.5"
+                        />
+                        Previous
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={currentPage >= pageCount}
+                        onClick={() => setPage(currentPage + 1)}
+                      >
+                        Next
+                        <ChevronRight
+                          data-icon="inline-end"
+                          className="size-3.5"
                         />
                       </Button>
-                      {renderBoardMenu(board)}
                     </div>
-                  </article>
-                );
-              })}
-            </div>
-          )}
+                  </nav>
+                </>
+              )}
+            </CardContent>
+          </Card>
         </section>
-
         {selectedBoardIds.size > 0 && (
           <aside
             aria-label="Bulk canvas actions"

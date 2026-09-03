@@ -9,12 +9,14 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   restoreLocalPresence,
   setActiveAwareness,
-  setLocalErasing,
+  setLocalCursorType,
+  setLocalEraserScribbles,
   setLocalPage,
   setLocalUser,
   setLocalVoice,
 } from './presence';
 import { usePresenceStore } from './use-presence-store';
+import type { EraserScribble } from '@/canvas/use-eraser-trail-store';
 
 const awarenessInstances: Awareness[] = [];
 
@@ -25,6 +27,7 @@ function makeAwareness(): Awareness {
 }
 
 afterEach(() => {
+  setLocalCursorType('pointer');
   setActiveAwareness(null);
   awarenessInstances.forEach((instance) => {
     instance.destroy();
@@ -98,9 +101,7 @@ describe('collaborator voice presence', () => {
       remote,
     );
     expect(usePresenceStore.getState().peers[0]).not.toBe(mutedPeer);
-    expect(usePresenceStore.getState().peers[0]?.voice).toBe(
-      mutedPeer?.voice,
-    );
+    expect(usePresenceStore.getState().peers[0]?.voice).toBe(mutedPeer?.voice);
 
     remote.setLocalStateField('voice', {
       inCall: true,
@@ -284,8 +285,22 @@ describe('local presence after a page-hide wipe', () => {
   });
 });
 
-describe('collaborator erase presence', () => {
-  it('publishes a peer mid-erase so their targets can be dimmed', () => {
+const eraserScribble: EraserScribble = {
+  id: 'erase-1',
+  points: [
+    { x: 10, y: 20, pressure: 0.5 },
+    { x: 30, y: 40, pressure: 0.5 },
+  ],
+  state: 'active',
+  color: 'muted-1',
+  size: 12,
+  opacity: 0.8,
+  shrink: 0.1,
+  taper: true,
+};
+
+describe('collaborator eraser presence', () => {
+  it('publishes a peer trail without exposing their pending target ids', () => {
     const local = makeAwareness();
     const remote = makeAwareness();
     setActiveAwareness(local);
@@ -294,7 +309,7 @@ describe('collaborator erase presence', () => {
       color: '#2f6df6',
       isTutor: false,
     });
-    remote.setLocalStateField('erasing', ['ink-1', 'ink-2']);
+    remote.setLocalStateField('scribbles', [eraserScribble]);
 
     applyAwarenessUpdate(
       local,
@@ -303,11 +318,11 @@ describe('collaborator erase presence', () => {
     );
 
     expect(usePresenceStore.getState().peers).toEqual([
-      expect.objectContaining({ erasing: ['ink-1', 'ink-2'] }),
+      expect.objectContaining({ scribbles: [eraserScribble] }),
     ]);
   });
 
-  it('reads a peer that is not erasing as null', () => {
+  it('reads a peer without an active eraser trail as null', () => {
     const local = makeAwareness();
     const remote = makeAwareness();
     setActiveAwareness(local);
@@ -323,29 +338,39 @@ describe('collaborator erase presence', () => {
       remote,
     );
 
-    expect(usePresenceStore.getState().peers[0]!.erasing).toBeNull();
+    expect(usePresenceStore.getState().peers[0]!.scribbles).toBeNull();
   });
 
-  it('sends the first mark of a stroke immediately', () => {
+  it('sends the first scribble sample immediately', () => {
     const local = makeAwareness();
     setActiveAwareness(local);
 
-    setLocalErasing(['ink-1']);
+    setLocalEraserScribbles([eraserScribble]);
 
-    expect(local.getLocalState()?.erasing).toEqual(['ink-1']);
+    expect(local.getLocalState()?.scribbles).toEqual([eraserScribble]);
+    expect(local.getLocalState()?.erasing ?? null).toBeNull();
   });
 
-  it('flushes the clear that ends a stroke even when it is throttled', async () => {
+  it('flushes the clear that ends a scribble even when it is throttled', async () => {
     const local = makeAwareness();
     setActiveAwareness(local);
 
-    setLocalErasing(['ink-1']);
+    setLocalEraserScribbles([eraserScribble]);
     // Straight after the first send, so this one can only go out on the
-    // trailing timer — the case where a lost clear would strand a peer's dim.
-    setLocalErasing([]);
+    // trailing timer — the case where a lost clear would strand a peer trail.
+    setLocalEraserScribbles([]);
 
-    expect(local.getLocalState()?.erasing).toEqual(['ink-1']);
-    await new Promise((resolve) => setTimeout(resolve, 120));
-    expect(local.getLocalState()?.erasing).toBeNull();
+    expect(local.getLocalState()?.scribbles).toEqual([eraserScribble]);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(local.getLocalState()?.scribbles).toBeNull();
+  });
+
+  it('carries the eraser crosshair independently from cursor coordinates', () => {
+    const local = makeAwareness();
+    setActiveAwareness(local);
+
+    setLocalCursorType('cross');
+
+    expect(local.getLocalState()?.cursorType).toBe('cross');
   });
 });

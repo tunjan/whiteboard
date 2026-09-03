@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { eq } from 'drizzle-orm';
 import { pageDocumentName } from '@whiteboard/shared';
 import { db } from '../db/client';
-import { boardDocuments } from '../db/schema';
+import { boardDocumentUpdates, boardDocuments } from '../db/schema';
 import { hocuspocus } from './hocuspocus';
 
 /**
@@ -33,11 +33,24 @@ pageRoutes.delete('/:boardId/:pageId', async (c) => {
   const open = hocuspocus.documents.get(documentName);
   if (open) {
     hocuspocus.closeConnections(documentName);
+    // `unloadDocument` is a no-op while a store is still debounced, and that is
+    // exactly the state right after someone drew on the page they are now
+    // deleting: the deletes below would run, and the pending store would append
+    // a fresh log row a couple of seconds later for a page no registry
+    // references. Flushing the debounce first both makes the unload real and
+    // puts every row this document will ever own in the table before we drop
+    // them. Returns undefined when nothing is pending.
+    await hocuspocus.debouncer.executeNow(`onStoreDocument-${documentName}`);
     await hocuspocus.unloadDocument(open);
   }
   await db
     .delete(boardDocuments)
     .where(eq(boardDocuments.documentName, documentName));
+  // The page's snapshot is only half of it: whatever it gained since that
+  // snapshot sits in the append-only update log.
+  await db
+    .delete(boardDocumentUpdates)
+    .where(eq(boardDocumentUpdates.documentName, documentName));
 
   return c.json({ ok: true });
 });

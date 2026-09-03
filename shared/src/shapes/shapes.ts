@@ -45,11 +45,38 @@ export interface DrawPoint {
   y: number;
   /** Optional pressure 0..1 for variable-width ink. */
   pressure?: number;
+  /**
+   * How far the stylus barrel was tilted off vertical, as the unit vector it
+   * leans along scaled by that lean: `(0, 0)` is a pen held upright and a
+   * magnitude of 1 is one laid flat on the page.
+   *
+   * Two channels rather than an angle pair because this is what the hardware
+   * reports (`tiltX`/`tiltY`, normalized off their ±90° range) and because the
+   * renderer wants the vector, not the angles: the nib broadens across the
+   * direction of lean, so both which way and how far are needed at once.
+   * Absent on every non-stylus sample and on every stroke drawn before tilt
+   * was recorded.
+   */
+  tiltX?: number;
+  tiltY?: number;
 }
 
-/** Serializable pressure curve used by the freehand radius model. */
+/**
+ * Serializable pressure curve used by the freehand radius model.
+ *
+ * `linear`, `ease-out-sine`, `stylus` and `smoothstep` are the automatic
+ * curves, chosen from the input the stroke was drawn with. `soft` and `firm`
+ * are the two deliberate ends of the pen-response preference: `soft` reaches
+ * full width under a light hand, `firm` holds a fine line until the pen is
+ * pressed.
+ */
 export type PressureEasing =
-  'linear' | 'ease-out-sine' | 'stylus' | 'smoothstep';
+  | 'linear'
+  | 'ease-out-sine'
+  | 'stylus'
+  | 'smoothstep'
+  | 'soft'
+  | 'firm';
 
 export interface DrawProps {
   /** Ink points in shape-local coordinates (append-only under the CRDT). */
@@ -78,6 +105,11 @@ export interface DrawProps {
   startTaper?: number | boolean;
   /** Optional taper distance at the end of the stroke. */
   endTaper?: number | boolean;
+  /**
+   * How strongly stylus tilt broadens the nib, 0..1. Undefined preserves
+   * strokes drawn before tilt was read, which render as an upright pen.
+   */
+  tiltAmount?: number;
 }
 
 export interface RectangleProps {

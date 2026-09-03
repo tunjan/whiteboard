@@ -100,7 +100,7 @@ export function ShapeMenu({
   // it and ends level with its foot, so the raw middle of that window sits
   // high.
   const trayArt = active ? (
-    <span className="relative flex h-full w-full items-center justify-center pt-6 text-fg">
+    <span className="relative flex h-full w-full items-center justify-center pt-6 text-fg transition-all duration-slow ease-out-quart motion-reduce:transition-none">
       {isPolygon ? (
         <MiniShape kind={polygonKind} size={26} />
       ) : (
@@ -108,7 +108,7 @@ export function ShapeMenu({
       )}
     </span>
   ) : (
-    <ShapeClusterObject className="relative translate-y-3.5 transition-transform duration-base ease-out-quart motion-reduce:transition-none" />
+    <ShapeClusterObject className="relative translate-y-3.5 transition-transform duration-slow ease-out-quart group-hover/slot:translate-y-2 motion-reduce:transition-none" />
   );
 
   const trigger =

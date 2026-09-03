@@ -4,6 +4,8 @@ import type { BackgroundType } from './grid';
 import {
   DEFAULT_PENCIL_DYNAMICS,
   DEFAULT_PENCIL_STABILIZATION,
+  type EndTaperMode,
+  type PencilPressureCurve,
 } from './shapes/ink';
 
 /**
@@ -33,8 +35,21 @@ interface CanvasUiStore {
   pencilSimulatePressure: boolean;
   /** Taper distance (px) at the start of newly drawn strokes. */
   pencilStartTaper: number;
-  /** Whether newly drawn strokes taper to a point at the end. */
-  pencilEndTaper: boolean;
+  /**
+   * How newly drawn strokes finish: a round cap, a taper the lift has to earn
+   * by being a flick, or the pointed brush finish over the whole stroke.
+   */
+  pencilEndTaper: EndTaperMode;
+  /**
+   * How much force it takes to reach a given width. Inert on a pointer with no
+   * pressure signal at all, which draws one width whatever this says.
+   */
+  pencilPressureCurve: PencilPressureCurve;
+  /**
+   * How strongly a leaning stylus broadens the nib, 0..1. Reads a hardware
+   * channel only a stylus has, so it does nothing for a mouse or a finger.
+   */
+  pencilTilt: number;
   /**
    * Whether the live stroke is drawn out to the browser's predicted pointer
    * position, ahead of the last real sample.
@@ -50,6 +65,14 @@ interface CanvasUiStore {
   /** Whether the on-canvas performance overlay (FPS/frame time) is shown. */
   debugPerformance: boolean;
   /**
+   * Whether to drop the effects that cost a compositor pass per frame. Today
+   * that is the chrome's frosted ground: `backdrop-filter` has to re-read and
+   * re-blur the board under the toolbar and the four corner HUDs on every
+   * frame, which is exactly the frames a stroke is being drawn in. With it off
+   * the same chrome falls back to an opaque wash (see `--chrome-wash-solid`).
+   */
+  lowGraphics: boolean;
+  /**
    * Whether the tutor is shown when a student stops paying attention. Tutor-only
    * in effect: every client publishes its own attention facts, but nothing is
    * rendered except in a tutor's participant list and toasts.
@@ -59,6 +82,15 @@ interface CanvasUiStore {
   attentionIdleSeconds: number;
   /** Seconds in another window before a student reads as away. */
   attentionAwaySeconds: number;
+  /**
+   * Most pages one pasted PDF may place on the board at once. A longer document
+   * asks which range to import instead of refusing outright.
+   *
+   * Tutor-only in the sense the attention thresholds are: this is a local
+   * preference, and only a tutor is shown the control. A student pasting a PDF
+   * gets the default and no way to raise it.
+   */
+  pdfPageLimit: number;
   /**
    * Resolution multiplier for exported and copied PNGs, in raster pixels per
    * board unit. PNG is lossless, so this — not a compression quality — is the
@@ -73,12 +105,16 @@ interface CanvasUiStore {
   setPencilSmoothing: (pencilSmoothing: number) => void;
   setPencilSimulatePressure: (pencilSimulatePressure: boolean) => void;
   setPencilStartTaper: (pencilStartTaper: number) => void;
-  setPencilEndTaper: (pencilEndTaper: boolean) => void;
+  setPencilEndTaper: (pencilEndTaper: EndTaperMode) => void;
+  setPencilPressureCurve: (pencilPressureCurve: PencilPressureCurve) => void;
+  setPencilTilt: (pencilTilt: number) => void;
   setPencilPrediction: (pencilPrediction: boolean) => void;
   setDebugPerformance: (debugPerformance: boolean) => void;
+  setLowGraphics: (lowGraphics: boolean) => void;
   setAttentionAlertsEnabled: (attentionAlertsEnabled: boolean) => void;
   setAttentionIdleSeconds: (attentionIdleSeconds: number) => void;
   setAttentionAwaySeconds: (attentionAwaySeconds: number) => void;
+  setPdfPageLimit: (pdfPageLimit: number) => void;
   setPngExportScale: (pngExportScale: number) => void;
   resetPencil: () => void;
 }
@@ -92,6 +128,13 @@ interface CanvasUiStore {
 export const ATTENTION_IDLE_RANGE = { min: 30, max: 300, step: 15 } as const;
 export const ATTENTION_AWAY_RANGE = { min: 5, max: 120, step: 5 } as const;
 
+/**
+ * Bounds for the PDF import limit. Ten covers the worksheet and past-paper
+ * extract this exists for; the ceiling is where rasterizing a document starts
+ * to cost more than the board gains from having it inline.
+ */
+export const PDF_PAGE_LIMIT_RANGE = { min: 1, max: 50, step: 1 } as const;
+
 /** Offered PNG export resolutions, as a multiplier of the board's own units. */
 export const PNG_EXPORT_SCALES = [1, 2, 3, 4] as const;
 /** Matches the 2x cap the export used to derive from `devicePixelRatio`. */
@@ -103,37 +146,94 @@ const PENCIL_DEFAULTS = {
   pencilSmoothing: DEFAULT_PENCIL_DYNAMICS.smoothing,
   pencilSimulatePressure: DEFAULT_PENCIL_DYNAMICS.simulatePressure,
   pencilStartTaper: 0,
-  pencilEndTaper: DEFAULT_PENCIL_DYNAMICS.endTaper,
+  // A lift that was still moving gets a taper and one that stopped does not,
+  // which is what a nib does. The unconditional pointed finish is still on the
+  // menu as `full`.
+  pencilEndTaper: 'velocity',
+  pencilPressureCurve: 'medium',
+  pencilTilt: DEFAULT_PENCIL_DYNAMICS.tiltAmount,
   pencilPrediction: false,
 } as const;
 
-// The previous release made every mouse/touch stroke behave like a pressure
-// brush, including a pointed finish. Only replace that exact untouched preset;
-// any person who changed one of the controls keeps their chosen configuration.
-const PREVIOUS_PENCIL_DEFAULTS = {
-  pencilThinning: 0.5,
-  pencilSmoothing: 0.5,
-  pencilSimulatePressure: true,
-  pencilStartTaper: 0,
-  pencilEndTaper: true,
-} as const;
+/**
+ * Pen presets shipped as defaults by earlier releases.
+ *
+ * A stored preset that still matches one of these exactly was never touched,
+ * and adopting the current defaults for it is how someone who has no opinion
+ * about their pen gets the pen the release ships. Anyone who moved even one
+ * control falls out of every entry here and keeps precisely what they chose —
+ * which is the whole reason these are matched in full rather than field by
+ * field.
+ *
+ * `brush` made every mouse and touch stroke a pressure brush with a pointed
+ * finish; `rounded` replaced it with the predictable pencil that stops where
+ * the pointer stops.
+ */
+const PREVIOUS_PENCIL_PRESETS = [
+  {
+    pencilThinning: 0.5,
+    pencilSmoothing: 0.5,
+    pencilSimulatePressure: true,
+    pencilStartTaper: 0,
+    pencilEndTaper: true,
+  },
+  {
+    pencilThinning: DEFAULT_PENCIL_DYNAMICS.thinning,
+    pencilSmoothing: DEFAULT_PENCIL_DYNAMICS.smoothing,
+    pencilSimulatePressure: DEFAULT_PENCIL_DYNAMICS.simulatePressure,
+    pencilStartTaper: 0,
+    pencilEndTaper: false,
+  },
+] as const;
+
+/**
+ * `pencilEndTaper` was a switch before it was a mode. Read the old boolean as
+ * the two positions it actually had — off, or the pointed finish over the
+ * whole stroke — rather than as the new default, so nobody's pen changes shape
+ * because the control it was set with grew a third option.
+ */
+function endTaperModeFrom(value: unknown): EndTaperMode {
+  if (value === 'off' || value === 'velocity' || value === 'full') return value;
+  return value === true ? 'full' : 'off';
+}
 
 function migrateCanvasUiStore(persistedState: unknown): CanvasUiStore {
   const state = persistedState as Partial<CanvasUiStore>;
-  const isUnchangedBrushPreset =
-    state.pencilThinning === PREVIOUS_PENCIL_DEFAULTS.pencilThinning &&
-    state.pencilSmoothing === PREVIOUS_PENCIL_DEFAULTS.pencilSmoothing &&
-    state.pencilSimulatePressure ===
-      PREVIOUS_PENCIL_DEFAULTS.pencilSimulatePressure &&
-    state.pencilStartTaper === PREVIOUS_PENCIL_DEFAULTS.pencilStartTaper &&
-    state.pencilEndTaper === PREVIOUS_PENCIL_DEFAULTS.pencilEndTaper;
+  const isUnchangedPreset = PREVIOUS_PENCIL_PRESETS.some(
+    (preset) =>
+      state.pencilThinning === preset.pencilThinning &&
+      state.pencilSmoothing === preset.pencilSmoothing &&
+      state.pencilSimulatePressure === preset.pencilSimulatePressure &&
+      state.pencilStartTaper === preset.pencilStartTaper &&
+      (state.pencilEndTaper as unknown) === preset.pencilEndTaper,
+  );
 
+  if (isUnchangedPreset) {
+    return {
+      snappingEnabled: true,
+      ...state,
+      ...PENCIL_DEFAULTS,
+    } as CanvasUiStore;
+  }
+  // Keys added since this state was written are left absent rather than set to
+  // `undefined`, so zustand's merge fills them from the initial state.
   return {
     snappingEnabled: true,
-    ...(isUnchangedBrushPreset
-      ? { ...state, ...PENCIL_DEFAULTS }
-      : state),
+    ...state,
+    ...('pencilEndTaper' in state
+      ? { pencilEndTaper: endTaperModeFrom(state.pencilEndTaper) }
+      : {}),
   } as CanvasUiStore;
+}
+
+/**
+ * Mirror the preference onto the document root, where the stylesheet can see
+ * it. It gates a CSS effect rather than a React one, so it has to be an
+ * attribute and not a prop threaded to five call sites — the same reason the
+ * theme is a class on `<html>` rather than context.
+ */
+export function applyLowGraphics(lowGraphics: boolean): void {
+  document.documentElement.toggleAttribute('data-low-graphics', lowGraphics);
 }
 
 // Local, per-user canvas UI preferences shown in the Settings dialog.
@@ -144,9 +244,11 @@ export const useCanvasUiStore = create<CanvasUiStore>()(
       snappingEnabled: true,
       eraserMode: 'object',
       debugPerformance: false,
+      lowGraphics: false,
       attentionAlertsEnabled: true,
       attentionIdleSeconds: 90,
       attentionAwaySeconds: 15,
+      pdfPageLimit: 10,
       pngExportScale: DEFAULT_PNG_EXPORT_SCALE,
       ...PENCIL_DEFAULTS,
       setBackground: (background) => set({ background }),
@@ -160,21 +262,32 @@ export const useCanvasUiStore = create<CanvasUiStore>()(
         set({ pencilSimulatePressure }),
       setPencilStartTaper: (pencilStartTaper) => set({ pencilStartTaper }),
       setPencilEndTaper: (pencilEndTaper) => set({ pencilEndTaper }),
+      setPencilPressureCurve: (pencilPressureCurve) =>
+        set({ pencilPressureCurve }),
+      setPencilTilt: (pencilTilt) => set({ pencilTilt }),
       setPencilPrediction: (pencilPrediction) => set({ pencilPrediction }),
       setDebugPerformance: (debugPerformance) => set({ debugPerformance }),
+      setLowGraphics: (lowGraphics) => {
+        applyLowGraphics(lowGraphics);
+        set({ lowGraphics });
+      },
       setAttentionAlertsEnabled: (attentionAlertsEnabled) =>
         set({ attentionAlertsEnabled }),
       setAttentionIdleSeconds: (attentionIdleSeconds) =>
         set({ attentionIdleSeconds }),
       setAttentionAwaySeconds: (attentionAwaySeconds) =>
         set({ attentionAwaySeconds }),
+      setPdfPageLimit: (pdfPageLimit) => set({ pdfPageLimit }),
       setPngExportScale: (pngExportScale) => set({ pngExportScale }),
       resetPencil: () => set({ ...PENCIL_DEFAULTS }),
     }),
     {
       name: 'whiteboard:canvas-ui',
-      version: 2,
+      version: 3,
       migrate: migrateCanvasUiStore,
+      onRehydrateStorage: () => (state) => {
+        if (state) applyLowGraphics(state.lowGraphics);
+      },
     },
   ),
 );

@@ -21,7 +21,11 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Kbd } from '@/components/ui/kbd';
-import { Surface } from '@/components/ui/surface';
+import {
+  CHROME_KEY_ON_BOARD,
+  CHROME_ON_BOARD,
+  Surface,
+} from '@/components/ui/surface';
 import {
   Tooltip,
   TooltipContent,
@@ -29,6 +33,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { useRovingToolbar } from '@/hooks/use-roving-toolbar';
+import { cn } from '@/lib/utils';
 import {
   type BackgroundType,
   BACKGROUND_LABELS,
@@ -52,6 +57,7 @@ function ControlButton({
   label,
   shortcut,
   children,
+  className,
   ...props
 }: Omit<ComponentProps<typeof Button>, 'aria-label'> & {
   label: string;
@@ -64,6 +70,7 @@ function ControlButton({
         render={
           <Button
             {...props}
+            className={cn(CHROME_KEY_ON_BOARD, className)}
             data-toolbar-item
             tabIndex={-1}
             aria-label={label}
@@ -111,7 +118,13 @@ export function CanvasControls({
           chrome
           onFocusCapture={toolbar.onFocusCapture}
           onKeyDown={toolbar.onKeyDown}
-          className="flex items-center gap-0.5 rounded-none rounded-tl-xl border-0 p-1"
+          className={cn(
+            // Mirror of the history HUD opposite it: no card, and the corner
+            // turned in on whichever sides are not flush to a viewport edge.
+            'relative flex items-center gap-0.5 rounded-none rounded-tl-xl p-1',
+            'wb-chrome-blur max-sm:rounded-bl-xl [@media(pointer:coarse)]:rounded-bl-xl',
+            CHROME_ON_BOARD,
+          )}
         >
           <ControlButton
             variant="ghost"
@@ -130,7 +143,7 @@ export function CanvasControls({
             label="Reset zoom to 100%"
             shortcut="Control+0"
             onClick={onZoomReset}
-            className="min-w-12 px-1.5 font-normal text-fg tabular-nums"
+            className="min-w-12 rounded-full px-1.5 font-normal text-fg tabular-nums"
             disabled={disabled}
           >
             {Math.round(zoom * 100)}%
@@ -166,6 +179,7 @@ export function CanvasControls({
                         <Button
                           variant="ghost"
                           size="icon-sm"
+                          className={CHROME_KEY_ON_BOARD}
                           data-toolbar-item
                           tabIndex={-1}
                           aria-label="Find an equation"
@@ -215,6 +229,7 @@ export function CanvasControls({
                       <Button
                         variant="ghost"
                         size="icon-sm"
+                        className={CHROME_KEY_ON_BOARD}
                         data-toolbar-item
                         tabIndex={-1}
                         aria-label={`Background: ${BACKGROUND_LABELS[background]}`}

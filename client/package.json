@@ -4,7 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "copy:pdfjs": "node scripts/copy-pdfjs-assets.mjs",
+    "predev": "npm run copy:pdfjs",
     "dev": "vite",
+    "prebuild": "npm run copy:pdfjs",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
@@ -27,6 +30,7 @@
     "mathjax-full": "^3.2.2",
     "mathjs": "^15.2.0",
     "mathlive": "^0.110.0",
+    "pdfjs-dist": "^6.3.289",
     "rbush": "^4.0.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

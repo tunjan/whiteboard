@@ -14,6 +14,13 @@ export interface ToolPointerInfo {
   zoom: number;
   /** Pointer pressure 0..1 (0.5 for mouse without real pressure). */
   pressure: number;
+  /**
+   * How far the stylus barrel leans off vertical, as the unit vector it leans
+   * along scaled by that lean. `(0, 0)` for an upright pen and for every
+   * pointer that is not one.
+   */
+  tiltX?: number;
+  tiltY?: number;
   /** Browser pointer type, used by tools that distinguish mouse from pen input. */
   pointerType: string;
   shiftKey: boolean;

@@ -1,7 +1,6 @@
 import { Fragment } from 'react';
 import { toolRegistry } from '@/canvas/tools/tool-registry';
 import { useToolStore } from '@/canvas/use-tool-store';
-import { EraserModeSelector } from '@/components/eraser-mode-selector';
 import { Button } from '@/components/ui/button';
 import { Kbd } from '@/components/ui/kbd';
 import {
@@ -51,16 +50,6 @@ export function ToolButton({ toolId }: ToolButtonProps) {
       </TooltipContent>
     </Tooltip>
   );
-
-  // The eraser carries its mode selector satellite anchored right above its button.
-  if (tool.id === 'eraser') {
-    return (
-      <div key={tool.id} className="relative flex">
-        {button}
-        <EraserModeSelector active={active} />
-      </div>
-    );
-  }
 
   return <Fragment key={tool.id}>{button}</Fragment>;
 }

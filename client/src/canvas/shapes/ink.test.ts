@@ -1,10 +1,16 @@
 import { describe, expect, it } from 'vitest';
+import type { DrawPoint } from '@whiteboard/shared';
 import {
   DEFAULT_PENCIL_DYNAMICS,
   DEFAULT_PENCIL_STABILIZATION,
+  LIFT_TAPER_FULL_SPEED,
+  LIFT_TAPER_MAX_STROKE_FRACTION,
+  LIFT_TAPER_MAX_WIDTHS,
+  LIFT_TAPER_MIN_SPEED,
   STROKE_PROFILES,
   getInkCenterlinePath,
   getInkPathData,
+  liftTaperFor,
   pencilStabilizationToStreamline,
 } from './ink';
 import { buildInkCenterline } from './ink-engine';
@@ -269,6 +275,84 @@ describe('pencil outlines', () => {
     // land just short of it, having covered the same ground.
     expect(thin).toBeCloseTo(thick, 2);
     expect(thin).toBeGreaterThan(0.69);
+  });
+
+  it('answers it at the same distance with the current opening model too', () => {
+    // The test above never reached the code every stroke drawn today runs:
+    // `pressureWarmup` names the five-brush-width opening initialization, but
+    // it was also branching the steady-state filter back onto the
+    // brush-dependent rate that filter replaced. Past the warmup window, a
+    // size-24 nib answered the same 40-unit step at 46% of its own width
+    // where a size-4 nib reached 64% of its own.
+    const widthFraction = (size: number) => {
+      const points = Array.from({ length: 241 }, (_, index) => ({
+        x: index,
+        y: 0,
+        // Past five brush widths for both nibs, so the opening warmup has
+        // finished and this is the steady-state response being measured.
+        pressure: index < 200 ? 0.2 : 0.8,
+      }));
+      const path = getInkPathData(points, size, true, {
+        ...dynamics,
+        smoothing: 0,
+        pressureEasing: 'linear',
+        pressureWarmup: true,
+      });
+      return maxAbsPathY(path) / size;
+    };
+
+    expect(widthFraction(4)).toBeCloseTo(widthFraction(24), 2);
+  });
+
+  it('opens at the speed the hand actually left the press point', () => {
+    // The streamline pass drops the first few filtered samples, but kept
+    // crediting the surviving one with only the last step into it while its
+    // run length counted the whole opening. Simulated pressure reads that step
+    // as how fast the hand is moving, so a stroke thrown out of the press point
+    // opened as if it had crawled — wider than the neutral press radius rather
+    // than narrower.
+    const points = Array.from({ length: 40 }, (_, index) => ({
+      x: index * 10,
+      y: 0,
+      pressure: 0.5,
+    }));
+    const path = getInkPathData(points, 60, true, {
+      ...dynamics,
+      smoothing: 0,
+      simulatePressure: true,
+      pressureEasing: 'linear',
+    });
+    // The press point is drawn at neutral pressure, half the brush width. The
+    // first vertex after it has to come in from there, not go out past it.
+    const [, pressY, firstDy] = /^M \S+ (\S+) q \S+ \S+ \S+ (\S+)/.exec(path)!;
+    expect(Math.abs(Number(pressY))).toBeCloseTo(30, 5);
+    expect(Math.abs(Number(pressY) + Number(firstDy))).toBeLessThan(30);
+  });
+
+  it('carries the previous direction through a step that goes nowhere', () => {
+    // A stroke that doubles back onto its own start leaves the streamline pass
+    // with two coincident points. That step has no direction, and the fallback
+    // used to be `(1, 1)` — not a unit vector at all, so the miter offset came
+    // out 41% too wide and locked at -45 degrees, tilting the cap off the line.
+    const path = getInkPathData(
+      [
+        { x: 0, y: 0, pressure: 0.5 },
+        { x: 3, y: 0, pressure: 0.5 },
+        { x: 4, y: 0, pressure: 0.5 },
+        { x: 3, y: 0, pressure: 0.5 },
+        { x: 0, y: 0, pressure: 0.5 },
+        { x: 10, y: 0, pressure: 0.5 },
+      ],
+      10,
+      true,
+      { ...dynamics, thinning: 0 },
+    );
+
+    // Every offset on a stroke drawn along x is one radius straight up or
+    // down. `(1, 1)` tilted the first one to (-5, 5): still 5 tall, but 5 wide
+    // as well, so the cap started a whole radius behind the press point.
+    expect(path).toMatch(/^M 0 -?5 /);
+    expect(maxAbsPathY(path)).toBeCloseTo(5, 2);
   });
 
   it('spends outline points on curvature rather than on distance', () => {
@@ -649,6 +733,15 @@ describe('finished-stroke endpoint', () => {
     expect(finished).toBeLessThanOrEqual(80 + 10);
   });
 
+  /** The conditioned centerline as plain points, copied out of the shared view. */
+  const centerlinePoints = (points: DrawPoint[]) => {
+    const line = buildInkCenterline(points, 10, stabilized.streamline, true);
+    return Array.from({ length: line.count }, (_, i) => ({
+      x: line.x[i]!,
+      y: line.y[i]!,
+    }));
+  };
+
   /** The same line every time; only the sample spacing changes. */
   const ramp = (spacing: number, length = 80) => {
     const steps = Math.round(length / spacing);
@@ -658,6 +751,49 @@ describe('finished-stroke endpoint', () => {
       pressure: 0.5,
     }));
   };
+
+  /** An arc sampled every unit, the shape the tip pin actually has to correct. */
+  const arc = (samples = 90) =>
+    Array.from({ length: samples }, (_, i) => {
+      const angle = (i / samples) * Math.PI * 0.8;
+      return { x: Math.cos(angle) * 40, y: Math.sin(angle) * 40, pressure: 0.5 };
+    });
+
+  it('eases the tip onto the pointer instead of snapping it there', () => {
+    // The pin has to reach the raw sample, but reaching it in one step makes a
+    // discontinuity that moves: while drawing, each frame puts the newest
+    // sample on the pointer and the next frame drops it back onto the filtered
+    // curve. Every sample behind the tip is bit-stable frame to frame, so that
+    // retreat was the whole of the ink's visible unsteadiness, and it sat at
+    // exactly the place the eye watches. Spreading it over a run of samples
+    // divides it by the number of frames the run spans.
+    const points = arc();
+    let worst = 0;
+    let previous = centerlinePoints(points.slice(0, 20));
+    for (let n = 21; n <= points.length; n++) {
+      const line = centerlinePoints(points.slice(0, n));
+      for (let i = 0; i < Math.min(previous.length, line.length); i++) {
+        worst = Math.max(
+          worst,
+          Math.hypot(previous[i]!.x - line[i]!.x, previous[i]!.y - line[i]!.y),
+        );
+      }
+      previous = line;
+    }
+    // The single-sample pin moved already-drawn ink by 5.48 units a frame on
+    // this arc; the ramp moves it by 1.96. The remainder is not the pin: it is
+    // the endpoint-jitter run being collapsed onto a new sample as the stroke
+    // grows, which happens with or without stabilization.
+    expect(worst).toBeLessThan(3);
+  });
+
+  it('still ends exactly on the raw sample while easing', () => {
+    // The ease is only in how the tip is reached. Were it to fall short, the
+    // stroke would trail the pointer and then pop forward at pointer-up.
+    const points = ramp(1);
+    const line = centerlinePoints(points);
+    expect(line[line.length - 1]).toEqual({ x: 80, y: 0 });
+  });
 
   it('trails the pointer when the endpoint is left unpinned', () => {
     // The unpinned form the engine still supports: every point, including the
@@ -934,5 +1070,123 @@ describe('stabilization against the camera', () => {
       return total;
     };
     expect(wobble(0.25)).toBeLessThan(wobble(1));
+  });
+});
+
+describe('stylus tilt', () => {
+  const dynamics = {
+    thinning: 0.5,
+    smoothing: 0.5,
+    streamline: 0,
+    startTaper: 0,
+    endTaper: false as const,
+  };
+
+  /** A straight horizontal stroke, every sample leaning the same way. */
+  function stroke(tiltX: number, tiltY: number): DrawPoint[] {
+    return Array.from({ length: 40 }, (_, i) => ({
+      x: i * 2,
+      y: 0,
+      pressure: 0.5,
+      tiltX,
+      tiltY,
+    }));
+  }
+
+  /** Widest half-width of that stroke, as drawn. */
+  function halfWidth(points: DrawPoint[], tiltAmount: number): number {
+    return maxAbsPathY(
+      getInkPathData(points, 10, true, { ...dynamics, tiltAmount }),
+    );
+  }
+
+  it('broadens a stroke drawn across the lean and not one drawn along it', () => {
+    // The nib is an ellipse laid along the barrel: crossing it presents the
+    // flat, following it presents the same edge an upright pen has. A model
+    // that widened on any tilt at all would fail the second of these.
+    const upright = halfWidth(stroke(0, 0), 1);
+    const along = halfWidth(stroke(1, 0), 1);
+    const across = halfWidth(stroke(0, 1), 1);
+
+    expect(along).toBeCloseTo(upright, 5);
+    expect(across / upright).toBeGreaterThan(2);
+    expect(across / upright).toBeLessThan(2.3);
+  });
+
+  it('scales with the setting and vanishes at zero', () => {
+    const upright = halfWidth(stroke(0, 0), 1);
+    expect(halfWidth(stroke(0, 1), 0)).toBeCloseTo(upright, 5);
+    const half = halfWidth(stroke(0, 1), 0.5);
+    expect(half).toBeGreaterThan(upright);
+    expect(half).toBeLessThan(halfWidth(stroke(0, 1), 1));
+  });
+
+  it('leaves strokes saved without tilt exactly as they were', () => {
+    // Absent channels are not zero-tilt samples that happen to agree; they are
+    // strokes drawn before tilt was read, and must render identically whatever
+    // the current preference is.
+    const legacy: DrawPoint[] = Array.from({ length: 40 }, (_, i) => ({
+      x: i * 2,
+      y: 0,
+      pressure: 0.5,
+    }));
+    expect(getInkPathData(legacy, 10, true, { ...dynamics, tiltAmount: 1 })).toBe(
+      getInkPathData(legacy, 10, true, { ...dynamics, tiltAmount: 0 }),
+    );
+  });
+});
+
+describe('pressure response curves', () => {
+  const points: DrawPoint[] = Array.from({ length: 40 }, (_, i) => ({
+    x: i * 2,
+    y: 0,
+    pressure: 0.5,
+  }));
+  const width = (pressureEasing: 'soft' | 'smoothstep' | 'firm'): number =>
+    maxAbsPathY(
+      getInkPathData(points, 10, true, {
+        thinning: 0.5,
+        smoothing: 0.5,
+        streamline: 0,
+        startTaper: 0,
+        endTaper: false,
+        pressureEasing,
+      }),
+    );
+
+  it('orders soft, medium and firm by how readily they give width', () => {
+    // The point of the preference is that the same hand gets a different line,
+    // so the three have to be separated by something a person would notice —
+    // not by a percent that only a test can see.
+    expect(width('soft')).toBeGreaterThan(width('smoothstep') * 1.2);
+    expect(width('firm')).toBeLessThan(width('smoothstep') * 0.8);
+  });
+});
+
+describe('lift taper', () => {
+  it('gives a slow lift no taper and a flick a long one', () => {
+    // A hand that stops and lifts has drawn a stroke that ends; only one still
+    // moving has drawn one that trails off.
+    expect(liftTaperFor(0.05, 10, 1000)).toBe(0);
+    expect(liftTaperFor(LIFT_TAPER_MIN_SPEED, 10, 1000)).toBe(0);
+    expect(liftTaperFor(LIFT_TAPER_FULL_SPEED, 10, 1000)).toBe(
+      10 * LIFT_TAPER_MAX_WIDTHS,
+    );
+    expect(liftTaperFor(99, 10, 1000)).toBe(10 * LIFT_TAPER_MAX_WIDTHS);
+  });
+
+  it('scales the taper with the brush', () => {
+    const fast = LIFT_TAPER_FULL_SPEED;
+    expect(liftTaperFor(fast, 20, 1000)).toBe(2 * liftTaperFor(fast, 10, 1000));
+  });
+
+  it('never lets a short tick be swallowed by its own taper', () => {
+    // A decimal point flicked off at speed is shorter than the taper the speed
+    // earns; without the cap it comes out a sliver pointed at both ends.
+    expect(liftTaperFor(99, 10, 8)).toBe(8 * LIFT_TAPER_MAX_STROKE_FRACTION);
+  });
+
+  it('reads a broken speed as no lift at all', () => {
+    expect(liftTaperFor(Number.NaN, 10, 100)).toBe(0);
   });
 });

@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
+import { ensureGraphMath } from './graph-math';
 import { DEFAULT_GRAPH_PARAMETER } from './graph-defaults';
 import { reconcileGraphParameters } from './graph-parameters';
 import {
@@ -9,6 +10,10 @@ import {
 import { GRAPH_MATH_PRESETS, GRAPH_VIEWPORT_PRESETS } from './graph-presets';
 import { sampleGraphExpression } from './graph-sampler';
 import type { GraphExpression, GraphViewport } from '@whiteboard/shared';
+
+// The mathjs parser is fetched on demand in the app; nothing parses until it
+// is in, here included.
+beforeAll(() => ensureGraphMath());
 
 const viewport: GraphViewport = {
   xMin: -1,
@@ -79,7 +84,23 @@ describe('graph expressions', () => {
 
     expect(parsed.ok).toBe(true);
     if (!parsed.ok || isCoordinateExpression(parsed)) return;
-    expect(parsed.normalized).toBe('(1+2+3+4+5)+1');
+    expect(parsed.evaluate(0, {})).toBeCloseTo(16);
+  });
+
+  it('sums to a slider, following it to the nearest whole number', () => {
+    // What MathLive hands back for \sum_{n=1}^{k}\left(\cos x\right).
+    const parsed = parseGraphExpression('y= sum  _(n=1)^k(cos x)');
+
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok || isCoordinateExpression(parsed)) return;
+    expect(parsed.variables).toEqual(['k']);
+    const withK = (value: number) => ({
+      k: { ...DEFAULT_GRAPH_PARAMETER, value },
+    });
+    expect(parsed.evaluate(0, withK(3))).toBeCloseTo(3);
+    expect(parsed.evaluate(1, withK(4.4))).toBeCloseTo(4 * Math.cos(1));
+    // Past the term limit the sum has no value rather than a slow one.
+    expect(parsed.evaluate(0, withK(500))).toBeNaN();
   });
 
   it('shadows the outer index in a nested summation', () => {
@@ -90,10 +111,91 @@ describe('graph expressions', () => {
     expect(parsed.evaluate(1, {})).toBeCloseTo(18);
   });
 
-  it('rejects summation limits it cannot expand', () => {
+  it('rejects summation limits it cannot use', () => {
     expect(parseGraphExpression(' sum  _(n=1)^(500)n').ok).toBe(false);
-    expect(parseGraphExpression(' sum  _(n=a)^(3)n').ok).toBe(false);
     expect(parseGraphExpression(' sum  _(x=1)^(3)x').ok).toBe(false);
+  });
+
+  it('integrates between its limits', () => {
+    // What MathLive hands back for y=\int_1^{x}\sin\left(t\right)\mathrm{d}t.
+    const parsed = parseGraphExpression('y= int  _1^x sin (t)d t');
+
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok || isCoordinateExpression(parsed)) return;
+    expect(parsed.kind).toBe('explicit');
+    expect(parsed.variables).toEqual([]);
+    expect(parsed.evaluate(1, {})).toBeCloseTo(0);
+    expect(parsed.evaluate(3, {})).toBeCloseTo(Math.cos(1) - Math.cos(3));
+    // Below the lower limit the integral runs backwards, and changes sign.
+    expect(parsed.evaluate(0, {})).toBeCloseTo(Math.cos(1) - Math.cos(0));
+  });
+
+  it('ends an integral at its differential', () => {
+    const parsed = parseGraphExpression(' int  _0^1t d t+3');
+
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok || isCoordinateExpression(parsed)) return;
+    expect(parsed.evaluate(0, {})).toBeCloseTo(3.5);
+  });
+
+  it('finds sliders inside an integrand', () => {
+    const parsed = parseGraphExpression(' int  _0^x a t d t');
+
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok || isCoordinateExpression(parsed)) return;
+    expect(parsed.variables).toEqual(['a']);
+    expect(
+      parsed.evaluate(2, { a: { ...DEFAULT_GRAPH_PARAMETER, value: 3 } }),
+    ).toBeCloseTo(6);
+  });
+
+  it('nests integrals, each over its own variable', () => {
+    const parsed = parseGraphExpression(' int  _0^x int  _0^u v d v d u');
+
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok || isCoordinateExpression(parsed)) return;
+    expect(parsed.evaluate(3, {})).toBeCloseTo(27 / 6);
+  });
+
+  it('rejects integrals it cannot read', () => {
+    expect(parseGraphExpression(' int  _0^1t').ok).toBe(false);
+    expect(parseGraphExpression(' int  _0^1x d x').ok).toBe(false);
+    expect(parseGraphExpression(' int  0^1t d t').ok).toBe(false);
+  });
+
+  it('integrates and sums inside a named function and a coordinate', () => {
+    const definition = expression('g(z)= int  _0^z u d u');
+    const definitions = createGraphFunctionDefinitions([definition]);
+    const named = parseGraphExpression(definition.expression, definitions);
+
+    expect(named.ok).toBe(true);
+    if (!named.ok || isCoordinateExpression(named)) return;
+    expect(named.evaluate(4, {})).toBeCloseTo(8);
+
+    // The bound variable shadows the parametric one, so the coordinate is
+    // still swept by the outer `t`.
+    const curve = parseGraphExpression('( int  _0^t sin (u)d u,t)');
+    expect(curve.ok).toBe(true);
+    if (!curve.ok || !isCoordinateExpression(curve)) return;
+    expect(curve.kind).toBe('parametric');
+    expect(curve.evaluateAt(Math.PI, {}).x).toBeCloseTo(2);
+  });
+
+  it('applies a function written without parentheses', () => {
+    // MathLive writes \cos x with no parentheses of its own.
+    const bare = parseGraphExpression('y=cos x');
+    expect(bare.ok).toBe(true);
+    if (!bare.ok || isCoordinateExpression(bare)) return;
+    expect(bare.normalized).toBe('cos(x)');
+    expect(bare.evaluate(0, {})).toBeCloseTo(1);
+
+    // The argument runs over the factors that follow it, and a second function
+    // starts a new term rather than nesting.
+    const product = parseGraphExpression('y=sin 2x cos x');
+    expect(product.ok).toBe(true);
+    if (!product.ok || isCoordinateExpression(product)) return;
+    expect(product.normalized).toBe('sin(2*x)*cos(x)');
+    expect(product.evaluate(1, {})).toBeCloseTo(Math.sin(2) * Math.cos(1));
   });
 
   it('rejects assignments and other unsupported expression forms', () => {

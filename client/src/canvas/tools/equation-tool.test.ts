@@ -59,7 +59,7 @@ function placedEquation(shapes: Map<string, Shape>) {
 describe('equation tool placement', () => {
   beforeEach(() => {
     useSelectionStore.getState().clear();
-    useStyleStore.setState({ color: '#d6568c' });
+    useStyleStore.getState().setColor('text', '#d6568c');
   });
 
   it('takes the current drawing color, like every other tool', () => {

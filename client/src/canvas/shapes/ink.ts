@@ -4,6 +4,7 @@ import {
   getFreehandPathData,
   getInkCenterlinePathData,
   vectorLength,
+  MAX_TILT_BROADENING,
   NOMINAL_SAMPLE_SPACING,
   type FreehandEngineOptions,
   type InkCenterline,
@@ -18,6 +19,7 @@ export interface InkStrokeDynamics {
   endTaper?: number | boolean;
   pressureEasing?: PressureEasing;
   pressureWarmup?: boolean;
+  tiltAmount?: number;
 }
 
 const MIN_STREAMLINE_RAW_WEIGHT = 0.15;
@@ -169,6 +171,94 @@ function toStreamline(rawWeight: number): number {
   );
 }
 
+/**
+ * How the stroke's end is finished, once the hand has actually lifted.
+ *
+ * `off` is a round cap: the ink stops where the pointer stopped. `full` is the
+ * pointed brush finish, which ramps across the whole stroke. `velocity` asks
+ * the gesture — a flick tapers, a considered stop does not. See
+ * {@link liftTaperFor}.
+ */
+export type EndTaperMode = 'off' | 'velocity' | 'full';
+
+/**
+ * The pen-response preference, as the user chooses it.
+ *
+ * `medium` is not a curve of its own: it means "whichever curve the input this
+ * stroke was drawn with calls for", which is what every stroke used before
+ * there was a choice. Only the two deliberate ends name a curve, and they name
+ * it for stylus and mouse alike — someone who says the pen is too soft means
+ * it about the pointer they have.
+ */
+export type PencilPressureCurve = 'soft' | 'medium' | 'firm';
+
+/**
+ * Speed, in screen pixels per millisecond, below which a lift earns no taper
+ * at all.
+ *
+ * A taper is the mark a nib leaves as it comes off the page while still
+ * moving, so the thing that decides whether there is one is whether the hand
+ * was still moving. Ending a letter by stopping and lifting is not a flick and
+ * must keep its round cap — that is the difference between handwriting and a
+ * brush script, and a fixed taper gets it wrong every time it is asked.
+ *
+ * Quoted on screen and against the clock for the reason `SPEED_AT_MIN_WIDTH`
+ * in the draw tool is: how fast the hand moved is a property of the hand, not
+ * of the camera it happened to be drawing through.
+ */
+export const LIFT_TAPER_MIN_SPEED = 0.35;
+
+/** Lift speed at which the taper reaches its full length, same units. */
+export const LIFT_TAPER_FULL_SPEED = 1.8;
+
+/**
+ * Longest taper a lift can earn, in brush widths.
+ *
+ * In widths rather than pixels because a taper shorter than the nib is not a
+ * taper — it is the round cap it replaces — and one many times longer than the
+ * nib is a needle. Six is where a fast flick reads as having been lifted
+ * rather than cut off, measured against the same gesture on paper.
+ */
+export const LIFT_TAPER_MAX_WIDTHS = 6;
+
+/**
+ * Most of a stroke a lift taper may consume.
+ *
+ * The length above is derived from the brush and the gesture, neither of which
+ * knows how long the stroke is. Without this, a short quick tick — a decimal
+ * point, the cross of a `t` — is entirely inside its own taper and comes out
+ * as a sliver pointed at both ends instead of a mark.
+ */
+export const LIFT_TAPER_MAX_STROKE_FRACTION = 0.5;
+
+/**
+ * The taper length a lift has earned, in world units, or 0 for none.
+ *
+ * `speed` is the filtered pointer speed at the lift in screen px/ms;
+ * `strokeLength` and `size` are world lengths, as the result is.
+ *
+ * No camera term, and deliberately: the only screen-referenced quantity here
+ * is the speed that decides *whether* there is a taper, which is a fact about
+ * the hand. How long it then is, is quoted in brush widths — already a world
+ * measure — so a flick leaves a taper the same number of nibs long at every
+ * zoom without anything having to convert between the two.
+ */
+export function liftTaperFor(
+  speed: number,
+  size: number,
+  strokeLength: number,
+): number {
+  if (!Number.isFinite(speed) || !(size > 0)) return 0;
+  const t = clamp01(
+    (speed - LIFT_TAPER_MIN_SPEED) /
+      (LIFT_TAPER_FULL_SPEED - LIFT_TAPER_MIN_SPEED),
+  );
+  if (t <= 0) return 0;
+  const taper = size * LIFT_TAPER_MAX_WIDTHS * t;
+  const cap = Math.max(0, strokeLength) * LIFT_TAPER_MAX_STROKE_FRACTION;
+  return cap > 0 ? Math.min(taper, cap) : taper;
+}
+
 export const DEFAULT_PENCIL_DYNAMICS = {
   // Mouse and touch do not provide meaningful pressure. A predictable pencil
   // line is a better default than turning small speed changes into a brush.
@@ -179,9 +269,13 @@ export const DEFAULT_PENCIL_DYNAMICS = {
   // Persisted on new shapes; older shapes omit both and keep this same curve.
   pressureEasing: 'smoothstep',
   pressureWarmup: false,
+  // Free hardware signal on a stylus and inert on everything else, so it is on
+  // by default at a middling strength; nothing a mouse or a finger draws can
+  // reach it. See `MAX_TILT_BROADENING`.
+  tiltAmount: 0.5,
   startTaper: 0,
-  // Round caps make a pencil stop where the pointer stops. The pointed brush
-  // finish remains available in Settings for people who want it.
+  // Round caps make a pencil stop where the pointer stops; a flick earns its
+  // taper from the speed it was lifted at. See `liftTaperFor`.
   endTaper: false,
 } as const satisfies Required<InkStrokeDynamics>;
 
@@ -202,6 +296,29 @@ const linearPressureEasing = (pressure: number): number => pressure;
 const smoothPressureEasing = (pressure: number): number =>
   pressure * pressure * (3 - 2 * pressure);
 
+/**
+ * How much sooner or later than the automatic curve a chosen pen response
+ * reaches a given width, as an exponent on the input to that same curve.
+ *
+ * Shaping the *input* rather than composing a different curve is what keeps
+ * the three responses recognisably one pen: `p ** g` fixes both ends, so a
+ * feather-light touch still draws nothing and a pen pressed to its limit still
+ * draws the full nib on all three. Only the journey between them moves — which
+ * is precisely what someone reaching for this control is complaining about.
+ *
+ * The pair is deliberately wide. A response preference that three people
+ * cannot tell apart is worse than no preference at all: at mid pressure these
+ * put soft at about 1.4x the width of medium and firm at about 0.6x, which is
+ * a difference you see in one written word.
+ */
+const SOFT_PRESSURE_GAMMA = 0.65;
+const FIRM_PRESSURE_GAMMA = 1.5;
+
+const softPressureEasing = (pressure: number): number =>
+  smoothPressureEasing(clamp01(pressure) ** SOFT_PRESSURE_GAMMA);
+const firmPressureEasing = (pressure: number): number =>
+  smoothPressureEasing(clamp01(pressure) ** FIRM_PRESSURE_GAMMA);
+
 function pressureEasingFor(
   easing: PressureEasing | undefined,
   simulatePressure: boolean,
@@ -215,6 +332,10 @@ function pressureEasingFor(
       return stylusEasing;
     case 'smoothstep':
       return smoothPressureEasing;
+    case 'soft':
+      return softPressureEasing;
+    case 'firm':
+      return firmPressureEasing;
     default:
       return simulatePressure ? linearPressureEasing : smoothPressureEasing;
   }
@@ -232,6 +353,7 @@ const engineOptions: FreehandEngineOptions = {
   startTaper: 0,
   endTaper: false,
   pressureWarmup: false,
+  tiltAmount: 0,
 };
 
 /**
@@ -303,6 +425,34 @@ function centerlineLength(line: InkCenterline): number {
   return total;
 }
 
+/**
+ * The widest half-width the engine can draw a stroke at, for the padding that
+ * bounds and hit tests reserve around its centerline.
+ *
+ * `baseRadius` is `size * easing(0.5 - thinning * (0.5 - pressure))`, so
+ * thinning pushes the radius past `size / 2` in *both* directions: negative
+ * thinning widens a light touch, positive thinning a heavy one. Reserving
+ * `size / 2` for the positive case cut a default pencil's own outline off at
+ * two thirds of its width, so clicks on visible ink missed and culling
+ * clipped it.
+ */
+export function maxInkRadius(
+  size: number,
+  dynamics: InkStrokeDynamics = {},
+): number {
+  const thinning = Math.max(-1, Math.min(1, dynamics.thinning ?? 0));
+  // A stroke drawn square across a fully laid-over stylus is the widest the
+  // nib ever gets, and bounds have to hold for it or the widest part of a
+  // shading stroke falls outside the box that selects and erases it.
+  const tilt = 1 + clamp01(dynamics.tiltAmount ?? 0) * MAX_TILT_BROADENING;
+  if (thinning === 0) return (size / 2) * tilt;
+  const easing = pressureEasingFor(
+    dynamics.pressureEasing,
+    dynamics.simulatePressure ?? false,
+  );
+  return size * easing(0.5 + Math.abs(thinning) / 2) * tilt;
+}
+
 /** SVG path data for an ink stroke (local coordinates). */
 export function getInkPathData(
   points: DrawPoint[],
@@ -323,5 +473,6 @@ export function getInkPathData(
   engineOptions.pressureWarmup = dynamics.pressureWarmup ?? false;
   engineOptions.startTaper = dynamics.startTaper ?? 0;
   engineOptions.endTaper = dynamics.endTaper ?? false;
+  engineOptions.tiltAmount = dynamics.tiltAmount ?? 0;
   return getFreehandPathData(points, engineOptions);
 }

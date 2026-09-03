@@ -4,12 +4,15 @@ import type {
   DrawPoint,
   DrawShape,
   EquationShape,
+  FrameShape,
   GroupShape,
   RectangleShape,
   TextShape,
 } from '@whiteboard/shared';
 import './shapes/register';
 import {
+  addComment,
+  addCommentReply,
   createPage,
   deletePage,
   documentByteSize,
@@ -27,6 +30,7 @@ import {
 import * as Y from 'yjs';
 import { residentPageDoc } from './page-docs';
 import { useCameraStore } from './use-camera-store';
+import { useCommentsStore } from './use-comments-store';
 import { beginLiveStroke, endLiveStroke } from './use-live-stroke-store';
 import { useEnteredGroupStore } from './use-entered-group-store';
 import { useEraserCutStore } from './use-eraser-cut-store';
@@ -357,6 +361,33 @@ describe('page transitions', () => {
     ).toBeUndefined();
   });
 
+  it('drops the deleted page\'s comment threads', () => {
+    const firstPageId = useDocumentStore.getState().currentPageId;
+    const secondPageId = createPage('Page 2');
+    const author = { name: 'A', color: '#000000' };
+    const kept = addComment({
+      pageId: firstPageId,
+      x: 0,
+      y: 0,
+      text: 'stays',
+      author,
+    });
+    const doomed = addComment({
+      pageId: secondPageId,
+      x: 0,
+      y: 0,
+      text: 'goes',
+      author,
+    });
+    addCommentReply(doomed, 'also goes', author);
+
+    setCurrentPage(firstPageId);
+    deletePage(secondPageId);
+
+    // Comments live on the board document, so nothing else would ever drop them.
+    expect(Object.keys(useCommentsStore.getState().messages)).toEqual([kept]);
+  });
+
   it('ends follow mode for manual switches but preserves follow-driven switches', () => {
     const firstPageId = useDocumentStore.getState().currentPageId;
     const secondPageId = createPage('Page 2');
@@ -502,6 +533,22 @@ describe('moveShapesToPage', () => {
     expect(editor.getShape('rect-a')?.parentId).toBeNull();
   });
 
+  it('dissolves a group the move leaves with one child', () => {
+    const firstPageId = useDocumentStore.getState().currentPageId;
+    const secondPageId = createPage('Page 2');
+    setCurrentPage(firstPageId);
+    editor.createShape(group('group-a'));
+    editor.createShape({ ...rect('rect-a', 'a1'), parentId: 'group-a' });
+    editor.createShape({ ...rect('rect-b', 'a2'), parentId: 'group-a' });
+
+    // The cleanup runs inside the move's own transaction, where `getShapes()`
+    // has not yet seen the delete it is reacting to.
+    moveShapesToPage(['rect-a'], secondPageId);
+
+    expect(editor.getShape('group-a')).toBeUndefined();
+    expect(editor.getShape('rect-b')?.parentId).toBeNull();
+  });
+
   it('refuses a no-op, an unknown page, and an empty selection', () => {
     const firstPageId = useDocumentStore.getState().currentPageId;
     editor.createShape(rect('rect-a', 'a1'));
@@ -612,6 +659,74 @@ describe('document store snapshot', () => {
     if (shape?.type !== 'text') return;
     expect(shape.props.text).toBe('Hello world');
     expect(shape.props.align).toBe('middle');
+  });
+});
+
+describe('frame children in the spatial index', () => {
+  // The Canvas culls a frame's descendants against the same broad-phase id set
+  // it uses for top-level shapes, instead of mounting the whole subtree of every
+  // frame that happens to intersect the viewport. That is only sound because a
+  // child is indexed by its own *world* bounds — if children were indexed
+  // relative to their frame, or skipped because they render inside a clip, an
+  // on-screen child would be culled and the frame would come up empty.
+  const frame = (
+    id: string,
+    index: string,
+    x: number,
+    y: number,
+  ): FrameShape => ({
+    id,
+    type: 'frame',
+    x,
+    y,
+    rotation: 0,
+    index,
+    props: { w: 1000, h: 1000, name: 'Frame' },
+  });
+
+  it('indexes a frame child at its world position, not its frame-relative one', () => {
+    editor.createShape(frame('frame-a', 'a1', 0, 0));
+    editor.createShape({
+      ...rect('near', 'a2'),
+      x: 100,
+      y: 100,
+      parentId: 'frame-a',
+    });
+    editor.createShape({
+      ...rect('far', 'a3'),
+      x: 90000,
+      y: 90000,
+      parentId: 'frame-a',
+    });
+
+    // A region over the frame's top-left finds the frame and the child sitting
+    // there — the child is reachable by the same search the Canvas culls with.
+    expect(new Set(spatialIndex.search(box(95, 95, 115, 115)))).toEqual(
+      new Set(['frame-a', 'near']),
+    );
+    // The distant child is not in it, so culling it is correct rather than a
+    // dropped shape.
+    expect(spatialIndex.search(box(95, 95, 115, 115))).not.toContain('far');
+    expect(spatialIndex.search(box(89995, 89995, 90015, 90015))).toEqual([
+      'far',
+    ]);
+  });
+
+  it('follows a child that moves out of the searched region', () => {
+    editor.createShape(frame('frame-a', 'a1', 0, 0));
+    editor.createShape({
+      ...rect('child', 'a2'),
+      x: 100,
+      y: 100,
+      parentId: 'frame-a',
+    });
+    expect(spatialIndex.search(box(95, 95, 115, 115))).toContain('child');
+
+    editor.updateShape('child', { x: 90000, y: 90000 });
+    expect(spatialIndex.search(box(95, 95, 115, 115))).not.toContain('child');
+    expect(spatialIndex.search(box(89995, 89995, 90015, 90015))).toContain(
+      'child',
+    );
   });
 });
 

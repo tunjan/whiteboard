@@ -168,6 +168,29 @@ describe('selection controls', () => {
     ]);
   });
 
+  it('drops handles that would overlap on a small box', () => {
+    const box = (w: number, h: number) => {
+      const base = rectangle();
+      return { ...base, props: { ...base.props, w, h } };
+    };
+    const thin = box(100, 10);
+    // Only 10 world px tall at zoom 1: the east and west grips would sit on
+    // top of the corners, so the box keeps its corners and its top/bottom.
+    expect(
+      getSelectionInfo([thin], [thin.id], 1)?.handles.map((h) => h.id),
+    ).toEqual(['nw', 'n', 'ne', 'se', 's', 'sw']);
+
+    const tiny = box(8, 6);
+    expect(
+      getSelectionInfo([tiny], [tiny.id], 1)?.handles.map((h) => h.id),
+    ).toEqual(['se']);
+
+    // Zooming in gives the same box room for the full set.
+    expect(
+      getSelectionInfo([tiny], [tiny.id], 8)?.handles.map((h) => h.id),
+    ).toEqual(['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w']);
+  });
+
   it('preserves a shared multi-selection rotation with an oriented box', () => {
     const first = rectangle({ id: 'first', rotation: Math.PI / 2 });
     const second = rectangle({
@@ -183,8 +206,12 @@ describe('selection controls', () => {
     expect(info.corners.nw.y).toBeCloseTo(-20);
     expect(info.corners.se.x).toBeCloseTo(20);
     expect(info.corners.se.y).toBeCloseTo(80);
-    expect(info.handles).toEqual([]);
-    expect(info.rotationHandles).toHaveLength(4);
+    // The box carries a full set of handles on its own axes, not the page's:
+    // the east handle sits on the oriented box's east edge.
+    expect(info.handles).toHaveLength(8);
+    const east = info.handles.find((handle) => handle.id === 'e')!;
+    expect(east.point.x).toBeCloseTo((info.corners.ne.x + info.corners.se.x) / 2);
+    expect(east.point.y).toBeCloseTo((info.corners.ne.y + info.corners.se.y) / 2);
   });
 
   it('falls back to an axis-aligned controller for mixed rotations', () => {

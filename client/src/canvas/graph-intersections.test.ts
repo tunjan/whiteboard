@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
+import { ensureGraphMath } from './graph-math';
 import { DEFAULT_GRAPH_PARAMETER } from './graph-defaults';
 import {
   MAX_INTERSECTIONS,
@@ -7,6 +8,10 @@ import {
   formatIntersectionLabel,
 } from './graph-intersections';
 import type { GraphExpression, GraphViewport } from '@whiteboard/shared';
+
+// The mathjs parser is fetched on demand in the app; nothing parses until it
+// is in, here included.
+beforeAll(() => ensureGraphMath());
 
 const viewport: GraphViewport = {
   xMin: -5,

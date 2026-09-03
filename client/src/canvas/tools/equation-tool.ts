@@ -11,7 +11,7 @@ import { ensureEquationRenderer } from '../equation-render';
 import { getTopIndex } from '../order';
 import { shapeRegistry } from '../shapes/shape-registry';
 import { useSelectionStore } from '../use-selection-store';
-import { useStyleStore } from '../use-style-store';
+import { groupStyle } from '../use-style-store';
 import type { Tool, ToolContext, ToolPointerInfo } from './types';
 
 function placeEquation(point: Point, ctx: ToolContext): void {
@@ -21,7 +21,7 @@ function placeEquation(point: Point, ctx: ToolContext): void {
   const props = {
     ...(util.getDefaultProps() as EquationProps),
     // Match every other tool: new shapes take the current drawing color.
-    color: useStyleStore.getState().color,
+    color: groupStyle('text').color,
   };
   const id = genId();
   const shape = {

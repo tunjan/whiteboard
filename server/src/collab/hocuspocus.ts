@@ -1,21 +1,19 @@
 import { Hocuspocus } from '@hocuspocus/server';
-import * as Y from 'yjs';
 import { LATENCY_MESSAGE_PREFIX } from '@whiteboard/shared';
-import { eq } from 'drizzle-orm';
-import { db } from '../db/client';
-import { boardDocuments } from '../db/schema';
+import { createDocumentPersistence } from './document-persistence';
 import {
   createVoiceSignalRouter,
   sanitizeVoiceAwareness,
 } from './voice-signaling';
 
 const routeVoiceSignal = createVoiceSignalRouter();
+const persistence = createDocumentPersistence();
 
 /**
- * Hocuspocus collaboration server. Persists each document's opaque Yjs state in
- * a bytea row via Drizzle, keyed by document name — a board's own document plus
- * one per page (`pageDocumentName`), which is what lets a client sync a page
- * only when it opens it. Rooms are open: per our model the board id (the
+ * Hocuspocus collaboration server. Persists each document's opaque Yjs state
+ * via Drizzle, keyed by document name — a board's own document plus one per page
+ * (`pageDocumentName`), which is what lets a client sync a page only when it
+ * opens it. Rooms are open: per our model the board id (the
  * capability URL) is the secret, so students connect without auth. Tutor gating
  * is on the HTTP management surface, not here.
  */
@@ -33,33 +31,17 @@ export const hocuspocus = new Hocuspocus({
   },
   // These replace the Database extension, which hardcodes V1 on both sides
   // (`Y.applyUpdate` on load, `Y.encodeStateAsUpdate` on store) and so gives no
-  // way to pick the encoding. Hocuspocus debounces `onStoreDocument` itself, so
-  // moving off the extension keeps the same 2s/10s write cadence.
+  // way to pick the encoding — nor to write anything less than the whole
+  // document each time. Hocuspocus debounces `onStoreDocument` itself, so moving
+  // off the extension keeps the same 2s/10s write cadence; what each of those
+  // writes costs is `document-persistence.ts`.
   onLoadDocument: async ({ documentName, document }) => {
-    const rows = await db
-      .select()
-      .from(boardDocuments)
-      .where(eq(boardDocuments.documentName, documentName))
-      .limit(1);
-    const row = rows[0];
-    if (!row) return;
-    // A v1 row is read once and then written back as v2 by the next store.
-    if (row.format === 'v2') Y.applyUpdateV2(document, row.data);
-    else Y.applyUpdate(document, row.data);
+    await persistence.load(documentName, document);
   },
   onStoreDocument: async ({ documentName, document }) => {
-    const data = Buffer.from(Y.encodeStateAsUpdateV2(document));
-    await db
-      .insert(boardDocuments)
-      .values({
-        documentName,
-        data,
-        format: 'v2',
-        updatedAt: new Date(),
-      })
-      .onConflictDoUpdate({
-        target: boardDocuments.documentName,
-        set: { data, format: 'v2', updatedAt: new Date() },
-      });
+    await persistence.store(documentName, document);
+  },
+  afterUnloadDocument: async ({ documentName }) => {
+    persistence.forget(documentName);
   },
 });

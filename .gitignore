@@ -15,3 +15,4 @@ server/data/music/*
 !server/data/music/.gitkeep
 server/data/docs/*
 !server/data/docs/.gitkeep
+client/public/pdfjs/

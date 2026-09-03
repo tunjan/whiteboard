@@ -81,6 +81,20 @@ interface EncodedMirror extends MirrorBase {
   chunks: string[];
   lengths: number[];
   points: DrawPoint[];
+  /**
+   * The exact samples this client encoded into `chunks`, or null when what is
+   * stored did not come from here (a peer's append, a reload, an undo).
+   *
+   * `points` is the decoded stroke, and decoding is lossy: a Float16 delta
+   * carries the quantization of its own step, which is unrelated to the
+   * magnitude of the coordinate it lands on. Deciding "is this an append or an
+   * edit?" by comparing a caller's samples against those decoded values asks a
+   * lossy format to answer an equality question it cannot, and a stroke that
+   * passes near an axis with a long step fails it — every frame from there on
+   * rewrote the whole array. Keeping what was actually written makes the
+   * comparison exact and independent of how precisely it is stored.
+   */
+  written: DrawPoint[] | null;
 }
 
 interface TriplesMirror extends MirrorBase {
@@ -115,6 +129,11 @@ function applyEncodedDelta(
   mirror: EncodedMirror,
   event: Y.YArrayEvent<StoredPoint>,
 ): void {
+  // `unobserved` is set by `syncYPoints` immediately before its own write, so
+  // finding it still set means this delta is that write coming back. Anything
+  // else — a peer, an undo — moved the chunks without going through the shadow,
+  // which no longer describes them.
+  if (!mirror.unobserved) mirror.written = null;
   mirror.unobserved = false;
   if (mirror.stale) return;
   let at = 0;
@@ -204,6 +223,10 @@ function createMirror(
       chunks: chunks.slice(),
       lengths: decoded.map((points) => points.length),
       points: decoded.flat(),
+      // What is already stored did not necessarily come from here. A live
+      // stroke adopts the shadow on its first append instead — a new shape is
+      // created with its seed point, so it never reaches here empty.
+      written: null,
       unobserved: false,
       stale: false,
     };
@@ -264,12 +287,30 @@ function isPrefix(
     const b = next[index]!;
     const pressureA = a.pressure ?? NEUTRAL_PRESSURE;
     const pressureB = b.pressure ?? NEUTRAL_PRESSURE;
+    // An absent lean and a measured upright one are the same sample to
+    // compare, exactly as an absent pressure is the neutral one: a stroke
+    // stored without tilt channels decodes without them, and the caller that
+    // wrote it may hold either form.
+    const tiltXA = a.tiltX ?? 0;
+    const tiltXB = b.tiltX ?? 0;
+    const tiltYA = a.tiltY ?? 0;
+    const tiltYB = b.tiltY ?? 0;
     if (exact) {
-      if (a.x !== b.x || a.y !== b.y || pressureA !== pressureB) return false;
+      if (
+        a.x !== b.x ||
+        a.y !== b.y ||
+        pressureA !== pressureB ||
+        tiltXA !== tiltXB ||
+        tiltYA !== tiltYB
+      ) {
+        return false;
+      }
     } else if (
       !almostEqual(a.x, b.x) ||
       !almostEqual(a.y, b.y) ||
-      !almostEqual(pressureA, pressureB)
+      !almostEqual(pressureA, pressureB) ||
+      !almostEqual(tiltXA, tiltXB) ||
+      !almostEqual(tiltYA, tiltYB)
     ) {
       return false;
     }
@@ -308,18 +349,49 @@ export function syncYPoints(
         ? mirror.points
         : decodedTriples(mirror)
       : decodeStored(arr.toArray());
+  // Prefer the samples this client wrote over the ones read back out of the
+  // encoding. See `EncodedMirror.written`. The length guard keeps the two from
+  // being compared when anything has left them describing different stretches
+  // of the stroke.
+  const shadow =
+    mirror?.kind === 'encoded' &&
+    mirror.written !== null &&
+    mirror.written.length === current.length
+      ? mirror.written
+      : null;
   const exact = mirror?.kind === 'triples';
-  const prefix = isPrefix(current, next, exact);
+  const prefix = shadow
+    ? isPrefix(shadow, next, true)
+    : isPrefix(current, next, exact);
   if (prefix && next.length === current.length) return;
   if (prefix && mirror?.kind === 'encoded') {
-    if (mirror) mirror.unobserved = true;
-    arr.push(
-      encodePointsForStorage(next.slice(current.length)) as StoredPoint[],
-    );
+    const tail = next.slice(current.length);
+    mirror.unobserved = true;
+    arr.push(encodePointsForStorage(tail) as StoredPoint[]);
+    // The prefix test that got here established that the caller's samples and
+    // the stored chunks describe the same stretch, so the caller's are the
+    // unquantized record of it and become the shadow from here on. Without
+    // this a stroke never acquires one: its shape is created holding a seed
+    // point, so the mirror is always built over chunks it did not see written.
+    // A shadow whose length no longer matches was skipped by the guard above
+    // and would stay skipped forever, since both arrays grow by the same tail:
+    // re-seed it here so the stroke returns to the exact comparison.
+    if (mirror.written === null || mirror.written.length !== current.length) {
+      mirror.written = next.slice(0, current.length);
+    }
+    // The observer runs at the end of the enclosing transaction and sees this
+    // write as its own, so extending the shadow here keeps it in step. The
+    // array is the mirror's own copy and is never handed out, so it is grown in
+    // place rather than rebuilt — the frame must cost the new points, no more.
+    mirror.written.push(...tail);
     return;
   }
 
-  if (mirror) mirror.unobserved = true;
+  // A rewrite re-establishes the shadow whatever it was before, which is what
+  // lets a stroke that once fell back to rewriting start appending again.
+  const owner = mirror ?? mirrors.get(arr) ?? null;
+  if (owner) owner.unobserved = true;
+  if (owner?.kind === 'encoded') owner.written = next.slice();
   arr.delete(0, arr.length);
   const encoded = encodePointsForStorage(next);
   if (encoded.length > 0) arr.insert(0, encoded as StoredPoint[]);

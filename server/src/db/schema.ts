@@ -1,5 +1,7 @@
 import {
+  bigserial,
   customType,
+  index,
   pgTable,
   text,
   timestamp,
@@ -58,3 +60,35 @@ export const boardDocuments = pgTable('board_documents', {
     .notNull()
     .defaultNow(),
 });
+
+/**
+ * The append-only tail of a document: the Yjs updates written since its
+ * `board_documents` snapshot was last rewritten.
+ *
+ * A document is only ever appended to between two persistence ticks, so writing
+ * its whole state each tick re-writes megabytes that did not change (see
+ * `document-persistence.ts` for the measurements). Each tick appends one small
+ * row here instead, and the snapshot is rebuilt — and these rows deleted — only
+ * once the log grows past a bound. Loading a document replays the snapshot and
+ * then these rows in `seq` order.
+ */
+export const boardDocumentUpdates = pgTable(
+  'board_document_updates',
+  {
+    // Insertion order is replay order, so the sequence is the ordering key.
+    seq: bigserial('seq', { mode: 'number' }).primaryKey(),
+    documentName: text('document_name').notNull(),
+    // Always a v2-encoded update, unlike `board_documents.data`: nothing
+    // predates this table.
+    data: bytea('data').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index('board_document_updates_document_idx').on(
+      table.documentName,
+      table.seq,
+    ),
+  ],
+);

@@ -12,6 +12,22 @@ import {
 const stroke = (n: number): DrawPoint[] =>
   Array.from({ length: n }, (_, i) => ({ x: i, y: i * 2, pressure: 0.5 }));
 
+/**
+ * A stroke shaped like one a hand draws: curved, fractionally spaced, and
+ * passing near both axes, where a coordinate is small while the step that
+ * reached it is not.
+ */
+const curvedStroke = (n: number): DrawPoint[] =>
+  Array.from({ length: n }, (_, i) => {
+    const angle = i * 0.05;
+    const radius = 200 + i * 2.5;
+    return {
+      x: Math.cos(angle) * radius - 200,
+      y: Math.sin(angle) * radius,
+      pressure: 0.5,
+    };
+  });
+
 /** A shape map in the current storage form: Base64 vector segments. */
 function modernShape(points: DrawPoint[]): Y.Map<unknown> {
   const doc = new Y.Doc();
@@ -168,6 +184,54 @@ describe('syncYPoints', () => {
     // The point of the whole exercise: extending a stroke must not rewrite it.
     expect(deletes).toBe(0);
     expect(inserts).toBe(1);
+  });
+
+  it('keeps appending across a whole curved stroke', () => {
+    // The straight integer fixture above round-trips through the Float16 delta
+    // encoding exactly, so it cannot see the append path fall over. A real
+    // stroke is curved, fractional, and crosses the axes: there the stored
+    // value differs from the sample it was written from by the quantization of
+    // its own step, which has nothing to do with the coordinate's magnitude.
+    // Comparing the two decides `append` vs `rewrite` for every frame of every
+    // stroke, so getting it wrong costs the whole point of the Y.Array.
+    const m = modernShape([]);
+    const arr = ensurePointsArray(m);
+    const drawn = curvedStroke(600);
+    let deletes = 0;
+    arr.observe((e) => {
+      for (const d of e.changes.delta) if (d.delete) deletes++;
+    });
+
+    // Two samples a frame, the rate the draw tool flushes at.
+    for (let n = 2; n <= drawn.length; n += 2) {
+      arr.doc!.transact(() => syncYPoints(arr, drawn.slice(0, n)));
+    }
+
+    expect(deletes).toBe(0);
+    expect(arr).toHaveLength(drawn.length / 2);
+    expect(readPoints(m, {})).toHaveLength(drawn.length);
+  });
+
+  it('keeps appending when the shape was created holding its seed point', () => {
+    // How the draw tool actually starts a stroke: `createShape` writes the
+    // press sample, so the mirror is first built over a chunk it did not see
+    // written. Adopting the shadow only when the array was empty meant a live
+    // stroke never had one, and the lossy comparison above eventually failed
+    // mid-stroke and rewrote the array.
+    const drawn = curvedStroke(600);
+    const m = modernShape(drawn.slice(0, 1));
+    const arr = ensurePointsArray(m);
+    let deletes = 0;
+    arr.observe((e) => {
+      for (const d of e.changes.delta) if (d.delete) deletes++;
+    });
+
+    for (let n = 2; n <= drawn.length; n += 2) {
+      arr.doc!.transact(() => syncYPoints(arr, drawn.slice(0, n)));
+    }
+
+    expect(deletes).toBe(0);
+    expect(readPoints(m, {})).toHaveLength(drawn.length);
   });
 
   it('replaces when the new points are shorter', () => {

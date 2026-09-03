@@ -6,12 +6,18 @@ import {
   type DrawProps,
   type DrawShape,
   type Point,
+  type PressureEasing,
   type Shape,
 } from '@whiteboard/shared';
 import { topFrameAtPoint } from '../frame-operations';
 import { getBottomIndex, getIndexAboveTopmostOf, getTopIndex } from '../order';
 import { InputsManager, isPenOrStylus } from '../inputs-manager';
-import { pencilStabilizationToStreamline } from '../shapes/ink';
+import {
+  liftTaperFor,
+  pencilStabilizationToStreamline,
+  type EndTaperMode,
+  type PencilPressureCurve,
+} from '../shapes/ink';
 import { NOMINAL_SAMPLE_SPACING } from '../shapes/ink-engine';
 import { shapeRegistry } from '../shapes/shape-registry';
 import { useCanvasUiStore } from '../use-canvas-ui-store';
@@ -20,7 +26,7 @@ import {
   endLiveStroke,
   publishLiveStroke,
 } from '../use-live-stroke-store';
-import { useStyleStore } from '../use-style-store';
+import { groupStyle, styleGroupForTool } from '../use-style-store';
 import type { Tool, ToolContext, ToolPointerInfo } from './types';
 
 /**
@@ -250,6 +256,11 @@ export function createDrawTool(
   let velocityPressure = false;
   const inputs = new InputsManager();
   let stylusInput = false;
+  // Filtered pointer speed at the most recent sample, in screen px/ms. Tracked
+  // for every stroke, not only the ones deriving width from it: the lift taper
+  // asks how fast the hand was moving when it left the page, and that question
+  // is just as meaningful for a stylus carrying its own pressure.
+  let lastSpeed = 0;
   let lastVelocityPressure = NEUTRAL_PRESSURE;
   // Whether the first real velocity reading has been folded back into the
   // stroke's opening point. See `pressureFromVelocity`.
@@ -265,8 +276,17 @@ export function createDrawTool(
   // Likewise the opacity, which the active-stroke layer has to reproduce for
   // the live stroke to look like the shape it is writing.
   let strokeOpacity = 1;
+  // How this gesture's last chunk finishes, captured at pointer-down so that
+  // changing the preference mid-stroke cannot reshape the end of a stroke that
+  // is already being drawn.
+  let endTaperMode: EndTaperMode = 'off';
   // Whether the point cap has already split this gesture. See isClosedStroke.
   let chunked = false;
+  // Shapes earlier chunks of this gesture were committed into, with what each
+  // held before the gesture touched it. `id` only ever names the chunk being
+  // drawn, so without these a cancelled long stroke left every chunk but the
+  // last one on the canvas.
+  let committedChunks: { id: string; restore: DrawPoint[] | null }[] = [];
   // Index in `points` the current straight segment is drawn from, or null when
   // the stroke is freehand. Everything past it is the segment's single moving
   // endpoint, so leaving straight mode simply stops rewriting that endpoint and
@@ -380,12 +400,31 @@ export function createDrawTool(
     if (chunked || !size || points.length < 3) return false;
     const first = points[0]!;
     const last = points[points.length - 1]!;
-    if (first.x === last.x && first.y === last.y) return false;
     if (pathLength(points) <= size * CLOSE_MIN_LENGTH_FACTOR) return false;
     return (
       Math.hypot(last.x - first.x, last.y - first.y) <=
       closeThreshold(size, zoomOnEnter)
     );
+  };
+
+  /**
+   * The taper this stroke's ending has earned, as a props patch to fold into
+   * the final write, or nothing when the finish is not velocity-driven.
+   *
+   * Only written at the end, and deliberately: a taper is what the nib leaves
+   * on the way off the page, so there is nothing to draw one from until the
+   * hand has actually left. The live stroke therefore shows a round cap right
+   * up to the lift and grows the taper on release, which is the order the
+   * gesture happens in.
+   *
+   * `finalize` also runs when the OS takes the pointer away mid-stroke. The
+   * speed read there is the speed the hand really was moving at, so a stroke
+   * interrupted mid-flick tapers exactly as one lifted mid-flick would.
+   */
+  const liftTaper = (): { endTaper: number } | undefined => {
+    const size = strokeProps?.size;
+    if (endTaperMode !== 'velocity' || !size) return undefined;
+    return { endTaper: liftTaperFor(lastSpeed, size, pathLength(points)) };
   };
 
   // Commit the accumulated points to the shape and end the stroke. Shared by
@@ -413,11 +452,12 @@ export function createDrawTool(
       props: {
         points: points.slice(),
         isClosed: isClosedStroke(),
-        ...(continuing ? { endTaper: false } : {}),
+        ...(continuing ? { endTaper: false } : liftTaper()),
       },
     });
     points = [];
     if (!continuing) {
+      committedChunks = [];
       extendedFrom = null;
       straightAnchor = null;
       pendingMode = null;
@@ -466,6 +506,7 @@ export function createDrawTool(
     const last = points[points.length - 1]!;
     const worldOrigin = { x: origin.x + last.x, y: origin.y + last.y };
     chunked = true;
+    if (id) committedChunks.push({ id, restore: extendedFrom });
     finalize(ctx, true);
     // The continuation begins where the last chunk was cut, not where the hand
     // pressed, so it must not open with the start taper again — that would pinch
@@ -487,14 +528,25 @@ export function createDrawTool(
   const stylusPressure = (pressure: number): number => clamp01(pressure * 1.25);
 
   /**
-   * Pressure from how fast the pointer is travelling. Consumes the raw sample
-   * rate rather than the stored one, so it must be called exactly once per
-   * incoming sample, in order.
+   * Advance the velocity filter by one incoming sample.
+   *
+   * The filter consumes the raw sample rate rather than the stored one, so
+   * this must be called exactly once per incoming sample, in order — which is
+   * why it sits at the top of `appendPoint` rather than inside the pressure
+   * path it used to live in. A stylus stroke skips that path entirely, and its
+   * lift is precisely the sample whose speed the taper needs.
    */
-  const pressureFromVelocity = (info: ToolPointerInfo): number => {
+  const trackVelocity = (info: ToolPointerInfo): void => {
     const velocity = inputs.update(info.screenPoint, info.timestamp);
-    const speed = Math.hypot(velocity.x, velocity.y);
-    lastVelocityPressure = clamp01(1 - speed / SPEED_AT_MIN_WIDTH);
+    lastSpeed = Math.hypot(velocity.x, velocity.y);
+  };
+
+  /**
+   * Pressure from how fast the pointer is travelling, as measured by the most
+   * recent {@link trackVelocity}.
+   */
+  const pressureFromVelocity = (): number => {
+    lastVelocityPressure = clamp01(1 - lastSpeed / SPEED_AT_MIN_WIDTH);
     // Pointer-down has nothing to measure against, so the stroke opens at the
     // neutral default and the engine then spends several world units easing
     // from it to the speed the hand was actually moving at — every stroke
@@ -515,8 +567,23 @@ export function createDrawTool(
   // off for new strokes. Everything else stores the neutral default.
   const pressureFor = (info: ToolPointerInfo): number => {
     if (stylusInput) return stylusPressure(info.pressure);
-    if (velocityPressure) return pressureFromVelocity(info);
+    if (velocityPressure) return pressureFromVelocity();
     return NEUTRAL_PRESSURE;
+  };
+
+  /**
+   * The pressure curve this stroke is drawn with.
+   *
+   * `medium` means "whichever curve this input calls for", which is what every
+   * stroke used before the preference existed — a stylus reading real force
+   * wants a different response from a mouse whose "pressure" is its own speed.
+   * The two deliberate ends override that for both, because someone who says
+   * the pen is too soft is saying it about the pointer they actually have.
+   */
+  const pressureEasingFor = (curve: PencilPressureCurve): PressureEasing => {
+    if (curve !== 'medium') return curve;
+    if (stylusInput) return 'stylus';
+    return velocityPressure ? 'ease-out-sine' : 'linear';
   };
 
   const snapToAngle = (point: DrawPoint, start: DrawPoint): DrawPoint => {
@@ -616,10 +683,17 @@ export function createDrawTool(
     info: ToolPointerInfo,
     pressureOverride?: number,
   ): boolean => {
+    trackVelocity(info);
     let local: DrawPoint = {
       x: info.point.x - origin.x,
       y: info.point.y - origin.y,
       pressure: pressureOverride ?? pressureFor(info),
+      // Only a stylus has a barrel to lean, and only a stylus stroke pays the
+      // two extra channels for storing where it leaned. Everything else omits
+      // them and reads back as the upright pen it was.
+      ...(stylusInput
+        ? { tiltX: info.tiltX ?? 0, tiltY: info.tiltY ?? 0 }
+        : {}),
     };
     const anchor = straightAnchor === null ? null : points[straightAnchor];
     if (anchor) {
@@ -765,9 +839,13 @@ export function createDrawTool(
       predictionAnchorScreen = null;
       stalePredictionAnchorScreen = null;
       inputs.reset(info.screenPoint, info.timestamp);
+      lastSpeed = 0;
       lastVelocityPressure = NEUTRAL_PRESSURE;
+      // The marker's flat band has no width profile for a taper to shape.
+      endTaperMode = config.ink === 'marker' ? 'off' : pencil.pencilEndTaper;
       velocitySeeded = false;
       chunked = false;
+      committedChunks = [];
       straightAnchor = null;
       pendingMode = null;
       pendingModeScreen = null;
@@ -788,7 +866,7 @@ export function createDrawTool(
           return;
         }
       }
-      const style = useStyleStore.getState();
+      const style = groupStyle(styleGroupForTool(config.id));
       if (config.ink === 'marker') {
         strokeOpacity = MARKER_OPACITY;
         strokeProps = {
@@ -809,6 +887,9 @@ export function createDrawTool(
           streamline: MARKER_STREAMLINE,
           startTaper: 0,
           endTaper: false,
+          // A chisel highlighter is already all flat; nothing about holding it
+          // at an angle should change the band it lays down.
+          tiltAmount: 0,
         };
         beginShape(ctx, info.point, { x: 0, y: 0, pressure: NEUTRAL_PRESSURE });
         return;
@@ -828,11 +909,7 @@ export function createDrawTool(
         // spacing. The flag stays in the schema for strokes saved before
         // that was true.
         simulatePressure: false,
-        pressureEasing: stylusInput
-          ? 'stylus'
-          : velocityPressure
-            ? 'ease-out-sine'
-            : 'linear',
+        pressureEasing: pressureEasingFor(pencil.pencilPressureCurve),
         pressureWarmup: stylusInput || velocityPressure,
         thinning: pencil.pencilThinning,
         smoothing: pencil.pencilSmoothing,
@@ -845,7 +922,11 @@ export function createDrawTool(
           zoomOnEnter,
         ),
         startTaper: pencil.pencilStartTaper,
-        endTaper: pencil.pencilEndTaper,
+        // `velocity` writes its taper at the lift, where the speed that earns
+        // it is finally known; until then the stroke ends in a round cap like
+        // any unfinished one. See `liftTaper`.
+        endTaper: endTaperMode === 'full',
+        tiltAmount: pencil.pencilTilt,
       };
       beginShape(ctx, info.point, {
         x: 0,
@@ -925,20 +1006,28 @@ export function createDrawTool(
       cancelPendingWork();
       predicted = [];
       endLiveStroke();
-      const sid = id;
-      const original = extendedFrom;
+      const cancelled = [
+        ...committedChunks,
+        ...(id ? [{ id, restore: extendedFrom }] : []),
+      ];
       id = null;
       points = [];
+      committedChunks = [];
       extendedFrom = null;
       straightAnchor = null;
       pendingMode = null;
       pendingModeScreen = null;
-      if (!sid) return;
       // Put an extended stroke back the way it was; delete one this gesture
       // created outright.
-      if (original)
-        ctx.editor.updateShape(sid, { props: { points: original } });
-      else ctx.editor.deleteShapes([sid]);
+      const deleted: string[] = [];
+      for (const chunk of cancelled) {
+        if (chunk.restore)
+          ctx.editor.updateShape(chunk.id, {
+            props: { points: chunk.restore },
+          });
+        else deleted.push(chunk.id);
+      }
+      if (deleted.length > 0) ctx.editor.deleteShapes(deleted);
     },
   };
 }

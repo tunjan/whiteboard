@@ -9,7 +9,7 @@ import { getBottomIndex } from '../order';
 import { captureEnclosedShapes, topFrameAtPoint } from '../frame-operations';
 import { shapeRegistry } from '../shapes/shape-registry';
 import { useSelectionStore } from '../use-selection-store';
-import { useStyleStore } from '../use-style-store';
+import { groupStyle } from '../use-style-store';
 import { dragBoxSnapTargets, snappedBoxFromDrag } from './drag-box';
 import type { Tool, ToolContext, ToolPointerInfo } from './types';
 
@@ -44,7 +44,7 @@ export function createFrameTool(): Tool {
       const shapes = ctx.editor.getShapes();
       const parentId = topFrameAtPoint(shapes, info.point)?.id ?? null;
       const count = shapes.filter((s) => s.type === 'frame').length;
-      const style = useStyleStore.getState();
+      const style = groupStyle('shape');
       const props: FrameProps = {
         ...(util.getDefaultProps() as FrameProps),
         w: 0,

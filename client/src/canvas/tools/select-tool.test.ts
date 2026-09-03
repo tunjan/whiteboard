@@ -343,6 +343,94 @@ describe('select tool state machine', () => {
     expect(shapes.get('c')?.x).toBe(200);
   });
 
+  it('resizes a rotated multi-selection along the box axes, not the page axes', () => {
+    const a = { ...rectangle('a', 0, 0, 'a0'), rotation: Math.PI / 2 };
+    const b = { ...rectangle('b', 80, 0, 'a1'), rotation: Math.PI / 2 };
+    const { ctx, shapes } = context([a, b]);
+    const tool = createSelectTool();
+    useSelectionStore.getState().setSelection(['a', 'b']);
+    const info = getSelectionInfo([a, b], ['a', 'b'], 1)!;
+    const east = info.handles.find((handle) => handle.id === 'e')!.point;
+    // The box's own +x runs along page +y here, so widening it means dragging
+    // the east handle downwards.
+    tool.onPointerDown?.(pointer(east.x, east.y), ctx);
+    tool.onPointerMove?.(pointer(east.x, east.y + 40), ctx);
+    tool.onPointerUp?.(pointer(east.x, east.y + 40), ctx);
+
+    // Both shapes span the box's full width, so both double along it and
+    // neither changes along the other axis.
+    for (const id of ['a', 'b']) {
+      const props = shapes.get(id)!.props as { w: number; h: number };
+      expect(props.w).toBeCloseTo(80);
+      expect(props.h).toBeCloseTo(30);
+    }
+    const after = getSelectionInfo(
+      [shapes.get('a')!, shapes.get('b')!],
+      ['a', 'b'],
+      1,
+    )!;
+    expect(after.alignedBounds.maxX - after.alignedBounds.minX).toBeCloseTo(80);
+    expect(after.alignedBounds.maxY - after.alignedBounds.minY).toBeCloseTo(110);
+  });
+
+  it('widens a quarter-turned member across its own height', () => {
+    const a = rectangle('a', 0, 0, 'a0');
+    // A right-angled neighbour drops the shared rotation to zero, so the box is
+    // page-aligned while this member's own axes are swapped inside it.
+    const b = { ...rectangle('b', 80, 0, 'a1'), rotation: Math.PI / 2 };
+    const { ctx, shapes } = context([a, b]);
+    const tool = createSelectTool();
+    useSelectionStore.getState().setSelection(['a', 'b']);
+    const info = getSelectionInfo([a, b], ['a', 'b'], 1)!;
+    const east = info.handles.find((handle) => handle.id === 'e')!.point;
+    const width = info.bounds.maxX - info.bounds.minX;
+
+    tool.onPointerDown?.(pointer(east.x, east.y), ctx);
+    const target = info.bounds.minX + width * 2;
+    tool.onPointerMove?.(pointer(target, east.y, { altKey: true }), ctx);
+    tool.onPointerUp?.(pointer(target, east.y, { altKey: true }), ctx);
+
+    // `b` shows its height to the page, so doubling the box's width has to
+    // double `h` and leave `w` alone.
+    expect(shapes.get('b')?.props).toMatchObject({ w: 40, h: 60 });
+    expect(shapes.get('a')?.props).toMatchObject({ w: 80, h: 30 });
+  });
+
+  it('scales an off-axis member uniformly rather than shearing it', () => {
+    const a = rectangle('a', 0, 0, 'a0');
+    const b = { ...rectangle('b', 80, 0, 'a1'), rotation: Math.PI / 4 };
+    const { ctx, shapes } = context([a, b]);
+    const tool = createSelectTool();
+    useSelectionStore.getState().setSelection(['a', 'b']);
+    const info = getSelectionInfo([a, b], ['a', 'b'], 1)!;
+    const east = info.handles.find((handle) => handle.id === 'e')!.point;
+    const target = info.bounds.minX + (info.bounds.maxX - info.bounds.minX) * 2;
+
+    tool.onPointerDown?.(pointer(east.x, east.y), ctx);
+    tool.onPointerMove?.(pointer(target, east.y, { altKey: true }), ctx);
+    tool.onPointerUp?.(pointer(target, east.y, { altKey: true }), ctx);
+
+    // A width-only drag cannot stretch a 45° shape without shearing it, so it
+    // keeps its proportions and takes the smaller factor on both axes.
+    const props = shapes.get('b')!.props as { w: number; h: number };
+    expect(props.w / props.h).toBeCloseTo(40 / 30);
+    expect(props.w).toBeCloseTo(40);
+  });
+
+  it('resizes from where the handle was grabbed, not where the cursor is', () => {
+    const { ctx, shapes } = context([rectangle('a', 0, 0, 'a0')]);
+    const tool = createSelectTool();
+    useSelectionStore.getState().setSelection(['a']);
+
+    // Grabbed 3px outside the east edge; the edge should follow the drag, not
+    // jump to meet the cursor.
+    tool.onPointerDown?.(pointer(43, 15), ctx);
+    tool.onPointerMove?.(pointer(53, 15, { altKey: true }), ctx);
+    tool.onPointerUp?.(pointer(53, 15, { altKey: true }), ctx);
+
+    expect(shapes.get('a')?.props).toMatchObject({ w: 50, h: 30 });
+  });
+
   it('does not snap or show guides when snapping is disabled', () => {
     const a = rectangle('a', 0, 0, 'a0');
     const target = rectangle('target', 80, 0, 'a1');

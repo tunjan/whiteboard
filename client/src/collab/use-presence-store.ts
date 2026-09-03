@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { Point, VoicePresence } from '@whiteboard/shared';
 import type { Camera } from '@/canvas/camera';
+import type { EraserScribble } from '@/canvas/use-eraser-trail-store';
 import type { LaserStroke } from '@/canvas/use-laser-store';
 import type { AttentionPresence } from './attention-state';
 
@@ -28,6 +29,8 @@ export interface PeerPresence {
   isTutor: boolean;
   /** Cursor position in world coordinates, or null when off-canvas. */
   cursor: Point | null;
+  /** Cursor glyph requested by the peer's active tool. */
+  cursorType: 'pointer' | 'cross';
   /** Viewport camera and pixel size, or null until the peer publishes it. */
   viewport: ViewportPresence | null;
   /** Transient bring-to-view nonce, or null until the peer sends one. */
@@ -42,12 +45,8 @@ export interface PeerPresence {
   textSelection: TextSelectionPresence | null;
   /** Ids of the shapes this peer has selected, or null when nothing is. */
   selection: string[] | null;
-  /**
-   * Ids this peer's in-progress erase stroke has marked for deletion, or null
-   * when it is not erasing. Momentary: the shapes are still in the document and
-   * only render dimmed until the peer lifts the eraser and the delete lands.
-   */
-  erasing: string[] | null;
+  /** Awareness-only eraser trails. Pending deletion ids stay local to the peer. */
+  scribbles: EraserScribble[] | null;
   /** In-progress laser-pointer strokes, or null when the peer has none. */
   laser: LaserStroke[] | null;
   /** This peer's current in-board voice membership and mute state. */

@@ -1,5 +1,4 @@
 import { create } from 'zustand';
-import { setLocalErasing } from '@/collab/presence';
 
 interface EraserStore {
   /** Shapes in the current erase stroke's pending queue (keys present = queued). */
@@ -17,10 +16,9 @@ interface EraserStore {
  * up, or clears it on cancel. Not part of the CRDT — the queue is one client's
  * pending intent, not a document change, and resets the instant the stroke ends.
  *
- * It is mirrored to peers through awareness (`setLocalErasing`) so a shape about
- * to be deleted fades on *everyone's* screen while the stroke is held, the same
- * way selections and laser strokes are shared. Peers see the fade resolve into
- * a deletion, rather than watching shapes disappear with no warning.
+ * Deliberately local: collaborators receive the short eraser scribble through
+ * awareness, but not this candidate-id set. The pending transaction belongs to
+ * the client performing it until pointer-up commits a document mutation.
  */
 export const useEraserStore = create<EraserStore>((set, get) => ({
   marked: {},
@@ -28,17 +26,18 @@ export const useEraserStore = create<EraserStore>((set, get) => ({
   set: (ids) => {
     const prev = get().marked;
     // Skip the state update (and the resulting re-renders) when nothing changed.
-    if (ids.length === Object.keys(prev).length && ids.every((id) => prev[id])) {
+    if (
+      ids.length === Object.keys(prev).length &&
+      ids.every((id) => prev[id])
+    ) {
       return;
     }
     const next: Record<string, true> = {};
     for (const id of ids) next[id] = true;
     set({ marked: next });
-    setLocalErasing(ids);
   },
   clear: () => {
     if (Object.keys(get().marked).length === 0) return;
     set({ marked: {} });
-    setLocalErasing([]);
   },
 }));

@@ -13,7 +13,12 @@ import { orthogonalRoute } from '@/canvas/shapes/connector-routing';
 import { stabilizeTextPosition } from '@/canvas/shapes/text-measure';
 import { editor, useDocumentStore } from '@/canvas/use-document-store';
 import { useSelectionStore } from '@/canvas/use-selection-store';
-import { paletteColors, useStyleStore } from '@/canvas/use-style-store';
+import {
+  paletteColors,
+  styleGroupForShape,
+  styleGroupForTool,
+  useStyleStore,
+} from '@/canvas/use-style-store';
 import { useThemeStore } from '@/use-theme-store';
 
 // Draw shapes take a fill too, but only once the stroke closed on itself — an
@@ -30,6 +35,7 @@ const DASHABLE = new Set([
 
 /** Which controls apply to what is being styled right now. */
 export interface StyleFlags {
+  eraserMode: boolean;
   color: boolean;
   size: boolean;
   fill: boolean;
@@ -41,6 +47,21 @@ export interface StyleFlags {
   lineOptions: boolean;
   connectorLabel: boolean;
 }
+
+/** The eraser's bar: its mode, and nothing it has no use for. */
+const ERASER_ONLY: StyleFlags = {
+  eraserMode: true,
+  color: false,
+  size: false,
+  fill: false,
+  dash: false,
+  opacity: false,
+  font: false,
+  align: false,
+  arrows: false,
+  lineOptions: false,
+  connectorLabel: false,
+};
 
 export interface StyleControls {
   /** True when at least one control applies — i.e. when a style UI belongs on screen. */
@@ -99,11 +120,6 @@ export interface StyleControls {
  */
 export function useStyleControls(activeToolId: string): StyleControls {
   const {
-    color,
-    size,
-    fill,
-    dash,
-    opacity,
     arrowStart,
     arrowEnd,
     arrowTopology,
@@ -160,16 +176,25 @@ export function useStyleControls(activeToolId: string): StyleControls {
       : '';
   });
 
+  // Which remembered style this bar reads and writes. The active tool's, so the
+  // swatch row shows what the next stroke will be — except while selecting,
+  // where the subject is the selected shape and the group is the one an edit to
+  // it should be remembered in.
+  const group =
+    activeToolId === 'select'
+      ? styleGroupForShape(selectedType ?? '')
+      : styleGroupForTool(activeToolId);
+  const { color, size, fill, dash, opacity } = useStyleStore(
+    (s) => s.groups[group],
+  );
+
+  // The eraser paints nothing, so none of the drawing controls apply to it.
+  // Its one setting — object vs precision — is a choice like any other on this
+  // bar, so it is drawn there and it is the whole of the bar while erasing.
+  const isEraser = activeToolId === 'eraser';
+
   const stylable = (() => {
-    // The eraser paints nothing, so every control here would be inert on it;
-    // its one setting — object vs precision — rides on its toolbar button.
-    if (
-      activeToolId === 'hand' ||
-      activeToolId === 'laser' ||
-      activeToolId === 'eraser'
-    ) {
-      return false;
-    }
+    if (activeToolId === 'hand' || activeToolId === 'laser') return false;
     if (activeToolId === 'select') return selectedIds.length > 0;
     return true;
   })();
@@ -180,7 +205,8 @@ export function useStyleControls(activeToolId: string): StyleControls {
   const visible =
     stylable && targetType !== 'graph' && targetType !== 'equation';
 
-  const show: StyleFlags = {
+  const show: StyleFlags = isEraser ? ERASER_ONLY : {
+    eraserMode: false,
     // Media and stickers carry fixed artwork colors. Frames do expose color for
     // their structural border and title, while opacity remains shape-level.
     color:
@@ -239,21 +265,25 @@ export function useStyleControls(activeToolId: string): StyleControls {
     const from = paletteColors(previousTheme.current);
     const to = paletteColors(theme);
     previousTheme.current = theme;
-    const slot = from.findIndex(
-      (c) => c.value === useStyleStore.getState().color,
-    );
-    const next = slot >= 0 ? to[slot] : undefined;
-    if (next) setColor(next.value);
+    // Every group, not just the one on screen: an instrument put down on the
+    // light canvas has to come back on its counterpart colour, not on a hex
+    // that is now invisible.
+    const groups = useStyleStore.getState().groups;
+    for (const key of Object.keys(groups) as (keyof typeof groups)[]) {
+      const slot = from.findIndex((c) => c.value === groups[key].color);
+      const next = slot >= 0 ? to[slot] : undefined;
+      if (next) setColor(key, next.value);
+    }
   }, [theme]);
 
   const applyColor = (value: string) => {
-    setColor(value);
+    setColor(group, value);
     for (const id of selectedIds)
       editor.updateShape(id, { props: { color: value } });
   };
 
   const applySize = (value: number) => {
-    setSize(value);
+    setSize(group, value);
     for (const id of selectedIds) {
       const shape = editor.getShape(id);
       if (shape && shape.type !== 'text') {
@@ -263,7 +293,7 @@ export function useStyleControls(activeToolId: string): StyleControls {
   };
 
   const applyFill = (value: FillStyle) => {
-    setFill(value);
+    setFill(group, value);
     for (const id of selectedIds) {
       const shape = editor.getShape(id);
       if (shape && FILLABLE.has(shape.type)) {
@@ -273,7 +303,7 @@ export function useStyleControls(activeToolId: string): StyleControls {
   };
 
   const applyDash = (value: StrokeDash) => {
-    setDash(value);
+    setDash(group, value);
     for (const id of selectedIds) {
       const shape = editor.getShape(id);
       if (shape && DASHABLE.has(shape.type)) {
@@ -285,7 +315,7 @@ export function useStyleControls(activeToolId: string): StyleControls {
   // Sets the opacity of the current selection (any shape type) and the style
   // default new shapes inherit.
   const applyOpacity = (value: number) => {
-    setOpacity(value);
+    setOpacity(group, value);
     for (const id of selectedIds) editor.updateShape(id, { opacity: value });
   };
 

@@ -13,6 +13,12 @@ export interface FreehandEngineOptions {
   easing?: (pressure: number) => number;
   /** Use the current five-brush-width pressure initialization model. */
   pressureWarmup?: boolean;
+  /**
+   * How strongly a tilted stylus broadens the nib, 0..1. Zero — the default,
+   * and everything a mouse or a finger can produce — leaves the radius model
+   * exactly as it was.
+   */
+  tiltAmount?: number;
 }
 
 const MIN_PHYSICAL_PRESSURE = 0.025;
@@ -36,6 +42,37 @@ export const NOMINAL_SAMPLE_SPACING = 1;
  * to the very same hand.
  */
 const PRESSURE_RESPONSE_DISTANCE = 8;
+
+/**
+ * Extra half-width a fully flattened stylus adds, as a multiple of the width
+ * it draws held upright.
+ *
+ * A pencil laid over on its side presents the long axis of its worn nib to the
+ * page, and how much of that axis the line is actually as wide as depends on
+ * which way the line goes: draw across the lean and you get the whole flat,
+ * draw along it and you get the same narrow edge an upright pen has. So this
+ * is a ceiling reached only by the stroke drawn square across the barrel, not
+ * a width every tilted sample gets.
+ *
+ * 1.2 puts a fully flattened shading stroke at a little over twice the width
+ * of the same pen held upright, which is about what a real pencil does before
+ * the tone stops reading as a line at all.
+ */
+export const MAX_TILT_BROADENING = 1.2;
+
+/**
+ * Distance over which the tilt reading closes ~63% of a change, in world
+ * units.
+ *
+ * Longer than the pressure response because the two are different gestures.
+ * Pressure is the hand leaning on the page and can change within a letter;
+ * the angle the barrel is held at is a grip, and a grip changes over a stroke,
+ * not over a sample. Filtering it this slowly keeps digitizer noise in the
+ * tilt channels — which is coarser than the pressure channel's, since tilt is
+ * quantized to whole degrees — from rippling the width of a line drawn at a
+ * constant angle.
+ */
+const TILT_RESPONSE_DISTANCE = 12;
 
 /**
  * Fraction of the brush width the decimated outline may deviate from the exact
@@ -124,6 +161,43 @@ const CORNER_WINDOW_RESPONSES = 3;
  * weight is 1 whatever the step, and the filter stays the identity.
  */
 const MAX_FILTER_STEP = 0.75;
+
+/**
+ * Travel, in filter response distances, over which the tip is eased onto the
+ * raw pointer position.
+ *
+ * The tip is pinned to the raw sample so the ink ends where the pointer is
+ * (see `pinTipToRaw`), but a pin applied to that one sample alone is a
+ * discontinuity that moves: while drawing, each frame puts the newest sample
+ * on the pointer and then, on the next frame, drops it back onto the filtered
+ * curve as the sample behind it takes over. Measured on a spiral at the draw
+ * tool's one-unit input gate, that retreat averaged 2.6 world units a frame
+ * with the default stabilization — a third of an eight-unit brush, twitching
+ * at exactly the place the eye is watching, while every sample behind it sat
+ * perfectly still.
+ *
+ * Spreading the same correction over a run of samples does not reduce it; it
+ * divides it by the number of frames the run spans, which is what turns a
+ * twitch into a drift the eye reads as the line settling. Expressed in
+ * response distances rather than world units because the lag being corrected
+ * is itself proportional to the response: it scales with the stabilization
+ * slider and vanishes with it, leaving the identity filter untouched.
+ */
+const TIP_PIN_RAMP_RESPONSES = 4;
+
+/**
+ * Greatest share of a stroke the tip ramp may cover.
+ *
+ * The ramp is sized from the filter response, which is a property of the
+ * settings and the camera, not of the stroke — so on a short stroke drawn at
+ * heavy stabilization it can reach most of the way back to the press point and
+ * pull the whole line onto its raw samples, undoing the smoothing everywhere
+ * instead of easing the last of it. Measured on a 60-unit zig-zag at zoom
+ * 0.25, an uncapped eight-response ramp left 38.4 units of tremor against the
+ * 43.4 an unstabilized filter leaves: almost none of the stabilization
+ * survived. Short strokes have short tips.
+ */
+const TIP_PIN_MAX_STROKE_FRACTION = 0.25;
 
 function clamp(value: number, min: number, max: number): number {
   if (!Number.isFinite(value)) return min;
@@ -279,12 +353,16 @@ class InkBuffers {
   stageX = new Float64Array(0);
   stageY = new Float64Array(0);
   stageZ = new Float64Array(0);
+  stageTiltX = new Float64Array(0);
+  stageTiltY = new Float64Array(0);
 
   pointX = new Float64Array(0);
   pointY = new Float64Array(0);
   inputX = new Float64Array(0);
   inputY = new Float64Array(0);
   inputZ = new Float64Array(0);
+  tiltX = new Float64Array(0);
+  tiltY = new Float64Array(0);
   pressure = new Float64Array(0);
   distance = new Float64Array(0);
   runLength = new Float64Array(0);
@@ -315,12 +393,16 @@ class InkBuffers {
     this.stageX = new Float64Array(this.capacity);
     this.stageY = new Float64Array(this.capacity);
     this.stageZ = new Float64Array(this.capacity);
+    this.stageTiltX = new Float64Array(this.capacity);
+    this.stageTiltY = new Float64Array(this.capacity);
 
     this.pointX = new Float64Array(this.capacity);
     this.pointY = new Float64Array(this.capacity);
     this.inputX = new Float64Array(this.capacity);
     this.inputY = new Float64Array(this.capacity);
     this.inputZ = new Float64Array(this.capacity);
+    this.tiltX = new Float64Array(this.capacity);
+    this.tiltY = new Float64Array(this.capacity);
     this.pressure = new Float64Array(this.capacity);
     this.distance = new Float64Array(this.capacity);
     this.runLength = new Float64Array(this.capacity);
@@ -350,6 +432,11 @@ function pressureOf(point: DrawPoint): number {
   return Number.isFinite(pressure) ? clamp01(pressure) : 0.5;
 }
 
+/** One tilt channel, defaulting an absent or broken reading to upright. */
+function tiltOf(value: number | undefined): number {
+  return Number.isFinite(value) ? clamp(value!, -1, 1) : 0;
+}
+
 function expandTwoPointStroke(
   count: number,
   simulatePressure: boolean,
@@ -360,11 +447,17 @@ function expandTwoPointStroke(
   const endX = buffers.stageX[1]!;
   const endY = buffers.stageY[1]!;
   const endPressure = buffers.stageZ[1]!;
+  // Tilt is the angle the barrel is held at, which the interpolated samples
+  // share with the two real ones — unlike pressure, it is not ramped.
+  const endTiltX = buffers.stageTiltX[1]!;
+  const endTiltY = buffers.stageTiltY[1]!;
   for (let k = 1; k <= 4; k++) {
     const t = k / 4;
     buffers.stageX[k] = startX + (endX - startX) * t;
     buffers.stageY[k] = startY + (endY - startY) * t;
     buffers.stageZ[k] = (endPressure * k) / 4;
+    buffers.stageTiltX[k] = endTiltX;
+    buffers.stageTiltY[k] = endTiltY;
   }
   return 5;
 }
@@ -385,6 +478,8 @@ function ingest(
     buffers.stageZ[i] = simulatePressure
       ? pressure
       : Math.max(MIN_PHYSICAL_PRESSURE, pressure);
+    buffers.stageTiltX[i] = tiltOf(point.tiltX);
+    buffers.stageTiltY[i] = tiltOf(point.tiltY);
   }
   if (count <= 1) return count;
 
@@ -408,6 +503,8 @@ function ingest(
     buffers.stageX[stagedCount] = buffers.stageX[read]!;
     buffers.stageY[stagedCount] = buffers.stageY[read]!;
     buffers.stageZ[stagedCount] = buffers.stageZ[read]!;
+    buffers.stageTiltX[stagedCount] = buffers.stageTiltX[read]!;
+    buffers.stageTiltY[stagedCount] = buffers.stageTiltY[read]!;
     stagedCount++;
   }
   if (stagedCount <= 2) {
@@ -428,6 +525,8 @@ function ingest(
     buffers.stageX[lastPrefix + 1] = endX;
     buffers.stageY[lastPrefix + 1] = endY;
     buffers.stageZ[lastPrefix + 1] = buffers.stageZ[end]!;
+    buffers.stageTiltX[lastPrefix + 1] = buffers.stageTiltX[end]!;
+    buffers.stageTiltY[lastPrefix + 1] = buffers.stageTiltY[end]!;
     stagedCount = lastPrefix + 2;
   }
   return expandTwoPointStroke(stagedCount, simulatePressure);
@@ -513,6 +612,8 @@ function streamline(
   buffers.inputX[0] = buffers.stageX[0]!;
   buffers.inputY[0] = buffers.stageY[0]!;
   buffers.inputZ[0] = buffers.stageZ[0]!;
+  buffers.tiltX[0] = buffers.stageTiltX[0]!;
+  buffers.tiltY[0] = buffers.stageTiltY[0]!;
   buffers.distance[0] = 0;
   buffers.runLength[0] = 0;
 
@@ -524,12 +625,6 @@ function streamline(
   let pointCount = 1;
 
   for (let i = 1; i < stagedCount; i++) {
-    // `last` pins the final sample to its raw position instead of the
-    // filtered one, so the ink ends exactly where the pointer is. The
-    // renderer asks for it on every stroke, in progress or committed: under
-    // heavy stabilization the filter trails the pointer, and pinning only on
-    // commit would snap the stroke forward at pointer-up.
-    const pinToRaw = last && i === stagedCount - 1;
     const rawX = buffers.stageX[i]!;
     const rawY = buffers.stageY[i]!;
     // Weight this step by how far the hand actually travelled, not by the
@@ -555,8 +650,8 @@ function streamline(
     }
     previousRawX = rawX;
     previousRawY = rawY;
-    const x = pinToRaw ? rawX : previousX + (rawX - previousX) * weight;
-    const y = pinToRaw ? rawY : previousY + (rawY - previousY) * weight;
+    const x = previousX + (rawX - previousX) * weight;
+    const y = previousY + (rawY - previousY) * weight;
     const step = vectorLength(x - previousX, y - previousY);
     totalLength += step;
     previousX = x;
@@ -569,11 +664,74 @@ function streamline(
     buffers.inputX[pointCount] = buffers.stageX[i]!;
     buffers.inputY[pointCount] = buffers.stageY[i]!;
     buffers.inputZ[pointCount] = buffers.stageZ[i]!;
-    buffers.distance[pointCount] = step;
+    buffers.tiltX[pointCount] = buffers.stageTiltX[i]!;
+    buffers.tiltY[pointCount] = buffers.stageTiltY[i]!;
+    // Samples skipped above still moved the pen, so the gap to the previous
+    // *stored* point is the run length since it, not this one step. Dynamics
+    // read `distance` as the spacing between the points they are walking, and
+    // `pinTipToRaw` maintains exactly that identity at the other end.
+    buffers.distance[pointCount] =
+      totalLength - buffers.runLength[pointCount - 1]!;
     buffers.runLength[pointCount] = totalLength;
     pointCount++;
   }
+  if (last) pinTipToRaw(pointCount, response);
   return pointCount;
+}
+
+/**
+ * Ease the end of the filtered curve onto the raw samples it was filtered
+ * from, so the ink ends exactly where the pointer is.
+ *
+ * The pin itself is not optional: under stabilization the filter trails the
+ * pointer, and pinning only on commit would snap the whole stroke forward at
+ * pointer-up. What is optional is doing it in one step. Blending over
+ * `TIP_PIN_RAMP_RESPONSES` of travel reaches the same raw endpoint by a
+ * smoothstep that is flat at both ends, so the ramp joins the filtered curve
+ * without a kink and the tip lands on the pointer rather than jumping to it.
+ *
+ * Applied after the loop rather than inside it, on purpose. The one-pole is
+ * recursive, so feeding blended positions back in as filter state would make
+ * every sample in the ramp depend on how near the end of the stroke it
+ * happened to be — the settled geometry behind the tip, which measures as
+ * bit-stable today, would start moving as the stroke grew. Reading the filter
+ * output and writing it back keeps that stability exactly as it is.
+ */
+function pinTipToRaw(pointCount: number, response: number): void {
+  // No stabilization means no response, no lag, and nothing to correct: the
+  // filter is already the identity and the raw tip is where it ends.
+  if (pointCount < 2 || response <= 0) return;
+
+  const last = pointCount - 1;
+  const tipLength = buffers.runLength[last]!;
+  const ramp = Math.min(
+    TIP_PIN_RAMP_RESPONSES * response,
+    tipLength * TIP_PIN_MAX_STROKE_FRACTION,
+  );
+  if (ramp <= 0) return;
+
+  let first = last;
+  for (let i = last; i > 0; i--) {
+    const t = clamp01(1 - (tipLength - buffers.runLength[i]!) / ramp);
+    if (t <= 0) break;
+    const blend = t * t * (3 - 2 * t);
+    const x = buffers.pointX[i]!;
+    const y = buffers.pointY[i]!;
+    buffers.pointX[i] = x + (buffers.inputX[i]! - x) * blend;
+    buffers.pointY[i] = y + (buffers.inputY[i]! - y) * blend;
+    first = i;
+  }
+
+  // Dynamics read per-sample steps and run length — pressure response, both
+  // tapers — so the ramp has to leave them describing the curve it just moved.
+  for (let i = first; i <= last; i++) {
+    const step = vectorLength(
+      buffers.pointX[i]! - buffers.pointX[i - 1]!,
+      buffers.pointY[i]! - buffers.pointY[i - 1]!,
+    );
+    buffers.distance[i] = step;
+    buffers.runLength[i] = buffers.runLength[i - 1]! + step;
+  }
 }
 
 function resolveTaper(
@@ -595,6 +753,54 @@ function baseRadius(
 ): number {
   if (thinning === 0) return Math.max(MIN_RADIUS, size / 2);
   return Math.max(MIN_RADIUS, size * easing(0.5 - thinning * (0.5 - pressure)));
+}
+
+/**
+ * Widen the radius where the stylus was leaning across the direction of travel.
+ *
+ * The lean is a vector on the page, and the only part of it the line can be
+ * wider for is the part that lies *across* where the line is going — which is
+ * exactly the cross product of the lean with the unit direction of travel, so
+ * no angle is ever formed. Drawn along the lean it is zero and the nib is the
+ * upright one; drawn square across it, it is the whole lean and the nib is at
+ * its broadest. That is the difference between the edge and the flat of a
+ * pencil, and it is the whole of why a tilted pen feels like one.
+ *
+ * Multiplied onto the radius the pressure model and the tapers have already
+ * agreed on, rather than folded into `baseRadius`: tilt says how wide the nib
+ * meeting the page is, and pressure says how hard it is being pushed into it.
+ * A stroke that tapers away at the lift still tapers away at whatever angle it
+ * was held.
+ */
+function applyTiltBroadening(pointCount: number, tiltAmount: number): void {
+  if (tiltAmount <= 0 || pointCount === 0) return;
+  let leanX = buffers.tiltX[0]!;
+  let leanY = buffers.tiltY[0]!;
+  for (let i = 0; i < pointCount; i++) {
+    if (i > 0) {
+      const weight = onePoleWeight(
+        buffers.distance[i]!,
+        TILT_RESPONSE_DISTANCE,
+      );
+      leanX += (buffers.tiltX[i]! - leanX) * weight;
+      leanY += (buffers.tiltY[i]! - leanY) * weight;
+    }
+    if (leanX === 0 && leanY === 0) continue;
+    // The opening sample has no step behind it, so it borrows the one ahead;
+    // a stroke of a single point has no direction at all and takes the full
+    // lean, which is the round nib seen face on.
+    const at = i > 0 ? i : 1;
+    let across = vectorLength(leanX, leanY);
+    if (at < pointCount) {
+      const dx = buffers.pointX[at]! - buffers.pointX[at - 1]!;
+      const dy = buffers.pointY[at]! - buffers.pointY[at - 1]!;
+      const travel = vectorLength(dx, dy);
+      if (travel > 0) across = Math.abs(dx * leanY - dy * leanX) / travel;
+    }
+    const broadening =
+      1 + tiltAmount * MAX_TILT_BROADENING * clamp01(across);
+    buffers.radius[i] = buffers.radius[i]! * broadening;
+  }
 }
 
 /** Compute pressure, short-stroke fixup, radius, and compatibility tapers. */
@@ -649,9 +855,14 @@ function calculateDynamics(
         );
       } else {
         const target = Math.max(MIN_PHYSICAL_PRESSURE, buffers.inputZ[i]!);
-        const response = options.pressureWarmup
-          ? clamp01(buffers.distance[i]! / options.size) * PRESSURE_RELAXATION
-          : onePoleWeight(buffers.distance[i]!, PRESSURE_RESPONSE_DISTANCE);
+        // `pressureWarmup` names the opening initialization above, not this
+        // steady-state filter: relaxing by a fraction of `distance / size`
+        // here is the brush-dependent rate `PRESSURE_RESPONSE_DISTANCE`
+        // exists to replace.
+        const response = onePoleWeight(
+          buffers.distance[i]!,
+          PRESSURE_RESPONSE_DISTANCE,
+        );
         pressure = clamp01(pressure + (target - pressure) * response);
       }
     }
@@ -690,20 +901,30 @@ function calculateDynamics(
     radius *= Math.min(startFactor, endFactor);
     buffers.radius[i] = Math.max(MIN_RADIUS, radius);
   }
+  applyTiltBroadening(pointCount, clamp01(options.tiltAmount ?? 0));
 }
 
 function calculateGlobalVectors(pointCount: number): void {
   if (pointCount === 1) {
     buffers.vectorX[0] = 1;
-    buffers.vectorY[0] = 1;
+    buffers.vectorY[0] = 0;
     return;
   }
   for (let i = 1; i < pointCount; i++) {
     const dx = buffers.pointX[i - 1]! - buffers.pointX[i]!;
     const dy = buffers.pointY[i - 1]! - buffers.pointY[i]!;
     const length = vectorLength(dx, dy);
-    buffers.vectorX[i] = length > 0 ? dx / length : 1;
-    buffers.vectorY[i] = length > 0 ? dy / length : 1;
+    if (length > 0) {
+      buffers.vectorX[i] = dx / length;
+      buffers.vectorY[i] = dy / length;
+      continue;
+    }
+    // A step that goes nowhere has no direction of its own, so it carries the
+    // one before it. The old fallback was `(1, 1)`, which is not a unit vector
+    // at all: the miter offset it produced was 41% too wide and locked at -45
+    // degrees, so a stroke that doubled back onto its own start bulged there.
+    buffers.vectorX[i] = i > 1 ? buffers.vectorX[i - 1]! : 1;
+    buffers.vectorY[i] = i > 1 ? buffers.vectorY[i - 1]! : 0;
   }
   buffers.vectorX[0] = buffers.vectorX[1]!;
   buffers.vectorY[0] = buffers.vectorY[1]!;
@@ -840,26 +1061,22 @@ function calculatePartitionTracks(
     const dx = seqX[local - 1]! - seqX[local]!;
     const dy = seqY[local - 1]! - seqY[local]!;
     const length = vectorLength(dx, dy);
-    buffers.vectorX[local] = length > 0 ? dx / length : 1;
-    buffers.vectorY[local] = length > 0 ? dy / length : 1;
+    if (length > 0) {
+      buffers.vectorX[local] = dx / length;
+      buffers.vectorY[local] = dy / length;
+      continue;
+    }
+    // See `calculateGlobalVectors`: carry the previous direction rather than
+    // the non-unit `(1, 1)` this used to fall back to.
+    buffers.vectorX[local] = local > 1 ? buffers.vectorX[local - 1]! : 1;
+    buffers.vectorY[local] = local > 1 ? buffers.vectorY[local - 1]! : 0;
   }
 
+  // `seq[0]` is already the boundary — the raw sample at an acute corner — and
+  // `seq[1]` the first centerline point after it, so `vector[1]` is the arm
+  // leaving the corner and is what the corner itself turns on.
   buffers.vectorX[0] = buffers.vectorX[1]!;
   buffers.vectorY[0] = buffers.vectorY[1]!;
-  if (buffers.rawBoundary[start] === 1) {
-    const anchorIndex = innerStart > start + 1 ? innerStart : start;
-    const boundaryX = buffers.inputX[start]!;
-    const boundaryY = buffers.inputY[start]!;
-    const anchorX = buffers.pointX[anchorIndex]!;
-    const anchorY = buffers.pointY[anchorIndex]!;
-    const dx = boundaryX - anchorX;
-    const dy = boundaryY - anchorY;
-    const length = vectorLength(dx, dy);
-    if (length > 0) {
-      buffers.vectorX[0] = dx / length;
-      buffers.vectorY[0] = dy / length;
-    }
-  }
 
   const errorLimit = clamp01(smoothing) * size * TRACK_ERROR_LIMIT;
 

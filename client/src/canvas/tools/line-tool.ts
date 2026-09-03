@@ -12,7 +12,7 @@ import { SNAP_SCREEN, snapRegion, snapTargetShapes } from '../snap-targets';
 import { type PointSnapTarget, snapPoint } from '../snapping';
 import { useCameraStore } from '../use-camera-store';
 import { useSelectionStore } from '../use-selection-store';
-import { useStyleStore } from '../use-style-store';
+import { groupStyle, useStyleStore } from '../use-style-store';
 import type { Tool, ToolContext, ToolPointerInfo } from './types';
 
 const CLICK_SCREEN_THRESHOLD = 4;
@@ -110,7 +110,8 @@ export function createLineTool(opts: LineToolOptions): Tool {
       const id = genId();
       creatingId = id;
       const base = util.getDefaultProps() as LineProps | ArrowProps;
-      const style = useStyleStore.getState();
+      const style = groupStyle('shape');
+      const connector = useStyleStore.getState();
       startTargetId =
         opts.type === 'arrow'
           ? findBindableShapeAt(
@@ -136,13 +137,13 @@ export function createLineTool(opts: LineToolOptions): Tool {
           // Arrowhead direction only applies to arrows; line props ignore it.
           ...(opts.type === 'arrow'
             ? {
-                arrowStart: style.arrowStart,
-                arrowEnd: style.arrowEnd,
-                topology: style.arrowTopology ?? 'straight',
+                arrowStart: connector.arrowStart,
+                arrowEnd: connector.arrowEnd,
+                topology: connector.arrowTopology ?? 'straight',
                 bindings: {},
                 label: '',
               }
-            : { spline: style.lineSpline ?? 'linear', label: '' }),
+            : { spline: connector.lineSpline ?? 'linear', label: '' }),
           points: [
             { x: 0, y: 0 },
             { x: 0, y: 0 },

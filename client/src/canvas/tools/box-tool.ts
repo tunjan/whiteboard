@@ -8,7 +8,7 @@ import {
 import { getTopIndex } from '../order';
 import { shapeRegistry } from '../shapes/shape-registry';
 import { useSelectionStore } from '../use-selection-store';
-import { useStyleStore } from '../use-style-store';
+import { groupStyle } from '../use-style-store';
 import { dragBoxSnapTargets, snappedBoxFromDrag } from './drag-box';
 import type { Tool, ToolContext, ToolPointerInfo } from './types';
 
@@ -72,7 +72,7 @@ export function createBoxTool(opts: BoxToolOptions): Tool {
       start = info.point;
       const id = genId();
       creatingId = id;
-      const style = useStyleStore.getState();
+      const style = groupStyle('shape');
       const props = {
         ...(util.getDefaultProps() as RectangleProps),
         w: 0,

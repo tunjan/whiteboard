@@ -83,12 +83,25 @@ describe('ToolPropertiesSatellite', () => {
   });
 
   it('hides itself, inertly, on a tool with no properties to set', () => {
-    for (const tool of ['select', 'hand', 'eraser', 'laser', 'graph']) {
+    for (const tool of ['select', 'hand', 'laser', 'graph']) {
       const html = render(tool);
       expect(html).toContain('aria-hidden="true"');
       expect(html).toContain('inert=""');
       expect(html).toContain('pointer-events-none');
     }
+  });
+
+  // The eraser's mode is a setting like any other, so it is found where every
+  // other tool's settings are — and it is the whole of the bar, because the
+  // eraser paints no colour and no weight.
+  it('gives the eraser its mode, and only that', () => {
+    const html = render('eraser');
+    expect(html).toContain('aria-label="Eraser mode"');
+    expect(html).not.toContain('inert=""');
+    expect(html).not.toContain('aria-label="Color"');
+    expect(html).not.toContain('aria-label="Stroke weight"');
+    // One section, so no rule.
+    expect(html).not.toContain('bg-tb-divider');
   });
 
   it('marks exactly one swatch and one weight as checked', () => {

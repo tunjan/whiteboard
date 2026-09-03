@@ -56,6 +56,19 @@ export interface ShapeUtil<
    */
   getHandles?(shape: ShapeMap[T]): ShapeHandle[];
 
+  /**
+   * The shape's own outline, as SVG path data in shape-local coordinates plus
+   * the transform that places it in world space — the same pair the renderer
+   * draws with, so the two cannot drift apart.
+   *
+   * Shapes that return one are *traced* by the selection layer instead of being
+   * boxed. A rectangle around an open curve is mostly empty space: it says
+   * nothing about where the ink is, and it hides whatever it covers.
+   */
+  getIndicatorPath?(
+    shape: ShapeMap[T],
+  ): { d: string; transform: string } | null;
+
   /** Apply a drag of the handle `handleId` to the world point `point`. */
   onHandleDrag?(
     shape: ShapeMap[T],

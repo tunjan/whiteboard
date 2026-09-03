@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { startDocumentNotifications } from '@/board/document-notifications';
 import { boardRepository } from '@/board/server-board-repository';
 import { Canvas } from '@/canvas/Canvas';
+import { ensureGraphMath } from '@/canvas/graph-math';
 import {
   loadBoard,
   setCurrentPage,
@@ -22,6 +23,7 @@ import { CanvasContextMenu } from '@/components/canvas-context-menu';
 import { AttentionToast } from '@/components/attention-toast';
 import { LatencyWarningToast } from '@/components/latency-warning-toast';
 import { NameDialog } from '@/components/name-dialog';
+import { PdfRangeDialog } from '@/components/pdf-range-dialog';
 import { Toolbar } from '@/components/toolbar';
 import { Toaster } from '@/components/ui/toast';
 import { VideoPanel } from '@/components/video-panel';
@@ -34,11 +36,15 @@ const EquationPanel = lazy(() =>
     default: EquationPanel,
   })),
 );
-const GraphPanel = lazy(() =>
-  import('@/components/graph-panel').then(({ GraphPanel }) => ({
-    default: GraphPanel,
-  })),
-);
+// The panel is unusable without the mathjs parser, so it waits for both here
+// and never renders the "still loading" state the canvas shapes can show.
+const GraphPanel = lazy(async () => {
+  const [{ GraphPanel }] = await Promise.all([
+    import('@/components/graph-panel'),
+    ensureGraphMath(),
+  ]);
+  return { default: GraphPanel };
+});
 
 /** The board editor for one board id. Loads content + sets up presence. */
 export function BoardView({ boardId }: { boardId: string }) {
@@ -140,6 +146,9 @@ export function BoardView({ boardId }: { boardId: string }) {
       {/* Bottom-right, clear of the latency warning's top-left viewport. */}
       <Toaster />
 
+      {/* Opened from the paste handler, not from a control, when a pasted PDF
+          runs past the import limit. */}
+      <PdfRangeDialog isTutor={identity?.isTutor ?? false} />
       <NameDialog
         open={needsName || editingIdentity}
         editing={editingIdentity}

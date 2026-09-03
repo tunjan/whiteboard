@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as Y from 'yjs';
 import { Awareness } from 'y-protocols/awareness';
 import type { Shape } from '@whiteboard/shared';
@@ -11,6 +11,7 @@ import { useCameraStore } from '../use-camera-store';
 import { useCanvasUiStore } from '../use-canvas-ui-store';
 import { useEraserCutStore } from '../use-eraser-cut-store';
 import { useEraserStore } from '../use-eraser-store';
+import { useEraserTrailStore } from '../use-eraser-trail-store';
 import { createEraserTool } from './eraser-tool';
 import type { ToolContext, ToolPointerInfo } from './types';
 
@@ -29,6 +30,27 @@ function rectangle(): Extract<Shape, { type: 'rectangle' }> {
       fillStyle: 'solid',
       dash: 'solid',
       size: 2,
+    },
+  };
+}
+
+function textShape(): Extract<Shape, { type: 'text' }> {
+  return {
+    id: 'label',
+    type: 'text',
+    x: 0,
+    y: 0,
+    rotation: 0,
+    index: 'a0',
+    props: {
+      text: 'Erase me',
+      color: '#111',
+      fontSize: 24,
+      fontFamily: 'sans',
+      sizingMode: 'auto',
+      width: 0,
+      lineHeight: 1.2,
+      align: 'start',
     },
   };
 }
@@ -81,7 +103,8 @@ interface Harness {
 
 function context(...initial: Shape[]): Harness {
   const shapes = new Map(initial.map((shape) => [shape.id, shape]));
-  for (const shape of initial) spatialIndex.insert(shape.id, shapeRotatedBounds(shape));
+  for (const shape of initial)
+    spatialIndex.insert(shape.id, shapeRotatedBounds(shape));
   const created: Shape[] = [];
   const updated: [string, ShapePatch][] = [];
   const harness = { shapes, created, updated, transacts: 0 } as Harness;
@@ -110,6 +133,14 @@ function context(...initial: Shape[]): Harness {
   return harness;
 }
 
+beforeEach(() => {
+  useEraserTrailStore.getState().clear();
+});
+
+afterEach(() => {
+  useEraserTrailStore.getState().clear();
+});
+
 describe('eraser tool stroke lifecycle', () => {
   beforeEach(() => {
     spatialIndex.clear();
@@ -131,12 +162,43 @@ describe('eraser tool stroke lifecycle', () => {
     const tool = createEraserTool();
 
     tool.onPointerDown?.(pointer(20, 15), ctx);
+    tool.onPointerMove?.(pointer(24, 15), ctx);
     expect(useEraserStore.getState().isMarked('target')).toBe(true);
 
     tool.onCommit?.(ctx);
 
     expect(shapes.has('target')).toBe(false);
     expect(useEraserStore.getState().marked).toEqual({});
+  });
+
+  it('deletes text on a discrete click instead of treating it as a container', () => {
+    const { ctx, shapes } = context(textShape());
+    const tool = createEraserTool();
+
+    tool.onPointerDown?.(pointer(20, 12), ctx);
+    expect(useEraserStore.getState().isMarked('label')).toBe(true);
+    expect(useEraserTrailStore.getState().scribbles).toEqual([]);
+    tool.onPointerUp?.(pointer(20, 12), ctx);
+
+    expect(shapes.has('label')).toBe(false);
+  });
+
+  it('promotes a sustained unmodified press into an erasing trail', () => {
+    vi.useFakeTimers();
+    try {
+      const { ctx } = context(rectangle());
+      const tool = createEraserTool();
+
+      tool.onPointerDown?.(pointer(20, 15), ctx);
+      expect(useEraserTrailStore.getState().scribbles).toEqual([]);
+
+      vi.advanceTimersByTime(500);
+
+      expect(useEraserTrailStore.getState().scribbles[0]?.state).toBe('active');
+      tool.onCancel?.(ctx);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   describe('precision mode', () => {
@@ -165,7 +227,8 @@ describe('eraser tool stroke lifecycle', () => {
       expect(harness.shapes.has('ink')).toBe(true);
 
       const kept = harness.updated[0]![1].props?.points as { x: number }[];
-      const split = (harness.created[0]! as Extract<Shape, { type: 'draw' }>).props.points;
+      const split = (harness.created[0]! as Extract<Shape, { type: 'draw' }>)
+        .props.points;
       expect(kept[kept.length - 1]!.x).toBeLessThan(100);
       expect(split[0]!.x).toBeGreaterThan(100);
       expect(useEraserCutStore.getState().fragments).toEqual({});
@@ -274,7 +337,11 @@ function group(id: string): Extract<Shape, { type: 'group' }> {
   return { id, type: 'group', x: 0, y: 0, rotation: 0, index: 'a0', props: {} };
 }
 
-function frame(id: string, w: number, h: number): Extract<Shape, { type: 'frame' }> {
+function frame(
+  id: string,
+  w: number,
+  h: number,
+): Extract<Shape, { type: 'frame' }> {
   return {
     id,
     type: 'frame',
@@ -287,7 +354,7 @@ function frame(id: string, w: number, h: number): Extract<Shape, { type: 'frame'
 }
 
 function modifiedPointer(x: number, y: number): ToolPointerInfo {
-  return { ...pointer(x, y), metaKey: true };
+  return { ...pointer(x, y), altKey: true };
 }
 
 describe('eraser hierarchy and containment', () => {
@@ -438,7 +505,7 @@ describe('precision eraser inside a group', () => {
   });
 });
 
-describe('erase preview reaches collaborators', () => {
+describe('eraser trail reaches collaborators', () => {
   let awareness: Awareness;
 
   beforeEach(() => {
@@ -458,32 +525,38 @@ describe('erase preview reaches collaborators', () => {
     useEraserStore.getState().clear();
   });
 
-  it('publishes the marked shape while the stroke is held, and clears it on release', async () => {
+  it('publishes the gesture, not local target ids, and clears it after release', async () => {
     const { ctx } = context(rectangle());
     const tool = createEraserTool();
 
     tool.onPointerDown?.(pointer(20, 15), ctx);
+    tool.onPointerMove?.(pointer(24, 15), ctx);
 
-    // Held: peers dim it, but the shape is still in everyone's document.
-    expect(awareness.getLocalState()?.erasing).toEqual(['target']);
+    expect(awareness.getLocalState()?.scribbles).toEqual([
+      expect.objectContaining({
+        state: 'active',
+        points: [{ x: 20, y: 15, pressure: 0.5 }],
+      }),
+    ]);
+    expect(awareness.getLocalState()?.erasing ?? null).toBeNull();
 
     tool.onPointerUp?.(pointer(20, 15), ctx);
+    useEraserTrailStore.getState().tick(false);
 
-    // The clear rides the throttle's trailing flush rather than going out with
-    // the release. Harmless: by then the delete itself has reached peers, and on
-    // a cancelled stroke the extra frame of dim is under a tenth of a second.
-    await new Promise((resolve) => setTimeout(resolve, 120));
-    expect(awareness.getLocalState()?.erasing).toBeNull();
+    // The clear rides the throttle's trailing flush.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(awareness.getLocalState()?.scribbles).toBeNull();
   });
 
-  it('publishes nothing when a stroke is cancelled without erasing anything', () => {
+  it('stops the trail and preserves the document when a miss is cancelled', () => {
     const { ctx, shapes } = context(rectangle());
     const tool = createEraserTool();
 
     tool.onPointerDown?.(pointer(500, 500), ctx);
+    tool.onPointerMove?.(pointer(504, 500), ctx);
     tool.onCancel?.(ctx);
 
-    expect(awareness.getLocalState()?.erasing ?? null).toBeNull();
+    expect(useEraserTrailStore.getState().scribbles[0]?.state).toBe('stopping');
     expect(shapes.has('target')).toBe(true);
   });
 });

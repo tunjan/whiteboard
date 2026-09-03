@@ -13,12 +13,7 @@ export const POLYGON_KINDS: { kind: PolygonKind; label: string }[] = [
 
 export const NAVIGATE_TOOLS = ['select', 'hand'] as const;
 /** Also the order they stand in, left to right, in the toolbar's tray. */
-export const INKING_TOOLS = [
-  'draw',
-  'highlighter',
-  'eraser',
-  'laser',
-] as const;
+export const INKING_TOOLS = ['draw', 'highlighter', 'eraser', 'laser'] as const;
 export const CREATION_TOOLS = ['text', 'comment'] as const;
 export const STEM_TOOLS = ['graph', 'equation'] as const;
 export const SHAPE_TOOLS = [
@@ -108,7 +103,7 @@ export const TOOL_IDLE =
  * four that only held while the boxes were nested.
  */
 export const TOOL_GEOMETRY =
-  'tb-key relative group/button size-9 min-w-9 rounded-full p-0 duration-fast ease-out-quart';
+  'tb-key relative group/button size-9 min-w-9 rounded-full p-0 duration-base ease-out-quart active:scale-[0.92] motion-reduce:active:scale-100';
 
 export function toolButtonClass(active: boolean, pressed = false) {
   return cn(
@@ -134,7 +129,7 @@ export function chromeButtonClass(pressed = false) {
  */
 export function menuItemClass(selected: boolean) {
   return cn(
-    'size-10 rounded-xl transition-colors duration-fast',
+    'size-10 rounded-xl transition-all duration-fast ease-out-quart active:scale-95 motion-reduce:active:scale-100',
     selected
       ? TOOL_PRESSED
       : 'text-fg-secondary hover:bg-panel hover:text-fg active:bg-panel/80',
@@ -331,7 +326,7 @@ export function FlyoutCaret({
     <span
       aria-hidden="true"
       className={cn(
-        'pointer-events-none absolute bottom-1 right-1 flex size-1.5 items-center justify-center transition-colors duration-fast',
+        'pointer-events-none absolute bottom-1 right-1 flex size-1.5 items-center justify-center transition-colors duration-base ease-out-quart',
         active
           ? 'text-fg/50 group-hover/button:text-fg'
           : 'text-fg-subtle/70 group-hover/button:text-fg-secondary',

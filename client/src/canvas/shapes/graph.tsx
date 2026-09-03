@@ -6,6 +6,7 @@ import {
   DEFAULT_GRAPH_CURVE_WIDTH,
   createDefaultGraphProps,
 } from '../graph-defaults';
+import { useGraphMathReady } from '../graph-math';
 import { mergeGraphParameters } from '../graph-parameters';
 import { createGraphFunctionDefinitions } from '../graph-parser';
 import { sampleGraphExpression } from '../graph-sampler';
@@ -192,9 +193,12 @@ export const graphUtil: ShapeUtil<'graph'> = {
     const verticalSamples = Math.max(120, Math.round(area.h * 1.4));
     const showAxisLabels = props.showAxisLabels !== false;
     const points = props.points ?? [];
+    // The mathjs parser is fetched on demand; until it lands every expression
+    // reads as unparsable, so each memo below has to recompute when it arrives.
+    const mathReady = useGraphMathReady();
     const functionDefinitions = useMemo(
       () => createGraphFunctionDefinitions(props.expressions),
-      [props.expressions],
+      [props.expressions, mathReady],
     );
 
     // A slider being played sweeps its value locally rather than through the
@@ -232,6 +236,7 @@ export const graphUtil: ShapeUtil<'graph'> = {
         samples,
         verticalSamples,
         functionDefinitions,
+        mathReady,
       ],
     );
 
@@ -252,6 +257,7 @@ export const graphUtil: ShapeUtil<'graph'> = {
         viewport,
         parameters,
         functionDefinitions,
+        mathReady,
       ],
     );
     const xLabelsBelow = clippedXAxis <= area.y + area.h - 18;
@@ -284,19 +290,18 @@ export const graphUtil: ShapeUtil<'graph'> = {
           {shadow && (
             <filter
               id={shadowId}
-              x={shape.x - 28}
+              x={shape.x - 24}
               y={shape.y - 20}
-              width={props.w + 56}
-              height={props.h + 64}
+              width={props.w + 48}
+              height={props.h + 52}
               filterUnits="userSpaceOnUse"
-              colorInterpolationFilters="sRGB"
             >
               <feDropShadow
                 dx={0}
-                dy={8}
-                stdDeviation={8}
-                floodColor="black"
-                floodOpacity={0.13}
+                dy={4}
+                stdDeviation={6}
+                floodColor="#000000"
+                floodOpacity={0.08}
               />
             </filter>
           )}

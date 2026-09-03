@@ -1,63 +1,173 @@
 import { create } from 'zustand';
-import type { Point } from '@whiteboard/shared';
+import { genId, type DrawPoint, type Point } from '@whiteboard/shared';
+import { setLocalEraserScribbles } from '@/collab/presence';
 
-/** Longest the trail ever gets, in points. Past this the tail is dropped. */
+/** Longest an active trail ever gets. Older samples are eaten from the tail. */
 export const ERASER_TRAIL_MAX = 8;
+/** Visual width in screen pixels. Collision size is intentionally independent. */
+export const ERASER_TRAIL_SIZE = 12;
+export const ERASER_TRAIL_OPACITY = 0.8;
+export const ERASER_TRAIL_SHRINK = 0.1;
+
+export interface EraserScribble {
+  id: string;
+  /** World-space samples, oldest first. */
+  points: DrawPoint[];
+  state: 'active' | 'stopping';
+  color: 'muted-1';
+  /** Current diameter in screen pixels. */
+  size: number;
+  opacity: number;
+  shrink: number;
+  taper: true;
+}
 
 interface EraserTrailStore {
-  /** World-space trail points, oldest first. */
-  points: Point[];
-  /** True between pointer down and up: a lifted stroke drains and disappears. */
-  active: boolean;
-  /**
-   * Bumped on every {@link extend}. The trail layer compares it against the
-   * previous frame's value to tell "the pointer moved" from "the pointer is
-   * sitting still", which is the difference between a trail that follows and one
-   * that eats itself.
-   */
+  /** Usually one active scribble, plus any just-released ribbons draining out. */
+  scribbles: EraserScribble[];
+  activeId: string | null;
+  /** Bumped only by pointer input, so the animation tick can detect an idle tip. */
   seq: number;
-  begin: (p: Point) => void;
-  extend: (p: Point) => void;
-  /** Drop the oldest point. Driven one per frame by the trail layer. */
-  consume: () => void;
+  begin: (p: Point, pressure?: number) => void;
+  extend: (p: Point, pressure?: number) => void;
+  /**
+   * Advance the self-consuming queue by one animation frame. Stopping trails
+   * always drain; the active trail drains only when `consumeActive` is true.
+   */
+  tick: (consumeActive: boolean) => void;
+  /** Stop accepting points and let the active trail shrink away. */
   end: () => void;
+  /** Immediate teardown for document/session disposal and deterministic tests. */
+  clear: () => void;
+}
+
+function sample(p: Point, pressure = 0.5): DrawPoint {
+  const normalized = Number.isFinite(pressure)
+    ? Math.max(0, Math.min(1, pressure))
+    : 0.5;
+  return { x: p.x, y: p.y, pressure: normalized };
+}
+
+function publish(scribbles: EraserScribble[]): void {
+  // Awareness owns only the serialized snapshot. The source of truth remains
+  // this local session store and never enters the shared document/undo history.
+  setLocalEraserScribbles(scribbles);
 }
 
 /**
- * The eraser's self-consuming trail — a short ribbon of where the swipe has just
- * been.
+ * Session-scoped eraser scribbles.
  *
- * The cursor ring says how much the eraser takes; it does not say what the last
- * few hundred milliseconds of a fast swipe actually crossed, and a swipe that
- * outruns the frame rate is exactly when that is in doubt. The trail is a fixed
- * few points long and continuously eats its own tail, so it reads as motion
- * rather than as a stroke: stop moving and it shrinks into the cursor, lift and
- * it drains away.
- *
- * Purely local and transient, like the erase highlight and cut preview — never
- * part of the CRDT, never seen by peers.
+ * Each active ribbon is capped at eight points. When input pauses, animation
+ * frames shift its oldest point until only the tip remains. Releasing the
+ * pointer moves the ribbon to `stopping`; subsequent frames keep shifting the
+ * tail while shrinking its diameter by ten percent, then remove it. Every
+ * snapshot is mirrored through awareness so collaborators can render the
+ * gesture without receiving the local pending-deletion set.
  */
 export const useEraserTrailStore = create<EraserTrailStore>((set, get) => ({
-  points: [],
-  active: false,
+  scribbles: [],
+  activeId: null,
   seq: 0,
-  begin: (p) => set({ points: [p], active: true, seq: get().seq + 1 }),
-  extend: (p) => {
-    const { points, seq } = get();
-    const last = points[points.length - 1];
-    // Coalesced samples land many points on one spot; a repeat is not movement.
-    if (last && last.x === p.x && last.y === p.y) return;
-    const next = points.length >= ERASER_TRAIL_MAX ? points.slice(1) : points.slice();
-    next.push(p);
-    set({ points: next, seq: seq + 1 });
+
+  begin: (p, pressure) => {
+    const { scribbles, seq } = get();
+    // A new press may arrive before the previous release has drained. Preserve
+    // that old trail as a stopping ribbon instead of popping it off screen.
+    const stopping = scribbles.map((scribble) =>
+      scribble.state === 'active'
+        ? { ...scribble, state: 'stopping' as const }
+        : scribble,
+    );
+    const id = genId();
+    const next = [
+      ...stopping,
+      {
+        id,
+        points: [sample(p, pressure)],
+        state: 'active' as const,
+        color: 'muted-1' as const,
+        size: ERASER_TRAIL_SIZE,
+        opacity: ERASER_TRAIL_OPACITY,
+        shrink: ERASER_TRAIL_SHRINK,
+        taper: true as const,
+      },
+    ];
+    set({ scribbles: next, activeId: id, seq: seq + 1 });
+    publish(next);
   },
-  consume: () => {
-    const { points } = get();
-    if (points.length === 0) return;
-    set({ points: points.slice(1) });
+
+  extend: (p, pressure) => {
+    const { activeId, scribbles, seq } = get();
+    if (!activeId) return;
+    let changed = false;
+    const next = scribbles.map((scribble) => {
+      if (scribble.id !== activeId || scribble.state !== 'active')
+        return scribble;
+      const last = scribble.points[scribble.points.length - 1];
+      if (last && last.x === p.x && last.y === p.y) return scribble;
+      const points =
+        scribble.points.length >= ERASER_TRAIL_MAX
+          ? scribble.points.slice(1)
+          : scribble.points.slice();
+      points.push(sample(p, pressure));
+      changed = true;
+      return { ...scribble, points };
+    });
+    if (!changed) return;
+    set({ scribbles: next, seq: seq + 1 });
+    publish(next);
   },
+
+  tick: (consumeActive) => {
+    const { activeId, scribbles } = get();
+    let changed = false;
+    const next: EraserScribble[] = [];
+    for (const scribble of scribbles) {
+      if (scribble.id === activeId && scribble.state === 'active') {
+        if (consumeActive && scribble.points.length > 1) {
+          next.push({ ...scribble, points: scribble.points.slice(1) });
+          changed = true;
+        } else {
+          next.push(scribble);
+        }
+        continue;
+      }
+
+      // A stopped two-point ribbon becomes a one-point dot after this shift;
+      // remove it in the same frame so no inert session survives indefinitely.
+      const points = scribble.points.slice(1);
+      if (points.length <= 1) {
+        changed = true;
+        continue;
+      }
+      next.push({
+        ...scribble,
+        points,
+        size: Math.max(1, scribble.size * (1 - scribble.shrink)),
+      });
+      changed = true;
+    }
+    if (!changed) return;
+    set({ scribbles: next });
+    publish(next);
+  },
+
   end: () => {
-    if (!get().active) return;
-    set({ active: false });
+    const { activeId, scribbles } = get();
+    if (!activeId) return;
+    const next = scribbles.map((scribble) =>
+      scribble.id === activeId
+        ? { ...scribble, state: 'stopping' as const }
+        : scribble,
+    );
+    set({ scribbles: next, activeId: null });
+    publish(next);
+  },
+
+  clear: () => {
+    const { scribbles, activeId } = get();
+    if (scribbles.length === 0 && activeId === null) return;
+    set({ scribbles: [], activeId: null });
+    publish([]);
   },
 }));

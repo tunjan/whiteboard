@@ -64,6 +64,33 @@ describe('draw hit-testing', () => {
     expect(drawUtil.hitTest(unstabilized, justOff, 1)).toBe(true);
   });
 
+  it('reserves the width positive thinning gives a heavy stroke', () => {
+    // Thinning moves the radius away from half the brush in both directions,
+    // but only the negative side was reserved for. At the pencil's own default
+    // thinning a full-pressure stroke is drawn three quarters of a brush wide
+    // — so the last third of it was outside its own bounds, culled early and
+    // unclickable.
+    const heavy: DrawShape = {
+      ...stroke(0),
+      props: {
+        ...stroke(0).props,
+        points: Array.from({ length: 80 }, (_, i) => ({
+          x: i * 2,
+          y: 0,
+          pressure: 1,
+        })),
+        size: 20,
+        thinning: 0.5,
+        pressureEasing: 'smoothstep',
+      },
+    };
+
+    // 16.875 = 20 * smoothstep(0.75), the outline's own half width here.
+    expect(drawUtil.getBounds(heavy).maxY).toBeGreaterThanOrEqual(16.875);
+    expect(drawUtil.hitTest(heavy, { x: 80, y: 16 }, 0)).toBe(true);
+    expect(drawUtil.hitTest(heavy, { x: 80, y: 25 }, 0)).toBe(false);
+  });
+
   it('hit-tests a single-point stroke as a dot', () => {
     const dot: DrawShape = {
       ...stroke(0.9),

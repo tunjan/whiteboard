@@ -1,13 +1,16 @@
 import { useShallow } from 'zustand/react/shallow';
 import type { Shape } from '@whiteboard/shared';
 import type { Camera } from './camera';
-import { worldToScreen } from './camera';
+import { cameraToTransform, worldToScreen } from './camera';
 import {
   getSelectionInfo,
+  HANDLE_HIT_SCREEN,
+  HANDLE_SCREEN,
   ROTATION_HANDLE_HIT_SCREEN,
   shapeRotatedBounds,
 } from './selection-geometry';
 import { rotationCursor } from './rotation-cursor';
+import { shapeRegistry } from './shapes/shape-registry';
 import { useDocumentStore } from './use-document-store';
 import { useSelectionStore } from './use-selection-store';
 
@@ -15,10 +18,12 @@ import { useSelectionStore } from './use-selection-store';
 const NO_SHAPES: Shape[] = [];
 
 const ACCENT = 'var(--action-solid, #3b82f6)';
+const MUTED = 'var(--muted-foreground, var(--fg-muted, #78716c))';
 const SNAP = '#e5484d';
 /** Half-length of a snap indicator's tick marks, in screen px. */
 const SNAP_TICK = 3;
-const HANDLE = 7;
+/** Screen-px radius of a connector handle's solid grip dot. */
+const GRIP = 4;
 
 interface SelectionLayerProps {
   camera: Camera;
@@ -68,13 +73,49 @@ export function SelectionLayer({ camera }: SelectionLayerProps) {
 
   const toScreen = (p: { x: number; y: number }) => worldToScreen(p, camera);
 
+  // Shapes that describe their own outline (connectors) are traced instead of
+  // boxed: a rectangle around an open curve covers mostly empty canvas, says
+  // nothing about where the stroke runs, and hides what is underneath it.
+  const traced = selectedIds.flatMap((id) => {
+    const shape = shapesRecord?.[id];
+    if (!shape) return [];
+    const util = shapeRegistry.getFor(shape);
+    const path = util?.getIndicatorPath?.(shape as never);
+    return path ? [{ id, locked: !!shape.locked, path }] : [];
+  });
+  const tracedIds = new Set(traced.map((t) => t.id));
+  // Only the box itself is dropped for a traced shape — any handles the
+  // selection still has keep their places on it.
+  const boxed = !(info?.isSingle && tracedIds.has(info.ids[0]!));
+
   return (
     <svg className="pointer-events-none absolute inset-0 z-[var(--z-canvas-indicator)] h-full w-full">
+      {/* Conformal outlines, drawn in world space so curves stay exact; the
+          stroke itself is screen-constant via non-scaling-stroke. */}
+      {traced.length > 0 && (
+        <g transform={cameraToTransform(camera)} fill="none">
+          {traced.map((t) => (
+            <path
+              key={t.id}
+              d={t.path.d}
+              transform={t.path.transform}
+              stroke={t.locked ? MUTED : ACCENT}
+              strokeWidth={1.5}
+              strokeDasharray={t.locked ? '4 3' : undefined}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              opacity={info?.isSingle ? 1 : 0.5}
+              vectorEffect="non-scaling-stroke"
+            />
+          ))}
+        </g>
+      )}
+
       {/* Per-shape outlines for multi-selection (so membership is visible). */}
       {info && !info.isSingle &&
         selectedIds.map((id) => {
           const shape = shapesRecord?.[id];
-          if (!shape) return null;
+          if (!shape || tracedIds.has(id)) return null;
           const b = shapeRotatedBounds(shape);
           const tl = toScreen({ x: b.minX, y: b.minY });
           const br = toScreen({ x: b.maxX, y: b.maxY });
@@ -101,13 +142,15 @@ export function SelectionLayer({ camera }: SelectionLayerProps) {
         const sw = toScreen(c.sw);
         return (
           <g>
-            <polygon
-              points={`${nw.x},${nw.y} ${ne.x},${ne.y} ${se.x},${se.y} ${sw.x},${sw.y}`}
-              fill="none"
-              stroke={locked ? 'var(--muted-foreground, var(--fg-muted, #78716c))' : ACCENT}
-              strokeWidth={1.5}
-              strokeDasharray={locked ? '4 3' : isGroup ? '6 4' : undefined}
-            />
+            {boxed && (
+              <polygon
+                points={`${nw.x},${nw.y} ${ne.x},${ne.y} ${se.x},${se.y} ${sw.x},${sw.y}`}
+                fill="none"
+                stroke={locked ? MUTED : ACCENT}
+                strokeWidth={1.5}
+                strokeDasharray={locked ? '4 3' : isGroup ? '6 4' : undefined}
+              />
+            )}
             {info.rotationHandles.map((handle) => {
               const p = toScreen(handle.point);
               return (
@@ -145,10 +188,10 @@ export function SelectionLayer({ camera }: SelectionLayerProps) {
               return (
                 <rect
                   key={h.id}
-                  x={p.x - HANDLE / 2}
-                  y={p.y - HANDLE / 2}
-                  width={HANDLE}
-                  height={HANDLE}
+                  x={p.x - HANDLE_SCREEN / 2}
+                  y={p.y - HANDLE_SCREEN / 2}
+                  width={HANDLE_SCREEN}
+                  height={HANDLE_SCREEN}
                   rx={1.5}
                   fill="var(--background, var(--bg-canvas, #ffffff))"
                   stroke={ACCENT}
@@ -160,52 +203,58 @@ export function SelectionLayer({ camera }: SelectionLayerProps) {
         );
       })()}
 
-      {/* Connector handles: vertices, bend/route controls, and insert points. */}
-      {info?.customHandles?.map((h) => {
-        const p = toScreen(h.point);
-        if (h.kind === 'create') {
+      {/* Connector handles: vertices, bend/route controls, and insert points.
+          Insert points come first so a vertex paints over one that a short
+          segment has collapsed onto it — the same order the select tool
+          resolves them in. Each handle carries its own grab zone, which is
+          also its hover halo: the circle you can see is the circle the tool
+          tests against. Insert points stay invisible until hovered (touch has
+          no hover, so `touch-reveal` keeps them out there). */}
+      {info?.customHandles
+        ?.slice()
+        .sort(
+          (a, b) => Number(b.kind === 'create') - Number(a.kind === 'create'),
+        )
+        .map((h) => {
+          const p = toScreen(h.point);
+          const isCreate = h.kind === 'create';
           return (
-            <g key={h.id} opacity={0.72}>
+            <g
+              key={h.id}
+              className={
+                isCreate
+                  ? 'group touch-reveal opacity-0 hover:opacity-100'
+                  : 'group'
+              }
+              style={{ cursor: 'grab' }}
+            >
               <circle
                 cx={p.x}
                 cy={p.y}
-                r={HANDLE / 2 - 0.5}
+                r={HANDLE_HIT_SCREEN}
+                fill={ACCENT}
+                fillOpacity={0.15}
+                pointerEvents="all"
+                className="opacity-0 group-hover:opacity-100"
+              />
+              <circle
+                cx={p.x}
+                cy={p.y}
+                r={isCreate ? GRIP - 1 : GRIP}
                 fill="var(--background, var(--bg-canvas, #ffffff))"
                 stroke={ACCENT}
-                strokeWidth={1.25}
+                strokeWidth={1.5}
               />
-              <path
-                d={`M ${p.x - 2} ${p.y} H ${p.x + 2} M ${p.x} ${p.y - 2} V ${p.y + 2}`}
-                stroke={ACCENT}
-                strokeWidth={1}
-              />
+              {isCreate && (
+                <path
+                  d={`M ${p.x - 2} ${p.y} H ${p.x + 2} M ${p.x} ${p.y - 2} V ${p.y + 2}`}
+                  stroke={ACCENT}
+                  strokeWidth={1}
+                />
+              )}
             </g>
           );
-        }
-        return h.kind === 'bend' || h.kind === 'route' ? (
-          <circle
-            key={h.id}
-            cx={p.x}
-            cy={p.y}
-            r={HANDLE / 2}
-            fill="var(--background, var(--bg-canvas, #ffffff))"
-            stroke={ACCENT}
-            strokeWidth={1.5}
-          />
-        ) : (
-          <rect
-            key={h.id}
-            x={p.x - HANDLE / 2}
-            y={p.y - HANDLE / 2}
-            width={HANDLE}
-            height={HANDLE}
-            rx={1.5}
-            fill="var(--background, var(--bg-canvas, #ffffff))"
-            stroke={ACCENT}
-            strokeWidth={1.5}
-          />
-        );
-      })}
+        })}
 
       {snapGuides.map((g, i) => {
         if (g.kind === 'point') {

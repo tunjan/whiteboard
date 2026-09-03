@@ -64,6 +64,12 @@
   --bg-inverse: #1c1917;
   --bg-inverse-hover: #292524;
 
+  /* Ink: the pen's slot-0 swatch, held as a token so a stroke stored in either
+     theme's ink repaints for whoever is looking at it (canvas/ink-color.ts).
+     Must equal PALETTE.light[0] / PALETTE.dark[0] in
+     canvas/use-style-store.ts. */
+  --ink: #1d1d1d;
+
   --fg: #0c0a09;
   --fg-secondary: #44403c;
   --fg-muted: #57534e;
@@ -146,6 +152,27 @@
        keeps a control legible over content it cannot control. */
   --tb-glyph-halo: rgba(255, 255, 255, 0.92);
 
+  /* The wash the board chrome floats on: the toolbar and the four corner HUDs
+       sit over live ink, and a halo per glyph carries a single control but not
+       a row of them over a dense drawing.
+
+       The blur does all of the separating and the tint does none of it. It is
+       barely there on purpose — enough to keep the frosted patch from reading
+       as clear glass, and not one step further, because anything heavier turns
+       the chrome into the white slab this bar spent its design getting rid of.
+       Whatever is drawn under it stays visible as itself, softened. The radius
+       is kept short for the same reason the tint is kept light: past a certain
+       point the board under the chrome stops being a board at all and becomes
+       an anonymous smear, which is a slab again by another route.
+
+       `-solid` is what is left when there is no compositor pass to spend — low
+       graphics, or an engine with no `backdrop-filter`. It has to carry the
+       separation alone, so it is heavier than the tint above; still short of
+       opaque, so the board reads through it. */
+  --chrome-blur: 8px;
+  --chrome-wash: rgba(255, 255, 255, 0.16);
+  --chrome-wash-solid: rgba(255, 255, 255, 0.6);
+
   --grid-minor: rgba(12, 10, 9, 0.05);
   --grid-major: rgba(12, 10, 9, 0.1);
   --grid-dot: rgba(12, 10, 9, 0.25);
@@ -190,6 +217,8 @@
   --bg-sunken: #0c0a09;
   --bg-inverse: #fafaf9;
   --bg-inverse-hover: #e7e5e4;
+
+  --ink: #f3f3f3;
 
   --fg: #fafaf9;
   --fg-secondary: #d6d3d1;
@@ -251,6 +280,8 @@
   --tb-accent-ring: #a8a29e;
   --tb-divider: #3b3733;
   --tb-glyph-halo: rgba(12, 10, 9, 0.85);
+  --chrome-wash: rgba(28, 25, 23, 0.2);
+  --chrome-wash-solid: rgba(28, 25, 23, 0.62);
 
   --grid-minor: rgba(250, 250, 249, 0.06);
   --grid-major: rgba(250, 250, 249, 0.12);
@@ -704,6 +735,98 @@
   animation: tool-panel-content-in 180ms var(--panel-ease) both;
 }
 
+/* The video panel changes between a pill, a floating player and a full-board
+   layout. View Transitions preserve that spatial relationship in Chromium;
+   the component supplies a FLIP fallback elsewhere. The remaining rules use
+   opacity and individual scale so they compose with either geometry path. */
+.video-panel-motion {
+  view-transition-name: video-panel;
+  transform-origin: center;
+  transition:
+    opacity var(--duration-base) var(--ease-out-quart),
+    scale var(--duration-slow) var(--ease-out-expo);
+}
+
+.video-panel-motion[data-phase='closing'] {
+  opacity: 0;
+  scale: 0.98;
+  pointer-events: none;
+}
+
+.video-panel-content,
+.video-tile-motion,
+.video-panel-control-in {
+  transform-origin: center;
+  transition:
+    opacity var(--duration-slow) var(--ease-out-quart),
+    scale var(--duration-slow) var(--ease-out-expo),
+    filter var(--duration-slow) var(--ease-out-quart);
+}
+
+.video-self-preview {
+  transform-origin: bottom right;
+  transition:
+    width var(--duration-slower) var(--ease-out-expo),
+    opacity var(--duration-base) var(--ease-out-quart),
+    scale var(--duration-slow) var(--ease-out-expo);
+}
+
+.video-panel-error {
+  transform-origin: bottom center;
+  transition:
+    opacity var(--duration-base) var(--ease-out-quart),
+    scale var(--duration-base) var(--ease-out-expo),
+    translate var(--duration-base) var(--ease-out-expo);
+}
+
+.video-self-preview[data-phase='closing'],
+.video-panel-error[data-phase='closing'] {
+  opacity: 0;
+  scale: 0.96;
+  pointer-events: none;
+}
+
+.video-panel-error[data-phase='closing'] {
+  translate: 0 4px;
+}
+
+@starting-style {
+  .video-panel-motion,
+  .video-panel-content,
+  .video-tile-motion,
+  .video-self-preview {
+    opacity: 0;
+    scale: 0.98;
+  }
+
+  .video-panel-control-in {
+    opacity: 0;
+    scale: 0.96;
+    filter: blur(4px);
+  }
+
+  .video-panel-error {
+    opacity: 0;
+    scale: 0.96;
+    translate: 0 4px;
+  }
+}
+
+::view-transition-group(video-panel) {
+  animation-duration: 320ms;
+  animation-timing-function: var(--ease-out-expo);
+}
+
+::view-transition-old(video-panel) {
+  animation-duration: 160ms;
+  animation-timing-function: ease-in;
+}
+
+::view-transition-new(video-panel) {
+  animation-duration: 320ms;
+  animation-timing-function: var(--ease-out-quart);
+}
+
 @keyframes tool-panel-content-in {
   from {
     transform: translateY(-4px);
@@ -766,7 +889,8 @@
 
 /* The tip of the laser tool glows like an energized optical diode. */
 @keyframes laser-tip-pulse {
-  0%, 100% {
+  0%,
+  100% {
     opacity: 0.85;
     transform: scale(1);
   }
@@ -793,6 +917,15 @@
 
   .tool-panel-content {
     animation: none;
+  }
+
+  .video-panel-motion,
+  .video-panel-content,
+  .video-tile-motion,
+  .video-panel-control-in,
+  .video-self-preview,
+  .video-panel-error {
+    transition: none;
   }
 
   .sticker-pop {
@@ -1023,17 +1156,80 @@
  * glyph carries its own separation: a tight halo in the board's own colour,
  * and a soft ambient shadow under it.
  *
- * On the glyph rather than on the button, so a key that *is* filled (the
- * selected one) reads as a flat chip and not as a lit one. Nothing here is
- * raised; the shadow is doing legibility, not relief.
+ * The drop-shadow is on the glyph rather than on the button, so a key that
+ * *is* filled (the selected one) reads as a flat chip and not as a lit one.
+ * Nothing here is raised; the shadow is doing legibility, not relief. The
+ * text-shadow rides on the element itself and inherits, which is what covers
+ * a label with no glyph in it — the zoom percentage, the "Tools" pill.
  */
+.tb-glyph {
+  text-shadow: 0 0 2px var(--tb-glyph-halo);
+}
+
 .tb-glyph svg {
   filter: drop-shadow(0 0 2px var(--tb-glyph-halo))
     drop-shadow(0 1px 2px rgb(0 0 0 / 0.16));
 }
 
+/**
+ * The frosted ground under a piece of board chrome: the toolbar and the four
+ * corner HUDs. Still not a card — no border, no shadow, and nothing that
+ * follows the chrome around — just the board itself, blurred, so a row of
+ * controls reads as one region over a dense drawing rather than as glyphs
+ * scattered across it.
+ *
+ * It has no edge. A `backdrop-filter` is clipped to its own border box, and
+ * that clip is a hard line: sharp board on one side of it, frost on the other,
+ * with a corner where two of those lines meet. So the frost is masked to
+ * strongest under the middle of the row and gone by the rim, and the mask
+ * takes the tint with it — what you get is the blur giving out gradually
+ * rather than a shape sitting on the board. Percentages rather than pixels
+ * because the same rule dresses a 600px toolbar and a two-key corner HUD, and
+ * a fixed inset would swallow the short one whole.
+ *
+ * On `::before` rather than on the row itself, because a mask applies to an
+ * element's whole subtree — masking the row would fade its own buttons out at
+ * the ends. `z-index: -1` puts the layer behind that content without
+ * `isolation: isolate`, which would make the row a backdrop root and leave the
+ * filter with nothing behind it to sample. The call site supplies the
+ * containing block (`relative`) and the shape, which the layer inherits.
+ *
+ * Low-graphics mode and engines with no `backdrop-filter` fall back to the
+ * heavier wash, still masked: the tint alone is clear glass, but a rim that
+ * fades is what keeps it from being the slab this chrome does not have.
+ */
+.wb-chrome-blur::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  border-radius: inherit;
+  background-color: var(--chrome-wash);
+  /* Unprefixed only. Lightning CSS adds `-webkit-` for the Safari versions
+     that still need it; writing the prefixed form here by hand made it drop
+     the unprefixed one instead, which left Firefox with no blur at all. */
+  backdrop-filter: blur(var(--chrome-blur));
+  mask-image:
+    linear-gradient(to right, transparent, #000 14%, #000 86%, transparent),
+    linear-gradient(to bottom, transparent, #000 22%, #000 78%, transparent);
+  mask-composite: intersect;
+}
+
+:root[data-low-graphics] .wb-chrome-blur::before {
+  background-color: var(--chrome-wash-solid);
+  backdrop-filter: none;
+}
+
+@supports not (backdrop-filter: blur(1px)) {
+  .wb-chrome-blur::before {
+    background-color: var(--chrome-wash-solid);
+  }
+}
+
 .tb-key {
-  transition-property: color, background-color, border-color;
+  transition-property:
+    color, background-color, border-color, transform, box-shadow;
 }
 
 @media (prefers-reduced-motion: reduce) {

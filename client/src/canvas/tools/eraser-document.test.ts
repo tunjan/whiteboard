@@ -11,6 +11,7 @@ import { useCameraStore } from '../use-camera-store';
 import { useCanvasUiStore } from '../use-canvas-ui-store';
 import { useEraserCutStore } from '../use-eraser-cut-store';
 import { useEraserStore } from '../use-eraser-store';
+import { useEraserTrailStore } from '../use-eraser-trail-store';
 import { createEraserTool } from './eraser-tool';
 import type { ToolContext, ToolPointerInfo } from './types';
 
@@ -86,14 +87,19 @@ let dispose: () => void;
 beforeEach(() => {
   vi.stubGlobal('localStorage', memoryStorage());
   vi.stubGlobal('sessionStorage', memoryStorage());
-  dispose = loadBoard('test-precision-eraser', { persist: false, collab: false });
+  dispose = loadBoard('test-precision-eraser', {
+    persist: false,
+    collab: false,
+  });
   useCameraStore.setState({ camera: { x: 0, y: 0, z: 1 } });
   useCanvasUiStore.getState().setEraserMode('precision');
+  useEraserTrailStore.getState().clear();
 });
 afterEach(() => {
   dispose();
   useEraserStore.getState().clear();
   useEraserCutStore.getState().clear();
+  useEraserTrailStore.getState().clear();
   useCanvasUiStore.getState().setEraserMode('object');
 });
 
@@ -116,7 +122,9 @@ describe('precision eraser against the document', () => {
     const left = after[0]!.id === 's' ? after[0]! : after[1]!;
     const right = after[0]!.id === 's' ? after[1]! : after[0]!;
     expect(left.props.points[0]).toEqual({ x: 0, y: 0, pressure: 0.5 });
-    expect(left.props.points[left.props.points.length - 1]!.x).toBeLessThan(100);
+    expect(left.props.points[left.props.points.length - 1]!.x).toBeLessThan(
+      100,
+    );
     expect(right.props.points[0]!.x).toBeGreaterThan(100);
     expect(right.props.points[right.props.points.length - 1]).toEqual({
       x: 199,

@@ -11,6 +11,8 @@ import {
   frameHeadingSideTransform,
   frameHeadingText,
 } from '../frame-geometry';
+import { inkPaint } from '../ink-color';
+import { useCameraStore } from '../use-camera-store';
 import { rotationTransform, unrotatedPoint } from './box-geometry';
 import { DEFAULT_SHAPE_STYLE } from './style';
 import type { ShapeUtil } from './types';
@@ -118,7 +120,7 @@ function FrameBorder({ frame }: { frame: FrameShape }) {
         width={frame.props.w}
         height={frame.props.h}
         fill="none"
-        stroke={frame.props.color ?? 'var(--color-muted-foreground)'}
+        stroke={inkPaint(frame.props.color ?? 'var(--color-muted-foreground)')}
         strokeOpacity={0.68}
         strokeWidth={1.25}
         vectorEffect="non-scaling-stroke"
@@ -150,7 +152,7 @@ function FrameHeading({ frame, zoom }: { frame: FrameShape; zoom: number }) {
           data-slot="frame-heading"
           x={layout.x + 6 / safeZoom}
           y={layout.y + layout.height / 2}
-          fill={frame.props.color ?? 'var(--color-muted-foreground)'}
+          fill={inkPaint(frame.props.color ?? 'var(--color-muted-foreground)')}
           fontSize={FRAME_HEADING_FONT_SCREEN / safeZoom}
           fontFamily="'Inter Variable', system-ui, sans-serif"
           fontWeight={550}
@@ -165,6 +167,17 @@ function FrameHeading({ frame, zoom }: { frame: FrameShape; zoom: number }) {
       </g>
     </LocalFrameTransform>
   );
+}
+
+/**
+ * Heading that reads the zoom off the camera store itself. Threading `camera.z`
+ * down as a prop would make the whole visible element tree a function of the
+ * camera, so every pinch frame rebuilt it; subscribing here confines a zoom to
+ * the handful of mounted frame headings that actually scale with it.
+ */
+function LiveFrameHeading({ frame }: { frame: FrameShape }) {
+  const zoom = useCameraStore((s) => s.camera.z);
+  return <FrameHeading frame={frame} zoom={zoom} />;
 }
 
 /** The frame's own visuals when rendered outside a container tree. */
@@ -205,7 +218,8 @@ export function FrameView({
   children: ReactNode;
   /** Resolved opacity for frame chrome only; children already compound it. */
   opacity?: number;
-  zoom?: number;
+  /** `'live'` subscribes the heading to the camera; a number pins it (export). */
+  zoom?: number | 'live';
   showTitle?: boolean;
   showBorder?: boolean;
 }) {
@@ -236,7 +250,12 @@ export function FrameView({
       <g clipPath={`url(#${clipId})`}>{children}</g>
       <g opacity={opacity}>
         {showBorder && <FrameBorder frame={frame} />}
-        {showTitle && <FrameHeading frame={frame} zoom={zoom} />}
+        {showTitle &&
+          (zoom === 'live' ? (
+            <LiveFrameHeading frame={frame} />
+          ) : (
+            <FrameHeading frame={frame} zoom={zoom} />
+          ))}
       </g>
     </g>
   );

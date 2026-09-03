@@ -1,9 +1,7 @@
 import type { Awareness } from 'y-protocols/awareness';
-import {
-  parseVoicePresence,
-  type Point,
-} from '@whiteboard/shared';
+import { parseVoicePresence, type Point } from '@whiteboard/shared';
 import type { Camera } from '@/canvas/camera';
+import type { EraserScribble } from '@/canvas/use-eraser-trail-store';
 import type { LaserStroke } from '@/canvas/use-laser-store';
 import { viewportWorldBounds } from '@/canvas/geometry';
 import { setCurrentPage } from '@/canvas/use-document-store';
@@ -48,15 +46,19 @@ let latestLaser: LaserStroke[] = [];
 let localSelection: string[] = [];
 let lastSelectionSent = 0;
 let selectionTrailingTimer: ReturnType<typeof setTimeout> | null = null;
-let localErasing: string[] = [];
-let lastErasingSent = 0;
-let erasingTrailingTimer: ReturnType<typeof setTimeout> | null = null;
+let localEraserScribbles: EraserScribble[] = [];
+let lastEraserScribblesSent = Number.NEGATIVE_INFINITY;
+let eraserScribblesTrailingTimer: ReturnType<typeof setTimeout> | null = null;
+let localCursorType: PeerPresence['cursorType'] = 'pointer';
 
 const CURSOR_THROTTLE_MS = 40;
 const VIEWPORT_THROTTLE_MS = 70;
 const LASER_THROTTLE_MS = 40;
 const SELECTION_THROTTLE_MS = 60;
-const ERASING_THROTTLE_MS = 60;
+// Each update carries whole point arrays, so this stays below the cursor's 25 Hz
+// rather than tracking the local animation frame. Peers interpolate nothing, but
+// the trail is a momentary decoration and the trailing flush still lands its end.
+const ERASER_SCRIBBLES_THROTTLE_MS = 60;
 
 // Previous peer objects keyed by clientId. Awareness fires `change` on any
 // peer's update (cursors publish at 25 Hz), but most peers are unchanged each
@@ -75,6 +77,8 @@ function publishPeers(a: Awareness): void {
     // Awareness returns the same object reference for a field until that field
     // is re-set, so `===` on cursor/viewport correctly detects "unchanged".
     const cursor = (state.cursor as Point | null) ?? null;
+    const cursorType: PeerPresence['cursorType'] =
+      state.cursorType === 'cross' ? 'cross' : 'pointer';
     const viewport = (state.viewport as ViewportPresence | null) ?? null;
     const summon = (state.summon as number | null) ?? null;
     const page = (state.page as string | null) ?? null;
@@ -89,7 +93,8 @@ function publishPeers(a: Awareness): void {
       (state.textSelection as TextSelectionPresence | null) ?? null;
     const laser = (state.laser as LaserStroke[] | null) ?? null;
     const selection = (state.selection as string[] | null) ?? null;
-    const erasing = (state.erasing as string[] | null) ?? null;
+    const scribbles =
+      (state.scribbles as EraserScribble[] | null | undefined) ?? null;
     const prev = prevPeers.get(clientId);
     const parsedAttention = parseAttentionPresence(state.attention);
     const attention =
@@ -117,6 +122,7 @@ function publishPeers(a: Awareness): void {
       prev.color === user.color &&
       prev.isTutor === user.isTutor &&
       prev.cursor === cursor &&
+      prev.cursorType === cursorType &&
       prev.viewport === viewport &&
       prev.summon === summon &&
       prev.page === page &&
@@ -125,7 +131,7 @@ function publishPeers(a: Awareness): void {
       prev.textSelection === textSelection &&
       prev.laser === laser &&
       prev.selection === selection &&
-      prev.erasing === erasing &&
+      prev.scribbles === scribbles &&
       prev.voice === voice &&
       prev.attention === attention
         ? prev
@@ -135,6 +141,7 @@ function publishPeers(a: Awareness): void {
             color: user.color,
             isTutor: user.isTutor,
             cursor,
+            cursorType,
             viewport,
             summon,
             page,
@@ -143,7 +150,7 @@ function publishPeers(a: Awareness): void {
             textSelection,
             laser,
             selection,
-            erasing,
+            scribbles,
             voice,
             attention,
           };
@@ -157,19 +164,19 @@ function publishPeers(a: Awareness): void {
 /** Bind/unbind the active provider's awareness. Called by loadBoard. */
 export function setActiveAwareness(next: Awareness | null): void {
   if (awareness && onChange) awareness.off('change', onChange);
-  // An erase stroke's marks are momentary and deliberately not republished on
-  // rebind (like the cursor and laser). Dropping them here keeps a flush that
+  // Eraser scribbles are momentary and deliberately not republished on rebind
+  // (like the cursor and laser). Dropping them here keeps a flush that
   // was still pending on the old connection from landing on the new one to
   // describe a stroke that is long over.
-  if (erasingTrailingTimer !== null) {
-    clearTimeout(erasingTrailingTimer);
-    erasingTrailingTimer = null;
+  if (eraserScribblesTrailingTimer !== null) {
+    clearTimeout(eraserScribblesTrailingTimer);
+    eraserScribblesTrailingTimer = null;
   }
-  localErasing = [];
+  localEraserScribbles = [];
   // A new connection has no send history to be throttled against, so the first
-  // mark of the next stroke goes out at once instead of waiting out a window
+  // point of the next stroke goes out at once instead of waiting out a window
   // measured against the previous session.
-  lastErasingSent = 0;
+  lastEraserScribblesSent = Number.NEGATIVE_INFINITY;
   awareness = next;
   onChange = null;
   prevPeers = new Map();
@@ -177,6 +184,12 @@ export function setActiveAwareness(next: Awareness | null): void {
     usePresenceStore.getState().setPeers([]);
     return;
   }
+  // Clear the pre-trail field left by an older hot-reloaded client. Target ids
+  // are session-private now; only the gesture path belongs in awareness.
+  next.setLocalStateField('erasing', null);
+  // Scribbles are momentary too: a rebound provider must not resurrect the
+  // final snapshot from a stroke that belonged to the previous connection.
+  next.setLocalStateField('scribbles', null);
   onChange = () => publishPeers(next);
   next.on('change', onChange);
   publishLocalState(next);
@@ -193,6 +206,7 @@ function publishLocalState(a: Awareness): void {
   a.setLocalStateField('textSelection', localTextSelection);
   a.setLocalStateField('voice', localVoice);
   a.setLocalStateField('attention', localAttention);
+  a.setLocalStateField('cursorType', localCursorType);
   a.setLocalStateField(
     'selection',
     localSelection.length > 0 ? localSelection : null,
@@ -337,42 +351,42 @@ export function setLocalSelection(ids: string[]): void {
   }, SELECTION_THROTTLE_MS - elapsed);
 }
 
-function sendErasing(): void {
+function sendEraserScribbles(): void {
   if (!awareness) return;
-  lastErasingSent = performance.now();
+  lastEraserScribblesSent = performance.now();
   awareness.setLocalStateField(
-    'erasing',
-    localErasing.length > 0 ? localErasing : null,
+    'scribbles',
+    localEraserScribbles.length > 0 ? localEraserScribbles : null,
   );
 }
 
 /**
- * Publish which shapes this client's erase stroke has marked, so peers dim them
- * for as long as the stroke is held rather than watching them vanish with no
- * warning. Throttled with a trailing flush like the selection: the flush is what
- * guarantees the *final* state of a burst arrives, and here that matters more
- * than usual — a dropped clear would leave a peer dimming a shape that is no
- * longer being erased, with nothing to correct it.
+ * Publish the local eraser's session-only scribbles. Updates are throttled and
+ * keep a trailing flush so the final stopping or empty state cannot be stranded
+ * behind it.
  */
-export function setLocalErasing(ids: string[]): void {
-  if (
-    ids.length === localErasing.length &&
-    ids.every((id, i) => id === localErasing[i])
-  ) {
-    return;
-  }
-  localErasing = ids;
+export function setLocalEraserScribbles(scribbles: EraserScribble[]): void {
+  localEraserScribbles = scribbles;
   if (!awareness) return;
-  if (erasingTrailingTimer !== null) return;
-  const elapsed = performance.now() - lastErasingSent;
-  if (elapsed >= ERASING_THROTTLE_MS) {
-    sendErasing();
+  if (eraserScribblesTrailingTimer !== null) return;
+  const elapsed = performance.now() - lastEraserScribblesSent;
+  if (elapsed >= ERASER_SCRIBBLES_THROTTLE_MS) {
+    sendEraserScribbles();
     return;
   }
-  erasingTrailingTimer = setTimeout(() => {
-    erasingTrailingTimer = null;
-    sendErasing();
-  }, ERASING_THROTTLE_MS - elapsed);
+  eraserScribblesTrailingTimer = setTimeout(() => {
+    eraserScribblesTrailingTimer = null;
+    sendEraserScribbles();
+  }, ERASER_SCRIBBLES_THROTTLE_MS - elapsed);
+}
+
+/** Publish the remote cursor glyph that matches the active local tool. */
+export function setLocalCursorType(
+  cursorType: PeerPresence['cursorType'],
+): void {
+  if (cursorType === localCursorType) return;
+  localCursorType = cursorType;
+  awareness?.setLocalStateField('cursorType', cursorType);
 }
 
 export function setLocalTextSelection(

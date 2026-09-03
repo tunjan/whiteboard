@@ -160,6 +160,11 @@ export function ungroupShapes(editor: Editor, ids: string[]): string[] {
  * `groupShapes` passes through a one-child state while it reparents, and a
  * reactive invariant would dissolve the group out from under it.
  *
+ * `goneIds` names shapes the caller has already deleted. Inside an open
+ * transaction `getShapes()` is served from a cache that has not seen those
+ * deletes yet, so a group would still look full and keep itself alive; passing
+ * them in is what makes this correct from inside a transaction.
+ *
  * Returns the dissolved group ids. A stale `enteredGroupId` needs no cleanup —
  * `selectionTargetId` matches it by identity, so an id that no longer exists
  * simply stops matching, which is the same as not being in a group.
@@ -167,6 +172,7 @@ export function ungroupShapes(editor: Editor, ids: string[]): string[] {
 export function pruneDegenerateGroups(
   editor: Editor,
   groupIds: Iterable<string>,
+  goneIds: Iterable<string> = [],
 ): string[] {
   const shapes = editor.getShapes();
   const byId = new Map(shapes.map((s) => [s.id, s]));
@@ -183,7 +189,11 @@ export function pruneDegenerateGroups(
     else childIds.set(s.parentId, [s.id]);
   }
 
-  const removed = new Set<string>();
+  // Seeded with what the caller already deleted, so those shapes neither keep a
+  // group alive nor get reparented; `dissolved` is what this pass removed and
+  // therefore what it has to write and report.
+  const removed = new Set<string>(goneIds);
+  const dissolved: string[] = [];
   const reparented: { id: string; parentId: string | null }[] = [];
   // Terminates: a parent is only enqueued after a group is removed, and a
   // removed group is skipped on re-visit.
@@ -202,17 +212,18 @@ export function pruneDegenerateGroups(
       if (up) childIds.set(up, [...(childIds.get(up) ?? []), childId]);
     }
     removed.add(id);
+    dissolved.push(id);
     childIds.delete(id);
     if (up) queue.push(up);
   }
 
-  if (!removed.size) return [];
+  if (!dissolved.length) return [];
   editor.transact(() => {
     for (const r of reparented)
       editor.updateShape(r.id, { parentId: r.parentId });
-    editor.deleteShapes([...removed]);
+    editor.deleteShapes(dissolved);
   });
-  return [...removed];
+  return dissolved;
 }
 
 /**
@@ -228,5 +239,5 @@ export function deleteShapesWithCleanup(editor: Editor, ids: string[]): void {
     if (parentId) parents.add(parentId);
   }
   editor.deleteShapes(ids);
-  if (parents.size) pruneDegenerateGroups(editor, parents);
+  if (parents.size) pruneDegenerateGroups(editor, parents, ids);
 }

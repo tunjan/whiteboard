@@ -94,11 +94,25 @@ export function worldToScreen(world: Point, camera: Camera): Point {
  * this adds at most a sub-device-pixel discrepancy with the overlays.
  */
 export function cameraToTransform(camera: Camera): string {
+  const { e, f } = cameraTranslation(camera);
+  return `matrix(${camera.z}, 0, 0, ${camera.z}, ${e}, ${f})`;
+}
+
+/**
+ * The device-pixel-snapped translate components of {@link cameraToTransform}.
+ *
+ * Exposed because the camera snapshot has to place a bitmap of the shape layer
+ * exactly where the shape layer itself was: reproducing the snap by hand would
+ * leave the capture up to half a device pixel out, which reads as a jump at the
+ * start and end of every gesture.
+ */
+export function cameraTranslation(camera: Camera): { e: number; f: number } {
   const dpr =
     (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
-  const e = Math.round(-camera.x * camera.z * dpr) / dpr;
-  const f = Math.round(-camera.y * camera.z * dpr) / dpr;
-  return `matrix(${camera.z}, 0, 0, ${camera.z}, ${e}, ${f})`;
+  return {
+    e: Math.round(-camera.x * camera.z * dpr) / dpr,
+    f: Math.round(-camera.y * camera.z * dpr) / dpr,
+  };
 }
 
 /**

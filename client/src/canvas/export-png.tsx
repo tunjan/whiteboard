@@ -3,6 +3,8 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { type Bounds, type Shape, unionBounds } from '@whiteboard/shared';
 import { descendantsOf } from './hierarchy';
 import { getEquationRender, typesetEquation } from './equation-render';
+import { ensureGraphMath } from './graph-math';
+import { resolveCssVars } from './css-vars';
 import { shapeRotatedBounds } from './shape-bounds';
 import {
   DEFAULT_PNG_EXPORT_SCALE,
@@ -10,6 +12,7 @@ import {
   useCanvasUiStore,
 } from './use-canvas-ui-store';
 import { compareIndex, editor } from './use-document-store';
+import { inkShape } from './ink-color';
 import { shapeRegistry } from './shapes/shape-registry';
 import { FrameView } from './shapes/frame';
 import { withPhysChunk } from './png-phys';
@@ -40,7 +43,7 @@ interface Scene {
  */
 async function boardScene(): Promise<Scene | null> {
   const shapes = editor.getShapes();
-  await prewarmEquationRenders(shapes);
+  await prewarmShapeEngines(shapes);
   const byId = new Map(shapes.map((shape) => [shape.id, shape]));
   let bounds: Bounds | null = null;
   for (const shape of shapes) {
@@ -109,7 +112,7 @@ async function selectionScene(ids: string[]): Promise<Scene | null> {
   }
   // Typeset first: `isExportable` reads the cache to drop equations that would
   // only contribute a placeholder box to the bounds.
-  await prewarmEquationRenders(shapes, renderSet);
+  await prewarmShapeEngines(shapes, renderSet);
   // Bounds = union of the rotated world bounds of every rendered shape with its
   // own geometry (groups carry none, so they're skipped).
   let bounds: Bounds | null = singleFrame
@@ -237,7 +240,7 @@ async function renderSceneForClipboard(
  * An equation with no source, or one whose source doesn't typeset, draws an
  * editing placeholder on the canvas (dashed box, warning glyph). That is
  * scaffolding for the author, so it stays out of the exported image. Call only
- * after `prewarmEquationRenders`, which fills the cache this reads.
+ * after `prewarmShapeEngines`, which fills the cache this reads.
  */
 export function isExportable(shape: Shape): boolean {
   if (shape.type !== 'equation') return true;
@@ -278,8 +281,14 @@ function confirmInvalidEquationExport(count: number): boolean {
   );
 }
 
-/** Fill the synchronous equation cache before server-rendering the SVG tree. */
-async function prewarmEquationRenders(
+/**
+ * Load what the shape renderers read synchronously, before the SVG tree is
+ * server-rendered: typeset equations, and the graph parser if a graph is in
+ * the export. Both are fetched on demand on the canvas, and a render body
+ * cannot wait for either — here it can, so the export never draws the
+ * intermediate state.
+ */
+async function prewarmShapeEngines(
   shapes: Shape[],
   renderSet?: Set<string>,
 ): Promise<void> {
@@ -295,11 +304,16 @@ async function prewarmEquationRenders(
     const inline = shape.props.inline ?? false;
     if (latex) wanted.set(`${inline ? 'i' : 'b'}${latex}`, { latex, inline });
   }
-  await Promise.all(
-    [...wanted.values()].map(({ latex, inline }) =>
+  const graphed = shapes.some(
+    (shape) =>
+      shape.type === 'graph' && (!renderSet || renderSet.has(shape.id)),
+  );
+  await Promise.all([
+    ...[...wanted.values()].map(({ latex, inline }) =>
       typesetEquation(latex, inline).catch(() => undefined),
     ),
-  );
+    graphed ? ensureGraphMath().catch(() => undefined) : undefined,
+  ]);
 }
 
 /**
@@ -425,41 +439,15 @@ function renderTree(renderSet?: Set<string>, rootFrameId?: string): ReactNode {
       );
     }
     const Component = shapeRegistry.getFor(shape)?.Component;
-    return Component ? <Component key={shape.id} shape={shape} /> : null;
+    return Component ? (
+      <Component key={shape.id} shape={inkShape(shape)} />
+    ) : null;
   };
 
   const topLevel = [...shapes]
     .sort(compareIndex)
     .filter((s) => inSet(s.id) && !hasRenderedFrameAncestor(s));
   return <>{topLevel.map((shape) => render(shape, false))}</>;
-}
-
-/**
- * Replace `var(--name[, fallback])` tokens with their computed value. Shapes use
- * Tailwind theme vars (e.g. `--color-border`) that alias raw vars (`--border`);
- * when the alias isn't a resolvable custom property we strip the `color-`
- * prefix. A detached SVG can't see the page stylesheet, so this must run before
- * rasterizing.
- */
-function resolveCssVars(input: string): string {
-  const root = getComputedStyle(document.documentElement);
-  const read = (name: string): string => {
-    let v = root.getPropertyValue(name).trim();
-    if (!v && name.startsWith('--color-')) {
-      v = root.getPropertyValue(`--${name.slice('--color-'.length)}`).trim();
-    }
-    return v;
-  };
-  const re = /var\(\s*(--[\w-]+)\s*(?:,\s*([^()]*))?\)/g;
-  let out = input;
-  // Loop because a resolved value (e.g. color-mix) may itself contain var().
-  for (let i = 0; i < 5 && out.includes('var('); i++) {
-    out = out.replace(re, (_m, name: string, fallback?: string) => {
-      const v = read(name);
-      return v || (fallback?.trim() ?? '');
-    });
-  }
-  return out;
 }
 
 /** Fetch each `/api/blobs/...` image and inline it as a data URL (canvas taint). */

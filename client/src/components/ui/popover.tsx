@@ -39,7 +39,7 @@ function PopoverContent({
           // not read as two different tiers of surface. `gap-3 p-3` is what
           // every chrome caller was already overriding the old `gap-4 p-4` to.
           className={cn(
-            'z-50 flex w-72 origin-(--transform-origin) flex-col gap-3 rounded-overlay border border-border bg-surface p-3 text-sm text-fg shadow-overlay outline-hidden duration-100 data-[side=bottom]:slide-in-from-top-1 data-[side=inline-end]:slide-in-from-left-1 data-[side=inline-start]:slide-in-from-right-1 data-[side=left]:slide-in-from-right-1 data-[side=right]:slide-in-from-left-1 data-[side=top]:slide-in-from-bottom-1 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0',
+            'z-50 flex w-72 origin-(--transform-origin) flex-col gap-3 rounded-overlay border border-border bg-surface p-3 text-sm text-fg shadow-overlay outline-hidden duration-150 ease-out-quart data-[side=bottom]:slide-in-from-top-1 data-[side=inline-end]:slide-in-from-left-1 data-[side=inline-start]:slide-in-from-right-1 data-[side=left]:slide-in-from-right-1 data-[side=right]:slide-in-from-left-1 data-[side=top]:slide-in-from-bottom-1 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0',
             className,
           )}
           {...props}

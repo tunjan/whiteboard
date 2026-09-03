@@ -15,22 +15,26 @@ import { spatialIndex } from '../use-document-store';
 import { segmentErasesShape, segmentIntersectsBounds } from './erase-geometry';
 
 /**
- * Shapes under the start point that must survive the whole stroke: containers
- * (frames/groups) and text boxes. When you begin a swipe on top of one of these
- * "backgrounds", dragging across it erases the drawings on it — not the
- * background itself. Captured once on pointer down (see {@link protectedAt}).
+ * Containers under the start point that must survive the whole stroke. When
+ * you begin inside a frame/group, dragging across it erases the drawings in it
+ * rather than the container itself. Captured once on pointer down (see
+ * {@link protectedAt}). Text is ordinary erasable content, including on click.
  *
  * A group is excluded by its *bounds* rather than by a hit test, because it has
  * no geometry of its own to hit. That is what makes the stroke's origin decide
  * granularity: starting inside a group erases its members one by one, starting
  * outside it takes the group whole (see {@link eraseTargetId}).
  */
-export function protectedAt(editor: Editor, p: Point, margin: number): Set<string> {
+export function protectedAt(
+  editor: Editor,
+  p: Point,
+  margin: number,
+): Set<string> {
   const out = new Set<string>();
   const shapes = editor.getShapes();
   let groupBounds: Map<string, Bounds> | null = null;
   for (const shape of shapes) {
-    if (!isContainerType(shape.type) && shape.type !== 'text') continue;
+    if (!isContainerType(shape.type)) continue;
     if (!isVisible(shape)) continue;
     if (shape.type === 'group') {
       // Derived once for every group on the page: asking each group for its own
@@ -38,7 +42,8 @@ export function protectedAt(editor: Editor, p: Point, margin: number): Set<strin
       // grouped diagrams is a quadratic pass on every single eraser press.
       groupBounds ??= allGroupBounds(shapes);
       const bounds = groupBounds.get(shape.id);
-      if (bounds && boundsContainsPoint(expand(bounds, margin), p)) out.add(shape.id);
+      if (bounds && boundsContainsPoint(expand(bounds, margin), p))
+        out.add(shape.id);
       continue;
     }
     const util = shapeRegistry.getFor(shape);
@@ -74,7 +79,12 @@ function allGroupBounds(shapes: readonly Shape[]): Map<string, Bounds> {
 }
 
 function expand(b: Bounds, m: number): Bounds {
-  return { minX: b.minX - m, minY: b.minY - m, maxX: b.maxX + m, maxY: b.maxY + m };
+  return {
+    minX: b.minX - m,
+    minY: b.minY - m,
+    maxX: b.maxX + m,
+    maxY: b.maxY + m,
+  };
 }
 
 /**

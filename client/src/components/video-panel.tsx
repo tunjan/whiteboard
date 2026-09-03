@@ -1,4 +1,12 @@
-import { memo, useCallback, useEffect, useRef } from 'react';
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
+import type { ComponentType, SVGProps } from 'react';
 import {
   ChevronDown,
   ChevronUp,
@@ -41,6 +49,8 @@ import {
 
 /** Kept clear of the canvas edges, and of the zoom controls it sits above. */
 const DRAG_MARGIN = 12;
+const PANEL_EXIT_MS = 160;
+const PANEL_MORPH_MS = 320;
 
 // Mirrors the ladder in CanvasControls, offset by that toolbar's own height
 // (2.5rem, or 3.25rem once coarse-pointer targets grow it) plus a gap.
@@ -62,6 +72,67 @@ const MODE_SIZE: Record<VideoPanelMode, string> = {
 const OVER_VIDEO =
   'text-white hover:bg-white/15 hover:text-white aria-pressed:bg-white/25 [&_svg]:drop-shadow-[0_1px_3px_rgb(0_0_0/0.7)]';
 
+const VIDEO_CONTROL_MOTION =
+  'relative transition-[color,background-color,border-color,opacity,scale] duration-fast ease-out-quart active:scale-[0.96] motion-reduce:transition-none motion-reduce:active:scale-100';
+
+interface DocumentViewTransition {
+  finished: Promise<void>;
+  skipTransition(): void;
+}
+
+type DocumentWithViewTransitions = Document & {
+  startViewTransition?: (update: () => void) => DocumentViewTransition;
+};
+
+function captureTileRects(root: HTMLElement | null): Map<string, DOMRect> {
+  const rects = new Map<string, DOMRect>();
+  root
+    ?.querySelectorAll<HTMLElement>('[data-video-tile-key]')
+    .forEach((element) => {
+      const key = element.dataset.videoTileKey;
+      if (key) rects.set(key, element.getBoundingClientRect());
+    });
+  return rects;
+}
+
+function reducedMotionPreferred(): boolean {
+  return (
+    typeof window !== 'undefined' &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  );
+}
+
+/** Keep a departing value mounted just long enough for its exit transition. */
+function useExitPresence<T>(value: T | null, duration: number) {
+  const latest = useRef(value);
+  if (value !== null) latest.current = value;
+
+  const present = value !== null;
+  const [mounted, setMounted] = useState(present);
+  const [exiting, setExiting] = useState(false);
+
+  useEffect(() => {
+    if (present) {
+      setMounted(true);
+      setExiting(false);
+      return;
+    }
+    if (!mounted) return;
+
+    setExiting(true);
+    const timer = window.setTimeout(() => {
+      setMounted(false);
+      setExiting(false);
+    }, duration);
+    return () => window.clearTimeout(timer);
+  }, [duration, mounted, present]);
+
+  return {
+    value: mounted ? latest.current : null,
+    exiting,
+  };
+}
+
 export const VideoPanel = memo(function VideoPanel({
   identity,
 }: {
@@ -76,22 +147,163 @@ export const VideoPanel = memo(function VideoPanel({
   const spotlightKey = useVideoStore((state) => state.spotlightKey);
   const selfView = useVideoStore((state) => state.selfView);
   const peers = usePresenceStore((state) => state.peers);
+  const panelPresence = useExitPresence(
+    identity && status === 'joined' ? identity : null,
+    PANEL_EXIT_MS,
+  );
   const panelRef = useRef<HTMLDivElement>(null);
+  const pendingPanelRect = useRef<DOMRect | null>(null);
+  const pendingTileRects = useRef(new Map<string, DOMRect>());
+  const panelAnimation = useRef<Animation | null>(null);
+  const activeViewTransition = useRef<DocumentViewTransition | null>(null);
   const [gridRef, gridSize] = useElementSize<HTMLDivElement>();
 
   const maximized = mode === 'maximized';
   const collapsed = mode === 'bar';
   const dragging = !maximized;
 
+  const runViewTransition = useCallback((update: () => void) => {
+    const viewTransitionDocument = document as DocumentWithViewTransitions;
+    if (
+      reducedMotionPreferred() ||
+      !viewTransitionDocument.startViewTransition
+    ) {
+      update();
+      return false;
+    }
+
+    activeViewTransition.current?.skipTransition();
+    const transition = viewTransitionDocument.startViewTransition(update);
+    activeViewTransition.current = transition;
+    void transition.finished
+      .catch(() => undefined)
+      .finally(() => {
+        if (activeViewTransition.current === transition) {
+          activeViewTransition.current = null;
+        }
+      });
+    return true;
+  }, []);
+
+  const setPanelMode = useCallback(
+    (nextMode: VideoPanelMode) => {
+      if (useVideoStore.getState().mode === nextMode) return;
+      const currentRect = panelRef.current?.getBoundingClientRect() ?? null;
+      pendingPanelRect.current = currentRect;
+      const usedViewTransition = runViewTransition(() =>
+        useVideoStore.getState().setMode(nextMode),
+      );
+      if (usedViewTransition) pendingPanelRect.current = null;
+    },
+    [runViewTransition],
+  );
+
+  const setSpotlight = useCallback(
+    (tileKey: string | null) => {
+      if (useVideoStore.getState().spotlightKey === tileKey) return;
+      const currentRects = captureTileRects(panelRef.current);
+      pendingTileRects.current = currentRects;
+      const usedViewTransition = runViewTransition(() =>
+        useVideoStore.getState().setSpotlightKey(tileKey),
+      );
+      if (usedViewTransition) pendingTileRects.current = new Map();
+    },
+    [runViewTransition],
+  );
+
+  const setSelfView = useCallback(
+    (nextSelfView: 'pip' | 'hidden') => {
+      if (useVideoStore.getState().selfView === nextSelfView) return;
+      runViewTransition(() =>
+        useVideoStore.getState().setSelfView(nextSelfView),
+      );
+    },
+    [runViewTransition],
+  );
+
+  // Safari and older Chromium builds do not have document view transitions.
+  // A FLIP transform keeps mode changes spatially continuous there too.
+  useLayoutEffect(() => {
+    const panel = panelRef.current;
+    const from = pendingPanelRect.current;
+    pendingPanelRect.current = null;
+    if (
+      !panel ||
+      !from ||
+      reducedMotionPreferred() ||
+      typeof panel.animate !== 'function'
+    ) {
+      return;
+    }
+
+    const to = panel.getBoundingClientRect();
+    if (to.width === 0 || to.height === 0) return;
+    panelAnimation.current?.cancel();
+    const animation = panel.animate(
+      [
+        {
+          transformOrigin: 'top left',
+          transform: `translate(${from.left - to.left}px, ${from.top - to.top}px) scale(${from.width / to.width}, ${from.height / to.height})`,
+        },
+        {
+          transformOrigin: 'top left',
+          transform: 'translate(0, 0) scale(1, 1)',
+        },
+      ],
+      {
+        duration: PANEL_MORPH_MS,
+        easing: 'cubic-bezier(0.16, 1, 0.3, 1)',
+      },
+    );
+    panelAnimation.current = animation;
+    animation.onfinish = () => {
+      if (panelAnimation.current === animation) panelAnimation.current = null;
+    };
+  }, [mode]);
+
+  // Spotlighting moves an existing tile between the grid and hero position.
+  // Preserve that tile's trajectory when View Transitions are unavailable.
+  useLayoutEffect(() => {
+    const fromRects = pendingTileRects.current;
+    pendingTileRects.current = new Map();
+    if (fromRects.size === 0 || reducedMotionPreferred()) return;
+
+    panelRef.current
+      ?.querySelectorAll<HTMLElement>('[data-video-tile-key]')
+      .forEach((element) => {
+        const key = element.dataset.videoTileKey;
+        const from = key ? fromRects.get(key) : undefined;
+        if (!from || typeof element.animate !== 'function') return;
+        const to = element.getBoundingClientRect();
+        if (to.width === 0 || to.height === 0) return;
+        element.animate(
+          [
+            {
+              transformOrigin: 'top left',
+              transform: `translate(${from.left - to.left}px, ${from.top - to.top}px) scale(${from.width / to.width}, ${from.height / to.height})`,
+            },
+            {
+              transformOrigin: 'top left',
+              transform: 'translate(0, 0) scale(1, 1)',
+            },
+          ],
+          {
+            duration: PANEL_MORPH_MS,
+            easing: 'cubic-bezier(0.16, 1, 0.3, 1)',
+          },
+        );
+      });
+  }, [spotlightKey]);
+
   // Escape restores the board, matching the video overlay on the canvas.
   useEffect(() => {
     if (!maximized) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') useVideoStore.getState().setMode('floating');
+      if (event.key === 'Escape') setPanelMode('floating');
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [maximized]);
+  }, [maximized, setPanelMode]);
 
   // A window that shrinks under a dragged panel must not strand it off-screen.
   useEffect(() => {
@@ -145,12 +357,12 @@ export const VideoPanel = memo(function VideoPanel({
     window.addEventListener('pointerup', onUp);
   }, []);
 
-  if (!identity || status !== 'joined') return null;
+  if (!panelPresence.value) return null;
 
   const local = {
     clientId: LOCAL_CLIENT_ID,
-    name: identity.name,
-    color: identity.color,
+    name: panelPresence.value.name,
+    color: panelPresence.value.color,
     camera: cameraEnabled,
     screen: screenEnabled,
   };
@@ -172,10 +384,12 @@ export const VideoPanel = memo(function VideoPanel({
         mode="floating"
         shape="pill"
         chrome
+        data-video-panel-mode={mode}
+        data-phase={panelPresence.exiting ? 'closing' : 'open'}
         role="region"
         aria-label="Video call"
         className={cn(
-          'absolute flex items-center gap-1 p-1 pl-3',
+          'video-panel-motion absolute flex items-center gap-1 p-1 pl-3',
           MODE_SIZE.bar,
           anchored && ANCHOR,
         )}
@@ -191,8 +405,9 @@ export const VideoPanel = memo(function VideoPanel({
           type="button"
           variant="ghost"
           size="icon-sm"
+          className={VIDEO_CONTROL_MOTION}
           aria-label="Show video"
-          onClick={() => useVideoStore.getState().setMode('floating')}
+          onClick={() => setPanelMode('floating')}
         >
           <ChevronUp />
         </Button>
@@ -215,22 +430,25 @@ export const VideoPanel = memo(function VideoPanel({
       ref={panelRef}
       mode="floating"
       chrome
+      data-video-panel-mode={mode}
+      data-phase={panelPresence.exiting ? 'closing' : 'open'}
       role="region"
       aria-label="Video call"
       className={cn(
-        'group/chrome absolute flex flex-col overflow-hidden bg-sunken',
+        'video-panel-motion group/chrome absolute flex flex-col overflow-hidden bg-sunken',
         MODE_SIZE[mode],
         anchored && !maximized && ANCHOR,
       )}
       style={anchorStyle}
     >
       {maximized ? (
-        <div className="relative flex min-h-0 flex-1 flex-col gap-1.5 p-1.5">
+        <div className="video-panel-content relative flex min-h-0 flex-1 flex-col gap-1.5 p-1.5">
           {hero ? (
             <VideoTileView
+              key={`hero:${hero.key}`}
               tile={hero}
               spotlit
-              onSpotlight={() => useVideoStore.getState().setSpotlightKey(null)}
+              onSpotlight={() => setSpotlight(null)}
             />
           ) : null}
           <div
@@ -250,21 +468,20 @@ export const VideoPanel = memo(function VideoPanel({
                 key={tile.key}
                 tile={tile}
                 spotlit={false}
-                onSpotlight={() =>
-                  useVideoStore.getState().setSpotlightKey(tile.key)
-                }
+                onSpotlight={() => setSpotlight(tile.key)}
               />
             ))}
           </div>
         </div>
       ) : hero ? (
         <VideoTileView
+          key={`floating:${hero.key}`}
           tile={hero}
           spotlit={false}
           className="aspect-video w-full rounded-none"
         />
       ) : (
-        <p className="flex aspect-video items-center justify-center px-6 text-center text-fg-muted text-sm">
+        <p className="video-panel-content flex aspect-video items-center justify-center px-6 text-center text-fg-muted text-sm text-pretty">
           {selfTile
             ? 'Waiting for someone else to turn on their camera.'
             : 'Turn on your camera or share your screen to start.'}
@@ -280,26 +497,15 @@ export const VideoPanel = memo(function VideoPanel({
         />
       ) : null}
 
-      {selfTile ? (
-        <div
-          className={cn(
-            'pointer-events-none absolute right-2 bottom-2 overflow-hidden rounded-md border border-border shadow-e2',
-            maximized ? 'w-48' : 'w-24',
-          )}
-        >
-          <VideoTileView
-            tile={selfTile}
-            spotlit={false}
-            className="aspect-video"
-          />
-        </div>
-      ) : null}
+      <SelfVideoPreview tile={selfTile} maximized={maximized} />
 
       <div
         className={cn(
           'pointer-events-none absolute inset-x-2 top-2 flex items-start justify-between gap-2',
           // Nothing to reveal over when there is no video to cover.
           overVideo && HOVER_REVEAL,
+          overVideo &&
+            'translate-y-1 transition-[opacity,translate] duration-base ease-out-quart group-hover/chrome:translate-y-0 group-focus-within/chrome:translate-y-0 motion-reduce:translate-y-0 motion-reduce:transition-none [@media(pointer:coarse)]:translate-y-0',
         )}
       >
         {/* Who the one tile belongs to, when more than one view is on offer. */}
@@ -314,11 +520,10 @@ export const VideoPanel = memo(function VideoPanel({
                   size="xs"
                   className={cn(
                     'shrink-0 rounded-full px-2',
+                    VIDEO_CONTROL_MOTION,
                     overVideo && OVER_VIDEO,
                   )}
-                  onClick={() =>
-                    useVideoStore.getState().setSpotlightKey(tile.key)
-                  }
+                  onClick={() => setSpotlight(tile.key)}
                 >
                   <TileName tile={tile} />
                 </Button>
@@ -335,14 +540,18 @@ export const VideoPanel = memo(function VideoPanel({
               next ? void enableCamera() : disableCamera()
             }
             size="sm"
-            className={cn('min-w-8 px-1.5', overVideo && OVER_VIDEO)}
+            className={cn(
+              'min-w-8 px-1.5',
+              VIDEO_CONTROL_MOTION,
+              overVideo && OVER_VIDEO,
+            )}
             aria-label={cameraEnabled ? 'Turn off camera' : 'Turn on camera'}
           >
-            {cameraEnabled ? (
-              <Video aria-hidden="true" />
-            ) : (
-              <VideoOff aria-hidden="true" />
-            )}
+            <CrossfadeIcon
+              active={cameraEnabled}
+              ActiveIcon={Video}
+              InactiveIcon={VideoOff}
+            />
           </Toggle>
           <Toggle
             pressed={screenEnabled}
@@ -350,25 +559,31 @@ export const VideoPanel = memo(function VideoPanel({
               next ? void enableScreen() : disableScreen()
             }
             size="sm"
-            className={cn('min-w-8 px-1.5', overVideo && OVER_VIDEO)}
+            className={cn(
+              'min-w-8 px-1.5',
+              VIDEO_CONTROL_MOTION,
+              overVideo && OVER_VIDEO,
+            )}
             aria-label={
               screenEnabled ? 'Stop sharing screen' : 'Share your screen'
             }
           >
-            {screenEnabled ? (
-              <Monitor aria-hidden="true" />
-            ) : (
-              <MonitorOff aria-hidden="true" />
-            )}
+            <CrossfadeIcon
+              active={screenEnabled}
+              ActiveIcon={Monitor}
+              InactiveIcon={MonitorOff}
+            />
           </Toggle>
           {cameraEnabled ? (
             <Toggle
               pressed={selfView === 'pip'}
-              onPressedChange={(next) =>
-                useVideoStore.getState().setSelfView(next ? 'pip' : 'hidden')
-              }
+              onPressedChange={(next) => setSelfView(next ? 'pip' : 'hidden')}
               size="sm"
-              className={cn('min-w-8 px-1.5', overVideo && OVER_VIDEO)}
+              className={cn(
+                'video-panel-control-in min-w-8 px-1.5',
+                VIDEO_CONTROL_MOTION,
+                overVideo && OVER_VIDEO,
+              )}
               aria-label={
                 selfView === 'pip'
                   ? 'Hide your own camera'
@@ -382,9 +597,9 @@ export const VideoPanel = memo(function VideoPanel({
             type="button"
             variant="ghost"
             size="icon-sm"
-            className={cn(overVideo && OVER_VIDEO)}
+            className={cn(VIDEO_CONTROL_MOTION, overVideo && OVER_VIDEO)}
             aria-label="Collapse video"
-            onClick={() => useVideoStore.getState().setMode('bar')}
+            onClick={() => setPanelMode('bar')}
           >
             <ChevronDown />
           </Button>
@@ -392,30 +607,106 @@ export const VideoPanel = memo(function VideoPanel({
             type="button"
             variant="ghost"
             size="icon-sm"
-            className={cn(overVideo && OVER_VIDEO)}
-            aria-label={maximized ? 'Restore video panel' : 'Maximize video panel'}
-            onClick={() =>
-              useVideoStore
-                .getState()
-                .setMode(maximized ? 'floating' : 'maximized')
+            className={cn(VIDEO_CONTROL_MOTION, overVideo && OVER_VIDEO)}
+            aria-label={
+              maximized ? 'Restore video panel' : 'Maximize video panel'
             }
+            onClick={() => setPanelMode(maximized ? 'floating' : 'maximized')}
           >
-            {maximized ? <Minimize2 /> : <Maximize2 />}
+            <CrossfadeIcon
+              active={maximized}
+              ActiveIcon={Minimize2}
+              InactiveIcon={Maximize2}
+            />
           </Button>
         </div>
       </div>
 
-      {error ? (
-        <p
-          role="status"
-          className="-translate-x-1/2 absolute bottom-2 left-1/2 max-w-[calc(100%-1rem)] rounded-full border border-danger-border bg-surface px-3 py-1 text-danger-fg text-sm"
-        >
-          {error}
-        </p>
-      ) : null}
+      <VideoError message={error} />
     </Surface>
   );
 });
+
+type PanelIcon = ComponentType<SVGProps<SVGSVGElement>>;
+
+/** Both glyphs stay mounted so toggles confirm state without an icon pop. */
+function CrossfadeIcon({
+  active,
+  ActiveIcon,
+  InactiveIcon,
+}: {
+  active: boolean;
+  ActiveIcon: PanelIcon;
+  InactiveIcon: PanelIcon;
+}) {
+  const iconMotion =
+    'transition-[opacity,scale,filter] duration-slow ease-out-quart motion-reduce:transition-none motion-reduce:blur-none';
+  return (
+    <>
+      <ActiveIcon
+        aria-hidden="true"
+        className={cn(
+          iconMotion,
+          active
+            ? 'scale-100 opacity-100 blur-none'
+            : 'scale-25 opacity-0 blur-[4px]',
+        )}
+      />
+      <InactiveIcon
+        aria-hidden="true"
+        className={cn(
+          '-translate-x-1/2 -translate-y-1/2 absolute top-1/2 left-1/2',
+          iconMotion,
+          active
+            ? 'scale-25 opacity-0 blur-[4px]'
+            : 'scale-100 opacity-100 blur-none',
+        )}
+      />
+    </>
+  );
+}
+
+function SelfVideoPreview({
+  tile,
+  maximized,
+}: {
+  tile: VideoTile | null;
+  maximized: boolean;
+}) {
+  const presence = useExitPresence(tile, PANEL_EXIT_MS);
+  if (!presence.value) return null;
+
+  return (
+    <div
+      data-phase={presence.exiting ? 'closing' : 'open'}
+      className={cn(
+        'video-self-preview pointer-events-none absolute right-2 bottom-2 overflow-hidden rounded-md border border-border shadow-e2',
+        maximized ? 'w-48' : 'w-24',
+      )}
+    >
+      <VideoTileView
+        tile={presence.value}
+        spotlit={false}
+        className="aspect-video"
+      />
+    </div>
+  );
+}
+
+function VideoError({ message }: { message: string | null }) {
+  const presence = useExitPresence(message, PANEL_EXIT_MS);
+  if (!presence.value) return null;
+
+  return (
+    <p
+      role="status"
+      data-phase={presence.exiting ? 'closing' : 'open'}
+      className="video-panel-error -translate-x-1/2 absolute bottom-2 left-1/2 max-w-[calc(100%-1rem)] rounded-full border border-danger-border bg-surface px-3 py-1 text-danger-fg text-sm"
+    >
+      {presence.value}
+    </p>
+  );
+}
 
 function VideoTileView({
   tile,
@@ -430,11 +721,16 @@ function VideoTileView({
 }) {
   const stream = useVideoStore((state) => streamFor(state, tile));
   const videoRef = useRef<HTMLVideoElement>(null);
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
+    setReady(false);
     video.srcObject = stream ?? null;
+    if (stream && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+      setReady(true);
+    }
     return () => {
       video.srcObject = null;
     };
@@ -455,8 +751,11 @@ function VideoTileView({
         autoPlay
         playsInline
         muted
+        onCanPlay={() => setReady(true)}
+        onPlaying={() => setReady(true)}
         className={cn(
-          'size-full',
+          'size-full transition-opacity duration-slow ease-out-quart motion-reduce:transition-none',
+          ready ? 'opacity-100' : 'opacity-0',
           tile.isLocal && tile.kind === 'camera'
             ? 'object-cover'
             : 'object-contain',
@@ -471,13 +770,20 @@ function VideoTileView({
   // Black, not a themed surface: a letterboxed screen share pads with bars, and
   // white labels have to stay readable on them in either theme.
   const shell = cn(
-    'relative min-h-0 overflow-hidden rounded-md bg-black',
+    'video-tile-motion relative min-h-0 overflow-hidden rounded-md bg-black',
     spotlit && 'flex-1',
     className,
   );
+  const style = {
+    viewTransitionName: `video-tile-${tile.clientId}-${tile.kind}`,
+  };
 
   if (!onSpotlight) {
-    return <div className={shell}>{body}</div>;
+    return (
+      <div className={shell} style={style} data-video-tile-key={tile.key}>
+        {body}
+      </div>
+    );
   }
   return (
     <button
@@ -489,6 +795,8 @@ function VideoTileView({
           : `Spotlight ${tile.isLocal ? 'your' : `${tile.name}'s`} ${tile.kind}`
       }
       className={shell}
+      style={style}
+      data-video-tile-key={tile.key}
     >
       {body}
     </button>

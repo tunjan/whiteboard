@@ -3,7 +3,11 @@ import { ChevronDown, ChevronUp } from 'lucide-react';
 import '@/canvas/tools/register';
 import { useToolStore } from '@/canvas/use-tool-store';
 import { Button } from '@/components/ui/button';
-import { HOVER_REVEAL, Surface } from '@/components/ui/surface';
+import {
+  CHROME_ON_BOARD,
+  HOVER_REVEAL,
+  Surface,
+} from '@/components/ui/surface';
 import { ToolPropertiesSatellite } from '@/components/tool-properties-satellite';
 import {
   Tooltip,
@@ -37,9 +41,9 @@ import { ToolButton } from './toolbar-tool-button';
  * The bar is built the way the call panel is: the content is the thing you
  * see, and the chrome around it takes up as little as it can get away with.
  *
- *   · No card, and nothing casting the shape of one. The bar has no fill, no
- *     border and no shadow of its own; what separates a control from the
- *     drawing under it is a halo on the glyph itself (`tb-glyph`), the way a
+ *   · No card, and nothing casting the shape of one. The bar has no border and
+ *     no shadow of its own; what it stands on is the board itself, blurred
+ *     (`wb-chrome-blur`), with a halo on each glyph over that — the way a
  *     player's controls are burned into the picture rather than laid on a
  *     panel over it.
  *   · No recesses either. The three groups used to stand in grooves and the
@@ -110,20 +114,25 @@ export function Toolbar() {
           onFocusCapture={toolbar.onFocusCapture}
           className={cn(
             'group/chrome relative flex w-max max-w-[calc(100vw-1rem)] items-center rounded-full',
-            // No card. Not a translucent one either — the bar is the controls
-            // and nothing else, the way a player's controls are the controls
-            // and not a panel laid over the picture. What used to be the
-            // slab's job is done twice over: each glyph carries its own halo,
-            // and the one filled key is solid enough to read on any board.
+            // No card: no border and no shadow, so nothing draws the outline
+            // of a slab. What the row lies on is the board under it, blurred
+            // — one ground for the whole bar, which a per-glyph halo cannot
+            // give it once the keys are read as a row rather than one at a
+            // time. The halos stay on top of that for the dense boards.
             //
-            // `shadow-none` explicitly: `Surface mode="floating"` brings a
-            // panel shadow, and a shadow cast by a box with nothing in it
-            // draws the outline of the card that was just removed.
-            'border-transparent bg-transparent p-1 shadow-none',
-            'origin-bottom transition-[opacity,transform] duration-base ease-out-quart',
+            // `CHROME_ON_BOARD` carries the `shadow-none`, which is not
+            // optional here: `Surface mode="floating"` brings a panel shadow,
+            // and a shadow cast by a box with nothing in it draws the outline
+            // of the card that was just removed. Its `bg-transparent` is
+            // overridden by `wb-chrome-blur`, which is unlayered and so beats
+            // every Tailwind utility (see section 8 of `index.css`).
+            CHROME_ON_BOARD,
+            'wb-chrome-blur',
+            'p-1',
+            'origin-bottom transition-[opacity,transform] duration-slow ease-out-quart',
             'motion-reduce:transition-none',
             hidden &&
-              'pointer-events-none translate-y-[calc(100%+0.75rem)] opacity-0',
+              'pointer-events-none translate-y-[calc(100%+0.75rem)] scale-[0.96] opacity-0',
           )}
         >
           {/* Space is the grouping: 2px between keys in a group, 18px across
@@ -232,10 +241,10 @@ export function Toolbar() {
                   // for the chevron, and `tb-shell` only to strip the shadow
                   // `Button variant="outline"` would otherwise bring.
                   'tb-glyph border-transparent bg-tb-track tb-shell hover:bg-surface dark:border-transparent',
-                  'transition-[opacity,transform] duration-base ease-out-quart motion-reduce:transition-none',
+                  'transition-[opacity,transform] duration-slow ease-out-quart motion-reduce:transition-none',
                   hidden
-                    ? 'translate-y-0 opacity-100'
-                    : 'pointer-events-none translate-y-2 opacity-0',
+                    ? 'translate-y-0 scale-100 opacity-100'
+                    : 'pointer-events-none translate-y-2 scale-95 opacity-0',
                 )}
               />
             }

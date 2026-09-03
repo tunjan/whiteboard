@@ -80,6 +80,22 @@ export const lineUtil: ShapeUtil<'line'> = {
     };
   },
 
+  // Traced, not boxed: the selection outline is the line's own centerline, so
+  // the gap between two bends stays clickable for whatever is under it.
+  getIndicatorPath: (s) => {
+    const { points, bend, spline } = s.props;
+    if (points.length < 2) return null;
+    return {
+      d: curvePath(points, bend ?? 0, spline ?? 'linear'),
+      transform: polylineTransform(
+        s.x,
+        s.y,
+        curvePoints(points, bend ?? 0, spline ?? 'linear'),
+        s.rotation,
+      ),
+    };
+  },
+
   getHandles: (s) => lineHandles(s),
   onHandleDrag: (s, handleId, point, opts) =>
     lineHandleDrag(s, handleId, point, opts),

@@ -5,6 +5,7 @@ import {
   Download,
   EllipsisVertical,
   Eye,
+  FileText,
   Gauge,
   Keyboard,
   Magnet,
@@ -14,15 +15,21 @@ import {
   RotateCcw,
   Scaling,
   Volume2,
+  Zap,
 } from 'lucide-react';
 
 import {
   copyBoardToPngClipboard,
   exportBoardToPng,
 } from '@/canvas/export-png';
+import type {
+  EndTaperMode,
+  PencilPressureCurve,
+} from '@/canvas/shapes/ink';
 import {
   ATTENTION_AWAY_RANGE,
   ATTENTION_IDLE_RANGE,
+  PDF_PAGE_LIMIT_RANGE,
   PNG_EXPORT_SCALES,
   useCanvasUiStore,
 } from '@/canvas/use-canvas-ui-store';
@@ -89,6 +96,7 @@ function MenuValue({ children }: { children: ReactNode }) {
  */
 function MenuSliderItem({
   label,
+  icon,
   value,
   display,
   min,
@@ -98,6 +106,9 @@ function MenuSliderItem({
   onChange,
 }: {
   label: string;
+  /** Only for a row sitting among icon-bearing items; inside a submenu the
+      trigger already carries the icon for the whole panel. */
+  icon?: ReactNode;
   value: number;
   display: string;
   min: number;
@@ -129,7 +140,10 @@ function MenuSliderItem({
       }}
     >
       <span className="flex items-center justify-between gap-3">
-        <span>{label}</span>
+        <span className="flex items-center gap-2">
+          {icon}
+          {label}
+        </span>
         <span className="font-mono text-2xs tabular-nums text-fg-subtle">
           {display}
         </span>
@@ -153,6 +167,32 @@ function MenuSliderItem({
   );
 }
 
+/**
+ * How the two pen enums are named in the menu.
+ *
+ * Named for what the pen does, not for the mechanism: "On flick" is a promise
+ * about the gesture, where "velocity" would be a promise about a filter. The
+ * orders are fixed here rather than derived from the union so the least
+ * surprising option reads first.
+ */
+const END_TAPER_MODES: readonly EndTaperMode[] = ['off', 'velocity', 'full'];
+const END_TAPER_LABELS: Record<EndTaperMode, string> = {
+  off: 'Round',
+  velocity: 'On flick',
+  full: 'Always',
+};
+
+const PRESSURE_CURVES: readonly PencilPressureCurve[] = [
+  'soft',
+  'medium',
+  'firm',
+];
+const PRESSURE_CURVE_LABELS: Record<PencilPressureCurve, string> = {
+  soft: 'Soft',
+  medium: 'Medium',
+  firm: 'Firm',
+};
+
 function PenSubmenu() {
   const pencilStabilization = useCanvasUiStore((s) => s.pencilStabilization);
   const setPencilStabilization = useCanvasUiStore(
@@ -166,6 +206,12 @@ function PenSubmenu() {
   const setPencilStartTaper = useCanvasUiStore((s) => s.setPencilStartTaper);
   const pencilEndTaper = useCanvasUiStore((s) => s.pencilEndTaper);
   const setPencilEndTaper = useCanvasUiStore((s) => s.setPencilEndTaper);
+  const pencilPressureCurve = useCanvasUiStore((s) => s.pencilPressureCurve);
+  const setPencilPressureCurve = useCanvasUiStore(
+    (s) => s.setPencilPressureCurve,
+  );
+  const pencilTilt = useCanvasUiStore((s) => s.pencilTilt);
+  const setPencilTilt = useCanvasUiStore((s) => s.setPencilTilt);
   const pencilSimulatePressure = useCanvasUiStore(
     (s) => s.pencilSimulatePressure,
   );
@@ -204,6 +250,15 @@ function PenSubmenu() {
           onChange={setPencilThinning}
         />
         <MenuSliderItem
+          label="Tilt"
+          value={pencilTilt}
+          display={`${Math.round(pencilTilt * 100)}%`}
+          min={0}
+          max={1}
+          step={0.05}
+          onChange={setPencilTilt}
+        />
+        <MenuSliderItem
           label="Smoothing"
           value={pencilSmoothing}
           display={`${Math.round(pencilSmoothing * 100)}%`}
@@ -222,12 +277,50 @@ function PenSubmenu() {
           onChange={setPencilStartTaper}
         />
         <DropdownMenuSeparator />
-        <DropdownMenuCheckboxItem
-          checked={pencilEndTaper}
-          onCheckedChange={setPencilEndTaper}
-        >
-          Taper stroke ends
-        </DropdownMenuCheckboxItem>
+        {/* Two enums, each behind its own trigger carrying the current value,
+            rather than six more rows in a panel that already holds five
+            faders. Same shape as Resolution below. */}
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger>
+            Stroke ends
+            <MenuValue>{END_TAPER_LABELS[pencilEndTaper]}</MenuValue>
+          </DropdownMenuSubTrigger>
+          <DropdownMenuSubContent className="w-40">
+            <DropdownMenuRadioGroup
+              value={pencilEndTaper}
+              onValueChange={(value) =>
+                setPencilEndTaper(value as EndTaperMode)
+              }
+            >
+              {END_TAPER_MODES.map((mode) => (
+                <DropdownMenuRadioItem key={mode} value={mode}>
+                  {END_TAPER_LABELS[mode]}
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger>
+            Response
+            <MenuValue>{PRESSURE_CURVE_LABELS[pencilPressureCurve]}</MenuValue>
+          </DropdownMenuSubTrigger>
+          <DropdownMenuSubContent className="w-40">
+            <DropdownMenuRadioGroup
+              value={pencilPressureCurve}
+              onValueChange={(value) =>
+                setPencilPressureCurve(value as PencilPressureCurve)
+              }
+            >
+              {PRESSURE_CURVES.map((curve) => (
+                <DropdownMenuRadioItem key={curve} value={curve}>
+                  {PRESSURE_CURVE_LABELS[curve]}
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+        <DropdownMenuSeparator />
         <DropdownMenuCheckboxItem
           checked={pencilSimulatePressure}
           onCheckedChange={setPencilSimulatePressure}
@@ -241,7 +334,7 @@ function PenSubmenu() {
           Predict stroke ahead
         </DropdownMenuCheckboxItem>
         <DropdownMenuSeparator />
-        {/* Stays open: the point of restoring defaults is watching the four
+        {/* Stays open: the point of restoring defaults is watching the five
             faders above snap back. */}
         <DropdownMenuItem closeOnClick={false} onClick={resetPencil}>
           <RotateCcw />
@@ -363,6 +456,10 @@ export function BoardActionsMenu({
   const setSnappingEnabled = useCanvasUiStore((s) => s.setSnappingEnabled);
   const debugPerformance = useCanvasUiStore((s) => s.debugPerformance);
   const setDebugPerformance = useCanvasUiStore((s) => s.setDebugPerformance);
+  const lowGraphics = useCanvasUiStore((s) => s.lowGraphics);
+  const setLowGraphics = useCanvasUiStore((s) => s.setLowGraphics);
+  const pdfPageLimit = useCanvasUiStore((s) => s.pdfPageLimit);
+  const setPdfPageLimit = useCanvasUiStore((s) => s.setPdfPageLimit);
 
   const onExport = async () => {
     setExporting(true);
@@ -465,6 +562,30 @@ export function BoardActionsMenu({
           <PenSubmenu />
           <SoundSubmenu />
           {isTutor && <AttentionSubmenu />}
+          {/* A student's boards get the default and no control: how much of a
+              document belongs on the board is the tutor's call, and the limit
+              is only ever met while pasting one. */}
+          {isTutor && (
+            <MenuSliderItem
+              label="PDF pages"
+              icon={<FileText />}
+              value={pdfPageLimit}
+              display={`${pdfPageLimit}`}
+              min={PDF_PAGE_LIMIT_RANGE.min}
+              max={PDF_PAGE_LIMIT_RANGE.max}
+              step={PDF_PAGE_LIMIT_RANGE.step}
+              onChange={setPdfPageLimit}
+            />
+          )}
+          {/* Sits next to the overlay because the two are used together: you
+              turn the counter on to find out whether you want this off. */}
+          <DropdownMenuCheckboxItem
+            checked={lowGraphics}
+            onCheckedChange={setLowGraphics}
+          >
+            <Zap />
+            Low graphics
+          </DropdownMenuCheckboxItem>
           <DropdownMenuCheckboxItem
             checked={debugPerformance}
             onCheckedChange={setDebugPerformance}

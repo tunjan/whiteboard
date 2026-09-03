@@ -1,7 +1,11 @@
 import { Redo2, Undo2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Kbd } from '@/components/ui/kbd';
-import { Surface } from '@/components/ui/surface';
+import {
+  CHROME_KEY_ON_BOARD,
+  CHROME_ON_BOARD,
+  Surface,
+} from '@/components/ui/surface';
 import {
   Tooltip,
   TooltipContent,
@@ -9,6 +13,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { useRovingToolbar } from '@/hooks/use-roving-toolbar';
+import { cn } from '@/lib/utils';
 
 interface UndoControlsProps {
   canUndo: boolean;
@@ -42,7 +47,16 @@ export function UndoControls({
           chrome
           onFocusCapture={toolbar.onFocusCapture}
           onKeyDown={toolbar.onKeyDown}
-          className="flex items-center gap-0.5 rounded-none rounded-tr-xl border-0 p-1"
+          className={cn(
+            // No card in the corner: no border and no shadow. The two keys
+            // stand on the board itself, blurred, with the corner turned in
+            // on whichever sides are not flush to a viewport edge — the top
+            // always, and the bottom too on the small and coarse-pointer
+            // layouts, where the HUD is lifted clear of the toolbar.
+            'relative flex items-center gap-0.5 rounded-none rounded-tr-xl p-1',
+            'wb-chrome-blur max-sm:rounded-br-xl [@media(pointer:coarse)]:rounded-br-xl',
+            CHROME_ON_BOARD,
+          )}
         >
           <Tooltip>
             <TooltipTrigger
@@ -50,6 +64,7 @@ export function UndoControls({
                 <Button
                   variant="ghost"
                   size="icon-sm"
+                  className={CHROME_KEY_ON_BOARD}
                   data-toolbar-item
                   tabIndex={0}
                   aria-label="Undo"
@@ -72,6 +87,7 @@ export function UndoControls({
                 <Button
                   variant="ghost"
                   size="icon-sm"
+                  className={CHROME_KEY_ON_BOARD}
                   data-toolbar-item
                   tabIndex={-1}
                   aria-label="Redo"

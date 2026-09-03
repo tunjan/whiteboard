@@ -83,3 +83,53 @@ describe('Float16 conversion', () => {
     expect(halfToFloat(floatToHalf(1e20))).toBe(65_504);
   });
 });
+
+describe('tilt channels', () => {
+  it('widens to five channels only when a sample carries a lean', () => {
+    const upright = [
+      { x: 0, y: 0, pressure: 0.9, tiltX: 0, tiltY: 0 },
+      { x: 1, y: 1, pressure: 0.8, tiltX: 0, tiltY: 0 },
+    ];
+    // A stylus held vertical for a whole stroke has nothing to store, and must
+    // not pay four bytes a sample to say so.
+    expect(encodedDimension(encodeB64Vecs(upright))).toBe(3);
+    expect(
+      encodedDimension(
+        encodeB64Vecs([{ x: 0, y: 0, pressure: 0.5, tiltX: 0.4, tiltY: 0 }]),
+      ),
+    ).toBe(5);
+  });
+
+  it('round-trips lean along with position and pressure', () => {
+    const points = [
+      { x: 12.5, y: -3.25, pressure: 0.75, tiltX: 0.5, tiltY: -0.25 },
+      { x: 14.5, y: -1.25, pressure: 0.5, tiltX: 0.25, tiltY: -0.5 },
+      { x: 18.5, y: 2.75, pressure: 0.25, tiltX: -0.5, tiltY: 0.75 },
+    ];
+    const decoded = decodeB64Vecs(encodeB64Vecs(points));
+
+    expect(decoded).toHaveLength(3);
+    for (const [index, point] of points.entries()) {
+      const back = decoded[index]!;
+      expect(back.x).toBeCloseTo(point.x, 3);
+      expect(back.y).toBeCloseTo(point.y, 3);
+      expect(back.pressure).toBeCloseTo(point.pressure, 3);
+      expect(back.tiltX).toBeCloseTo(point.tiltX, 3);
+      expect(back.tiltY).toBeCloseTo(point.tiltY, 3);
+    }
+  });
+
+  it('leaves tilt off a segment that does not carry it', () => {
+    // Absent is not zero: a stroke drawn before tilt was read must decode to
+    // the samples it was written from, so nothing downstream can mistake it
+    // for a pen that was measured and found upright.
+    const [point] = decodeB64Vecs(encodeB64Vecs([{ x: 1, y: 2, pressure: 0.3 }]));
+    expect(point).not.toHaveProperty('tiltX');
+    expect(point).not.toHaveProperty('tiltY');
+  });
+
+  it('rejects a dimension it does not know', () => {
+    expect(encodedDimension('4:AAAA')).toBeNull();
+    expect(decodeB64Vecs('4:AAAA')).toEqual([]);
+  });
+});

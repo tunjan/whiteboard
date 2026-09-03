@@ -1,7 +1,6 @@
 import { toolRegistry } from '@/canvas/tools/tool-registry';
-import { useStyleStore } from '@/canvas/use-style-store';
+import { styleGroupForTool, useStyleStore } from '@/canvas/use-style-store';
 import { useToolStore } from '@/canvas/use-tool-store';
-import { EraserModeSelector } from '@/components/eraser-mode-selector';
 import { Kbd } from '@/components/ui/kbd';
 import {
   Tooltip,
@@ -88,8 +87,7 @@ function Pencil({ ink }: { ink: string }) {
  * giving it the recognizable mini desk-highlighter silhouette.
  */
 function Marker({ ink }: { ink: string }) {
-  const nib =
-    'M10.1 12V5.8Q10.1 4.6 11.2 4.3L17.4 2.2Q17.9 2 17.9 2.5V12Z';
+  const nib = 'M10.1 12V5.8Q10.1 4.6 11.2 4.3L17.4 2.2Q17.9 2 17.9 2.5V12Z';
   const barrel =
     'M5.3 28h17.4v14.8a2.6 2.6 0 0 1-2.6 2.6H7.9a2.6 2.6 0 0 1-2.6-2.6Z';
   const collar =
@@ -282,7 +280,11 @@ const BODIES: Record<
 function InstrumentButton({ toolId }: { toolId: string }) {
   const activeToolId = useToolStore((state) => state.activeToolId);
   const setTool = useToolStore((state) => state.setTool);
-  const ink = useStyleStore((state) => state.color);
+  // Each instrument is drawn in the colour it will actually lay down, so the
+  // highlighter in the tray reads yellow while the pen reads black.
+  const ink = useStyleStore(
+    (state) => state.groups[styleGroupForTool(toolId)].color,
+  );
   const tool = toolRegistry.get(toolId);
   const Body = BODIES[toolId];
 
@@ -313,7 +315,7 @@ function InstrumentButton({ toolId }: { toolId: string }) {
           className={cn(
             // Positioned, so it paints over the absolutely placed well rather
             // than under it.
-            'relative transition-transform duration-base ease-out-quart overflow-visible',
+            'relative transition-transform duration-slow ease-out-quart overflow-visible',
             'motion-reduce:transition-none',
             // Standing up *is* the selection now that no chip marks it, and
             // hover is that same movement begun: the instrument rises a
@@ -335,14 +337,7 @@ function InstrumentButton({ toolId }: { toolId: string }) {
     </Tooltip>
   );
 
-  // The eraser's mode selector has to hang outside the clipping window, so it
-  // is anchored to the slot rather than to the button itself.
-  return (
-    <div className={INSTRUMENT_SLOT}>
-      {button}
-      {tool.id === 'eraser' ? <EraserModeSelector active={active} /> : null}
-    </div>
-  );
+  return <div className={INSTRUMENT_SLOT}>{button}</div>;
 }
 
 /**

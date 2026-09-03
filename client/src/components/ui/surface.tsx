@@ -26,7 +26,23 @@ export const CHROME_CONTROLS =
  * permanent glyph would be clutter. Never for the only control on a surface.
  */
 export const HOVER_REVEAL =
-  'touch-reveal opacity-0 transition-opacity duration-instant group-hover/chrome:opacity-100 group-focus-within/chrome:opacity-100';
+  'touch-reveal opacity-0 transition-opacity duration-base ease-out-quart group-hover/chrome:opacity-100 group-focus-within/chrome:opacity-100';
+
+/**
+ * Chrome laid straight on the board: no fill, no border, and no shadow of its
+ * own — a shadow cast by a box with nothing in it draws the outline of the
+ * card that was removed. What separates these controls from the drawing under
+ * them is on each control instead: the `tb-glyph` halo, and a translucent wash
+ * on hover rather than the opaque chip a ghost control takes on a panel.
+ *
+ * Used by the canvas toolbar, the properties pill, and the two corner HUDs, so
+ * every piece of chrome over the board disappears by the same rule.
+ */
+export const CHROME_ON_BOARD =
+  'border-0 bg-transparent shadow-none [--chrome-hover:var(--color-tb-track)]';
+
+/** A key inside one: round, and haloed because nothing is under it. */
+export const CHROME_KEY_ON_BOARD = 'tb-glyph rounded-full';
 
 const surfaceVariants = cva(
   'select-none rounded-panel border border-border bg-surface text-fg',

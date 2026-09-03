@@ -6,6 +6,7 @@ import {
   FRAME_HEADING_FONT_SCREEN,
   frameHeadingLayout,
 } from './frame-geometry';
+import { inkPaint } from './ink-color';
 import { editor } from './use-document-store';
 import { useFrameEditingStore } from './use-frame-editing-store';
 import { useSelectionStore } from './use-selection-store';
@@ -80,7 +81,7 @@ export function FrameTitleEditorOverlay({
         lineHeight: `${layout.height * camera.z}px`,
         transform: `rotate(${layout.pageRotation}rad)`,
         transformOrigin: '0 0',
-        color: shape.props.color ?? 'var(--color-muted-foreground)',
+        color: inkPaint(shape.props.color ?? 'var(--color-muted-foreground)'),
       }}
     />
   );

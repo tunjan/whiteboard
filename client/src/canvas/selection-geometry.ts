@@ -17,6 +17,7 @@ import {
   curvePoints,
   tangentAnchor,
 } from './shapes/line-geometry';
+import { maxInkRadius } from './shapes/ink';
 import { normalizedPolygonPoints } from './shapes/polygon-geometry';
 import { shapeRegistry } from './shapes/shape-registry';
 import type { ShapeHandle } from './shapes/types';
@@ -58,11 +59,30 @@ export const RESIZE_HANDLES: ResizeHandleId[] = [
 const ROTATE_CORNER_OFFSET = 18;
 /** Screen-px radius of each corner rotation hit zone. */
 export const ROTATION_HANDLE_HIT_SCREEN = 14;
+/**
+ * Screen-px radius of a resize or shape handle's grab zone. Shared so the
+ * circle the overlay draws around a hovered handle is the circle the select
+ * tool actually tests against.
+ */
+export const HANDLE_HIT_SCREEN = 10;
+/**
+ * Screen-px side of a drawn resize handle. Shared with the overlay so the
+ * pruning below (which drops handles that would overlap on a small box) uses
+ * the size the handles are actually painted at.
+ */
+export const HANDLE_SCREEN = 7;
 
 export interface SelectionInfo {
   ids: string[];
   /** World AABB enclosing the displayed selection box. */
   bounds: Bounds;
+  /**
+   * The selection box in the frame where it is axis-aligned: page space
+   * rotated about the origin by `-rotation`. Equals `bounds` when `rotation`
+   * is 0. Group resize scales in this frame and rotates the result back, which
+   * is what lets an oriented multi-selection resize along its own axes.
+   */
+  alignedBounds: Bounds;
   /** Shared page rotation, or 0 when selected elements have mixed rotations. */
   rotation: number;
   center: Point;
@@ -104,6 +124,39 @@ function boundsCorners(bounds: Bounds): Point[] {
     { x: bounds.maxX, y: bounds.maxY },
     { x: bounds.minX, y: bounds.maxY },
   ];
+}
+
+/**
+ * Drops handles that would land on top of each other on a small box. An edge
+ * handle sits at a midpoint, so it clears the two corners it lies between only
+ * once that axis is two handle widths long. When neither axis has that much
+ * room the corners collide as well, and one bottom-right grip is all that fits.
+ */
+function prunedHandles(
+  ids: readonly ResizeHandleId[],
+  bounds: Bounds,
+  zoom: number,
+): ResizeHandleId[] {
+  const room = (2 * HANDLE_SCREEN) / zoom;
+  const w = bounds.maxX - bounds.minX;
+  const h = bounds.maxY - bounds.minY;
+  if (w < room && h < room) return ids.filter((id) => id === 'se');
+  return ids.filter((id) => {
+    if (id === 'n' || id === 's') return w >= room;
+    if (id === 'e' || id === 'w') return h >= room;
+    return true;
+  });
+}
+
+/** The box's own axis-aligned frame: page space rotated about the origin. */
+function alignedFrameBounds(
+  corners: { nw: Point; ne: Point; se: Point; sw: Point },
+  rotation: number,
+): Bounds {
+  const points = [corners.nw, corners.ne, corners.se, corners.sw];
+  return pointsBounds(
+    rotation ? points.map((p) => rotateFromOrigin(p, -rotation)) : points,
+  );
 }
 
 function rotateFromOrigin(point: Point, angle: number): Point {
@@ -198,7 +251,10 @@ export function getSelectionInfo(
         shape.type === 'text'
           ? (['nw', 'ne', 'e', 'se', 'sw', 'w'] as ResizeHandleId[])
           : RESIZE_HANDLES;
-      handles = resizeHandles.map((id) => ({ id, point: handlePts[id] }));
+      handles = prunedHandles(resizeHandles, { minX, minY, maxX, maxY }, zoom).map((id) => ({
+        id,
+        point: handlePts[id],
+      }));
       const d = ROTATE_CORNER_OFFSET / zoom;
       rotationHandles = [
         { id: 'rotate-nw', point: rot(minX - d, minY - d) },
@@ -211,6 +267,7 @@ export function getSelectionInfo(
     return {
       ids: [shape.id],
       bounds,
+      alignedBounds: alignedFrameBounds(corners, rotation),
       rotation,
       center,
       corners,
@@ -266,20 +323,21 @@ export function getSelectionInfo(
   const canRotateAll = selected.every(
     (shape) => !shape.locked && shape.type !== 'group',
   );
+  const resizable = selected.some((shape) => !shape.locked);
   const d = ROTATE_CORNER_OFFSET / zoom;
   return {
     ids: selected.map((s) => s.id),
     bounds,
+    alignedBounds,
     rotation,
     center,
     corners,
-    // The existing group resize math is page-axis-aligned. Keep those handles
-    // off an oriented controller until that separate gesture can preserve the
-    // shared axis without distorting children.
-    handles:
-      selected.some((shape) => !shape.locked) && rotation === 0
-        ? RESIZE_HANDLES.map((id) => ({ id, point: groupPts[id] }))
-        : [],
+    handles: resizable
+      ? prunedHandles(RESIZE_HANDLES, alignedBounds, zoom).map((id) => ({
+          id,
+          point: groupPts[id],
+        }))
+      : [],
     rotationHandles: canRotateAll
       ? [
           { id: 'rotate-nw', point: fromAligned(minX - d, minY - d) },
@@ -405,11 +463,11 @@ function marqueeGeometry(shape: Shape): MarqueeGeometry | null {
     }
     case 'draw': {
       const points = localPointsToWorld(shape, shape.props.points);
-      const radius =
-        shape.props.thinning !== undefined && shape.props.thinning < 0
-          ? shape.props.size
-          : shape.props.size / 2;
-      return strokeGeometry(points, radius, shape.props.isClosed);
+      return strokeGeometry(
+        points,
+        maxInkRadius(shape.props.size, shape.props),
+        shape.props.isClosed,
+      );
     }
     case 'text':
     case 'image':

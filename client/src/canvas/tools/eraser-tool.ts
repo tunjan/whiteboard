@@ -8,13 +8,26 @@ import { useCanvasUiStore, type EraserMode } from '../use-canvas-ui-store';
 import { useEraserCutStore } from '../use-eraser-cut-store';
 import { useEraserStore } from '../use-eraser-store';
 import { useEraserTrailStore } from '../use-eraser-trail-store';
-import { candidatesAlong, eraseAlong, eraseTargetId, eraseTopAlong, protectedAt } from './erase';
+import {
+  candidatesAlong,
+  eraseAlong,
+  eraseTargetId,
+  eraseTopAlong,
+  protectedAt,
+} from './erase';
 import { segmentErasesShape } from './erase-geometry';
-import { cutRuns, cuttablePoints, fragmentShape, type PointRun } from './precision-erase';
+import {
+  cutRuns,
+  cuttablePoints,
+  fragmentShape,
+  type PointRun,
+} from './precision-erase';
 import type { Tool, ToolContext, ToolPointerInfo } from './types';
 
 /** Collision radius in screen pixels; scaled to world units by the zoom level. */
 export const ERASER_SCREEN_RADIUS = 8;
+const ERASER_DRAG_SLOP_SCREEN = 3;
+const ERASER_LONG_PRESS_MS = 500;
 
 /** Collision radius in world units at the current zoom. */
 function eraserMargin(): number {
@@ -36,14 +49,17 @@ function eraserMargin(): number {
  * every shape. The tool stays active after a stroke for repeated erasing.
  */
 export function createEraserTool(): Tool {
-  let erasing = false;
+  let phase: 'idle' | 'pointing' | 'erasing' = 'idle';
   let last: Point | null = null;
+  let startScreen: Point | null = null;
+  let startPressure = 0.5;
+  let longPressTimer: ReturnType<typeof setTimeout> | null = null;
   /** Mode captured at pointer-down, so a mid-stroke change can't split a swipe. */
   let mode: EraserMode = 'object';
-  /** Backgrounds (containers/text) under the start point, spared all stroke. */
+  /** Containers under the start point, spared for the whole stroke. */
   let protectedIds = new Set<string>();
   /**
-   * Accelerator held at pointer-down: take only the topmost shape each sample
+   * Option/Alt held at pointer-down: take only the topmost shape each sample
    * instead of everything the swipe crosses. Captured for the whole stroke, so
    * the modifier means the same thing whether you click or drag with it.
    */
@@ -53,10 +69,25 @@ export function createEraserTool(): Tool {
   /** Surviving runs per cut shape (precision mode). Empty array = fully erased. */
   const cuts = new Map<string, PointRun[]>();
 
+  function clearLongPress() {
+    if (longPressTimer === null) return;
+    clearTimeout(longPressTimer);
+    longPressTimer = null;
+  }
+
+  function enterErasing() {
+    if (phase !== 'pointing' || !last) return;
+    clearLongPress();
+    phase = 'erasing';
+    useEraserTrailStore.getState().begin(last, startPressure);
+  }
+
   /** End the stroke, clearing transient state and the preview. */
   function reset() {
-    erasing = false;
+    clearLongPress();
+    phase = 'idle';
     last = null;
+    startScreen = null;
     topOnly = false;
     protectedIds = new Set();
     queue.clear();
@@ -98,7 +129,13 @@ export function createEraserTool(): Tool {
     }
 
     let cutChanged = false;
-    for (const shape of candidatesAlong(editor, from, to, margin, protectedIds)) {
+    for (const shape of candidatesAlong(
+      editor,
+      from,
+      to,
+      margin,
+      protectedIds,
+    )) {
       const base = cuttablePoints(shape);
       if (!base) {
         // Not a polyline: precision mode falls back to the whole-shape rule.
@@ -116,10 +153,9 @@ export function createEraserTool(): Tool {
       cuts.set(shape.id, next);
       cutChanged = true;
     }
-    // Ink the swipe has consumed entirely is already gone from this screen — its
-    // fragment list is empty — but peers still hold the whole shape and have no
-    // cut preview. Marking it queues the same fade for them until the delete
-    // lands. Locally it changes nothing: there are no fragments left to dim.
+    // Ink the swipe has consumed entirely is already gone from the local preview
+    // because its fragment list is empty. Keep it in the marked set as well so
+    // the eventual vanish snapshot begins from the same pre-delete treatment.
     const consumed: string[] = [];
     for (const [id, runs] of cuts) if (runs.length === 0) consumed.push(id);
     useEraserStore.getState().set([...queue, ...consumed]);
@@ -132,7 +168,7 @@ export function createEraserTool(): Tool {
    * boundaries so it cannot merge with anything either side.
    */
   function commit(ctx: ToolContext) {
-    if (!erasing) return;
+    if (phase === 'idle') return;
     const entries = [...cuts];
     // Everything actually leaving the page. A queued group only ever stands in
     // for its members and `deleteShapes` does not cascade, so it is expanded to
@@ -211,24 +247,41 @@ export function createEraserTool(): Tool {
 
     onPointerDown(info: ToolPointerInfo, ctx: ToolContext) {
       if (info.button !== 0) return;
-      erasing = true;
+      phase = 'pointing';
       last = info.point;
-      topOnly = info.metaKey || info.ctrlKey;
+      startScreen = info.screenPoint;
+      startPressure = info.pressure;
+      topOnly = info.altKey;
       mode = useCanvasUiStore.getState().eraserMode;
       protectedIds = protectedAt(ctx.editor, info.point, eraserMargin());
       queue.clear();
       cuts.clear();
-      useEraserTrailStore.getState().begin(info.point);
       // A click with no drag still erases what's under the cursor.
       extend(ctx.editor, info.point, info.point);
+      if (!info.shiftKey && !info.altKey && !info.ctrlKey && !info.metaKey) {
+        longPressTimer = setTimeout(enterErasing, ERASER_LONG_PRESS_MS);
+      }
     },
 
     onPointerMove(info: ToolPointerInfo, ctx: ToolContext) {
-      if (!erasing) return;
+      if (phase === 'idle') return;
+      if (phase === 'pointing') {
+        if (
+          !startScreen ||
+          Math.hypot(
+            info.screenPoint.x - startScreen.x,
+            info.screenPoint.y - startScreen.y,
+          ) < ERASER_DRAG_SLOP_SCREEN
+        ) {
+          return;
+        }
+        enterErasing();
+      }
+      if (phase !== 'erasing') return;
       const from = last ?? info.point;
       extend(ctx.editor, from, info.point);
       last = info.point;
-      useEraserTrailStore.getState().extend(info.point);
+      useEraserTrailStore.getState().extend(info.point, info.pressure);
     },
 
     onPointerUp(_info: ToolPointerInfo, ctx: ToolContext) {

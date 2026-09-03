@@ -7,7 +7,7 @@ import {
 } from '@whiteboard/shared';
 import { requireTutor } from '../auth/middleware';
 import { db } from '../db/client';
-import { boardDocuments, boards } from '../db/schema';
+import { boardDocumentUpdates, boardDocuments, boards } from '../db/schema';
 
 type BoardRow = typeof boards.$inferSelect;
 
@@ -120,6 +120,16 @@ boardRoutes.delete('/:id', async (c) => {
       or(
         eq(boardDocuments.documentName, id),
         sql`starts_with(${boardDocuments.documentName}, ${pageDocumentPrefix(id)})`,
+      ),
+    );
+  // Each of those documents also has an append-only log of the updates written
+  // since its snapshot, under the same names.
+  await db
+    .delete(boardDocumentUpdates)
+    .where(
+      or(
+        eq(boardDocumentUpdates.documentName, id),
+        sql`starts_with(${boardDocumentUpdates.documentName}, ${pageDocumentPrefix(id)})`,
       ),
     );
   await db.delete(boards).where(eq(boards.id, id));

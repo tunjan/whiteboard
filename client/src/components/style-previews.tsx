@@ -9,6 +9,7 @@ import type {
   StrokeDash,
   TextAlign,
 } from '@whiteboard/shared';
+import type { EraserMode } from '@/canvas/use-canvas-ui-store';
 
 /**
  * The option tables and the little glyphs that stand for each one.
@@ -183,3 +184,54 @@ export function OpacityPreview({ value }: { value: number }) {
     </svg>
   );
 }
+
+/**
+ * Whole shapes: a closed box, which is the smallest thing that reads as "an
+ * object" at this size. Drawn at the same 16px viewBox and 1.75 weight as its
+ * sibling below so the two glyphs sit on one optical line.
+ */
+export function EraserObjectPreview() {
+  return (
+    <svg width={16} height={16} viewBox="0 0 16 16" aria-hidden="true">
+      <rect
+        x={3}
+        y={3}
+        width={10}
+        height={10}
+        rx={2.5}
+        fill="currentColor"
+        fillOpacity={0.18}
+        stroke="currentColor"
+        strokeWidth={1.75}
+      />
+    </svg>
+  );
+}
+
+/** A stroke with a bite taken out of its middle: what precision mode does. */
+export function EraserPrecisionPreview() {
+  return (
+    <svg width={16} height={16} viewBox="0 0 16 16" aria-hidden="true">
+      <path
+        d="M2 11 A 6 6 0 0 1 5.95 5.36 M10.05 5.36 A 6 6 0 0 1 14 11"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.75}
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+export const ERASER_MODES: {
+  mode: EraserMode;
+  label: string;
+  Preview: () => React.JSX.Element;
+}[] = [
+  { mode: 'object', label: 'Object eraser', Preview: EraserObjectPreview },
+  {
+    mode: 'precision',
+    label: 'Precision eraser',
+    Preview: EraserPrecisionPreview,
+  },
+];

@@ -1094,14 +1094,20 @@ export function loadBoard(
     );
 
     // A peer deleted the page we're on — prefer its previous neighbor, matching
-    // local deletion. If the old order is unavailable, use the first page.
+    // local deletion. The neighbor is only a candidate: one update can remove
+    // several pages at once (a peer's deletions arrive batched), so it may be
+    // gone too, in which case any surviving page will do.
     if (session.pages.size > 0 && !session.pages.has(session.currentPageId)) {
       const at = previousOrder.indexOf(session.currentPageId);
+      const neighbor = at > 0 ? previousOrder[at - 1] : previousOrder[at + 1];
       const fallbackId =
-        (at > 0 ? previousOrder[at - 1] : previousOrder[at + 1]) ??
+        (neighbor && session.pages.has(neighbor) ? neighbor : undefined) ??
         readPages(session.pages)[0]?.id;
-      if (fallbackId && session.pages.has(fallbackId)) {
-        switchToPageInternal(fallbackId, 'integrity');
+      // Switching rebuilds both caches itself; anything else leaves them
+      // describing pages that no longer exist.
+      if (!fallbackId || !switchToPageInternal(fallbackId, 'integrity')) {
+        rebuildPagesCache();
+        rebuildSnapshot();
       }
     } else {
       rebuildPagesCache();
@@ -1263,28 +1269,37 @@ export function loadBoard(
     writePageSession(boardId, session.currentPageId);
   };
 
-  // Seed page-default once the board's existing state is known. We only seed
-  // when the registry is still empty after sync, so a deliberately deleted
-  // page-default is never resurrected (other pages keep the registry non-empty).
+  // Seed page-default once the board's existing state is known. Behind the same
+  // readiness gate as the restore above, and for the same reason: before every
+  // configured source has synced, an empty registry only means "nothing has
+  // arrived yet". Seeding on that would resurrect a deliberately deleted
+  // page-default on every board that has one — as a local write, which then
+  // syncs back out to everyone. With no source to wait for (tests, in-memory
+  // boards) both flags start true and this seeds immediately.
+  const seedWhenSynced = () => {
+    if (!session || session.doc !== doc) return;
+    if (!persistenceReady || !providerReady) return;
+    maybeSeedDefaultPage();
+  };
   // Legacy content can only be spotted once the board document has arrived, so
   // the open page is re-checked after every source syncs. A no-op once there is
   // nothing left in the legacy maps, which is every board written since.
   const migrateOpenPage = () => {
     if (session?.doc === doc) migrateLegacyPageShapes(session.currentPageId);
   };
-  maybeSeedDefaultPage();
-  persistence?.on('synced', maybeSeedDefaultPage);
-  provider?.on('synced', maybeSeedDefaultPage);
   persistence?.on('synced', () => {
     persistenceReady = true;
+    seedWhenSynced();
     restorePageFromSession();
     migrateOpenPage();
   });
   provider?.on('synced', () => {
     providerReady = true;
+    seedWhenSynced();
     restorePageFromSession();
     migrateOpenPage();
   });
+  seedWhenSynced();
   restorePageFromSession();
 
   fullResync();
@@ -1770,6 +1785,12 @@ export function deletePage(id: string): void {
     // here too; a migrated page's content is a document of its own, dropped by
     // `cleanupDeletedPageState` as the registry change is observed.
     legacyShapesMap(session!.doc, id)?.clear();
+    // Comments live on the board document, not the page's, so nothing else
+    // drops them: left behind they would sync to every client on every join,
+    // for a page no view can ever show again.
+    for (const [messageId, message] of session!.comments) {
+      if (message.pageId === id) session!.comments.delete(messageId);
+    }
   });
   deleteStoredPage(boardId, id);
 }

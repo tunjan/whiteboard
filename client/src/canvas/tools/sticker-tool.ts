@@ -5,7 +5,7 @@ import { shapeRegistry } from '../shapes/shape-registry';
 import { customStickerSize } from '../shapes/sticker';
 import { useCustomStickersStore } from '../use-custom-stickers-store';
 import { useStickerPopStore } from '../use-sticker-pop-store';
-import { useStyleStore } from '../use-style-store';
+import { groupStyle, useStyleStore } from '../use-style-store';
 import type { Tool, ToolContext, ToolPointerInfo } from './types';
 
 /**
@@ -31,13 +31,13 @@ export function createStickerTool(): Tool {
       if (info.button !== 0) return;
       const util = shapeRegistry.get('sticker');
       if (!util) return;
-      const style = useStyleStore.getState();
+      const stickerId = useStyleStore.getState().stickerId;
       // `stickerId` addresses either the built-in catalog or the board's
       // uploaded library; a hit in the library wins and brings its artwork.
-      const custom = useCustomStickersStore.getState().stickers[style.stickerId];
+      const custom = useCustomStickersStore.getState().stickers[stickerId];
       const props: StickerProps = {
         ...(util.getDefaultProps() as StickerProps),
-        sticker: style.stickerId,
+        sticker: stickerId,
         ...(custom
           ? {
               blobId: custom.blobId,
@@ -52,7 +52,7 @@ export function createStickerTool(): Tool {
         x: info.point.x - props.w / 2,
         y: info.point.y - props.h / 2,
         rotation: 0,
-        opacity: style.opacity,
+        opacity: groupStyle('shape').opacity,
         index: getTopIndex(ctx.editor.getShapes()),
         props,
       } as Shape);

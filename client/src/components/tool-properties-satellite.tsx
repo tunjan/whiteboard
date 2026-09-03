@@ -10,6 +10,7 @@ import type {
   TextAlign,
 } from '@whiteboard/shared';
 import { fontStack } from '@/canvas/shapes/text-measure';
+import { useCanvasUiStore } from '@/canvas/use-canvas-ui-store';
 import { useStyleControls } from '@/canvas/use-style-controls';
 import {
   paletteColors,
@@ -21,6 +22,7 @@ import {
   ALIGNS,
   ARROW_TOPOLOGIES,
   DASHES,
+  ERASER_MODES,
   DASH_LABELS,
   DashPreview,
   FILLS,
@@ -43,7 +45,7 @@ import {
   PopoverTitle,
   PopoverTrigger,
 } from '@/components/ui/popover';
-import { Surface } from '@/components/ui/surface';
+import { CHROME_ON_BOARD, Surface } from '@/components/ui/surface';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import {
   Tooltip,
@@ -148,15 +150,15 @@ function Swatch({
             onClick={onSelect}
             className={cn(
               'flex size-7 items-center justify-center rounded-xl',
-              'transition-colors duration-fast ease-out-quart motion-reduce:transition-none',
-              'hover:bg-[var(--chrome-hover,var(--color-panel))]',
+              'transition-all duration-fast ease-out-quart motion-reduce:transition-none',
+              'hover:bg-[var(--chrome-hover,var(--color-panel))] active:scale-95',
             )}
           />
         }
       >
         <span
           className={cn(
-            'size-4 rounded-full border',
+            'size-4 rounded-full border transition-all duration-fast ease-out-quart motion-reduce:transition-none',
             // The ring is what marks the choice here, as it did in the panel's
             // grid — a swatch cannot show selection with a fill of its own.
             selected &&
@@ -202,8 +204,8 @@ function ColorWheel({
               aria-label="More colors"
               className={cn(
                 'flex size-7 items-center justify-center rounded-xl',
-                'transition-colors duration-fast ease-out-quart motion-reduce:transition-none',
-                'hover:bg-[var(--chrome-hover,var(--color-panel))]',
+                'transition-all duration-fast ease-out-quart motion-reduce:transition-none',
+                'hover:bg-[var(--chrome-hover,var(--color-panel))] active:scale-95',
               )}
             />
           }
@@ -293,7 +295,7 @@ function StyleKey({
             <PopoverTrigger
               aria-label={label}
               className={cn(
-                'tb-key tb-glyph group/key relative flex size-9 items-center justify-center rounded-full',
+                'tb-key tb-glyph group/key relative flex size-9 items-center justify-center rounded-full active:scale-95 motion-reduce:active:scale-100',
                 open ? 'text-tb-accent-fg' : 'text-fg-muted hover:text-fg',
               )}
             />
@@ -312,7 +314,7 @@ function StyleKey({
             aria-hidden="true"
             className={cn(
               'pointer-events-none absolute inset-[3px] rounded-[13px]',
-              'transition-colors duration-fast ease-out-quart motion-reduce:transition-none',
+              'transition-colors duration-base ease-out-quart motion-reduce:transition-none',
               open ? 'bg-tb-accent' : 'group-hover/key:bg-tb-accent/60',
             )}
           />
@@ -391,7 +393,7 @@ function StrokeWeight({
         aria-hidden="true"
         className={cn(
           'pointer-events-none absolute inset-y-[3px] left-[3px] w-[calc(25%-6px)] rounded-[13px] bg-tb-accent',
-          'transition-transform duration-base ease-out-quart motion-reduce:transition-none',
+          'transition-transform duration-slow ease-out-quart motion-reduce:transition-none',
           index < 0 && 'opacity-0',
         )}
         style={{
@@ -433,6 +435,88 @@ function StrokeWeight({
           </TooltipContent>
         </Tooltip>
       ))}
+    </div>
+  );
+}
+
+/**
+ * The eraser's two modes, built exactly like the stroke weight above it: a
+ * chip that slides between the segments of one recess, so the pair reads as a
+ * single switch rather than two lights.
+ *
+ * It rides on this bar rather than on the eraser's own button because it is
+ * what the eraser is set to, and every other tool's settings are found here.
+ * The eraser's bar carries nothing else — it paints no colour and no weight —
+ * so the switch is the whole of it.
+ */
+function EraserModeSwitch() {
+  const eraserMode = useCanvasUiStore((s) => s.eraserMode);
+  const setEraserMode = useCanvasUiStore((s) => s.setEraserMode);
+  const refs = useRef<(HTMLButtonElement | null)[]>([]);
+  const index = ERASER_MODES.findIndex(({ mode }) => mode === eraserMode);
+
+  const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!ARROW_KEYS.includes(event.key)) return;
+    event.preventDefault();
+    const from = index < 0 ? 0 : index;
+    const next =
+      (from + arrowDelta(event.key) + ERASER_MODES.length) %
+      ERASER_MODES.length;
+    const option = ERASER_MODES[next];
+    if (!option) return;
+    setEraserMode(option.mode);
+    refs.current[next]?.focus();
+  };
+
+  return (
+    <div
+      role="radiogroup"
+      aria-label="Eraser mode"
+      onKeyDown={onKeyDown}
+      className="relative grid shrink-0 grid-cols-2 self-center rounded-2xl bg-tb-track"
+    >
+      <span
+        aria-hidden="true"
+        className={cn(
+          'pointer-events-none absolute inset-y-[3px] left-[3px] w-[calc(50%-6px)] rounded-[13px] bg-tb-accent',
+          'transition-transform duration-slow ease-out-quart motion-reduce:transition-none',
+        )}
+        style={{
+          transform: `translateX(calc(${Math.max(index, 0)} * (100% + 6px)))`,
+        }}
+      />
+      {ERASER_MODES.map(({ mode, label, Preview }, i) => {
+        const selected = mode === eraserMode;
+        return (
+          <Tooltip key={mode}>
+            <TooltipTrigger
+              render={
+                <button
+                  ref={(node) => {
+                    refs.current[i] = node;
+                  }}
+                  type="button"
+                  role="radio"
+                  aria-label={label}
+                  aria-checked={selected}
+                  tabIndex={selected ? 0 : -1}
+                  onClick={() => setEraserMode(mode)}
+                  className={cn(
+                    'relative z-10 flex size-9 items-center justify-center rounded-xl',
+                    'transition-colors duration-fast ease-out-quart motion-reduce:transition-none',
+                    selected
+                      ? 'text-tb-accent-fg'
+                      : 'text-fg-muted hover:text-fg',
+                  )}
+                />
+              }
+            >
+              <Preview />
+            </TooltipTrigger>
+            <TooltipContent side="top">{label}</TooltipContent>
+          </Tooltip>
+        );
+      })}
     </div>
   );
 }
@@ -830,6 +914,9 @@ export function ToolPropertiesSatellite({
   // subject that drops a whole section — an image, which has only opacity —
   // never leaves a rule against the pill's edge with nothing on the far side.
   const sections: { id: string; node: ReactNode }[] = [];
+  if (on.eraserMode) {
+    sections.push({ id: 'eraser-mode', node: <EraserModeSwitch /> });
+  }
   if (on.size) {
     sections.push({
       id: 'size',
@@ -879,11 +966,11 @@ export function ToolPropertiesSatellite({
         // middle. Centred below `sm`, where this pill can outgrow the compact
         // bar and would otherwise run off the screen.
         'left-1/2 -translate-x-1/2 sm:left-1.5 sm:translate-x-0',
-        'origin-bottom transition-[opacity,transform] duration-base ease-out-quart',
+        'origin-bottom transition-[opacity,transform] duration-slow ease-out-quart',
         'motion-reduce:transition-none',
         visible
-          ? 'translate-y-0 opacity-100'
-          : 'pointer-events-none translate-y-1.5 opacity-0',
+          ? 'translate-y-0 scale-100 opacity-100'
+          : 'pointer-events-none translate-y-1.5 scale-[0.97] opacity-0',
       )}
     >
       <Surface
@@ -905,7 +992,7 @@ export function ToolPropertiesSatellite({
           // vertical scroller for the 4px the rules bleed into the padding.
           'max-sm:overflow-x-auto max-sm:overflow-y-hidden',
           'max-sm:[scrollbar-width:none] max-sm:[&::-webkit-scrollbar]:hidden',
-          'border-transparent bg-transparent shadow-none dark:border-transparent',
+          CHROME_ON_BOARD,
         )}
       >
         {sections.map((section, index) => (

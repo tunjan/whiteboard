@@ -121,7 +121,7 @@ registry plus the page being looked at.
 | `use-document-store.ts`                   | Zustand store + Yjs providers + UndoManagers. Manages board lifecycle (`loadBoard`), shape CRUD, page navigation, spatial index synchronization, and document state. Leaving a page *parks* its derived state (shape cache, sorted array, spatial index, binding graph) so returning to it is a pointer swap; a peer's edit to a parked page marks it stale and the return re-derives instead. |
 | `ShapeView.tsx`                           | Polymorphic shape renderer invoking registered `ShapeUtil.Component`.                                                                                              |
 | `Background.tsx`                          | Dot grid, graph paper, line grid, or blank background renderer matching camera zoom/pan.                                                                           |
-| `SelectionLayer.tsx`                      | Selection bounding box, 8 resize handles, rotation handle, and custom shape handles.                                                                               |
+| `SelectionLayer.tsx`                      | Selection bounding box, 8 resize handles, rotation handle, and custom shape handles. Shapes that expose `getIndicatorPath()` (connectors) are traced along their own outline instead of boxed. |
 | `SelectionToolbar.tsx`                    | Floating quick-actions toolbar above active selection.                                                                                                             |
 | `CommentsLayer.tsx`                       | Canvas thread comment pins and popup dialogs.                                                                                                                      |
 | `CommentText.tsx`                         | Renders a comment body: Markdown marks as elements, `$…$` / `$$…$$` as MathJax-typeset math (shares the equation render cache).                                     |
@@ -158,17 +158,19 @@ registry plus the page being looked at.
 | `equation-complete.ts` / `equation-shortcuts.ts`                      | LaTeX command catalog for the panel's autocomplete, plus pure typing edits (auto-brackets, Tab slots, environment rows). |
 | `ink-to-latex.ts`                                                     | Handwriting or pasted image → equation: rasterize the selection, transcribe it via `/api/ai/latex/ink`, swap the source for a typeset shape in one undo step. |
 | `link-url.ts` / `place-image.ts` / `place-link.ts` / `place-video.ts` | Asset drop and paste placement handlers.                                                                                |
+| `place-pdf.ts` / `pdf-render.ts`                                      | Pasted/dropped PDF → one `image` shape per page, stacked in a column. `pdf-render.ts` is the only module that touches pdf.js (lazily imported; its fonts/CMaps/wasm are copied into `public/pdfjs` by `client/scripts/copy-pdfjs-assets.mjs`). Pages are rasterized and uploaded *before* any document write, then created in one `transact` — one undo step, and peers never see a half-imported document. |
 
 #### Canvas Zustand Stores & Hooks
 
 - `use-selection-store.ts` — Selected shape IDs (`selectedIds: string[]`).
-- `use-style-store.ts` — Active stroke color, fill style, dash style, stroke size, font settings.
+- `use-style-store.ts` — Style new shapes inherit. Color, size, fill, dash and opacity are remembered per **style group** (`pen` / `marker` / `shape` / `text`) so the highlighter keeps its yellow while the pen keeps its ink; `styleGroupForTool` maps a tool to its group and `styleGroupForShape` maps a selected shape back. Font, arrow, spline, polygon and sticker settings have one consumer each and stay flat.
 - `use-style-controls.ts` — The one answer to "which style controls apply right now, and what does each one write?": derives the visibility flags from the active tool plus the selection, and returns setters that update the style store *and* every selected shape carrying that property. Consumed by `tool-properties-satellite.tsx`.
 - `use-canvas-ui-store.ts` — Canvas HUD visibility, grid mode, performance stats toggles.
 - `use-tool-store.ts` / `use-tool-lock-store.ts` — Active tool ID and tool lock state.
 - `use-eraser-store.ts` / `use-eraser-cut-store.ts` — Precision path cutting state.
 - `use-eraser-trail-store.ts` — Self-consuming swipe trail (ring buffer, ≤8 points), drawn by `EraserTrail.tsx`.
 - `use-comments-store.ts` — Active comment threads.
+- `use-pdf-import-store.ts` — The one pending PDF page-range request. Inverted from the app's other dialogs: `place-pdf.ts` awaits a promise and `pdf-range-dialog.tsx` settles it.
 - `use-documents-store.ts` — Board file attachment drawer, plus which attachments this user hasn't opened yet (`unread`, owned by `board/document-notifications.ts`).
 - `use-custom-stickers-store.ts` — User custom sticker library.
 - `use-camera-interaction.ts` / `use-wheel.ts` / `use-space-pan.ts` / `use-safari-gestures.ts` — Viewport pan/zoom input handling.
@@ -181,7 +183,7 @@ Every shape implements `ShapeUtil<T>` (registered in `register.ts`):
 
 | Shape Type  | File                                                            | Key Features                                                                                                               |
 | ----------- | --------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `draw`      | `draw.tsx`, `ink-engine.ts`, `ink-points.ts`, `perfect-dash.ts` | Variable-width ink with Catmull-Rom smoothing, pressure simulation, fill patterns (solid, hatch, crosshatch), dash styles. |
+| `draw`      | `draw.tsx`, `ink-engine.ts`, `ink-points.ts`, `perfect-dash.ts` | Variable-width ink with Catmull-Rom smoothing, pressure simulation, stylus tilt broadening, velocity-driven lift tapers, fill patterns (solid, hatch, crosshatch), dash styles. |
 | `rectangle` | `rectangle.tsx`                                                 | Box shape with fills and border dashes.                                                                                    |
 | `ellipse`   | `ellipse.tsx`                                                   | Ellipse/circle with fills and border dashes.                                                                               |
 | `polygon`   | `polygon.tsx`, `polygon-geometry.ts`                            | Triangle, diamond, trapezoid, pentagon, hexagon.                                                                           |
@@ -256,6 +258,7 @@ All tools implement `Tool` (registered in `register.ts`):
 | `equation-panel.tsx`      | LaTeX source editor: command autocomplete, Quick-LaTeX typing shortcuts, and "describe an equation" generation. |
 | `documents-panel.tsx`     | Drawer for uploading, downloading, and viewing board file attachments; carries the unread dot.     |
 | `page-menu.tsx`           | Multi-page list switcher, reordering, creation, and deletion.                                      |
+| `pdf-range-dialog.tsx`    | Which pages of an over-long PDF to import; also how the page limit is announced.                   |
 | `canvas-context-menu.tsx` | Right-click context menu (Cut, Copy, Paste, Bring to Front, Send to Back, Group, Lock).            |
 | `board-notes-dialog.tsx`  | Tutor-only private student notes.                                                                  |
 | `board-actions-menu.tsx`  | Board ⋯ menu: dialogs, PNG copy/export + resolution, and all board preferences (theme, snapping, pen, sound, perf overlay, tutor-only attention thresholds). |
@@ -289,7 +292,7 @@ All tools implement `Tool` (registered in `register.ts`):
 1. **Define Contract in `shared/src/shapes/`:**
    - In `shapes.ts`, add `MyShapeProps` interface, `MyShape = BaseShape<'myshape', MyShapeProps>`, add `MyShape` to `Shape` union and `ShapeMap`.
 2. **Create ShapeUtil in `client/src/canvas/shapes/myshape.tsx`:**
-   - Implement `ShapeUtil<'myshape'>` with `getBounds()`, `hitTest()`, `Component()`, and optional `getHandles()` / `onHandleDrag()`.
+   - Implement `ShapeUtil<'myshape'>` with `getBounds()`, `hitTest()`, `Component()`, and optional `getHandles()` / `onHandleDrag()` / `getIndicatorPath()`.
 3. **Register Shape:**
    - In `client/src/canvas/shapes/register.ts`, import `myShapeUtil` and call `shapeRegistry.register(myShapeUtil)`.
 

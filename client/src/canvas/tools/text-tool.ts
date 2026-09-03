@@ -14,7 +14,7 @@ import {
 import { useCameraStore } from '../use-camera-store';
 import { useCanvasUiStore } from '../use-canvas-ui-store';
 import { useSelectionStore } from '../use-selection-store';
-import { useStyleStore } from '../use-style-store';
+import { groupStyle, useStyleStore } from '../use-style-store';
 import { useTextEditingStore } from '../use-text-editing-store';
 import type { Tool, ToolContext, ToolPointerInfo } from './types';
 
@@ -57,7 +57,7 @@ export function createTextTool(): Tool {
     const style = useStyleStore.getState();
     return {
       ...(util?.getDefaultProps() as TextProps),
-      color: style.color,
+      color: groupStyle('text').color,
       fontFamily: style.fontFamily,
       fontWeight: style.fontWeight,
       align: style.align,
@@ -105,7 +105,7 @@ export function createTextTool(): Tool {
       x,
       y,
       rotation: 0,
-      opacity: useStyleStore.getState().opacity,
+      opacity: groupStyle('text').opacity,
       index: getTopIndex(ctx.editor.getShapes()),
       props:
         width === null
