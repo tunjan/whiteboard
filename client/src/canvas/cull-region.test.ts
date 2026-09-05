@@ -70,7 +70,20 @@ describe('quantizedCullRegion', () => {
       ].join(':');
     };
     expect(new Set(frames.map(liveCellKey)).size).toBe(frames.length);
-    expect(new Set(frames.map(key)).size).toBeLessThanOrEqual(8);
+    expect(new Set(frames.map(key)).size).toBeLessThanOrEqual(2);
+  });
+
+  // A zoom out to fit the board and back is what the shape tree is rebuilt for,
+  // so it is the sweep worth counting: one region per zoom band, not per frame.
+  it('re-cuts a handful of times across a full zoom-out and back', () => {
+    const anchor = { x: W / 2, y: H / 2 };
+    const world = { x: 500 + anchor.x, y: 500 + anchor.y };
+    const frames: Camera[] = [];
+    for (let i = 0, z = 1; i < 180; i++) {
+      z *= i < 48 || (i >= 96 && i < 144) ? 1 / 1.04 : 1.04;
+      frames.push({ x: world.x - anchor.x / z, y: world.y - anchor.y / z, z });
+    }
+    expect(new Set(frames.map(key)).size).toBeLessThanOrEqual(6);
   });
 
   it('re-cuts the grid across a zoom band boundary', () => {

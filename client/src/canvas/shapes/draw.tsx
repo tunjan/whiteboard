@@ -83,7 +83,7 @@ export function buildInkRender(
   // of a render, so it is built once here rather than once per consumer.
   const centerline =
     isDashed || filled || forceSolid
-      ? getInkCenterlineGeometry(points, size, streamline)
+      ? getInkCenterlineGeometry(points, size, streamline, props.inkAlgorithm)
       : EMPTY_INK_CENTERLINE;
 
   if (isDashed) {
@@ -112,6 +112,7 @@ export function buildInkRender(
   return {
     stroked: false,
     d: getInkPathData(points, size, true, {
+      inkAlgorithm: props.inkAlgorithm,
       simulatePressure: props.simulatePressure,
       thinning: props.thinning,
       smoothing: props.smoothing,
@@ -199,6 +200,7 @@ export const drawUtil: ShapeUtil<'draw'> = {
       s.props.size,
       s.props.streamline ?? 0.5,
       true,
+      s.props.inkAlgorithm,
     );
     if (line.count === 0) return false;
     const segStart = { x: line.x[0]!, y: line.y[0]! };

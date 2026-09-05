@@ -1,4 +1,11 @@
-import { useLayoutEffect, useRef, useState, type RefObject } from 'react';
+import {
+  useLayoutEffect,
+  useRef,
+  useState,
+  type Dispatch,
+  type RefObject,
+  type SetStateAction,
+} from 'react';
 import type { Camera } from './camera';
 import {
   captureShapeLayer,
@@ -6,6 +13,35 @@ import {
   snapshotTransform,
   type CameraSnapshot,
 } from './camera-snapshot';
+
+/**
+ * The snapshot's own state, split out from the effect that fills it.
+ *
+ * The canvas has to know whether a snapshot stands in *before* it decides
+ * which shapes to mount — the mounted set is culled at the snapshot's camera
+ * while one is up — but the effect that takes a snapshot has to run *after*,
+ * because it rasterizes exactly that mounted set. Two hooks over one slot is
+ * what unties those from each other; one hook owning both ends cannot, since
+ * each end is the other's input.
+ */
+export interface SnapshotSlot {
+  snapshot: CameraSnapshot | null;
+  setSnapshot: Dispatch<SetStateAction<CameraSnapshot | null>>;
+  /**
+   * Path2D objects survive across captures: rebuilding them is the expensive
+   * half of a capture, and a gesture that re-captures is drawing mostly the
+   * same strokes it drew a moment ago.
+   */
+  paths: RefObject<WeakMap<Element, { key: string; path: Path2D }>>;
+}
+
+export function useSnapshotSlot(): SnapshotSlot {
+  const [snapshot, setSnapshot] = useState<CameraSnapshot | null>(null);
+  const paths = useRef<WeakMap<Element, { key: string; path: Path2D }>>(
+    new WeakMap(),
+  );
+  return { snapshot, setSnapshot, paths };
+}
 
 /**
  * Holds a rasterized copy of the shape layer for as long as the camera is
@@ -20,26 +56,22 @@ import {
  * moving it.
  */
 export function useCameraSnapshot({
+  slot,
   worldRef,
   camera,
   width,
   height,
   active,
 }: {
+  slot: SnapshotSlot;
   /** The `<g>` carrying the camera transform in the shape layer. */
   worldRef: RefObject<SVGGElement | null>;
   camera: Camera;
   width: number;
   height: number;
   active: boolean;
-}): CameraSnapshot | null {
-  const [snapshot, setSnapshot] = useState<CameraSnapshot | null>(null);
-  // Path2D objects survive across captures: rebuilding them is the expensive
-  // half of a capture, and a gesture that re-captures is drawing mostly the
-  // same strokes it drew a moment ago.
-  const paths = useRef<WeakMap<Element, { key: string; path: Path2D }>>(
-    new WeakMap(),
-  );
+}): void {
+  const { snapshot, setSnapshot, paths } = slot;
 
   useLayoutEffect(() => {
     const world = worldRef.current;
@@ -47,13 +79,22 @@ export function useCameraSnapshot({
       if (snapshot) setSnapshot(null);
       return;
     }
-    // A pan that runs off the bitmap's edge, or a zoom that magnifies it past
-    // legibility, is re-captured rather than left to show blank or mush.
-    if (snapshot && snapshotCovers(snapshot, camera, width, height)) return;
+    if (snapshot) {
+      // A pan that runs off the bitmap's edge, or a zoom that magnifies it past
+      // legibility, is re-captured rather than left to show blank or mush.
+      if (snapshotCovers(snapshot, camera, width, height)) return;
+      // Dropping it first, rather than re-capturing here, is what makes the
+      // frozen cull region safe: while a snapshot stands in, the shape layer is
+      // mounted for *its* camera, so capturing straight from this tree would
+      // rasterize the old viewport's shapes into the new viewport's bitmap.
+      // Clearing it re-mounts the tree for the live camera, and the next run of
+      // this effect — one frame later, with the live vectors briefly on screen
+      // and correct — captures that.
+      setSnapshot(null);
+      return;
+    }
     setSnapshot(captureShapeLayer(world, camera, width, height, paths.current));
-  }, [active, camera, width, height, snapshot, worldRef]);
-
-  return snapshot;
+  }, [active, camera, width, height, snapshot, setSnapshot, paths, worldRef]);
 }
 
 /**

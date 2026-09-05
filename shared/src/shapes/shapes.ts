@@ -79,6 +79,8 @@ export type PressureEasing =
   | 'firm';
 
 export interface DrawProps {
+  /** Versioned geometry keeps existing documents visually stable. */
+  inkAlgorithm?: 'reference';
   /** Ink points in shape-local coordinates (append-only under the CRDT). */
   points: DrawPoint[];
   /** Whether the stroke ended near enough to its start to enclose a region. */

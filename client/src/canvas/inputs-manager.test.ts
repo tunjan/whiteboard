@@ -32,6 +32,15 @@ describe('InputsManager', () => {
 
     expect(inputs.update({ x: 16, y: 0 }, 128)).toEqual({ x: 0, y: 0 });
   });
+
+  it('applies the velocity deadband independently to each axis', () => {
+    const inputs = new InputsManager();
+    inputs.reset({ x: 0, y: 0 }, 0);
+
+    // The first target is (0.01, 1), so the 0.5 EMA produces (0.005, 0.5).
+    // Meaningful y motion must not keep the sub-threshold x drift alive.
+    expect(inputs.update({ x: 0.16, y: 16 }, 16)).toEqual({ x: 0, y: 0.5 });
+  });
 });
 
 describe('isPenOrStylus', () => {

@@ -2,6 +2,7 @@ import type { DrawPoint } from '@whiteboard/shared';
 import { CentiPixelPathWriter, toCenti } from './fmt';
 
 export interface FreehandEngineOptions {
+  inkAlgorithm?: 'reference';
   size: number;
   last: boolean;
   simulatePressure: boolean;
@@ -413,10 +414,10 @@ class InkBuffers {
     this.sequenceX = new Float64Array(this.capacity);
     this.sequenceY = new Float64Array(this.capacity);
 
-    this.trackLeftX = new Float64Array(this.capacity);
-    this.trackLeftY = new Float64Array(this.capacity);
-    this.trackRightX = new Float64Array(this.capacity);
-    this.trackRightY = new Float64Array(this.capacity);
+    this.trackLeftX = new Float64Array(this.capacity * 14);
+    this.trackLeftY = new Float64Array(this.capacity * 14);
+    this.trackRightX = new Float64Array(this.capacity * 14);
+    this.trackRightY = new Float64Array(this.capacity * 14);
 
     this.partitionStart = new Int32Array(this.capacity);
     this.partitionEnd = new Int32Array(this.capacity);
@@ -467,6 +468,7 @@ function ingest(
   points: DrawPoint[],
   size: number,
   simulatePressure: boolean,
+  reference = false,
 ): number {
   buffers.ensureCapacity(Math.max(points.length, 5));
   const count = points.length;
@@ -483,7 +485,8 @@ function ingest(
   }
   if (count <= 1) return count;
 
-  const thresholdSquared = Math.min(size / 3, ENDPOINT_JITTER_DISTANCE) ** 2;
+  const thresholdSquared =
+    (reference ? size / 3 : Math.min(size / 3, ENDPOINT_JITTER_DISTANCE)) ** 2;
   const startX = buffers.stageX[0]!;
   const startY = buffers.stageY[0]!;
   let startPressure = buffers.stageZ[0]!;
@@ -596,6 +599,7 @@ function streamline(
   size: number,
   streamlineAmount: number,
   last: boolean,
+  reference = false,
 ): number {
   if (stagedCount === 0) return 0;
   const response = responseDistanceFor(streamlineRawWeight(streamlineAmount));
@@ -648,6 +652,11 @@ function streamline(
       );
       weight = uncapped - (uncapped - clampedWeight) * straightness;
     }
+    if (reference)
+      weight =
+        last && i === stagedCount - 1
+          ? 1
+          : streamlineRawWeight(streamlineAmount);
     previousRawX = rawX;
     previousRawY = rawY;
     const x = previousX + (rawX - previousX) * weight;
@@ -675,7 +684,7 @@ function streamline(
     buffers.runLength[pointCount] = totalLength;
     pointCount++;
   }
-  if (last) pinTipToRaw(pointCount, response);
+  if (last && !reference) pinTipToRaw(pointCount, response);
   return pointCount;
 }
 
@@ -797,8 +806,7 @@ function applyTiltBroadening(pointCount: number, tiltAmount: number): void {
       const travel = vectorLength(dx, dy);
       if (travel > 0) across = Math.abs(dx * leanY - dy * leanX) / travel;
     }
-    const broadening =
-      1 + tiltAmount * MAX_TILT_BROADENING * clamp01(across);
+    const broadening = 1 + tiltAmount * MAX_TILT_BROADENING * clamp01(across);
     buffers.radius[i] = buffers.radius[i]! * broadening;
   }
 }
@@ -812,7 +820,7 @@ function calculateDynamics(
   const thinning = clamp(options.thinning, -1, 1);
   const easing = options.easing ?? linearEasing;
   let pressure = clamp01(buffers.inputZ[0] ?? 0.5);
-  if (options.pressureWarmup) {
+  if (options.pressureWarmup || options.inkAlgorithm === 'reference') {
     // A pointer-down sample has no velocity history and a stylus often reports
     // its contact ramp. Average the opening response over five brush widths so
     // that one reading cannot leave a heavy blob at the press point.
@@ -859,10 +867,10 @@ function calculateDynamics(
         // steady-state filter: relaxing by a fraction of `distance / size`
         // here is the brush-dependent rate `PRESSURE_RESPONSE_DISTANCE`
         // exists to replace.
-        const response = onePoleWeight(
-          buffers.distance[i]!,
-          PRESSURE_RESPONSE_DISTANCE,
-        );
+        const response =
+          options.inkAlgorithm === 'reference'
+            ? clamp01(buffers.distance[i]! / options.size) * PRESSURE_RELAXATION
+            : onePoleWeight(buffers.distance[i]!, PRESSURE_RESPONSE_DISTANCE);
         pressure = clamp01(pressure + (target - pressure) * response);
       }
     }
@@ -931,7 +939,7 @@ function calculateGlobalVectors(pointCount: number): void {
 }
 
 /** Partition overlapping index ranges at acute and close hard elbows. */
-function partition(pointCount: number): number {
+function partition(pointCount: number, reference = false): number {
   buffers.boundary.fill(0, 0, pointCount);
   buffers.rawBoundary.fill(0, 0, pointCount);
   if (pointCount <= 1) {
@@ -956,7 +964,15 @@ function partition(pointCount: number): number {
     // test divided the neighbouring segment lengths by the brush radius, and
     // sample spacing is a record of hand speed, so one and the same corner
     // partitioned cleanly when drawn slowly and grew a spike when drawn fast.
-    const hard = !acute && 1 + directionChange < MITER_DENOMINATOR_FLOOR;
+    const meanRadius =
+      (buffers.radius[i - 1]! + buffers.radius[i]! + buffers.radius[i + 1]!) /
+      3;
+    const hard = reference
+      ? directionChange <= 0.7 &&
+        (buffers.distance[i]! ** 2 + buffers.distance[i + 1]! ** 2) /
+          meanRadius ** 2 <
+          1.5
+      : !acute && 1 + directionChange < MITER_DENOMINATOR_FLOOR;
     if (!acute && !hard) continue;
 
     buffers.boundary[i] = 1;
@@ -1043,6 +1059,7 @@ function calculatePartitionTracks(
   innerStart: number,
   size: number,
   smoothing: number,
+  reference = false,
 ): number {
   const localCount = 1 + Math.max(0, end - innerStart + 1);
   if (localCount <= 1) return 1;
@@ -1078,7 +1095,25 @@ function calculatePartitionTracks(
   buffers.vectorX[0] = buffers.vectorX[1]!;
   buffers.vectorY[0] = buffers.vectorY[1]!;
 
-  const errorLimit = clamp01(smoothing) * size * TRACK_ERROR_LIMIT;
+  if (reference && start > 0 && buffers.rawBoundary[start] === 1) {
+    const dx = buffers.pointX[start]! - seqX[1]!;
+    const dy = buffers.pointY[start]! - seqY[1]!;
+    const length = vectorLength(dx, dy);
+    if (length > 0) {
+      buffers.vectorX[0] = dx / length;
+      buffers.vectorY[0] = dy / length;
+    }
+  }
+  const errorLimit =
+    (reference ? 1 : clamp01(smoothing)) * size * TRACK_ERROR_LIMIT;
+  let trackCount = 0;
+  let wasSharp = false;
+  const append = (lx: number, ly: number, rx: number, ry: number) => {
+    buffers.trackLeftX[trackCount] = lx;
+    buffers.trackLeftY[trackCount] = ly;
+    buffers.trackRightX[trackCount] = rx;
+    buffers.trackRightY[trackCount++] = ry;
+  };
 
   for (let local = 0; local < localCount; local++) {
     const index = sequenceIndex(local, start, innerStart);
@@ -1091,6 +1126,47 @@ function calculatePartitionTracks(
       -1,
       1,
     );
+    if (reference && local > 0 && local < localCount - 1) {
+      const prev = local - 1;
+      const prevDot =
+        buffers.vectorX[local]! * buffers.vectorX[prev]! +
+        buffers.vectorY[local]! * buffers.vectorY[prev]!;
+      const sharp = (prevDot < 0 && !wasSharp) || directionChange < 0.2;
+      if (sharp) {
+        const radius = buffers.radius[index]!;
+        const hard = directionChange <= -0.62;
+        const cx = hard ? buffers.inputX[index]! : centerX;
+        const cy = hard ? buffers.inputY[index]! : centerY;
+        const armX = -buffers.vectorY[prev]! * radius;
+        const armY = buffers.vectorX[prev]! * radius;
+        const cross =
+          buffers.vectorX[prev]! * buffers.vectorY[next]! -
+          buffers.vectorY[prev]! * buffers.vectorX[next]!;
+        const sweep = hard
+          ? Math.PI + 0.0001
+          : Math.acos(directionChange) * (cross < 0 ? -1 : 1);
+        const tolerance = Math.max(0.05, size * 0.02);
+        const steps = Math.max(
+          8,
+          Math.min(
+            13,
+            Math.ceil(
+              Math.abs(sweep) /
+                (2 * Math.acos(clamp(1 - tolerance / radius, -1, 1))),
+            ),
+          ),
+        );
+        for (let k = 0; k <= steps; k++) {
+          const angle = (sweep * k) / steps;
+          const ox = armX * Math.cos(angle) - armY * Math.sin(angle);
+          const oy = armX * Math.sin(angle) + armY * Math.cos(angle);
+          append(cx + ox, cy + oy, cx - ox, cy - oy);
+        }
+        wasSharp = true;
+        continue;
+      }
+    }
+    wasSharp = false;
     // Offset along the turn's bisector, scaled so the ribbon stays exactly one
     // radius wide measured perpendicular to each arm. The previous offset was
     // an un-normalized lerp between the two segment normals, whose length rode
@@ -1101,21 +1177,26 @@ function calculatePartitionTracks(
     const miterScale =
       buffers.radius[index]! /
       Math.max(1 + directionChange, MITER_DENOMINATOR_FLOOR);
-    const offsetX =
-      (buffers.vectorY[next]! + buffers.vectorY[local]!) * miterScale;
-    const offsetY =
-      -(buffers.vectorX[next]! + buffers.vectorX[local]!) * miterScale;
+    const offsetX = reference
+      ? (buffers.vectorY[next]! +
+          (buffers.vectorY[local]! - buffers.vectorY[next]!) *
+            directionChange) *
+        buffers.radius[index]!
+      : (buffers.vectorY[next]! + buffers.vectorY[local]!) * miterScale;
+    const offsetY = reference
+      ? -(
+          buffers.vectorX[next]! +
+          (buffers.vectorX[local]! - buffers.vectorX[next]!) * directionChange
+        ) * buffers.radius[index]!
+      : -(buffers.vectorX[next]! + buffers.vectorX[local]!) * miterScale;
     const leftX = centerX - offsetX;
     const leftY = centerY - offsetY;
     const rightX = centerX + offsetX;
     const rightY = centerY + offsetY;
-    buffers.trackLeftX[local] = leftX;
-    buffers.trackLeftY[local] = leftY;
-    buffers.trackRightX[local] = rightX;
-    buffers.trackRightY[local] = rightY;
+    append(leftX, leftY, rightX, rightY);
   }
 
-  return simplifyTracks(localCount, errorLimit);
+  return simplifyTracks(trackCount, errorLimit);
 }
 
 function midpointCenti(a: number, b: number): number {
@@ -1200,6 +1281,7 @@ function writePartition(
   end: number,
   size: number,
   smoothing: number,
+  reference = false,
 ): void {
   if (start === end) {
     writeDot(start);
@@ -1212,6 +1294,7 @@ function writePartition(
     innerStart,
     size,
     smoothing,
+    reference,
   );
   if (count <= 1) {
     writeDot(start);
@@ -1230,6 +1313,20 @@ function writePartition(
     toCenti(buffers.trackRightX[count - 1]!),
     toCenti(buffers.trackRightY[count - 1]!),
   );
+  if (reference) {
+    // Continue around the endpoint for a total 540-degree sweep. The extra
+    // turn keeps a curling terminal ribbon covered with nonzero winding.
+    writer.arcTo(
+      toCenti(buffers.radius[end]!),
+      toCenti(buffers.trackLeftX[count - 1]!),
+      toCenti(buffers.trackLeftY[count - 1]!),
+    );
+    writer.arcTo(
+      toCenti(buffers.radius[end]!),
+      toCenti(buffers.trackRightX[count - 1]!),
+      toCenti(buffers.trackRightY[count - 1]!),
+    );
+  }
   writeReverseTrack(count);
   writer.arcTo(
     toCenti(buffers.radius[start]!),
@@ -1272,6 +1369,7 @@ export function buildInkCenterline(
   size: number,
   streamlineAmount: number,
   last: boolean,
+  inkAlgorithm?: 'reference',
 ): InkCenterline {
   centerlineView.x = buffers.pointX;
   centerlineView.y = buffers.pointY;
@@ -1282,8 +1380,14 @@ export function buildInkCenterline(
   // Pressure never moves the centerline, so the simulation flag is irrelevant
   // here; `false` skips the two-point expansion, which only interpolates
   // collinear samples anyway.
-  const stagedCount = ingest(points, size, false);
-  centerlineView.count = streamline(stagedCount, size, streamlineAmount, last);
+  const stagedCount = ingest(points, size, false, inkAlgorithm === 'reference');
+  centerlineView.count = streamline(
+    stagedCount,
+    size,
+    streamlineAmount,
+    last,
+    inkAlgorithm === 'reference',
+  );
   centerlineView.x = buffers.pointX;
   centerlineView.y = buffers.pointY;
   return centerlineView;
@@ -1344,17 +1448,26 @@ export function getFreehandPathData(
     return '';
   }
 
-  const stagedCount = ingest(points, options.size, options.simulatePressure);
+  const stagedCount = ingest(
+    points,
+    options.size,
+    options.simulatePressure,
+    options.inkAlgorithm === 'reference',
+  );
   const pointCount = streamline(
     stagedCount,
     options.size,
     options.streamline,
     options.last,
+    options.inkAlgorithm === 'reference',
   );
   if (pointCount === 0) return '';
 
   calculateDynamics(pointCount, options);
-  const partitionCount = partition(pointCount);
+  const partitionCount = partition(
+    pointCount,
+    options.inkAlgorithm === 'reference',
+  );
   buffers.writer.reset(pointCount * 96 + partitionCount * 160 + 128);
   for (let i = 0; i < partitionCount; i++) {
     writePartition(
@@ -1362,6 +1475,7 @@ export function getFreehandPathData(
       buffers.partitionEnd[i]!,
       options.size,
       options.smoothing,
+      options.inkAlgorithm === 'reference',
     );
   }
   return buffers.writer.finish();

@@ -20,6 +20,8 @@
  * supposed to replace.
  */
 
+// TEMPORARY perf harness import — delete with ./zoom-bench.ts.
+import { benchCounters, useBenchFlags } from './bench-flags';
 import { cameraTranslation, type Camera } from './camera';
 import { createCssVarResolver } from './css-vars';
 import { CULL_OVERSCAN } from './geometry';
@@ -159,6 +161,9 @@ export function captureShapeLayer(
   const cssWidth = width + marginX * 2;
   const cssHeight = height + marginY * 2;
 
+  // TEMPORARY bench instrumentation.
+  const __t0 = performance.now();
+
   const canvas = document.createElement('canvas');
   canvas.width = Math.max(1, Math.round(cssWidth * pixelScale));
   canvas.height = Math.max(1, Math.round(cssHeight * pixelScale));
@@ -170,6 +175,10 @@ export function captureShapeLayer(
   canvas.style.width = `${cssWidth}px`;
   canvas.style.height = `${cssHeight}px`;
   canvas.style.transformOrigin = '0 0';
+  // TEMPORARY bench flag — delete with ./zoom-bench.ts.
+  if (useBenchFlags.getState().willChange) {
+    canvas.style.willChange = 'transform';
+  }
 
   const ctx = canvas.getContext('2d');
   if (!ctx) return null;
@@ -191,6 +200,9 @@ export function captureShapeLayer(
     // group normally carries, so seed the walk with it.
     scale: camera.z,
   });
+
+  // TEMPORARY bench instrumentation.
+  benchCounters.caps.push(performance.now() - __t0);
 
   return {
     canvas,

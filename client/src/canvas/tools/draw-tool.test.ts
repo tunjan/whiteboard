@@ -271,6 +271,8 @@ describe('draw tool stroke lifecycle', () => {
     expect(shape?.type).toBe('draw');
     if (shape?.type !== 'draw') return;
     expect(shape.props.points).toHaveLength(2);
+    expect(shape.props.points[0]).toMatchObject({ x: 0.6, y: 0 });
+    expect(shape.props.points[1]).toMatchObject({ x: 1.2, y: 0 });
     expect(shape.props.points[0]?.pressure).toBe(1);
     expect(shape.props.points[1]?.pressure).toBeCloseTo(0.375, 12);
   });
@@ -571,38 +573,14 @@ describe('velocity-derived pressure', () => {
     return [...shapes.values()][0];
   }
 
-  it('resolves pressure at capture, leaving the engine nothing to simulate', () => {
+  it('stores neutral samples and delegates simulation to the reference engine', () => {
     const shape = withSimulation(() => drag(60, 60, 6));
-
     expect(shape?.type).toBe('draw');
     if (shape?.type !== 'draw') return;
-    // Points now carry a filtered real signal, so re-deriving one from sample
-    // spacing would be second-guessing it.
-    expect(shape.props.simulatePressure).toBe(false);
+    expect(shape.props.inkAlgorithm).toBe('reference');
+    expect(shape.props.simulatePressure).toBe(true);
     expect(shape.props.pressureEasing).toBe('ease-out-sine');
-    expect(shape.props.pressureWarmup).toBe(true);
-    const expectedFinalSpeed = 1 - 0.5 ** (60 / 16);
-    expect(shape.props.points.at(-1)?.pressure).toBeCloseTo(
-      1 - expectedFinalSpeed / 1.5,
-      5,
-    );
-  });
-
-  it('opens the stroke at the speed the hand was moving, not at neutral', () => {
-    // Pointer-down has nothing to measure against, so the opening sample used
-    // to keep the neutral default and the engine then spent several world units
-    // easing away from it: every velocity-drawn stroke began at mid weight
-    // however it was actually drawn. The first real reading is the one that
-    // describes that opening.
-    const shape = withSimulation(() => drag(60, 60, 6));
-
-    expect(shape?.type).toBe('draw');
-    if (shape?.type !== 'draw') return;
-    const firstFilteredSpeed = 1 - 0.5 ** (10 / 16);
-    expect(shape.props.points[0]?.pressure).toBeCloseTo(
-      1 - firstFilteredSpeed / 1.5,
-      5,
-    );
+    expect(shape.props.points.every((p) => p.pressure === 0.5)).toBe(true);
   });
 
   it('leaves a stylus stroke to open on its own hardware reading', () => {
@@ -621,9 +599,8 @@ describe('velocity-derived pressure', () => {
     expect(shape.props.points[0]?.pressure).toBeCloseTo(0.5, 5);
   });
 
-  it('reads the same gesture identically at any hardware report rate', () => {
-    // The previous per-sample heuristic measured travel between reports, so
-    // this same 1 px/ms drag came out thinner the slower the device reported.
+  it('retains neutral pressure across hardware report rates', () => {
+    // Capture retains all positions; sample spacing drives the render-time model.
     const fast = withSimulation(() => drag(60, 60, 12));
     const slow = withSimulation(() => drag(60, 60, 3));
 
@@ -635,27 +612,16 @@ describe('velocity-derived pressure', () => {
     const slowPressures = pressures(slow);
 
     expect(fastPressures.length).toBeGreaterThan(slowPressures.length);
-    // Intermediate reports naturally sample different instants, but the exact
-    // time-normalized EMA reaches the same value after the same 60 ms gesture.
+    // Neither stream bakes a second pressure model into its samples.
     expect(fastPressures.at(-1)).toBeCloseTo(slowPressures.at(-1)!, 10);
   });
 
-  it('thins toward nothing as the pointer outruns the width floor', () => {
+  it('keeps capture neutral regardless of timestamps', () => {
     const slow = withSimulation(() => drag(60, 120, 6));
     const quick = withSimulation(() => drag(60, 30, 6));
-
-    const last = (shape: Shape | undefined) =>
-      shape?.type === 'draw'
-        ? shape.props.points[shape.props.points.length - 1]?.pressure
-        : undefined;
-
-    const filteredSlowSpeed = 0.5 * (1 - 0.5 ** (120 / 16));
-    const filteredQuickSpeed = 2 * (1 - 0.5 ** (30 / 16));
-    expect(last(slow)).toBeCloseTo(1 - filteredSlowSpeed / 1.5, 5);
-    expect(last(quick)).toBeCloseTo(
-      Math.max(0, 1 - filteredQuickSpeed / 1.5),
-      5,
-    );
+    if (slow?.type !== 'draw' || quick?.type !== 'draw')
+      throw new Error('Missing strokes');
+    expect(slow.props.points).toEqual(quick.props.points);
   });
 });
 
@@ -1004,7 +970,7 @@ describe('straight-segment mode', () => {
     expect(points[3]!.y).toBeCloseTo(0, 9);
   });
 
-  it('resumes freehand after the segment when shift is released', () => {
+  it('resumes freehand through an eased bridge when shift is released', () => {
     const { ctx, shapes } = context();
     const tool = createDrawTool();
 
@@ -1023,7 +989,21 @@ describe('straight-segment mode', () => {
     });
 
     const points = drawPoints([...shapes.values()][0])!;
-    expect(points.map((point) => point.y)).toEqual([0, 0, 10, 20, 30]);
+    expect(points).toHaveLength(9);
+    const segmentEnd = points[2]!;
+    const bridge = points.slice(3, 7);
+    const resumedAt = points[7]!;
+
+    expect(segmentEnd).toMatchObject({ x: 85, y: 10 });
+    expect(resumedAt).toMatchObject({ x: 90, y: 20 });
+    expect(Math.hypot(bridge[0]!.x - 85, bridge[0]!.y - 10)).toBeCloseTo(1, 12);
+    expect(Math.hypot(bridge[3]!.x - 90, bridge[3]!.y - 20)).toBeCloseTo(1, 12);
+    expect(bridge.map((point) => point.y)).toEqual(
+      [...bridge.map((point) => point.y)].sort((a, b) => a - b),
+    );
+    expect(bridge[1]!.pressure).toBeLessThan(bridge[0]!.pressure!);
+    expect(bridge[2]!.pressure).toBeLessThan(bridge[3]!.pressure!);
+    expect(points[8]).toMatchObject({ x: 95, y: 30 });
   });
 });
 
@@ -1178,9 +1158,7 @@ describe('highlighter (marker ink)', () => {
 
   /** The single shape the gesture created, ignoring anything seeded first. */
   function only(shapes: Map<string, Shape>, ...seeded: string[]): Shape {
-    const created = [...shapes.values()].filter(
-      (s) => !seeded.includes(s.id),
-    );
+    const created = [...shapes.values()].filter((s) => !seeded.includes(s.id));
     expect(created).toHaveLength(1);
     return created[0]!;
   }

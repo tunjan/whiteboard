@@ -231,9 +231,7 @@ function markerIndex(shapes: readonly Shape[], at: Point): string {
     : getIndexAboveTopmostOf(shapes, [frame.id]);
 }
 
-export function createDrawTool(
-  config: DrawToolConfig = PENCIL_CONFIG,
-): Tool {
+export function createDrawTool(config: DrawToolConfig = PENCIL_CONFIG): Tool {
   let id: string | null = null;
   let origin = { x: 0, y: 0 };
   let points: DrawPoint[] = [];
@@ -292,6 +290,12 @@ export function createDrawTool(
   // endpoint, so leaving straight mode simply stops rewriting that endpoint and
   // resumes appending after it.
   let straightAnchor: number | null = null;
+  // The last stylus position that cleared the one-screen-pixel sampling gate.
+  // A merged tip may move between this point and the next accepted sample.
+  let lastRecordedPoint: Point | null = null;
+  // Set for the first freehand sample after a straight segment. That sample is
+  // joined through an eased bridge instead of making one hard corner.
+  let bridgeFromStraight = false;
   // A mode change Shift has asked for but that has not yet travelled far enough
   // to take effect, and the screen position it was asked at.
   // See MODE_SWITCH_SCREEN_DISTANCE_SQUARED.
@@ -460,6 +464,8 @@ export function createDrawTool(
       committedChunks = [];
       extendedFrom = null;
       straightAnchor = null;
+      lastRecordedPoint = null;
+      bridgeFromStraight = false;
       pendingMode = null;
       pendingModeScreen = null;
     }
@@ -476,6 +482,8 @@ export function createDrawTool(
     extendedFrom = null;
     origin = worldOrigin;
     points = [seed];
+    lastRecordedPoint = { x: seed.x, y: seed.y };
+    bridgeFromStraight = false;
     const sid = genId();
     id = sid;
     ctx.editor.createShape({
@@ -562,12 +570,12 @@ export function createDrawTool(
     return lastVelocityPressure;
   };
 
-  // Stylus pressure is conditioned once at ingestion and then persisted; so is
-  // velocity-derived pressure, which is why the engine's own simulation stays
-  // off for new strokes. Everything else stores the neutral default.
+  // Reference strokes store hardware pressure or neutral samples. Extended
+  // legacy strokes retain their original capture-time velocity model.
   const pressureFor = (info: ToolPointerInfo): number => {
     if (stylusInput) return stylusPressure(info.pressure);
-    if (velocityPressure) return pressureFromVelocity();
+    if (velocityPressure && strokeProps?.inkAlgorithm !== 'reference')
+      return pressureFromVelocity();
     return NEUTRAL_PRESSURE;
   };
 
@@ -628,7 +636,13 @@ export function createDrawTool(
     if (dx * dx + dy * dy < MODE_SWITCH_SCREEN_DISTANCE_SQUARED) return;
     pendingMode = null;
     pendingModeScreen = null;
-    straightAnchor = wanted === 'straight' ? points.length - 1 : null;
+    if (wanted === 'straight') {
+      straightAnchor = points.length - 1;
+      bridgeFromStraight = false;
+    } else {
+      straightAnchor = null;
+      bridgeFromStraight = true;
+    }
   };
 
   /**
@@ -673,10 +687,66 @@ export function createDrawTool(
     strokeOpacity = shape.opacity ?? 1;
     origin = { x: shape.x, y: shape.y };
     points = shape.props.points.slice();
+    const last = points[points.length - 1];
+    lastRecordedPoint = last ? { x: last.x, y: last.y } : null;
+    bridgeFromStraight = false;
     id = shape.id;
     straightAnchor = points.length - 1;
     beginLiveStroke(shape.id);
     publishFrame();
+  };
+
+  const easeInOutQuad = (t: number): number =>
+    t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
+
+  /**
+   * Join a completed straight segment to the first freehand sample.
+   *
+   * The short inward nudges avoid duplicate boundary points. A smoothstep
+   * distributes the synthetic points without a velocity jump, and the pressure
+   * dip keeps the join from forming a heavy knot.
+   */
+  const appendStraightBridge = (to: DrawPoint): boolean => {
+    const from = points[points.length - 1];
+    if (!from) {
+      points.push(to);
+      lastRecordedPoint = { x: to.x, y: to.y };
+      return true;
+    }
+
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const distance = Math.hypot(dx, dy);
+    if (distance === 0) return false;
+
+    const unitX = dx / distance;
+    const unitY = dy / distance;
+    const inset = Math.min(1, Math.floor(distance / 4));
+    const startX = from.x + unitX * inset;
+    const startY = from.y + unitY * inset;
+    const endX = to.x - unitX * inset;
+    const endY = to.y - unitY * inset;
+    const steps = Math.max(4, Math.floor(distance / 16));
+
+    for (let i = 0; i < steps; i++) {
+      const t = i / (steps - 1);
+      const eased = t * t;
+      const x = startX + (endX - startX) * eased;
+      const y = startY + (endY - startY) * eased;
+      // An inset of zero makes the first synthetic point equal the segment's
+      // existing endpoint. Do not store a duplicate just to begin the bridge.
+      if (i === 0 && x === from.x && y === from.y) continue;
+      const pressurePhase = easeInOutQuad(t);
+      points.push({
+        ...to,
+        x,
+        y,
+        pressure: Math.min(1, 0.5 + Math.abs(0.5 - pressurePhase) * 0.65),
+      });
+    }
+    points.push(to);
+    lastRecordedPoint = { x: to.x, y: to.y };
+    return true;
   };
 
   const appendPoint = (
@@ -712,31 +782,55 @@ export function createDrawTool(
         return false;
       }
       points = [...points.slice(0, straightAnchor! + 1), local];
+      lastRecordedPoint = { x: local.x, y: local.y };
       return true;
+    }
+
+    if (bridgeFromStraight) {
+      bridgeFromStraight = false;
+      return appendStraightBridge(local);
     }
 
     const last = points[points.length - 1];
     if (last) {
       // Pen digitizers report densely enough to include sub-pixel jitter. One
       // screen pixel (`1 / zoom` world units) is the stable sampling floor;
-      // mouse and touch keep every reported position. Pressure is still merged
-      // so a slow or stationary pen retains its strongest contact reading.
-      const minSampleDistance = stylusInput ? 1 / Math.max(info.zoom, 1e-6) : 0;
-      const distanceFromLast = Math.hypot(last.x - local.x, last.y - local.y);
-      if (distanceFromLast === 0 || distanceFromLast < minSampleDistance) {
+      // mouse and touch keep every reported position. The live tip still moves
+      // to the newest reading while pressure retains its strongest contact.
+      const minSampleDistance = stylusInput
+        ? 1 / Math.max(zoomOnEnter, 1e-6)
+        : 0;
+      const recorded = lastRecordedPoint ?? last;
+      const distanceFromRecorded = Math.hypot(
+        recorded.x - local.x,
+        recorded.y - local.y,
+      );
+      if (
+        distanceFromRecorded === 0 ||
+        distanceFromRecorded < minSampleDistance
+      ) {
         const pressure = Math.max(
           last.pressure ?? NEUTRAL_PRESSURE,
           local.pressure ?? NEUTRAL_PRESSURE,
         );
-        if (last.pressure === pressure) return false;
+        if (
+          last.x === local.x &&
+          last.y === local.y &&
+          last.pressure === pressure &&
+          last.tiltX === local.tiltX &&
+          last.tiltY === local.tiltY
+        ) {
+          return false;
+        }
         // Replace (don't mutate): the previous object was already handed to Yjs
         // by an earlier flush's `points.slice()`, so mutating it in place would
         // desync the stored value from the document.
-        points[points.length - 1] = { ...last, pressure };
+        points[points.length - 1] = { ...local, pressure };
         return true;
       }
     }
     points.push(local);
+    lastRecordedPoint = { x: local.x, y: local.y };
     return true;
   };
 
@@ -770,7 +864,7 @@ export function createDrawTool(
     // would change the stroke's width at the junction.
     const pressure = stylusInput
       ? stylusPressure(info.pressure)
-      : velocityPressure
+      : velocityPressure && strokeProps?.inkAlgorithm !== 'reference'
         ? lastVelocityPressure
         : NEUTRAL_PRESSURE;
     const tail: DrawPoint[] = [];
@@ -829,7 +923,9 @@ export function createDrawTool(
       // A marker has no width profile for pressure to act on, so there is
       // nothing for the velocity filter to measure for.
       velocityPressure =
-        config.ink === 'pencil' && !stylusInput && pencil.pencilSimulatePressure;
+        config.ink === 'pencil' &&
+        !stylusInput &&
+        pencil.pencilSimulatePressure;
       // Opt-in, and then only where it describes something: a zero-stabilization
       // pencil is a literal input mode, and extrapolation is not a hardware
       // sample. The marker carries its own fixed stabilization.
@@ -847,6 +943,8 @@ export function createDrawTool(
       chunked = false;
       committedChunks = [];
       straightAnchor = null;
+      lastRecordedPoint = null;
+      bridgeFromStraight = false;
       pendingMode = null;
       pendingModeScreen = null;
       zoomOnEnter = info.zoom;
@@ -904,11 +1002,10 @@ export function createDrawTool(
         // Only ever seen once the stroke closes on itself; an open squiggle
         // renders the same whatever the fill style is set to.
         fillStyle: style.fill,
-        // The points already carry pressure — hardware or velocity-derived —
-        // so the engine must read it rather than re-deriving one from sample
-        // spacing. The flag stays in the schema for strokes saved before
-        // that was true.
-        simulatePressure: false,
+        // The reference kernel simulates mouse pressure from sample travel;
+        // stylus samples retain their calibrated hardware readings.
+        inkAlgorithm: 'reference',
+        simulatePressure: velocityPressure,
         pressureEasing: pressureEasingFor(pencil.pencilPressureCurve),
         pressureWarmup: stylusInput || velocityPressure,
         thinning: pencil.pencilThinning,
@@ -1015,6 +1112,8 @@ export function createDrawTool(
       committedChunks = [];
       extendedFrom = null;
       straightAnchor = null;
+      lastRecordedPoint = null;
+      bridgeFromStraight = false;
       pendingMode = null;
       pendingModeScreen = null;
       // Put an extended stroke back the way it was; delete one this gesture

@@ -40,6 +40,8 @@ import { requestEquationFocus } from '../equation-focus';
 import { getSnapGridStep } from '../grid';
 import { safeLinkUrl } from '../link-url';
 import { isSelectable } from '../selectable';
+import { useHiddenStore } from '../use-hidden-store';
+import { hitTestCanvas } from '../engine/hit-test';
 import { useEnteredGroupStore } from '../use-entered-group-store';
 import { shapeRegistry } from '../shapes/shape-registry';
 import { findBindableShapeAt } from '../shapes/connector-routing';
@@ -217,20 +219,13 @@ type SelectState =
 
 /** Topmost selectable shape under a world point, after an R-tree broad phase. */
 function topmostHit(shapes: Shape[], p: Point, tol: number): string | null {
-  const candidates = new Set(
-    spatialIndex.search({
-      minX: p.x - tol,
-      minY: p.y - tol,
-      maxX: p.x + tol,
-      maxY: p.y + tol,
-    }),
+  return (
+    hitTestCanvas(shapes, spatialIndex, p, tol, {
+      zoom: useCameraStore.getState().camera.z,
+      isEligible: isSelectable,
+      isHidden: useHiddenStore.getState().isHidden,
+    })?.id ?? null
   );
-  for (let i = shapes.length - 1; i >= 0; i--) {
-    const shape = shapes[i]!;
-    if (!candidates.has(shape.id) || !isSelectable(shape)) continue;
-    if (shapeRegistry.getFor(shape)?.hitTest(shape, p, tol)) return shape.id;
-  }
-  return null;
 }
 
 /**
@@ -432,7 +427,10 @@ function syncStyleFromSelection(editor: Editor): void {
   // Picked up into the group the shape belongs to, so eyedropping a heading
   // sets the text tool's colour and leaves the pen on the colour it was on.
   const group = styleGroupForShape(first.type);
-  style.setOpacity(group, typeof first.opacity === 'number' ? first.opacity : 1);
+  style.setOpacity(
+    group,
+    typeof first.opacity === 'number' ? first.opacity : 1,
+  );
   if (typeof props.color === 'string') style.setColor(group, props.color);
   if (typeof props.size === 'number') style.setSize(group, props.size);
   if (props.fillStyle) style.setFill(group, props.fillStyle);

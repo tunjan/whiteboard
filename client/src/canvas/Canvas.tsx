@@ -1,5 +1,4 @@
 import {
-  Fragment,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -10,19 +9,19 @@ import type {
   DragEvent as ReactDragEvent,
   MouseEvent as ReactMouseEvent,
   PointerEvent as ReactPointerEvent,
-  ReactNode,
 } from 'react';
 import { type Shape, pointInPolygon } from '@whiteboard/shared';
 import './shapes/register';
 import './tools/register';
 import { ActiveStrokeLayer } from './ActiveStrokeLayer';
-import { CameraSnapshotLayer, useCameraSnapshot } from './CameraSnapshotLayer';
-import { MIN_SNAPSHOT_SHAPES } from './camera-snapshot';
+import { hitTestCanvas } from './engine/hit-test';
+import { FlatShapeLayer } from './FlatShapeLayer';
+import { useBenchFlags } from './bench-flags';
 import { Background } from './Background';
 import { CanvasControls } from './CanvasControls';
 import { UndoControls } from './UndoControls';
-import { cameraToTransform, nextDiscreteZoom, screenToWorld } from './camera';
-import { quantizedCullRegion, viewportWorldBounds } from './geometry';
+import { nextDiscreteZoom, screenToWorld } from './camera';
+import { viewportWorldBounds } from './geometry';
 import { PerformanceOverlay } from '@/components/performance-overlay';
 import { noteActivity } from '@/collab/attention';
 import { CursorsLayer } from '@/collab/CursorsLayer';
@@ -46,9 +45,7 @@ import {
 } from '@/collab/use-follow-store';
 import { useShallow } from 'zustand/react/shallow';
 import { usePresenceStore } from '@/collab/use-presence-store';
-import { ShapeView } from './ShapeView';
 import { VanishLayer } from './VanishLayer';
-import { FrameView } from './shapes/frame';
 import { plotArea } from './shapes/graph';
 import { panViewport, zoomViewport } from './shapes/graph-interaction';
 import { SelectionLayer } from './SelectionLayer';
@@ -85,7 +82,6 @@ import { useEnteredGroupStore } from './use-entered-group-store';
 import {
   bindingGraph,
   breakUndoCapture,
-  compareIndex,
   editor,
   redo,
   setCurrentPage,
@@ -96,7 +92,6 @@ import {
   useDocumentStore,
   useUndoStore,
 } from './use-document-store';
-import { shapeRegistry } from './shapes/shape-registry';
 import { syncBoundArrows } from './shapes/connector-routing';
 import { useCameraStore } from './use-camera-store';
 import { subscribeCanvasZoomToBounds } from './camera-requests';
@@ -113,9 +108,6 @@ import { copySelectionToPngClipboard } from './export-png';
 import { getSelectionInfo } from './selection-geometry';
 import { shapeRotatedBounds } from './shape-bounds';
 import { isSelectable } from './selectable';
-import { resolveOpacity } from './opacity';
-import { useEraserCutStore } from './use-eraser-cut-store';
-import { useEraserStore } from './use-eraser-store';
 import { useHiddenStore } from './use-hidden-store';
 import { useLiveStrokeShapeId } from './use-live-stroke-store';
 import { useSelectionStore } from './use-selection-store';
@@ -130,6 +122,7 @@ import { useToolStore } from './use-tool-store';
 import { useToolLockStore } from './use-tool-lock-store';
 import {
   TOUCH_PAN_SPEED,
+  nextPinchMode,
   pinchGesture,
   pruneStaleTouches,
   zoomFromDistance,
@@ -213,14 +206,6 @@ const STALE_TOUCH_MS = 2000;
  */
 const SPRING_HOLD_MS = 250;
 
-// Shared empties for the page-wide derivations below, so a page with no
-// parenting and no equations reuses one object per frame instead of allocating
-// a fresh (always empty) Map, Set and array on every shape mutation. Returning
-// the same reference also keeps downstream memos from invalidating.
-const EMPTY_HIERARCHY: {
-  childrenByParent: Map<string, Shape[]>;
-  frameAncestorIds: Set<string>;
-} = { childrenByParent: new Map(), frameAncestorIds: new Set() };
 type EquationItem = { id: string; label: string; locked: boolean };
 const EMPTY_EQUATION_ITEMS: EquationItem[] = [];
 
@@ -241,26 +226,6 @@ function equationItem(shape: Extract<Shape, { type: 'equation' }>) {
   };
   equationItemCache.set(shape, item);
   return item;
-}
-
-/**
- * Shapes the SVG tree should render. The three id checks exclude whichever
- * shape an HTML overlay currently owns (text editor, video player, image
- * cropper), which draws it in the canvas's place.
- */
-function renderFilter(
-  editingId: string | null,
-  playingId: string | null,
-  croppingId: string | null,
-  liveStrokeId: string | null,
-  hidden: Record<string, boolean>,
-): (shape: Shape) => boolean {
-  return (shape) =>
-    shape.id !== editingId &&
-    shape.id !== playingId &&
-    shape.id !== croppingId &&
-    shape.id !== liveStrokeId &&
-    !hidden[shape.id];
 }
 
 function CanvasSelectionStatus() {
@@ -303,13 +268,12 @@ export function Canvas() {
   const debugPerformance = useCanvasUiStore((s) => s.debugPerformance);
   const activeToolId = useToolStore((s) => s.activeToolId);
   const cameraMoving = useCameraInteraction((s) => s.isMoving);
+  // TEMPORARY perf harness — delete with ./zoom-bench.ts.
+  const bench = useBenchFlags();
   const handDragging = useCameraInteraction((s) => s.isHandDragging);
   const pan = useSpacePan(false);
   useWheel(containerRef, false);
   useSafariGestures(containerRef, false);
-
-  // The world group in the shape layer, read by the camera snapshot.
-  const worldRef = useRef<SVGGElement>(null);
 
   // Which gesture owns the current pointer interaction.
   const gesture = useRef<'pan' | 'tool' | null>(null);
@@ -381,11 +345,8 @@ export function Canvas() {
   // it instead of the tree below, so it is filtered out of both for as long as
   // that lasts. Changes twice per stroke, not per frame.
   const liveStrokeId = useLiveStrokeShapeId();
-  const hasHierarchy = useDocumentStore((s) => s.hasHierarchy);
   const hasEquations = useDocumentStore((s) => s.hasEquations);
   const hidden = useHiddenStore((s) => s.hidden);
-  const erasing = useEraserStore((s) => s.marked);
-  const cutFragments = useEraserCutStore((s) => s.fragments);
   const currentPageId = useDocumentStore((s) => s.currentPageId);
   const shapesById = useDocumentStore((s) => s.shapesById);
   // Shared, pre-sorted array from the store (stable across camera-only renders).
@@ -421,223 +382,6 @@ export function Canvas() {
   );
   const canUndo = useUndoStore((s) => s.canUndo);
   const canRedo = useUndoStore((s) => s.canRedo);
-
-  // Shape-graph derivations that depend only on the shapes — never on the
-  // camera. Memoizing them keeps the pan/zoom hot path (which re-renders this
-  // component on every frame) from re-walking the hierarchy each time:
-  //  - `childrenByParent`: parent id → its children, already in index order
-  //    (`shapes` is globally sorted, so each bucket is sorted for free).
-  //  - `frameAncestorIds`: shapes that live under a frame, excluded from the
-  //    flat top-level pass (they render inside their frame's clip).
-  const { childrenByParent, frameAncestorIds } = useMemo(() => {
-    // Nothing on the page is parented, so both collections are empty by
-    // construction — skip the two page-wide walks rather than allocate a Map
-    // and a Set per frame to prove it.
-    if (!hasHierarchy) return EMPTY_HIERARCHY;
-    const childrenByParent = new Map<string, Shape[]>();
-    for (const s of shapes) {
-      if (!s.parentId) continue;
-      const bucket = childrenByParent.get(s.parentId);
-      if (bucket) bucket.push(s);
-      else childrenByParent.set(s.parentId, [s]);
-    }
-    const frameAncestorIds = new Set<string>();
-    for (const s of shapes) {
-      let cur = s.parentId ? shapesById.get(s.parentId) : undefined;
-      // Most shapes have no parent — skip the per-shape Set until a walk starts.
-      if (!cur) continue;
-      const seen = new Set<string>();
-      while (cur && !seen.has(cur.id)) {
-        if (cur.type === 'frame') {
-          // Connectors deliberately escape every frame mask. They remain in
-          // the flat pass even when their logical parent is nested.
-          if (s.type !== 'arrow') frameAncestorIds.add(s.id);
-          break;
-        }
-        seen.add(cur.id);
-        cur = cur.parentId ? shapesById.get(cur.parentId) : undefined;
-      }
-    }
-    return { childrenByParent, frameAncestorIds };
-    // `shapesById` is the live cache: a stable reference whose contents move
-    // with `shapes`, so `shapes` is the honest dependency here.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shapes, hasHierarchy]);
-
-  // Viewport culling. The search region is overscanned past the viewport and
-  // snapped to a coarse grid (see `quantizedCullRegion`), so panning within a
-  // grid cell reuses the same visible set instead of re-searching the spatial
-  // index and re-filtering the whole document every frame. `cullKey` is the
-  // primitive form of that region, used as the memo dependency so sub-cell
-  // camera frames don't invalidate it. `shapes` is also a dependency because the
-  // spatial index moves in lockstep with it.
-  const cullRegion =
-    size.width > 0 && size.height > 0
-      ? quantizedCullRegion(camera, size.width, size.height)
-      : null;
-  const cullKey = cullRegion
-    ? `${cullRegion.minX}:${cullRegion.minY}:${cullRegion.maxX}:${cullRegion.maxY}`
-    : '';
-
-  // The broad phase on its own, because two passes need it: the flat top-level
-  // list below, and the recursive frame/group branches in `renderedShapes`. A
-  // frame that clips its children still mounts every one of them, so without a
-  // shared id set a large half-visible frame kept thousands of offscreen nodes
-  // alive — clipped to invisibility, but still constructed, reconciled and
-  // walked by the snapshot rasteriser. `null` means "not measured yet, cull
-  // nothing". Set iteration is insertion-ordered, so this stays tree-ordered.
-  const visibleIds = useMemo(() => {
-    if (!cullRegion) return null;
-    return new Set(spatialIndex.search(cullRegion));
-    // `cullKey` stands in for `cullRegion` (stable across sub-cell pans), and
-    // the index moves in lockstep with `shapes`.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cullKey, shapes]);
-
-  const visibleShapes = useMemo(() => {
-    let base = shapes;
-    if (visibleIds) {
-      // Zoomed in, the hit list is a small fraction of the page: resolving those
-      // ids and sorting just them (O(V log V)) beats scanning all N shapes. That
-      // flips when the viewport holds most of the board — then the sort costs
-      // more than the scan it replaces — so keep the filter for that case.
-      if (visibleIds.size * 4 < shapes.length) {
-        const hits: Shape[] = [];
-        for (const id of visibleIds) {
-          const shape = shapesById.get(id);
-          if (shape) hits.push(shape);
-        }
-        // `shapes` is z-sorted and the render tree depends on that; the spatial
-        // index returns hits in tree order, so this sort is required, not
-        // cosmetic.
-        base = hits.sort(compareIndex);
-      } else {
-        base = shapes.filter((s) => visibleIds.has(s.id));
-      }
-    }
-    return base.filter(
-      renderFilter(editingId, playingId, croppingId, liveStrokeId, hidden),
-    );
-    // `shapesById` is the live cache — a stable reference that moves with
-    // `shapes`, which is the honest dependency.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    visibleIds,
-    shapes,
-    editingId,
-    playingId,
-    croppingId,
-    liveStrokeId,
-    hidden,
-  ]);
-
-  const topLevelShapes = useMemo(
-    () => visibleShapes.filter((s) => !frameAncestorIds.has(s.id)),
-    [visibleShapes, frameAncestorIds],
-  );
-
-  // The rendered element tree. Memoized so a pan/zoom that doesn't change the
-  // visible set produces a referentially-stable child array — React then skips
-  // reconciling the shape `<g>` entirely and only updates its transform.
-  //
-  // Render opacity (ancestor compounding + eraser dim) is resolved here rather
-  // than in a document-wide map, because only the shapes this tree mounts need
-  // it: the culled set plus each visible frame's children. Deriving it for the
-  // whole page instead cost an N-entry map on every stroke frame, and scoping
-  // that map to `visibleShapes` would have been wrong — a frame's children are
-  // rendered through `childrenByParent` even when culled out of that set.
-  // Every dependency below is stable across camera-only renders, so panning and
-  // zooming both reuse this array and ShapeView's memo still holds. Frame
-  // headings are the one thing here that scales with zoom, and they subscribe to
-  // the camera themselves (`zoom="live"`) rather than making the whole tree a
-  // function of it.
-  const renderedShapes = useMemo(() => {
-    const isRenderable = renderFilter(
-      editingId,
-      playingId,
-      croppingId,
-      liveStrokeId,
-      hidden,
-    );
-    const getShape = (id: string) => shapesById.get(id);
-    const isMarked = (id: string) => !!erasing[id];
-    // Descendants of a frame or group are reached through `childrenByParent`,
-    // which is page-wide, so they have to be culled here — the top-level pass
-    // above never sees them. Groups carry no geometry of their own and are
-    // deliberately absent from the spatial index, so descend into them
-    // unconditionally and let their children answer for themselves.
-    const isInView = (shape: Shape) =>
-      !visibleIds || shape.type === 'group' || visibleIds.has(shape.id);
-    // A declaration, not a const: this and `renderShape` are mutually
-    // recursive, so one of the two has to be hoisted.
-    function renderChildren(parentId: string) {
-      return (childrenByParent.get(parentId) ?? [])
-        .filter(
-          (child) =>
-            isRenderable(child) && child.type !== 'arrow' && isInView(child),
-        )
-        .map((child) => renderShape(child, true));
-    }
-    const renderShape = (shape: Shape, insideFrame = false): ReactNode => {
-      // Mid-cut under the precision eraser: the document still holds the whole
-      // shape, but what the user should see is the ink that survived so far.
-      // Rendering the fragments in the original's slot keeps them in z-order and
-      // reuses its own renderer, and an empty list reads as fully erased.
-      const fragments = cutFragments[shape.id];
-      if (fragments) {
-        const alpha = resolveOpacity(shape, getShape, isMarked);
-        return (
-          <Fragment key={shape.id}>
-            {fragments.map((piece) => (
-              <ShapeView key={piece.id} shape={piece} opacity={alpha} />
-            ))}
-          </Fragment>
-        );
-      }
-      if (shape.type === 'group') {
-        // Groups are flat on the page, but once a group itself is a frame child
-        // its descendants must recurse through this clipped branch. Arrows are
-        // hoisted to the flat pass so they can cross frame boundaries.
-        return insideFrame ? (
-          <Fragment key={shape.id}>{renderChildren(shape.id)}</Fragment>
-        ) : null;
-      }
-      return shape.type === 'frame' ? (
-        <FrameView
-          key={shape.id}
-          frame={shape}
-          opacity={resolveOpacity(shape, getShape, isMarked)}
-          zoom="live"
-          showTitle={frameEditingId !== shape.id}
-        >
-          {renderChildren(shape.id)}
-        </FrameView>
-      ) : (
-        <ShapeView
-          key={shape.id}
-          shape={shape}
-          opacity={resolveOpacity(shape, getShape, isMarked)}
-        />
-      );
-    };
-    return topLevelShapes.map((shape) => renderShape(shape, false));
-    // `shapesById` is read through `getShape` but is a stable reference; the
-    // per-mutation signal arrives via `topLevelShapes`, which is rebuilt from
-    // the `shapes` array every time the document changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    topLevelShapes,
-    childrenByParent,
-    visibleIds,
-    erasing,
-    cutFragments,
-    editingId,
-    playingId,
-    croppingId,
-    liveStrokeId,
-    frameEditingId,
-    hidden,
-  ]);
 
   const editingShape = editingId ? shapesById.get(editingId) : undefined;
   const frameEditingShape = frameEditingId
@@ -888,7 +632,9 @@ export function Canvas() {
     pinch.current = {
       startDistance: g.distance,
       startZoom: useCameraStore.getState().camera.z,
+      startMidpoint: g.midpoint,
       lastMidpoint: g.midpoint,
+      mode: 'unsure',
     };
     pinchLastDistance.current = g.distance;
     // If the pinch lands inside the sole selected graph's plot, it adjusts that
@@ -1103,18 +849,39 @@ export function Canvas() {
             pinchLastDistance.current = g.distance;
             return;
           }
-          useCameraStore
-            .getState()
-            .zoomAtScreenWithPan(
-              g.midpoint,
-              zoomFromDistance(
-                pinch.current.startZoom,
-                pinch.current.startDistance,
-                g.distance,
-              ),
-              (g.midpoint.x - pinch.current.lastMidpoint.x) * TOUCH_PAN_SPEED,
-              (g.midpoint.y - pinch.current.lastMidpoint.y) * TOUCH_PAN_SPEED,
-            );
+          // Two fingers can mean either a pan or a zoom, and committing to one
+          // keeps a gesture that was meant as a drag from also re-scaling the
+          // board (which would re-cut the cull region on every frame).
+          const mode = nextPinchMode(
+            pinch.current.mode,
+            { distance: pinch.current.startDistance, midpoint: pinch.current.startMidpoint },
+            g,
+          );
+          if (mode === 'zooming' && pinch.current.mode !== 'zooming') {
+            // Re-baseline on the transition: the fingers already crossed the
+            // threshold, and scaling from the original separation would jump.
+            pinch.current.startDistance = g.distance;
+            pinch.current.startZoom = useCameraStore.getState().camera.z;
+          }
+          pinch.current.mode = mode;
+          if (mode !== 'unsure') {
+            useCameraStore
+              .getState()
+              .zoomAtScreenWithPan(
+                g.midpoint,
+                mode === 'panning'
+                  ? pinch.current.startZoom
+                  : zoomFromDistance(
+                      pinch.current.startZoom,
+                      pinch.current.startDistance,
+                      g.distance,
+                    ),
+                (g.midpoint.x - pinch.current.lastMidpoint.x) * TOUCH_PAN_SPEED,
+                (g.midpoint.y - pinch.current.lastMidpoint.y) * TOUCH_PAN_SPEED,
+              );
+          }
+          // Tracked even while undecided so the deadband discards that motion
+          // instead of releasing it as one jump when the mode resolves.
           pinch.current.lastMidpoint = g.midpoint;
           return;
         }
@@ -1275,31 +1042,12 @@ export function Canvas() {
       const tol = 4 / useCameraStore.getState().camera.z;
       const shapes = editor.getShapes();
       const isHidden = useHiddenStore.getState().isHidden;
-      // R-tree broad phase before the geometric tests, exactly as the select
-      // tool's `topmostHit` does: hit tests walk real geometry (an ink path
-      // measures against every point it holds), so running one per shape made a
-      // right-click on empty space scale with the whole page. Groups are absent
-      // from the index but their hitTest is a constant `false`, so nothing
-      // reachable is lost.
-      const candidates = new Set(
-        spatialIndex.search({
-          minX: info.point.x - tol,
-          minY: info.point.y - tol,
-          maxX: info.point.x + tol,
-          maxY: info.point.y + tol,
-        }),
-      );
-      let hitId: string | null = null;
-      for (let i = shapes.length - 1; i >= 0; i--) {
-        const s = shapes[i]!;
-        if (!candidates.has(s.id)) continue;
-        // Right-click can target locked shapes (to unlock them) but not hidden.
-        if (isHidden(s.id)) continue;
-        if (shapeRegistry.getFor(s)?.hitTest(s, info.point, tol)) {
-          hitId = s.id;
-          break;
-        }
-      }
+      const hitId =
+        hitTestCanvas(shapes, spatialIndex, info.point, tol, {
+          zoom: useCameraStore.getState().camera.z,
+          isEligible: (shape) => !isHidden(shape.id),
+          isHidden,
+        })?.id ?? null;
       const sel = useSelectionStore.getState();
       if (hitId) {
         if (!sel.selectedIds.includes(hitId)) sel.setSelection([hitId]);
@@ -1862,19 +1610,6 @@ export function Canvas() {
     [size.height, size.width],
   );
 
-  // A snapshot freezes the board for the length of the gesture, which is only
-  // acceptable when the local user is the one moving the camera: under follow
-  // the camera moves continuously and a peer's edits would never appear. A
-  // sparse page is left alone too — see MIN_SNAPSHOT_SHAPES.
-  const snapshot = useCameraSnapshot({
-    worldRef,
-    camera,
-    width: size.width,
-    height: size.height,
-    active:
-      cameraMoving && !following && visibleShapes.length >= MIN_SNAPSHOT_SHAPES,
-  });
-
   const toolCursor = toolRegistry.get(activeToolId)?.cursor ?? 'default';
   const rotationCursor = useSelectionStore((state) => state.rotationCursor);
   const showDrawingCursor = activeToolId === 'draw' && !pan.isSpaceDown;
@@ -1930,38 +1665,23 @@ export function Canvas() {
         Board actions, then Keyboard shortcuts, for the complete reference.
       </span>
       <CanvasSelectionStatus />
-      <Background
-        type={background}
-        camera={camera}
-        width={size.width}
-        height={size.height}
-      />
+      {/* TEMPORARY bench flag — delete with ./zoom-bench.ts. */}
+      {!bench.noBg && (
+        <Background
+          type={background}
+          camera={camera}
+          width={size.width}
+          height={size.height}
+        />
+      )}
 
-      {/* Not hit-testable, like the active-stroke and vanish layers that share
-          its z-band. Every pointer
-          event makes the browser resolve a target, and a page of ink is the
-          worst thing to resolve one against: a single long stroke serializes to
-          kilobytes of path data, and the walk happens again for every coalesced
-          sample of every move. Nothing is lost by opting out — no shape util
-          registers a DOM handler, and hit-testing runs on the spatial index and
-          `ShapeUtil.hitTest`, never on the event target. */}
-      {/* While a snapshot stands in for this layer it is hidden and its
-          transform frozen, so the browser neither paints it nor re-parses a
-          camera matrix sixty times a second. Hidden rather than unmounted: the
-          tree stays reconciled, so coming back is a repaint and not a rebuild
-          of every path in the viewport. */}
-      <svg
-        className="pointer-events-none absolute inset-0 z-[var(--z-canvas-shapes)] h-full w-full"
-        style={snapshot ? { visibility: 'hidden' } : undefined}
-      >
-        <g
-          ref={worldRef}
-          transform={cameraToTransform(snapshot ? snapshot.camera : camera)}
-        >
-          {renderedShapes}
-        </g>
-      </svg>
-      {snapshot && <CameraSnapshotLayer snapshot={snapshot} camera={camera} />}
+      {!bench.noShapes && (
+        <FlatShapeLayer
+          key={currentPageId}
+          width={size.width}
+          height={size.height}
+        />
+      )}
 
       {/* Mounted only while the local pointer is drawing, and paired with the
           `liveStrokeId` filter above so exactly one of the two draws that

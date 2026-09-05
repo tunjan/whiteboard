@@ -50,10 +50,11 @@ export class InputsManager {
     this.filtered.x += (targetX - this.filtered.x) * alpha;
     this.filtered.y += (targetY - this.filtered.y) * alpha;
 
-    if (Math.hypot(this.filtered.x, this.filtered.y) < STOP_SPEED) {
-      this.filtered.x = 0;
-      this.filtered.y = 0;
-    }
+    // Apply the deadband per axis. A small x drift should not survive merely
+    // because the pointer is still moving meaningfully along y (and vice
+    // versa); each channel is an independent velocity estimate.
+    if (Math.abs(this.filtered.x) < STOP_SPEED) this.filtered.x = 0;
+    if (Math.abs(this.filtered.y) < STOP_SPEED) this.filtered.y = 0;
     return { ...this.filtered };
   }
 

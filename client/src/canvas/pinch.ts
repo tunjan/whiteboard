@@ -10,10 +10,52 @@ export interface TouchGesture {
   distance: number;
 }
 
+/**
+ * Which interpretation of a two-finger gesture the canvas has committed to.
+ * `unsure` moves nothing: it is the deadband that keeps the small, incidental
+ * finger drift at the start of a gesture from nudging the camera.
+ */
+export type PinchMode = 'unsure' | 'panning' | 'zooming';
+
 export interface PinchState {
   startDistance: number;
   startZoom: number;
+  startMidpoint: Point;
   lastMidpoint: Point;
+  mode: PinchMode;
+}
+
+/** Finger separation change that classifies an undecided gesture as a zoom. */
+export const PINCH_ZOOM_THRESHOLD = 24;
+/** Midpoint travel that classifies an undecided gesture as a pan. */
+export const PINCH_PAN_THRESHOLD = 16;
+/**
+ * Separation change that upgrades an established pan to a zoom. Wider than
+ * {@link PINCH_ZOOM_THRESHOLD} so a pan that spreads slightly does not flip
+ * back and forth across the boundary.
+ */
+export const PINCH_ZOOM_UPGRADE_THRESHOLD = 64;
+
+/**
+ * Advance the pan/zoom disambiguation state machine. Zooming is absorbing: once
+ * a gesture zooms it keeps zooming, because re-classifying it mid-flight would
+ * strand the camera at whatever scale it had reached.
+ */
+export function nextPinchMode(
+  mode: PinchMode,
+  start: { distance: number; midpoint: Point },
+  current: TouchGesture,
+): PinchMode {
+  if (mode === 'zooming') return 'zooming';
+  const spread = Math.abs(current.distance - start.distance);
+  if (mode === 'panning')
+    return spread > PINCH_ZOOM_UPGRADE_THRESHOLD ? 'zooming' : 'panning';
+  if (spread > PINCH_ZOOM_THRESHOLD) return 'zooming';
+  const travel = Math.hypot(
+    current.midpoint.x - start.midpoint.x,
+    current.midpoint.y - start.midpoint.y,
+  );
+  return travel > PINCH_PAN_THRESHOLD ? 'panning' : 'unsure';
 }
 
 function clamp(n: number, min: number, max: number): number {

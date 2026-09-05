@@ -40,6 +40,7 @@ import { shapeRotatedBounds } from './shape-bounds';
 import type { Bounds } from './geometry';
 import { BindingGraph } from './binding-graph';
 import { SpatialIndex } from './spatial-index';
+import { publishDocumentChanges } from './engine/document-changes';
 import {
   subscribeToTextMetrics,
   watchFontLoading,
@@ -155,6 +156,9 @@ export const bindingGraph = new BindingGraph();
  * unresolved until something else happened to touch them.
  */
 let pendingBindingDirty: Set<string> | null = null;
+let pendingRenderDirty: Set<string> | null = null;
+let pendingContentDirty = new Set<string>();
+let lastRenderedCache: ReadonlyMap<string, Shape> | null = null;
 
 function markBindingDirty(ids: Iterable<string>): void {
   // Already pending a full rescan — narrowing it now would lose work.
@@ -557,6 +561,7 @@ function unparkPage(pageId: string): boolean {
   // The Canvas resolves connectors against the page it is rendering, so the
   // page coming back needs the same full rescan a freshly derived one gets.
   pendingBindingDirty = null;
+  pendingRenderDirty = null;
   rebuildPagesCache();
   rebuildSnapshot();
   return true;
@@ -746,6 +751,13 @@ function rebuildSnapshot(): void {
   // Nothing here is proportional to the number of shapes on the page. The
   // sorted array is maintained incrementally by `applyAffected`, page metadata
   // is republished by reference, and lookups are served from the live cache.
+  const renderDirty =
+    lastRenderedCache === shapeCache ? pendingRenderDirty : null;
+  pendingRenderDirty = new Set();
+  lastRenderedCache = shapeCache;
+  const contentIds = pendingContentDirty;
+  pendingContentDirty = new Set();
+  publishDocumentChanges({ shapes: shapeCache, ids: renderDirty, contentIds });
   useDocumentStore.setState({
     doc: cachedDoc,
     shapes: currentSortedShapes(),
@@ -907,6 +919,8 @@ function applyAffected(ids: Set<string>, paced = false): void {
   }
   startVanish(removed);
   markBindingDirty(ids);
+  if (pendingRenderDirty !== null)
+    for (const id of ids) pendingRenderDirty.add(id);
   if (orderChanged || !sortedShapesCache) {
     sortedShapesCache = null;
   } else {
@@ -948,6 +962,7 @@ function fullResync(): void {
   spatialIndex.clear();
   bindingGraph.clear();
   pendingBindingDirty = null;
+  pendingRenderDirty = null;
   parentedCount = 0;
   equationCount = 0;
   // Collected and handed to the R-tree in one bulk load rather than inserted
@@ -1016,6 +1031,21 @@ function makeShapesObserver(): (
         for (const key of e.keys.keys()) affected.add(key);
       } else if (typeof e.path[0] === 'string') {
         affected.add(e.path[0]);
+        // Nested text/ink/graph sequences can mutate a retained array in place.
+        // Capture actual content diffs rather than treating every drag as content.
+        if (
+          e.path.length > 1 ||
+          [...e.keys.keys()].some(
+            (key) =>
+              key === 'props' ||
+              key === 'type' ||
+              key === 'text' ||
+              key === 'points' ||
+              key === 'expressions',
+          )
+        ) {
+          pendingContentDirty.add(e.path[0]);
+        }
       }
     }
     applyAffected(affected, paced);
@@ -1059,6 +1089,7 @@ export function loadBoard(
   spatialIndex.clear();
   bindingGraph.clear();
   pendingBindingDirty = null;
+  pendingRenderDirty = null;
   parentedCount = 0;
   equationCount = 0;
   cachedPages = {};

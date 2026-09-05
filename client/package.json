@@ -21,6 +21,7 @@
     "@fontsource-variable/inter": "^5.2.8",
     "@hocuspocus/provider": "^4.2.0",
     "@tailwindcss/vite": "^4.3.1",
+    "@tldraw/state": "^5.4.0",
     "@whiteboard/shared": "*",
     "browser-image-compression": "^2.0.2",
     "class-variance-authority": "^0.7.1",
@@ -47,6 +48,7 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^6.0.2",
+    "happy-dom": "^20.14.0",
     "vite": "^8.0.16",
     "vitest": "^4.1.9"
   }

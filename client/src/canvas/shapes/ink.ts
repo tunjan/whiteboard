@@ -11,6 +11,7 @@ import {
 } from './ink-engine';
 
 export interface InkStrokeDynamics {
+  inkAlgorithm?: 'reference';
   simulatePressure?: boolean;
   thinning?: number;
   smoothing?: number;
@@ -277,7 +278,7 @@ export const DEFAULT_PENCIL_DYNAMICS = {
   // Round caps make a pencil stop where the pointer stops; a flick earns its
   // taper from the speed it was lifted at. See `liftTaperFor`.
   endTaper: false,
-} as const satisfies Required<InkStrokeDynamics>;
+} as const satisfies Required<Omit<InkStrokeDynamics, 'inkAlgorithm'>>;
 
 /**
  * Legacy simulated-pressure strokes keep the flat response they were drawn
@@ -381,8 +382,15 @@ export function getInkCenterlineGeometry(
   points: DrawPoint[],
   size: number,
   streamlineAmount = 0.5,
+  inkAlgorithm?: 'reference',
 ): InkCenterlineGeometry {
-  const line = buildInkCenterline(points, size, streamlineAmount, true);
+  const line = buildInkCenterline(
+    points,
+    size,
+    streamlineAmount,
+    true,
+    inkAlgorithm,
+  );
   return {
     path: getInkCenterlinePathData(line),
     length: centerlineLength(line),
@@ -460,6 +468,7 @@ export function getInkPathData(
   last: boolean,
   dynamics: InkStrokeDynamics = {},
 ): string {
+  engineOptions.inkAlgorithm = dynamics.inkAlgorithm;
   engineOptions.size = size;
   engineOptions.last = last;
   engineOptions.thinning = dynamics.thinning ?? 0;

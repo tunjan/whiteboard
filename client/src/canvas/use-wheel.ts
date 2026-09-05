@@ -1,16 +1,38 @@
 import { useEffect, type RefObject } from 'react';
 import { noteActivity } from '@/collab/attention';
 import { stopFollowingForManualCameraChange } from '@/collab/use-follow-store';
+import type { Point } from './camera';
 import { useCameraStore } from './use-camera-store';
 
 // Rough px-per-line for wheel events reported in line units (mouse wheels).
 const LINE_HEIGHT = 16;
+// Rough px-per-page for wheel events reported in page units.
+const PAGE_HEIGHT = 800;
 const WHEEL_ZOOM_SPEED = 1;
 // Bound a single event's zoom delta so one notch can't jump wildly.
 const MAX_ZOOM_DELTA = 10;
 
 function clamp(n: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, n));
+}
+
+/**
+ * A wheel event's deltas in CSS pixels.
+ *
+ * `deltaMode` is not a hint: an event reporting lines or pages carries numbers
+ * on a completely different scale (a page-mode notch is ~1, not ~100), so
+ * reading `deltaY` without converting pans by a few pixels where the user asked
+ * for a screenful. Firefox on Linux is the common source of line mode; page
+ * mode is rare but costs one branch to honour.
+ */
+export function normalizeWheelDelta(event: {
+  deltaX: number;
+  deltaY: number;
+  deltaMode: number;
+}): Point {
+  const scale =
+    event.deltaMode === 1 ? LINE_HEIGHT : event.deltaMode === 2 ? PAGE_HEIGHT : 1;
+  return { x: event.deltaX * scale, y: event.deltaY * scale };
 }
 
 /**
@@ -82,15 +104,14 @@ export function useWheel(
       anchorClientX = e.clientX;
       anchorClientY = e.clientY;
 
+      const delta = normalizeWheelDelta(e);
       if (e.ctrlKey || e.metaKey) {
-        const lineScale = e.deltaMode === 1 ? LINE_HEIGHT : 1;
-        const delta = clamp(e.deltaY * lineScale, -MAX_ZOOM_DELTA, MAX_ZOOM_DELTA);
-        const zoomDelta = -delta / 100;
+        const zoomDelta =
+          -clamp(delta.y, -MAX_ZOOM_DELTA, MAX_ZOOM_DELTA) / 100;
         zoomFactor *= 1 + zoomDelta * WHEEL_ZOOM_SPEED;
       } else {
-        const scale = e.deltaMode === 1 ? LINE_HEIGHT : 1;
-        panX += e.deltaX * scale;
-        panY += e.deltaY * scale;
+        panX += delta.x;
+        panY += delta.y;
       }
 
       if (frame === null) frame = requestAnimationFrame(flush);

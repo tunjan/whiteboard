@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { MAX_ZOOM, MIN_ZOOM } from './camera';
-import { pinchGesture, pruneStaleTouches, zoomFromDistance } from './pinch';
+import {
+  PINCH_PAN_THRESHOLD,
+  PINCH_ZOOM_THRESHOLD,
+  PINCH_ZOOM_UPGRADE_THRESHOLD,
+  nextPinchMode,
+  pinchGesture,
+  pruneStaleTouches,
+  zoomFromDistance,
+} from './pinch';
 
 describe('pinchGesture', () => {
   it('returns the midpoint and finger separation', () => {
@@ -56,5 +64,75 @@ describe('pruneStaleTouches', () => {
     ]);
     pruneStaleTouches(touches, 5000, 2000);
     expect(touches.size).toBe(0);
+  });
+});
+
+describe('nextPinchMode', () => {
+  const start = { distance: 100, midpoint: { x: 0, y: 0 } };
+  const at = (distance: number, x = 0, y = 0) => ({
+    distance,
+    midpoint: { x, y },
+  });
+
+  it('stays undecided inside both deadbands', () => {
+    expect(
+      nextPinchMode(
+        'unsure',
+        start,
+        at(100 + PINCH_ZOOM_THRESHOLD, PINCH_PAN_THRESHOLD, 0),
+      ),
+    ).toBe('unsure');
+  });
+
+  it('classifies a spread as a zoom', () => {
+    expect(
+      nextPinchMode('unsure', start, at(100 + PINCH_ZOOM_THRESHOLD + 1)),
+    ).toBe('zooming');
+  });
+
+  it('classifies a pinch together as a zoom', () => {
+    expect(
+      nextPinchMode('unsure', start, at(100 - PINCH_ZOOM_THRESHOLD - 1)),
+    ).toBe('zooming');
+  });
+
+  it('classifies midpoint travel with steady fingers as a pan', () => {
+    expect(nextPinchMode('unsure', start, at(100, 0, PINCH_PAN_THRESHOLD + 1))).toBe(
+      'panning',
+    );
+  });
+
+  it('prefers zoom when both thresholds are crossed', () => {
+    expect(
+      nextPinchMode(
+        'unsure',
+        start,
+        at(100 + PINCH_ZOOM_THRESHOLD + 1, 500, 500),
+      ),
+    ).toBe('zooming');
+  });
+
+  it('holds a pan through a spread below the wider upgrade threshold', () => {
+    expect(
+      nextPinchMode(
+        'panning',
+        start,
+        at(100 + PINCH_ZOOM_UPGRADE_THRESHOLD, 300, 0),
+      ),
+    ).toBe('panning');
+  });
+
+  it('upgrades a pan to a zoom past the wider threshold', () => {
+    expect(
+      nextPinchMode(
+        'panning',
+        start,
+        at(100 + PINCH_ZOOM_UPGRADE_THRESHOLD + 1),
+      ),
+    ).toBe('zooming');
+  });
+
+  it('never leaves zooming', () => {
+    expect(nextPinchMode('zooming', start, at(100, 0, 0))).toBe('zooming');
   });
 });
