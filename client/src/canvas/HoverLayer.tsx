@@ -1,6 +1,7 @@
 import type { Shape } from '@whiteboard/shared';
 import type { Camera } from './camera';
-import { cameraToTransform, worldToScreen } from './camera';
+import { worldToScreen } from './camera';
+import { useCameraTransform } from './use-camera-interaction';
 import { isCoarsePointer } from './platform';
 import { shapeOutlineCorners } from './selection-geometry';
 import { shapeRegistry } from './shapes/shape-registry';
@@ -37,6 +38,7 @@ export function HoverLayer({ camera }: { camera: Camera }) {
   // has to watch the whole page; everything else depends on its own shape only.
   const isGroup = shape?.type === 'group';
   const shapes = useDocumentStore((s) => (isGroup ? s.shapes : NO_SHAPES));
+  const transform = useCameraTransform(camera);
 
   // The selected shape already has a box around it, and drawing a second one
   // inside it just thickens the line.
@@ -50,7 +52,7 @@ export function HoverLayer({ camera }: { camera: Camera }) {
       <svg className="pointer-events-none absolute inset-0 z-[var(--z-canvas-indicator)] h-full w-full">
         {/* World space, so a curve is traced exactly; the stroke stays a
             constant screen width via non-scaling-stroke. */}
-        <g transform={cameraToTransform(camera)} fill="none">
+        <g transform={transform} fill="none">
           <path
             d={traced.d}
             transform={traced.transform}

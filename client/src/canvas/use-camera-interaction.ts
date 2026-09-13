@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { cameraToTransform, type Camera } from './camera';
 import { useCameraStore } from './use-camera-store';
 
 // How long after the last camera change we keep treating the camera as "moving".
@@ -20,6 +21,22 @@ export const useCameraInteraction = create<CameraInteractionStore>(() => ({
   isMoving: false,
   isHandDragging: false,
 }));
+
+/**
+ * The world-space transform every camera-following layer shares, with
+ * device-pixel snapping applied only once the camera has settled.
+ *
+ * Snapping is a quantizer (see {@link cameraTranslation}): worth it at rest for
+ * crisp edges, visible as stepping while moving. `isMoving` is already the
+ * debounced signal for exactly that window, and routing every layer through one
+ * hook is what keeps them from disagreeing about where the world is mid-gesture
+ * — half the layers snapped and half not would show up as overlays drifting
+ * against their shapes by up to half a device pixel, every frame.
+ */
+export function useCameraTransform(camera: Camera): string {
+  const isMoving = useCameraInteraction((s) => s.isMoving);
+  return cameraToTransform(camera, !isMoving);
+}
 
 /** Publish the Hand tool's press state for the canvas cursor and toolbar icon. */
 export function setHandDragging(isHandDragging: boolean): void {

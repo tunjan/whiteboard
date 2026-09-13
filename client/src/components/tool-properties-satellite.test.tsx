@@ -121,11 +121,21 @@ describe('ToolPropertiesSatellite', () => {
     expect(html).toMatch(/translateX\(calc\(\d+ \* \(100% \+ 6px\)\)\)/);
   });
 
-  // Eight quick colours in the ramp, so the same formula has to come out in
-  // eighths there. A chip that only ever divided by four was the bug this
-  // guards: the ramp used to mark its choice with a ring instead.
-  it('divides the colour ramp by its own length, not the weight row', () => {
-    expect(render('draw')).toContain(`width:calc(${100 / 8}% - 6px)`);
+  // The ramp is the one switch here that does *not* take the chip. A chip is a
+  // ground, and a ground behind a swatch is a second colour sitting next to the
+  // colour being chosen — which shifts how every swatch beside it reads. The
+  // chosen colour wears a ring instead: a gap in the plate's own colour, then a
+  // hairline outside it, in box-shadows so the dot never changes size and
+  // pushes the ramp along.
+  it('marks the chosen colour with a ring, never with a ground', () => {
+    const html = render('draw');
+    expect(html).toContain(
+      'box-shadow:0 0 0 2.5px var(--bg-surface), 0 0 0 4px var(--border-strong)',
+    );
+    // One ring, on the one chosen swatch.
+    expect(html.match(/0 0 0 2\.5px var\(--bg-surface\)/g)).toHaveLength(1);
+    // And no eighth-width chip travelling under the ramp.
+    expect(html).not.toContain(`width:calc(${100 / 8}% - 6px)`);
   });
 });
 
@@ -134,39 +144,6 @@ describe('ToolPropertiesSatellite', () => {
 // work, so each is worth failing a build over.
 describe('ToolPropertiesSatellite as a bar in its own right', () => {
   const html = render('draw');
-
-  it('floats clear of the toolbar instead of sitting flush on it', () => {
-    expect(html).toContain('bottom-full');
-    // The gutter is what makes these two bars rather than one tall control.
-    expect(html).toMatch(/\bmb-2\.5\b/);
-  });
-
-  it('is cut from the same nothing as the bar: no card under either', () => {
-    // The bar is a transparent pill, so the pill riding above it is one too:
-    // the controls are the chrome, and there is no slab behind them to match.
-    expect(html).toContain('rounded-full');
-    expect(html).toContain('bg-transparent');
-    expect(html).not.toContain('tb-shell');
-    // What the controls stand on is their own glass, one capsule per group —
-    // weight, colour, keys — and not a ground belonging to the bar.
-    expect(html.match(/\blg lg-pill\b/g)).toHaveLength(3);
-    // The glyph halo went with it: a halo is what carries a glyph with nothing
-    // under it, and these are on glass now. Two grounds is a smudge.
-    expect(html).not.toContain('tb-glyph');
-    // Both were how the old riser hid the seam it shared with the bar. A
-    // detached pill has no such seam, and a squared-off edge on one would
-    // read as a piece that had come loose.
-    expect(html).not.toContain('rounded-b-none');
-    expect(html).not.toContain('border-b-0');
-  });
-
-  // `left-1.5` is the toolbar's own padding, so the two left edges line up.
-  it('left-aligns to the bar, but centres where the bar is narrower', () => {
-    expect(html).toContain('sm:left-1.5');
-    expect(html).toContain('sm:translate-x-0');
-    expect(html).toContain('left-1/2');
-    expect(html).toContain('-translate-x-1/2');
-  });
 
   it('rises into place rather than unrolling out of the bar', () => {
     expect(html).toContain('data-visible="true"');
@@ -226,19 +203,6 @@ describe('ToolPropertiesSatellite as the only style surface', () => {
   // it is the one inking tool that ends up with nothing behind a key at all.
   it('shows no keys where no key would do anything', () => {
     expect(keys(render('highlighter'))).toEqual([]);
-  });
-
-  // A rule earns its place by having a section on both sides of it. Sections
-  // drop out per subject, so the count has to follow rather than be fixed.
-  it('rules between the sections it has, never against its own edge', () => {
-    const rules = (html: string) =>
-      (html.match(/bg-tb-divider/g) ?? []).length;
-    // weight · colour · keys
-    expect(rules(render('draw'))).toBe(2);
-    // weight · colour
-    expect(rules(render('highlighter'))).toBe(1);
-    // colour · keys
-    expect(rules(render('text'))).toBe(1);
   });
 
   // Wide subjects can outrun a phone, and the fix has to stay on one axis: a

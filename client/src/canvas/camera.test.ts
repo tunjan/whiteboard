@@ -1,5 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  cameraToTransform,
+  cameraTranslation,
   nextDiscreteZoom,
   interpolateCameraViewport,
   screenToWorld,
@@ -113,6 +115,64 @@ describe('viewport animation', () => {
       const actual = worldToScreen(world, interpolateCameraViewport(from, to, t));
       expect(actual.x).toBeCloseTo(anchor.x);
       expect(actual.y).toBeCloseTo(anchor.y);
+    }
+  });
+});
+
+describe('cameraTranslation', () => {
+  // These tests run without a DOM, and `cameraTranslation` falls back to dpr 1
+  // when there is no `window` — which is itself a grid, so a test that did not
+  // pin the ratio would be asserting against the fallback.
+  const dpr = (value: number) => {
+    vi.stubGlobal('window', { devicePixelRatio: value });
+    return () => vi.unstubAllGlobals();
+  };
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('snaps to the device-pixel grid by default', () => {
+    const restore = dpr(2);
+    // -x*z = -(-10.3) = 10.3 CSS px = 20.6 device px -> 21 -> 10.5 CSS px.
+    expect(cameraTranslation({ x: -10.3, y: 0, z: 1 }).e).toBeCloseTo(10.5);
+    restore();
+  });
+
+  it('leaves the translation exact when snapping is off', () => {
+    const restore = dpr(2);
+    expect(cameraTranslation({ x: -10.3, y: 0, z: 1 }, false).e).toBeCloseTo(
+      10.3,
+    );
+    restore();
+  });
+
+  it('quantizes a slow pan when snapping and not when it is off', () => {
+    const restore = dpr(2);
+    // A third of a CSS pixel per frame: below the 0.5px snapping quantum, so
+    // snapped frames stall and then jump, which is the stepping this exists to
+    // avoid during a gesture.
+    const steps = (snap: boolean) =>
+      Array.from({ length: 6 }, (_, i) =>
+        cameraTranslation({ x: -i / 3, y: 0, z: 1 }, snap).e,
+      );
+    const snapped = steps(true);
+    const exact = steps(false);
+    expect(new Set(snapped.map((n) => n.toFixed(3))).size).toBeLessThan(
+      new Set(exact.map((n) => n.toFixed(3))).size,
+    );
+    // Consecutive exact frames all advance; snapped ones include a dead frame.
+    const advanced = (a: number[]) =>
+      a.slice(1).filter((n, i) => n !== a[i]!).length;
+    expect(advanced(exact)).toBe(5);
+    expect(advanced(snapped)).toBeLessThan(5);
+    restore();
+  });
+
+  it('agrees with cameraToTransform', () => {
+    const camera = { x: -10.3, y: 4.7, z: 1.5 };
+    for (const snap of [true, false]) {
+      const { e, f } = cameraTranslation(camera, snap);
+      expect(cameraToTransform(camera, snap)).toBe(
+        `matrix(1.5, 0, 0, 1.5, ${e}, ${f})`,
+      );
     }
   });
 });

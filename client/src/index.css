@@ -1290,6 +1290,20 @@
   text-shadow: 0 0 2px var(--tb-glyph-halo);
 }
 
+/**
+ * A drawn object standing in a hued well — the tray's instruments.
+ *
+ * `.tb-glyph`'s white halo is for a glyph with *nothing* under it, and these
+ * now have something: a pastel well the halo was bleaching a ring out of,
+ * right where the well is supposed to be reading against the barrel. What is
+ * left is the contact shadow, which is what separates an object from what it
+ * is lying on in the first place.
+ */
+.tb-object svg {
+  filter: drop-shadow(0 1px 2px rgb(0 0 0 / 0.14))
+    drop-shadow(0 3px 6px rgb(0 0 0 / 0.09));
+}
+
 .tb-glyph svg {
   filter: drop-shadow(0 0 2px var(--tb-glyph-halo))
     drop-shadow(0 1px 2px rgb(0 0 0 / 0.16));
@@ -1464,7 +1478,6 @@
   }
 }
 
-
 /* The toolbar bar and the show-toolbar pill: one plain plate. A solid ground,
    a hairline, and the same ambient shadow the rest of the floating chrome
    uses. Unlayered so it beats the `shadow-panel` `Surface mode="floating"`
@@ -1501,5 +1514,449 @@
     width: 44px;
     height: 44px;
     min-width: 44px;
+  }
+}
+
+/* Soft toolbar silhouette, rendered behind the controls. */
+.tb-plate {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  filter: var(--tb-plate-shadow);
+}
+
+:root {
+  --tb-plate-shadow: drop-shadow(0 14px 26px rgba(12, 10, 9, 0.14))
+    drop-shadow(0 3px 7px rgba(12, 10, 9, 0.07))
+    drop-shadow(0 1px 1px rgba(12, 10, 9, 0.05));
+}
+
+:root[data-theme='dark'] {
+  --tb-plate-shadow: drop-shadow(0 16px 30px rgba(0, 0, 0, 0.55))
+    drop-shadow(0 4px 10px rgba(0, 0, 0, 0.38))
+    drop-shadow(0 1px 1px rgba(0, 0, 0, 0.3));
+}
+
+/* --------------------------------------------------------------------------
+ * A hued key.
+ *
+ * Every key on this bar owns a colour, and the colour is a property of the
+ * tool rather than of its state — the eraser's well is pink whether or not the
+ * eraser is held. That is what turns a row of twelve glyphs into twelve
+ * findable things: you reach for the yellow one, and confirming that it says
+ * "highlighter" is the second look rather than the first.
+ *
+ * So selection cannot be carried by *having* a well, the way it was when the
+ * wells were all one neutral grey. It is carried by the well getting heavier
+ * and the glyph stepping up into its own hue at the same time, which is the
+ * same two-channel move the neutral bar made — fill and ink together — just
+ * run in colour.
+ *
+ * The well is inset from the key's edge rather than filling it, so the plate
+ * still shows around it, and it is rounded off-square: a blob-shaped mark on a
+ * blob-shaped bar, which is the one radius on this bar that must not be a
+ * circle — a circle among these lumps reads as a hole punched in them.
+ * -------------------------------------------------------------------------- */
+
+.tb-hue::before {
+  content: '';
+  position: absolute;
+  inset: 1px;
+  /* Behind the button's own content but still inside its stacking context
+     (`.tb-key` is `relative z-10`), so the well never covers its glyph and
+     never reaches back through to the plate. A pseudo-element rather than a
+     span, because the well has to exist on five different call sites' buttons
+     and a rule beats five remembered spans. */
+  z-index: -1;
+  pointer-events: none;
+  border-radius: 46% 54% 52% 48% / 50% 46% 54% 50%;
+  background-color: color-mix(in oklab, var(--key-hue) 15%, transparent);
+  transform: scale(0.9);
+  transition:
+    background-color var(--duration-base) var(--ease-out-quart),
+    transform var(--duration-base) var(--tb-press-spring);
+}
+
+.tb-hue:hover::before {
+  background-color: color-mix(in oklab, var(--key-hue) 24%, transparent);
+  transform: scale(0.96);
+}
+
+.tb-hue[aria-current='true']::before,
+.tb-hue[aria-pressed='true']::before,
+.tb-hue[data-pressed]::before {
+  background-color: color-mix(in oklab, var(--key-hue) 38%, transparent);
+  transform: scale(1);
+}
+
+/* The glyph takes the hue too, but mixed into the foreground rather than used
+   neat: neat, a pastel-anchored hue on a pale well is a legibility problem,
+   and the point of the colour up here is to agree with the well, not to shout
+   over it. Held, it steps most of the way into the hue. */
+.tb-hue {
+  color: color-mix(in oklab, var(--key-hue) 42%, var(--fg));
+}
+
+.tb-hue[aria-current='true'],
+.tb-hue[aria-pressed='true'],
+.tb-hue[data-pressed] {
+  color: color-mix(in oklab, var(--key-hue) 74%, var(--fg));
+}
+
+:root[data-theme='dark'] .tb-hue::before {
+  background-color: color-mix(in oklab, var(--key-hue) 24%, transparent);
+}
+
+:root[data-theme='dark'] .tb-hue:hover::before {
+  background-color: color-mix(in oklab, var(--key-hue) 34%, transparent);
+}
+
+:root[data-theme='dark'] .tb-hue[aria-current='true']::before,
+:root[data-theme='dark'] .tb-hue[aria-pressed='true']::before,
+:root[data-theme='dark'] .tb-hue[data-pressed]::before {
+  background-color: color-mix(in oklab, var(--key-hue) 52%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tb-hue::before {
+    transition: none;
+  }
+}
+
+/* The well an instrument stands in. Same fill and the same growth as a key's,
+   but it cannot be the key's own inset layer: the instrument's button is a
+   tall clipping window that starts above the bar, and a well inset into *that*
+   would be a stripe running up over the canvas. It is placed against the slot
+   instead, which is exactly a key tall. */
+.tb-slot::before {
+  content: '';
+  position: absolute;
+  inset: 1px;
+  z-index: 0;
+  pointer-events: none;
+  border-radius: 48% 52% 46% 54% / 52% 48% 52% 48%;
+  /* Heavier than a key's. A key's well only has to separate a dark glyph from
+     a white plate; this one has to separate a *white* barrel from it, and the
+     only thing doing that is the tone the well puts behind it. */
+  background-color: color-mix(in oklab, var(--key-hue) 24%, transparent);
+  transform: scale(0.95);
+  transition:
+    background-color var(--duration-base) var(--ease-out-quart),
+    transform var(--duration-base) var(--tb-press-spring);
+}
+
+.tb-slot:hover::before {
+  background-color: color-mix(in oklab, var(--key-hue) 34%, transparent);
+  transform: scale(1);
+}
+
+.tb-slot[data-held='true']::before {
+  background-color: color-mix(in oklab, var(--key-hue) 48%, transparent);
+  transform: scale(1.04);
+}
+
+:root[data-theme='dark'] .tb-slot::before {
+  background-color: color-mix(in oklab, var(--key-hue) 24%, transparent);
+}
+
+:root[data-theme='dark'] .tb-slot:hover::before {
+  background-color: color-mix(in oklab, var(--key-hue) 34%, transparent);
+}
+
+:root[data-theme='dark'] .tb-slot[data-held='true']::before {
+  background-color: color-mix(in oklab, var(--key-hue) 54%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tb-slot::before {
+    transition: none;
+  }
+}
+
+/**
+ * The chosen segment of a switch on the properties bar.
+ *
+ * The same blue the select tool's well is, because it is the same statement —
+ * "this is the one that is on" — and the bar under it now makes that statement
+ * in colour. A grey chip here would be the only neutral mark left in the set,
+ * which reads as a control nobody finished rather than as a quieter one.
+ */
+.tb-mark {
+  background-color: color-mix(in oklab, #4f8bf5 26%, transparent);
+}
+
+:root[data-theme='dark'] .tb-mark {
+  background-color: color-mix(in oklab, #4f8bf5 42%, transparent);
+}
+
+/* Reference toolbar: full drawing objects on a soft, white painter's palette. */
+.toolbar-reference .toolbar-desktop {
+  height: 56px;
+}
+.toolbar-reference .tb-key {
+  width: 40px;
+  height: 44px;
+  min-width: 40px;
+}
+.toolbar-reference .tb-key > svg,
+.toolbar-reference .tb-key > span.relative.block {
+  width: 23px;
+  height: 23px;
+  stroke-width: 1.9;
+}
+.toolbar-reference .tb-hue {
+  color: color-mix(in oklab, var(--key-hue) 22%, #434653);
+}
+.toolbar-reference .tb-hue::before {
+  inset: 4px 1px;
+  background: color-mix(in oklab, var(--key-hue) 12%, var(--bg-surface));
+  transform: rotate(-5deg) scale(0.94);
+}
+.toolbar-reference .tb-hue:hover::before {
+  background: color-mix(in oklab, var(--key-hue) 21%, var(--bg-surface));
+  transform: rotate(-3deg);
+}
+.toolbar-reference .tb-hue[aria-current='true']::before,
+.toolbar-reference .tb-hue[aria-pressed='true']::before {
+  background: linear-gradient(135deg, #dceeff, #b8d8fc);
+  transform: rotate(-7deg) scale(1.05, 1.15);
+}
+.toolbar-reference .tb-hue[aria-current='true'],
+.toolbar-reference .tb-hue[aria-pressed='true'] {
+  color: #173d78;
+}
+.toolbar-reference .tb-slot::before {
+  inset: 6px 1px;
+  background: color-mix(in oklab, var(--key-hue) 11%, var(--bg-surface));
+  transform: rotate(16deg) scale(0.92);
+  border-radius: 55% 45% 44% 56% / 55% 35% 65% 45%;
+}
+.toolbar-reference .tb-slot[data-held='true']::before {
+  background: color-mix(in oklab, var(--key-hue) 29%, var(--bg-surface));
+  transform: rotate(12deg) scale(1.02);
+}
+.toolbar-reference .tb-shapes-slot::before {
+  inset: 1px;
+  background: #ffebc9;
+  transform: rotate(5deg);
+  border-radius: 48% 52% 40% 60% / 40% 36% 64% 60%;
+}
+.toolbar-reference .tb-object svg {
+  filter: drop-shadow(2px 4px 3px rgb(64 59 85 / 13%));
+}
+.toolbar-reference .tb-shapes-slot svg {
+  filter: none;
+}
+.tb-plate-art {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.tb-plate-top {
+  stop-color: #fff;
+}
+.tb-plate-bottom {
+  stop-color: #f7f8fb;
+}
+:root {
+  --tb-plate-shadow: drop-shadow(0 9px 12px rgb(76 75 120 / 13%))
+    drop-shadow(0 2px 3px rgb(76 75 120 / 4%));
+}
+.style-group-plate {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: linear-gradient(var(--style-well-top), var(--style-well-bottom));
+  box-shadow:
+    0 4px 8px rgb(65 65 90 / 9%),
+    0 1px 2px rgb(65 65 90 / 3%),
+    inset 0 1px 2px var(--style-rim);
+}
+.style-reference {
+  --style-well-top: #fff;
+  --style-well-bottom: #fdfdfe;
+  --style-rim: rgb(255 255 255 / 95%);
+  --style-ink: #292d3b;
+  gap: 18px;
+  padding: 6px 14px;
+  max-width: calc(100vw - 1rem);
+}
+.style-plate {
+  position: absolute;
+  inset: 0 auto auto 0;
+  pointer-events: none;
+  overflow: visible;
+  filter: drop-shadow(0 7px 10px rgb(88 81 142 / 15%))
+    drop-shadow(0 2px 3px rgb(75 71 105 / 4%));
+}
+.style-color-section {
+  gap: 14px;
+}
+.style-control-group {
+  padding: 0 4px;
+}
+.style-reference .style-control-group:has(.tb-mark) {
+  padding: 0;
+}
+.style-reference .lg-key {
+  width: 30px;
+  height: 34px;
+  min-width: 30px;
+}
+.style-reference .style-swatch {
+  width: 22px;
+  height: 22px;
+  background-image: linear-gradient(rgb(255 255 255 / 9%), rgb(0 0 0 / 3%));
+  box-shadow: inset 0 1px 2px rgb(0 0 0 / 12%);
+}
+.style-reference [aria-checked='true'] .style-swatch {
+  box-shadow:
+    0 0 0 2px var(--style-well-top),
+    0 0 0 3px rgb(85 87 95 / 13%),
+    0 2px 4px 3px rgb(42 43 53 / 19%),
+    inset 0 1px 2px rgb(0 0 0 / 15%) !important;
+}
+.style-reference .style-wheel-key {
+  width: 34px;
+  min-width: 34px;
+  border: 0;
+  background: linear-gradient(var(--style-well-top), var(--style-well-bottom));
+  box-shadow:
+    0 4px 8px rgb(65 65 90 / 12%),
+    inset 0 1px 2px var(--style-rim);
+}
+.style-reference .style-color-wheel {
+  width: 26px;
+  height: 26px;
+  background-blend-mode: normal;
+  box-shadow: inset 0 0 1px rgb(255 255 255 / 65%);
+}
+.style-reference .style-detail-group .lg-key {
+  width: 34px;
+  min-width: 34px;
+  color: var(--style-ink);
+}
+.style-reference .style-detail-group svg {
+  filter: drop-shadow(0 1px 1px rgb(0 0 0 / 12%));
+}
+.style-no-fill {
+  width: 12px;
+  height: 3px;
+  border-radius: 999px;
+  background: currentColor;
+  box-shadow: 0 1px 1px rgb(0 0 0 / 12%);
+}
+.style-reference .style-detail-group [aria-label='Opacity'] svg {
+  width: 22px;
+  height: 22px;
+}
+.style-reference .tb-mark {
+  background: linear-gradient(145deg, #d9e9ff, #b6d4fd);
+  box-shadow: inset 0 1px 2px rgb(255 255 255 / 50%);
+}
+.style-reference .lg-key[aria-checked='true'] > .lg-wash {
+  background: transparent;
+}
+.style-reference .lg-key:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+:root[data-theme='dark'] .tb-plate-top {
+  stop-color: #36363e;
+}
+:root[data-theme='dark'] .tb-plate-bottom {
+  stop-color: #29292f;
+}
+:root[data-theme='dark'] .toolbar-reference .tb-hue {
+  color: #d7d9e9;
+}
+:root[data-theme='dark'] .toolbar-reference .tb-hue[aria-current='true'],
+:root[data-theme='dark'] .toolbar-reference .tb-hue[aria-pressed='true'] {
+  color: #173d78;
+}
+:root[data-theme='dark'] .toolbar-reference .tb-shapes-slot::before {
+  background: #6d5737;
+}
+:root[data-theme='dark'] .toolbar-reference .tb-shapes-slot svg {
+  color: #f1d8b5;
+}
+:root:is(.dark, [data-theme='dark']) .style-group-plate {
+  box-shadow: 0 3px 8px rgb(0 0 0 / 15%);
+}
+:root:is(.dark, [data-theme='dark']) .style-reference {
+  --style-well-top: #41414a;
+  --style-well-bottom: #383840;
+  --style-rim: rgb(255 255 255 / 10%);
+  --style-ink: #e1e3ed;
+}
+:root:is(.dark, [data-theme='dark']) .style-reference .tb-mark {
+  background: #3e608e;
+}
+:root.dark .style-plate .tb-plate-top {
+  stop-color: #36363e;
+}
+:root.dark .style-plate .tb-plate-bottom {
+  stop-color: #29292f;
+}
+@media (max-width: 899px) {
+  .style-reference {
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+  }
+  .style-reference::-webkit-scrollbar {
+    display: none;
+  }
+}
+@media (max-width: 699px) {
+  .toolbar-reference .toolbar-desktop {
+    display: none;
+  }
+  .toolbar-reference .toolbar-compact {
+    display: flex;
+  }
+  .toolbar-reference .tb-key {
+    width: 40px;
+    height: 44px;
+    min-width: 40px;
+  }
+  .toolbar-reference {
+    padding: 4px 8px;
+  }
+}
+
+.toolbar-reference [data-tool='select'] svg path {
+  fill: currentColor;
+}
+
+@media (max-width: 699px) {
+  .toolbar-reference > .tb-plate {
+    border-radius: 999px;
+    background: var(--bg-surface);
+  }
+  .toolbar-reference > .tb-plate > svg {
+    display: none;
+  }
+}
+
+@media (min-width: 700px) {
+  .toolbar-reference .toolbar-desktop {
+    display: flex;
+  }
+  .toolbar-reference .toolbar-compact {
+    display: none;
+  }
+}
+@media (pointer: coarse) {
+  .toolbar-reference .tb-key,
+  .style-reference .lg-key,
+  .style-reference .style-detail-group .lg-key {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+  }
+  .toolbar-reference .tb-slot {
+    width: 44px;
   }
 }

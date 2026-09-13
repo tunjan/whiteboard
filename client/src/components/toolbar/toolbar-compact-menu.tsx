@@ -44,7 +44,8 @@ import {
 import { cn } from '@/lib/utils';
 import {
   COMPACT_MORE_TOOLS,
-  toolButtonClass,
+  hueVars,
+  toolKeyClass,
   TOOL_ICON,
 } from './toolbar-constants';
 
@@ -84,7 +85,8 @@ export function CompactMoreMenu({
                 tabIndex={active ? 0 : -1}
                 aria-label={label}
                 aria-current={active ? 'true' : undefined}
-                className={toolButtonClass(active)}
+                style={hueVars(active ? activeToolId : undefined)}
+                className={toolKeyClass()}
               />
             }
           >

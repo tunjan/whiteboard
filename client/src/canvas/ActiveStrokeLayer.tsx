@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef } from 'react';
-import { cameraToTransform, type Camera } from './camera';
+import { type Camera } from './camera';
+import { useCameraTransform } from './use-camera-interaction';
 import { inkPaint } from './ink-color';
 import { isBelowPatternDetail, useDotLength } from './lod';
 import { inkErrorLimit } from './use-lod-store';
@@ -25,6 +26,7 @@ import {
  * to a single path and the page's raster survives the gesture untouched.
  */
 export function ActiveStrokeLayer({ camera }: { camera: Camera }) {
+  const transform = useCameraTransform(camera);
   const groupRef = useRef<SVGGElement>(null);
   const inkRef = useRef<SVGPathElement>(null);
   // A dot is a zero-length dash, which browsers drop once the stroke is
@@ -103,7 +105,7 @@ export function ActiveStrokeLayer({ camera }: { camera: Camera }) {
 
   return (
     <svg className="pointer-events-none absolute inset-0 z-[var(--z-canvas-shapes)] h-full w-full">
-      <g transform={cameraToTransform(camera)}>
+      <g transform={transform}>
         {/* `d`, `fill`, `stroke`, `opacity`, the dash props and the inner
             transform are all written imperatively above. React must not be
             given any of them, or it would reset them to its own (empty) values

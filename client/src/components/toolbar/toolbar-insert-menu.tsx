@@ -42,7 +42,8 @@ import {
   menuItemClass,
   TOOL_FLYOUT,
   TOOL_ICON,
-  toolButtonClass,
+  hueVars,
+  toolKeyClass,
 } from './toolbar-constants';
 
 function CustomStickerItem({
@@ -133,7 +134,8 @@ export function InsertMenu({ active }: InsertMenuProps) {
                 tabIndex={active ? 0 : -1}
                 aria-label={label}
                 aria-current={active ? 'true' : undefined}
-                className={toolButtonClass(active)}
+                style={hueVars('sticker')}
+                className={toolKeyClass()}
               />
             }
           >

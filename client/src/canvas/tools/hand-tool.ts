@@ -1,5 +1,6 @@
 import { stopFollowingForManualCameraChange } from '@/collab/use-follow-store';
 import { InputsManager } from '../inputs-manager';
+import { PanScheduler } from '../pan-scheduler';
 import { useCameraStore } from '../use-camera-store';
 import { setHandDragging } from '../use-camera-interaction';
 import { HandToolIcon } from './hand-tool-icon';
@@ -14,7 +15,12 @@ import type { Tool, ToolPointerInfo } from './types';
 export function createHandTool(): Tool {
   let last: { x: number; y: number } | null = null;
   const inputs = new InputsManager();
+  // One camera write per frame, however fast the pointer reports.
+  const pan = new PanScheduler();
   const finishDrag = () => {
+    // Before the caller reads a release velocity or starts a coast — see
+    // `PanScheduler.flush`.
+    pan.flush();
     last = null;
     inputs.reset();
     setHandDragging(false);
@@ -47,7 +53,7 @@ export function createHandTool(): Tool {
       inputs.update(info.screenPoint, info.timestamp);
       if (dx === 0 && dy === 0) return;
       // Drag right -> camera moves left so content follows the cursor.
-      useCameraStore.getState().panByScreen(-dx, -dy);
+      pan.push(-dx, -dy);
     },
 
     onPointerUp(info: ToolPointerInfo) {

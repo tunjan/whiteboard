@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHandTool } from './hand-tool';
 import type { ToolContext, ToolPointerInfo } from './types';
 
@@ -53,7 +53,27 @@ function pointer(
 const context = {} as ToolContext;
 
 describe('hand tool', () => {
-  beforeEach(() => vi.clearAllMocks());
+  // The tool pans through a `PanScheduler`, which holds deltas until the next
+  // animation frame. Drive frames by hand so a test says when one happens.
+  let pending: Array<() => void> = [];
+  const frame = () => {
+    const due = pending;
+    pending = [];
+    for (const cb of due) cb();
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    pending = [];
+    vi.stubGlobal('requestAnimationFrame', (cb: () => void) => {
+      pending.push(cb);
+      return pending.length;
+    });
+    vi.stubGlobal('cancelAnimationFrame', (id: number) => {
+      pending[id - 1] = () => {};
+    });
+  });
+  afterEach(() => vi.unstubAllGlobals());
 
   it('publishes its grip state and pans with the pointer', () => {
     const tool = createHandTool();
@@ -63,10 +83,43 @@ describe('hand tool', () => {
 
     expect(mocks.setHandDragging).toHaveBeenCalledWith(true);
     expect(mocks.stopFollowing).toHaveBeenCalledOnce();
+    // Held until the frame, not written per move.
+    expect(mocks.panByScreen).not.toHaveBeenCalled();
+    frame();
     expect(mocks.panByScreen).toHaveBeenCalledWith(-8, 6);
 
     tool.onPointerUp?.(pointer(18, 14), context);
     expect(mocks.setHandDragging).toHaveBeenLastCalledWith(false);
+  });
+
+  it('writes the camera once per frame however many moves arrive', () => {
+    const tool = createHandTool();
+
+    tool.onPointerDown?.(pointer(0, 0), context);
+    for (let i = 1; i <= 8; i++) tool.onPointerMove?.(pointer(i * 3, 0), context);
+    frame();
+
+    expect(mocks.panByScreen).toHaveBeenCalledTimes(1);
+    // And at the position the eight moves actually reached.
+    expect(mocks.panByScreen).toHaveBeenCalledWith(-24, 0);
+  });
+
+  it('flushes the pending frame before the release coast starts', () => {
+    const tool = createHandTool();
+
+    tool.onPointerDown?.(pointer(0, 0, { timestamp: 0 }), context);
+    tool.onPointerMove?.(pointer(-16, 0, { timestamp: 16 }), context);
+    tool.onPointerUp?.(pointer(-16, 0, { timestamp: 16 }), context);
+
+    // The last frame of drag must land before the coast, or the coast starts
+    // behind the finger — and a later flush would cancel it outright.
+    expect(mocks.panByScreen).toHaveBeenCalledWith(16, 0);
+    const panOrder = mocks.panByScreen.mock.invocationCallOrder[0]!;
+    const slideOrder = mocks.slideCamera.mock.invocationCallOrder[0]!;
+    expect(panOrder).toBeLessThan(slideOrder);
+    // Nothing left queued to re-apply or to cancel the coast.
+    frame();
+    expect(mocks.panByScreen).toHaveBeenCalledTimes(1);
   });
 
   it('hands the release velocity to the camera to coast on', () => {
@@ -104,11 +157,13 @@ describe('hand tool', () => {
 
     tool.onPointerDown?.(pointer(0, 0, { button: 2 }), context);
     tool.onPointerMove?.(pointer(8, 8), context);
+    frame();
     expect(mocks.panByScreen).not.toHaveBeenCalled();
     expect(mocks.stopFollowing).not.toHaveBeenCalled();
 
     tool.onPointerDown?.(pointer(4, 4), context);
     tool.onPointerMove?.(pointer(4, 4), context);
+    frame();
     expect(mocks.panByScreen).not.toHaveBeenCalled();
   });
 

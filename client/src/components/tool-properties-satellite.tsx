@@ -1,4 +1,12 @@
-import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
+import {
+  Fragment,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import { ArrowLeft, ArrowRight } from 'lucide-react';
 import type {
   ArrowTopology,
@@ -44,7 +52,7 @@ import {
   PopoverTitle,
   PopoverTrigger,
 } from '@/components/ui/popover';
-import { CHROME_ON_BOARD, Surface } from '@/components/ui/surface';
+import { Surface } from '@/components/ui/surface';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import {
   Tooltip,
@@ -54,39 +62,12 @@ import {
 import { useThemeStore } from '@/use-theme-store';
 import { cn, swatchBorder } from '@/lib/utils';
 
-/**
- * The quick set, held as palette slot indices rather than hex values so it
- * follows the theme the way every other swatch in the app does.
- *
- * Slot 0 is the ink swatch (black on the light canvas, white on the dark one),
- * then a spectrum — red, orange, yellow, green, blue, violet — and grey to
- * close it. Ordered by hue rather than by how often each is reached for,
- * because a row this long is scanned as a ramp: a swatch is found by where it
- * falls in the rainbow, and any other ordering makes that search fail.
- *
- * The remaining four are one click away behind the wheel that closes the row.
- */
 const QUICK_SLOTS = [0, 11, 7, 6, 9, 5, 3, 1];
 
-/**
- * Dot diameters for the four stroke presets. Deliberately not the world-unit
- * widths: those run 2→10, and a ramp that literal either starts invisible or
- * ends wider than the key it sits in. These preserve the ordering and the sense
- * of acceleration at a size that reads inside a 36px target.
- */
-const DOT_SIZES = [5, 7, 9, 11];
+const DOT_SIZES = [6, 10, 14, 18];
 
 const ARROW_KEYS = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'];
 
-/**
- * Every popover on the bar opens at one width, so the set reads as one control
- * shown several ways rather than as six differently-shaped menus. It is also
- * what lets the option rows inside divide evenly, the way the panel's did.
- *
- * The same plate as the capsules that open them. `border-0` drops the
- * popover's own hairline, since `.lg` states the edge for the whole family and
- * a border over it reads as two.
- */
 const POPOVER = 'lg lg-card w-52 gap-2 border-0 p-2';
 const ROW = 'w-full';
 /**
@@ -96,12 +77,6 @@ const ROW = 'w-full';
  */
 const ITEM = 'lg-option grow basis-0';
 
-/**
- * The quick slots under `colors`, plus the live color when it is not one of
- * them. Same rule as the old panel's grid: a swatch row with nothing selected
- * reads as "no color set", so a color chosen outside this set joins the row
- * rather than leaving it blank.
- */
 export function quickSwatches(
   colors: PaletteColor[],
   color: string,
@@ -112,27 +87,109 @@ export function quickSwatches(
     : [...quick, { name: 'Current color', value: color }];
 }
 
-/**
- * The selection chip: one fill sliding under the chosen segment of a capsule,
- * rather than a segment lighting up.
- *
- * It is inset on all four sides, so the capsule still reads as a track with
- * something in it. That inset is what the travel has to account for: the chip
- * is a segment less the two insets, so one step along is its own width plus the
- * gap it leaves, not a flat 100%. Both stay percentages of the track, because a
- * coarse pointer grows every key here to 44px and a chip sized in fixed pixels
- * would then sit half a key off.
- *
- * Shared by the three capsules on this bar — weight, colour, eraser mode — so
- * the mark cannot come to mean one thing in one of them and something else in
- * the next.
- */
+function Plated({ children, className, ...rest }: React.ComponentProps<'div'>) {
+  return (
+    <div
+      {...rest}
+      data-style-lobe=""
+      className={cn('style-control-group relative self-center', className)}
+    >
+      <span aria-hidden="true" className="style-group-plate" />
+      {children}
+    </div>
+  );
+}
+
+/** Follow the actual groups, including the shorter bars and extra colors. */
+function StylePlate() {
+  const ref = useRef<SVGSVGElement>(null);
+  const id = useId();
+  const [outline, setOutline] = useState({ path: '', width: 1, height: 1 });
+
+  useLayoutEffect(() => {
+    const svg = ref.current;
+    const bar = svg?.parentElement;
+    if (!bar) return;
+    const measure = () => {
+      const bounds = bar.getBoundingClientRect();
+      const height = bar.offsetHeight;
+      const radius = height / 2;
+      const groups = Array.from(
+        bar.querySelectorAll<HTMLElement>('[data-style-lobe]'),
+      );
+      if (!groups.length || !bounds.width) return;
+      // Compensate for the entrance animation's scale, and preserve the full
+      // silhouette while the narrow-screen viewport scrolls across it.
+      const scale = bounds.width / bar.offsetWidth;
+      const lobes = groups.map((group) => {
+        const box = group.getBoundingClientRect();
+        return {
+          left: (box.left - bounds.left) / scale + bar.scrollLeft - 8,
+          right: (box.right - bounds.left) / scale + bar.scrollLeft + 8,
+        };
+      });
+      const first = lobes[0]!;
+      const last = lobes[lobes.length - 1]!;
+      const edge = (bottom: boolean) => {
+        const y = bottom ? height : 0;
+        const neck = bottom ? height * 0.76 : height * 0.24;
+        const ordered = bottom ? [...lobes].reverse() : lobes;
+        const direction = bottom ? -1 : 1;
+        return ordered
+          .map((lobe, index) => {
+            const end = bottom ? lobe.left + radius : lobe.right - radius;
+            const next = ordered[index + 1];
+            if (!next) return `L${end},${y}`;
+            const start = bottom ? next.right - radius : next.left + radius;
+            const middle = (end + start) / 2;
+            const shoulder = radius * 0.6875;
+            const waist = radius * 0.3125;
+            return `L${end},${y} C${end + direction * shoulder},${y} ${middle - direction * waist},${neck} ${middle},${neck} S${start - direction * shoulder},${y} ${start},${y}`;
+          })
+          .join(' ');
+      };
+      const path = `M${first.left + radius},0 ${edge(false)} A${radius},${radius} 0 0 1 ${last.right - radius},${height} ${edge(true)} A${radius},${radius} 0 0 1 ${first.left + radius},0 Z`;
+      const width = last.right + first.left;
+      setOutline((previous) =>
+        previous.path === path && previous.width === width
+          ? previous
+          : { path, width, height },
+      );
+    };
+    const observer = new ResizeObserver(measure);
+    observer.observe(bar);
+    bar
+      .querySelectorAll('[data-style-lobe]')
+      .forEach((group) => observer.observe(group));
+    measure();
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <svg
+      ref={ref}
+      aria-hidden="true"
+      className="style-plate"
+      width={outline.width}
+      height={outline.height}
+    >
+      <defs>
+        <linearGradient id={id} x1="0" y1="0" x2="0" y2="1">
+          <stop className="tb-plate-top" />
+          <stop offset="1" className="tb-plate-bottom" />
+        </linearGradient>
+      </defs>
+      <path d={outline.path} fill={`url(#${id})`} />
+    </svg>
+  );
+}
+
 function SelectionChip({ index, count }: { index: number; count: number }) {
   return (
     <span
       aria-hidden="true"
       className={cn(
-        'lg-chip lg-travel pointer-events-none absolute inset-y-[3px] left-[3px] rounded-full',
+        'tb-mark lg-travel pointer-events-none absolute inset-y-[3px] left-[3px] rounded-full',
         index < 0 && 'opacity-0',
       )}
       style={{
@@ -150,31 +207,12 @@ function arrowDelta(key: string): number {
   return 0;
 }
 
-/**
- * Shuts a popover when the bar it hangs off goes away.
- *
- * The bar hides itself with opacity and `inert`, but a popover is portalled
- * out of that subtree — so one left open when the tool changes under a hotkey
- * would sit on the canvas with nothing under it to explain what it belongs to.
- */
 function useCloseWithBar(visible: boolean, close: (open: boolean) => void) {
   useEffect(() => {
     if (!visible) close(false);
   }, [visible]);
 }
 
-/**
- * One swatch, drawn as the color itself.
- *
- * The selection is the chip, not a ring: in the ramp capsule it slides
- * under the chosen swatch from wherever it was, and in the wheel's grid — where
- * a slide between two rows would mean nothing — it simply stands under it
- * (`chip`). The ring this used to wear was how a swatch showed its state with no
- * ground to change; with a ground, a ring over the chip is the state said twice.
- *
- * `relative z-10` because the capsule's lens and rim are positioned layers, and
- * a static child of one would paint behind them.
- */
 function Swatch({
   swatch,
   selected,
@@ -202,7 +240,7 @@ function Swatch({
             tabIndex={selected ? 0 : -1}
             onClick={onSelect}
             className={cn(
-              'lg-key relative z-10 flex size-7 items-center justify-center rounded-full',
+              'lg-key relative z-10 flex size-9 items-center justify-center rounded-full',
               'transition-transform duration-fast ease-out-quart motion-reduce:transition-none',
               'active:scale-95',
             )}
@@ -218,10 +256,13 @@ function Swatch({
             )}
           />
           <span
-            className="relative z-10 size-4 rounded-full border"
+            className="style-swatch relative z-10 size-5 rounded-full border"
             style={{
               backgroundColor: swatch.value,
               borderColor: swatchBorder(swatch.value),
+              boxShadow: selected
+                ? '0 0 0 2.5px var(--bg-surface), 0 0 0 4px var(--border-strong)'
+                : undefined,
             }}
           />
         </>
@@ -258,11 +299,9 @@ function ColorWheel({
           render={
             <PopoverTrigger
               aria-label="More colors"
+              data-style-lobe=""
               className={cn(
-                // Its own round capsule beside the ramp rather than a
-                // ninth column inside it: it opens something instead of
-                // choosing something, so it is not a segment the chip can land
-                'lg lg-key lg-pill relative flex size-7 items-center justify-center',
+                'style-wheel-key lg lg-key lg-pill relative flex size-9 items-center justify-center',
                 'transition-transform duration-fast ease-out-quart motion-reduce:transition-none',
                 'active:scale-95',
               )}
@@ -276,10 +315,10 @@ function ColorWheel({
             />
             <span
               aria-hidden="true"
-              className="relative z-10 size-4 rounded-full"
+              className="style-color-wheel relative z-10 size-5 rounded-full"
               style={{
                 backgroundImage:
-                  'conic-gradient(#e03131, #e16919, #f1ac4b, #4cb05e, #099268, #4ba1f1, #4465e9, #ae3ec9, #e03131)',
+                  'conic-gradient(#ff2857, #ff8b18, #ffe438, #7bd94b, #00bdd3, #3264ff, #b52fff, #ff2857)',
               }}
             />
           </>
@@ -302,9 +341,6 @@ function ColorWheel({
         <div
           role="radiogroup"
           aria-label="All colors"
-          // No sliding chip here: the chip reads as one object moving along a
-          // line, and it has nothing to say about a jump between two rows of a
-          // grid. The chosen swatch carries the chip standing still instead.
           className="grid grid-cols-4"
         >
           {colors.map((swatch) => (
@@ -325,22 +361,6 @@ function ColorWheel({
   );
 }
 
-/**
- * One property that does not earn a permanent seat on the bar: a key that
- * shows the value it currently holds, and opens the choices over it.
- *
- * A key rather than a row, because the bar has to stay one line at any width
- * and the pointer is already here — a click that lands the options directly
- * above the toolbar beats a row that pushes half the bar off a phone screen.
- * The preview is what keeps the click honest: the current fill, dash, amount
- * or typeface is legible without opening anything, so the key is only pressed
- * when the value is actually being changed.
- *
- * Open is marked the way every other chosen thing in this set is: the
- * chip, standing under the key rather than sliding — these keys open things
- * rather than choosing between each other, so there is no line for a chip to
- * travel along and at most one of them is ever open.
- */
 function StyleKey({
   label,
   hint,
@@ -366,21 +386,12 @@ function StyleKey({
             <PopoverTrigger
               aria-label={label}
               className={cn(
-                // No `tb-glyph`: the halo is what carries a glyph that has
-                // nothing under it, and this one is standing on a plate now.
-                // Two grounds is a smudge, not twice the legibility.
                 'tb-key lg-key group/key relative flex size-9 items-center justify-center rounded-full active:scale-95 motion-reduce:active:scale-100',
                 open ? 'text-fg' : 'text-fg-muted hover:text-fg',
               )}
             />
           }
         >
-          {/* The chip is a layer inset into the key, not the key's own
-              background: inset by 3 on every side, the same as the sliding chips
-              in the capsules beside it, so the plate it stands on still shows
-              around it and its specular rim never lands on the capsule's own.
-              Rounded full rather than to a radius, because the capsule holding
-              these keys is a pill — a concentric inset of a pill is a pill. */}
           <span
             aria-hidden="true"
             className={cn(
@@ -411,12 +422,6 @@ function StyleKey({
   );
 }
 
-/**
- * Stroke weight: four segments of one capsule, with the chip sliding
- * between them — one moving mark rather than four lights taking turns, which is
- * what makes the row read as a single control. Geometry and travel live in
- * `SelectionChip`, which the colour ramp and the eraser switch share.
- */
 function StrokeWeight({
   size,
   color,
@@ -445,11 +450,11 @@ function StrokeWeight({
   };
 
   return (
-    <div
+    <Plated
       role="radiogroup"
       aria-label="Stroke weight"
       onKeyDown={onKeyDown}
-      className="lg lg-pill relative grid shrink-0 grid-cols-4 self-center"
+      className="grid shrink-0 grid-cols-4"
     >
       <SelectionChip index={index} count={SIZE_OPTIONS.length} />
       {SIZE_OPTIONS.map((option, i) => (
@@ -474,8 +479,6 @@ function StrokeWeight({
               aria-hidden="true"
               className="lg-wash pointer-events-none absolute inset-[3px] rounded-full"
             />
-            {/* Painted in the live ink color, so the row previews both of the
-                bar's permanent properties at once. */}
             <span
               className="relative z-10 rounded-full border"
               style={{
@@ -491,20 +494,10 @@ function StrokeWeight({
           </TooltipContent>
         </Tooltip>
       ))}
-    </div>
+    </Plated>
   );
 }
 
-/**
- * The eraser's two modes, built exactly like the stroke weight above it: a
- * chip that slides between the segments of one capsule, so the pair reads
- * as a single switch rather than two lights.
- *
- * It rides on this bar rather than on the eraser's own button because it is
- * what the eraser is set to, and every other tool's settings are found here.
- * The eraser's bar carries nothing else — it paints no colour and no weight —
- * so the switch is the whole of it.
- */
 function EraserModeSwitch() {
   const eraserMode = useCanvasUiStore((s) => s.eraserMode);
   const setEraserMode = useCanvasUiStore((s) => s.setEraserMode);
@@ -525,11 +518,11 @@ function EraserModeSwitch() {
   };
 
   return (
-    <div
+    <Plated
       role="radiogroup"
       aria-label="Eraser mode"
       onKeyDown={onKeyDown}
-      className="lg lg-pill relative grid shrink-0 grid-cols-2 self-center"
+      className="grid shrink-0 grid-cols-2"
     >
       <SelectionChip index={index} count={ERASER_MODES.length} />
       {ERASER_MODES.map(({ mode, label, Preview }, i) => {
@@ -568,20 +561,10 @@ function EraserModeSwitch() {
           </Tooltip>
         );
       })}
-    </div>
+    </Plated>
   );
 }
 
-/**
- * The eight quick colours as a ramp, closed by the wheel holding the rest.
- *
- * One capsule holding the swatches, with the chip sliding under the chosen
- * one — the same capsule and the same chip as the stroke weights, because
- * picking a colour and picking a weight are the same kind of choice and a row
- * this long is read as a ramp either way. A grid rather than a flex row so the
- * segments divide evenly whatever the pointer has grown them to, which is what
- * the chip's travel is measured in.
- */
 function ColorRamp({
   color,
   onSelect,
@@ -594,7 +577,6 @@ function ColorRamp({
   const theme = useThemeStore((s) => s.theme);
   const swatches = quickSwatches(paletteColors(theme), color);
   const refs = useRef<(HTMLButtonElement | null)[]>([]);
-  const index = swatches.findIndex((swatch) => swatch.value === color);
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     const delta = arrowDelta(event.key);
@@ -608,23 +590,17 @@ function ColorRamp({
     refs.current[next]?.focus();
   };
 
-  // The wheel closes the ramp inside the colour group rather than standing
-  // behind a rule of its own: it is where the ramp runs out, not a separate
-  // thing the bar does. It sits just outside the capsule rather than as a last
-  // segment of it, because it opens something instead of choosing something —
-  // the chip must never be able to land on it.
   return (
-    <div className="flex shrink-0 items-center gap-1 self-center">
-      <div
+    <div className="style-color-section flex shrink-0 items-center self-center">
+      <Plated
         role="radiogroup"
         aria-label="Color"
         onKeyDown={onKeyDown}
-        className="lg lg-pill relative grid self-center"
+        className="grid"
         style={{
           gridTemplateColumns: `repeat(${swatches.length}, minmax(0, 1fr))`,
         }}
       >
-        <SelectionChip index={index} count={swatches.length} />
         {swatches.map((swatch, position) => (
           <Swatch
             key={swatch.value}
@@ -636,43 +612,12 @@ function ColorRamp({
             }}
           />
         ))}
-      </div>
+      </Plated>
       <ColorWheel color={color} setColor={onSelect} barVisible={barVisible} />
     </div>
   );
 }
 
-/**
- * Every style control the board has, as a second bar floating just above the
- * toolbar.
- *
- * It replaces the top-right style panel outright. The settings belong to what
- * the pointer is holding or has picked up, so they should land where the
- * pointer already is instead of costing a trip across the screen mid-stroke —
- * the same reason the eraser's mode selector rides on the eraser.
- *
- * A bar cannot hold eleven groups of controls in a line, so the two reached
- * for constantly stay out on it — stroke weight and colour, no click at all —
- * and the rest collapse into keys that each show their current value and open
- * their choices over the bar. What is left is one row at any width, where the
- * cost of a property is either zero clicks or one, and never a hunt.
- *
- * It is a bar in its own right, not a flange off the toolbar: same slab, same
- * corner, same shadow, separated from the toolbar by a real gap. Which means
- * the pair reads as two instruments stacked — what you are drawing with, above
- * what you are drawing with it — rather than as one tall control.
- *
- * Two things keep it tied to the bar under it despite that gap. It is shorter,
- * so it never squares up as an equal; and it left-aligns to the toolbar's
- * padding edge, which lands it over the tray whose instruments it configures.
- * Alignment is desktop-only: below `sm` the compact bar is the narrower of the
- * two, so this one centres and scrolls within the screen instead of hanging
- * off the side of a phone.
- *
- * Mounted at all times and hidden with opacity so it animates out as well as
- * in; `inert` keeps the hidden copy out of the tab order and off the a11y tree.
- * Callers must place it inside a positioned ancestor.
- */
 export function ToolPropertiesSatellite({
   activeToolId,
 }: {
@@ -680,9 +625,6 @@ export function ToolPropertiesSatellite({
 }) {
   const { visible, show, values, apply } = useStyleControls(activeToolId);
 
-  // Which set of controls to draw. Pinned to the last one that had any, so
-  // clearing the selection fades the pill out whole instead of dropping half
-  // its keys on the first frame of the close.
   const shown = useRef(show);
   if (visible) shown.current = show;
   const on = shown.current;
@@ -695,7 +637,13 @@ export function ToolPropertiesSatellite({
         barVisible={visible}
         label="Fill"
         hint="Choose how the shape's interior is painted"
-        preview={<FillPreview style={values.fill} />}
+        preview={
+          values.fill === 'none' ? (
+            <span aria-hidden="true" className="style-no-fill" />
+          ) : (
+            <FillPreview style={values.fill} />
+          )
+        }
       >
         <ToggleGroup
           className={ROW}
@@ -763,8 +711,6 @@ export function ToolPropertiesSatellite({
             value={values.opacity}
             onValueChange={apply.opacity}
           />
-          {/* Tabular, so the fader does not shuffle its own label sideways
-              as it passes 9%, 99%. */}
           <span className="w-9 shrink-0 text-right text-xs tabular-nums text-fg-muted">
             {Math.round(values.opacity * 100)}%
           </span>
@@ -1011,14 +957,7 @@ export function ToolPropertiesSatellite({
     sections.push({
       id: 'keys',
       node: (
-        // Flush in its capsule rather than padded like a toolbar group: the
-        // padded version stands 52px tall, which is the toolbar's own height,
-        // and the satellite has to stay the shorter of the two. A 36px key in a
-        // pill of the same height is concentric by construction, which is what
-        // the old 16px recess needed a stepped-down radius to fake.
-        <div className="lg lg-pill relative flex shrink-0 self-center">
-          {keys}
-        </div>
+        <Plated className="style-detail-group flex shrink-0">{keys}</Plated>
       ),
     });
   }
@@ -1027,18 +966,10 @@ export function ToolPropertiesSatellite({
     <div
       aria-hidden={!visible}
       inert={!visible}
-      // The rise and the fade live in `.style-bar-motion` rather than in
-      // utilities here. They have to read the `translate` the centring below
-      // writes, and a transition that spans both channels is a rule, not a
-      // class list.
       data-visible={visible}
       className={cn(
-        'absolute bottom-full mb-3.5 w-max max-w-[calc(100vw-1rem)]',
-        // `left-1.5` is the toolbar's own `p-1.5`, so the two left edges line
-        // up exactly — a landmark on the bar rather than an offset from its
-        // middle. Centred below `sm`, where this pill can outgrow the compact
-        // bar and would otherwise run off the screen.
-        'left-1/2 -translate-x-1/2 sm:left-1.5 sm:translate-x-0',
+        'absolute bottom-full mb-2 w-max max-w-[calc(100vw-1rem)]',
+        'left-1/2 -translate-x-1/2',
         'style-bar-motion',
       )}
     >
@@ -1048,22 +979,13 @@ export function ToolPropertiesSatellite({
         role="group"
         aria-label="Style controls"
         className={cn(
-          // `items-stretch` so the rules between the sections can run the full
-          // depth of the pill; each section re-centres its own contents.
-          // Round, and with no card, like the bar it rides on: the two are
-          // one piece of chrome seen at two heights, so they cannot round or
-          // fill by different rules. What is left of the pill is its
-          // contents — the washes under the switches, and the glyphs.
-          'flex items-stretch gap-1 rounded-full py-1 px-1.5 [--tb-pad:0.25rem]',
-          // Below `sm` a wide subject (mixed selection, an arrow) can outrun a
-          // phone's width, so the bar scrolls rather than reaching past the
-          // screen. `overflow-y-hidden` is what keeps that from also opening a
-          // vertical scroller for the 4px the rules bleed into the padding.
-          'max-sm:overflow-x-auto max-sm:overflow-y-hidden',
+          'border-0 bg-transparent shadow-none',
+          'style-reference relative isolate flex items-center',
+          'max-sm:overflow-x-auto max-sm:overflow-y-hidden max-sm:py-2',
           'max-sm:[scrollbar-width:none] max-sm:[&::-webkit-scrollbar]:hidden',
-          CHROME_ON_BOARD,
         )}
       >
+        <StylePlate key={sections.map((section) => section.id).join('-')} />
         {sections.map((section) => (
           <Fragment key={section.id}>{section.node}</Fragment>
         ))}

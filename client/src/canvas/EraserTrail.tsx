@@ -1,6 +1,7 @@
 import { memo, useEffect, useMemo, useRef } from 'react';
 import { usePresenceStore } from '@/collab/use-presence-store';
-import { cameraToTransform, type Camera } from './camera';
+import { type Camera } from './camera';
+import { useCameraTransform } from './use-camera-interaction';
 import { getInkPathData } from './shapes/ink';
 import { useDocumentStore } from './use-document-store';
 import {
@@ -69,6 +70,7 @@ export const EraserScribblePath = memo(function EraserScribblePath({
  * the remote client's local pending-delete set is shared document state.
  */
 export function EraserTrail({ camera }: { camera: Camera }) {
+  const transform = useCameraTransform(camera);
   const localScribbles = useEraserTrailStore((s) => s.scribbles);
   const seq = useEraserTrailStore((s) => s.seq);
   const peers = usePresenceStore((s) => s.peers);
@@ -107,7 +109,7 @@ export function EraserTrail({ camera }: { camera: Camera }) {
           aria-hidden="true"
           className="pointer-events-none absolute inset-0 z-[var(--z-canvas-indicator)] h-full w-full"
         >
-          <g transform={cameraToTransform(camera)}>
+          <g transform={transform}>
             {localScribbles.map((scribble) => (
               <EraserScribblePath
                 key={scribble.id}
@@ -125,7 +127,7 @@ export function EraserTrail({ camera }: { camera: Camera }) {
           aria-hidden="true"
           className="pointer-events-none absolute inset-0 z-[var(--z-canvas-collaborator)] h-full w-full"
         >
-          <g transform={cameraToTransform(camera)}>
+          <g transform={transform}>
             {remote.map(({ key, color, scribble }) => (
               <EraserScribblePath
                 key={key}

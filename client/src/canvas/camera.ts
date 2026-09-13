@@ -115,31 +115,47 @@ export function worldToScreen(world: Point, camera: Camera): Point {
  * SVG transform for the world-space root `<g>`. A world point (wx, wy) maps to
  * ((wx - x) * z, (wy - y) * z) in screen pixels, matching {@link worldToScreen}.
  *
- * The translate components are snapped to the device-pixel grid (ε(s)) so the
- * composited shape layer's origin lands on a physical pixel — the standard
- * mitigation for blurry edges / jitter at fractional zoom (notably in Safari).
- * Hit-testing still uses the exact, un-snapped math in {@link screenToWorld}, so
- * this adds at most a sub-device-pixel discrepancy with the overlays.
+ * `snap` lands the translate on the device-pixel grid — see
+ * {@link cameraTranslation}. Hit-testing always uses the exact, un-snapped math
+ * in {@link screenToWorld}, so snapping adds at most a sub-device-pixel
+ * discrepancy against anything positioned from that.
  */
-export function cameraToTransform(camera: Camera): string {
-  const { e, f } = cameraTranslation(camera);
+export function cameraToTransform(camera: Camera, snap = true): string {
+  const { e, f } = cameraTranslation(camera, snap);
   return `matrix(${camera.z}, 0, 0, ${camera.z}, ${e}, ${f})`;
 }
 
 /**
- * The device-pixel-snapped translate components of {@link cameraToTransform}.
+ * The translate components of {@link cameraToTransform}, snapped to the
+ * device-pixel grid when `snap`.
  *
- * Exposed because the camera snapshot has to place a bitmap of the shape layer
- * exactly where the shape layer itself was: reproducing the snap by hand would
- * leave the capture up to half a device pixel out, which reads as a jump at the
- * start and end of every gesture.
+ * Snapping makes the layer's origin land on a physical pixel — the standard
+ * mitigation for blurry edges at fractional zoom (notably in Safari). But it is
+ * a *quantizer*, and while the camera is in motion that is the wrong trade: at
+ * dpr 2 the layer advances in 0.5 CSS-px steps, so a slow pan alternates between
+ * moving and not moving, and the tail of an inertial coast (final steps are well
+ * under a tenth of a pixel) freezes several frames before it comes to rest.
+ * Crispness is something you look at while still; stepping is something you see
+ * while moving. So callers pass `snap: false` for the duration of a camera
+ * gesture and `true` once it settles — `useCameraTransform` in
+ * `use-camera-interaction.ts` is the single place that decides which.
+ *
+ * Every consumer of the world transform must agree on the answer within a
+ * frame, or the overlays drift against the shapes they annotate; that is why
+ * this is one shared hook rather than a judgement call per layer.
  */
-export function cameraTranslation(camera: Camera): { e: number; f: number } {
+export function cameraTranslation(
+  camera: Camera,
+  snap = true,
+): { e: number; f: number } {
+  const e = -camera.x * camera.z;
+  const f = -camera.y * camera.z;
+  if (!snap) return { e, f };
   const dpr =
     (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
   return {
-    e: Math.round(-camera.x * camera.z * dpr) / dpr,
-    f: Math.round(-camera.y * camera.z * dpr) / dpr,
+    e: Math.round(e * dpr) / dpr,
+    f: Math.round(f * dpr) / dpr,
   };
 }
 

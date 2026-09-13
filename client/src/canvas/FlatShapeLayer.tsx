@@ -1,7 +1,7 @@
 import { memo, useLayoutEffect, useMemo, useRef } from 'react';
 import { computed, react, transact } from '@tldraw/state';
 import type { Shape } from '@whiteboard/shared';
-import { cameraToTransform } from './camera';
+import { cameraToTransform, type Camera } from './camera';
 import { CanvasScene, type SceneNode } from './engine/scene';
 import { useSignalValue } from './engine/use-signal';
 import { subscribeDocumentChanges } from './engine/document-changes';
@@ -17,6 +17,7 @@ import {
 } from './frame-geometry';
 import { inkPaint } from './ink-color';
 import { useDocumentStore, spatialIndex } from './use-document-store';
+import { useCameraInteraction } from './use-camera-interaction';
 import { useCameraStore } from './use-camera-store';
 import { useSelectionStore } from './use-selection-store';
 import { useHiddenStore } from './use-hidden-store';
@@ -71,6 +72,13 @@ export const FlatShapeLayer = memo(function FlatShapeLayer({
       });
     };
     const syncCamera = () => scene.camera.set(useCameraStore.getState().camera);
+    const positionLayer = (camera: Camera) => {
+      if (!layer.current) return;
+      layer.current.style.transform = cameraToTransform(
+        camera,
+        !useCameraInteraction.getState().isMoving,
+      );
+    };
     transact(() => {
       scene.apply(useDocumentStore.getState().shapesById, null);
       syncCamera();
@@ -92,10 +100,16 @@ export const FlatShapeLayer = memo(function FlatShapeLayer({
       useVideoPlayingStore.subscribe(syncUi),
       useFrameEditingStore.subscribe(syncUi),
       useLiveStrokeStore.subscribe(syncUi),
+      // Device-pixel snapping is dropped while the camera moves and restored
+      // when it settles, matching `useCameraTransform` — see
+      // `cameraTranslation`. This layer is positioned imperatively, so it takes
+      // the settle signal as its own subscription rather than a re-render; both
+      // paths read the same `isMoving`, so they cannot land on different
+      // answers for the same frame.
       react('position camera layer', () => {
-        const transform = cameraToTransform(scene.camera.get());
-        if (layer.current) layer.current.style.transform = transform;
+        positionLayer(scene.camera.get());
       }),
+      useCameraInteraction.subscribe(() => positionLayer(scene.camera.get())),
       react('cull page', () => {
         const visible = scene.visible.get();
         for (const id of previousVisible)

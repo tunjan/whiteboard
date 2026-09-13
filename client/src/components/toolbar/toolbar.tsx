@@ -3,7 +3,7 @@ import { ChevronDownGlyph, ChevronUpGlyph } from '@/components/ui/glyphs';
 import '@/canvas/tools/register';
 import { useToolStore } from '@/canvas/use-tool-store';
 import { Button } from '@/components/ui/button';
-import { HOVER_REVEAL, Surface } from '@/components/ui/surface';
+import { Surface } from '@/components/ui/surface';
 import { ToolPropertiesSatellite } from '@/components/tool-properties-satellite';
 import {
   Tooltip,
@@ -15,17 +15,19 @@ import { useRovingToolbar } from '@/hooks/use-roving-toolbar';
 import { cn } from '@/lib/utils';
 import { CompactMoreMenu } from './toolbar-compact-menu';
 import {
-  chromeButtonClass,
+  hueVars,
   COMPACT_PRIMARY_TOOLS,
   INKING_TOOLS,
   NAVIGATE_TOOLS,
   SHAPE_TOOLS,
   STEM_TOOLS,
+  toolKeyClass,
   TOOL_GROUP,
 } from './toolbar-constants';
 import { InsertMenu } from './toolbar-insert-menu';
 import { InstrumentTray } from './toolbar-instruments';
 import { ToolLockButton } from './toolbar-lock-button';
+import { ToolbarPlate } from './toolbar-plate';
 import { ShapeMenu } from './toolbar-shape-menu';
 import { ToolButton } from './toolbar-tool-button';
 
@@ -81,15 +83,15 @@ export function Toolbar() {
           onFocusCapture={toolbar.onFocusCapture}
           className={cn(
             'group/chrome relative flex w-max max-w-[calc(100vw-1rem)] items-center',
-            'toolbar-bar rounded-full',
-            'p-1',
+            'toolbar-reference border-0 bg-transparent shadow-none px-2 py-1',
             'origin-bottom transition-[opacity,transform] duration-slow ease-out-quart',
             'motion-reduce:transition-none',
             hidden &&
               'pointer-events-none translate-y-[calc(100%+0.75rem)] scale-[0.96] opacity-0',
           )}
         >
-          <div className="toolbar-desktop relative z-10 items-stretch gap-2.5">
+          <ToolbarPlate />
+          <div className="toolbar-desktop relative z-10 items-stretch gap-1">
             <div role="group" aria-label="Navigate" className={TOOL_GROUP}>
               {NAVIGATE_TOOLS.map((id) => (
                 <ToolButton key={id} toolId={id} />
@@ -112,12 +114,7 @@ export function Toolbar() {
               <ToolButton toolId="comment" />
               <InsertMenu active={activeToolId === 'sticker'} />
             </div>
-            <div
-              className={cn(
-                'ms-0.5 flex items-center gap-0.5 self-center',
-                HOVER_REVEAL,
-              )}
-            >
+            <div className="ms-0.5 flex items-center gap-0.5 self-center">
               <ToolLockButton />
               <Tooltip>
                 <TooltipTrigger
@@ -129,7 +126,8 @@ export function Toolbar() {
                       tabIndex={-1}
                       aria-label="Hide toolbar"
                       onClick={hideToolbar}
-                      className={chromeButtonClass()}
+                      style={hueVars()}
+                      className={toolKeyClass()}
                     />
                   }
                 >

@@ -1,6 +1,7 @@
 import { useShallow } from 'zustand/react/shallow';
 import type { Shape } from '@whiteboard/shared';
-import { cameraToTransform, type Camera } from '@/canvas/camera';
+import { type Camera } from '@/canvas/camera';
+import { useCameraTransform } from '@/canvas/use-camera-interaction';
 import { getSelectionInfo } from '@/canvas/selection-geometry';
 import { useDocumentStore } from '@/canvas/use-document-store';
 import { usePresenceStore } from '@/collab/use-presence-store';
@@ -14,6 +15,7 @@ const NO_SHAPES: Shape[] = [];
  * dashed outline; a multi-shape selection adds the union box around them.
  */
 export function PeerSelectionLayer({ camera }: { camera: Camera }) {
+  const transform = useCameraTransform(camera);
   const peers = usePresenceStore((s) => s.peers);
   const currentPageId = useDocumentStore((s) => s.currentPageId);
   // Only the shapes peers actually have selected — usually a handful.
@@ -35,7 +37,7 @@ export function PeerSelectionLayer({ camera }: { camera: Camera }) {
   const getShape = (id: string) => shapes[id];
   return (
     <svg className="pointer-events-none absolute inset-0 z-[var(--z-canvas-indicator)] h-full w-full">
-      <g transform={cameraToTransform(camera)}>
+      <g transform={transform}>
         {peers.map((peer) => {
           if (peer.page && peer.page !== currentPageId) return null;
           const ids = (peer.selection ?? []).filter((id) => shapes[id]);

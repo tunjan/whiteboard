@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import { InputsManager } from './inputs-manager';
+import { PanScheduler } from './pan-scheduler';
 import { useCameraStore } from './use-camera-store';
 
 function isTypingTarget(target: EventTarget | null): boolean {
@@ -51,12 +52,15 @@ export function useSpacePan(disabled = false) {
   // Frame-rate-independent release velocity, so a flick throws the same
   // distance on a 60 and a 120 Hz display.
   const inputs = useRef(new InputsManager());
+  // One camera write per frame, however fast the pointer reports.
+  const pan = useRef(new PanScheduler());
 
   useEffect(() => {
     if (disabled) {
       setSpaceDown(false);
       setPanning(false);
       last.current = null;
+      pan.current.cancel();
     }
     const onKeyDown = (e: KeyboardEvent) => {
       if (disabled) return;
@@ -100,7 +104,7 @@ export function useSpacePan(disabled = false) {
       last.current = { x: e.clientX, y: e.clientY };
       inputs.current.update({ x: e.clientX, y: e.clientY }, e.timeStamp);
       // Drag right -> camera moves left so content follows the cursor.
-      useCameraStore.getState().panByScreen(-dx, -dy);
+      pan.current.push(-dx, -dy);
     },
     [disabled, isPanning],
   );
@@ -120,6 +124,8 @@ export function useSpacePan(disabled = false) {
         { x: e.clientX, y: e.clientY },
         e.timeStamp,
       );
+      // Before the coast reads the camera or starts — see `PanScheduler.flush`.
+      pan.current.flush();
       useCameraStore.getState().slideCamera(velocity);
       inputs.current.reset();
     },
@@ -129,6 +135,9 @@ export function useSpacePan(disabled = false) {
   const cancel = useCallback(() => {
     last.current = null;
     inputs.current.reset();
+    // The motion already happened under the finger; a cancelled gesture should
+    // keep it rather than snap back by up to a frame's worth of drag.
+    pan.current.flush();
     setPanning(false);
   }, []);
 

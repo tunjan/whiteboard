@@ -8,7 +8,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-import { toolButtonClass, TOOL_ICON } from './toolbar-constants';
+import { hueVars, toolKeyClass, TOOL_ICON } from './toolbar-constants';
 
 interface ToolButtonProps {
   toolId: string;
@@ -29,6 +29,7 @@ export function ToolButton({ toolId }: ToolButtonProps) {
         render={
           <Button
             data-toolbar-item
+            data-tool={tool.id}
             variant="ghost"
             size="icon-md"
             tabIndex={active ? 0 : -1}
@@ -36,7 +37,8 @@ export function ToolButton({ toolId }: ToolButtonProps) {
             aria-label={tool.label}
             aria-current={active ? 'true' : undefined}
             aria-keyshortcuts={tool.hotkey?.toUpperCase()}
-            className={toolButtonClass(active)}
+            style={hueVars(tool.id)}
+            className={toolKeyClass()}
           />
         }
       >

@@ -31,7 +31,8 @@ import {
   menuItemClass,
   TOOL_FLYOUT,
   TOOL_ICON,
-  toolButtonClass,
+  hueVars,
+  toolKeyClass,
 } from './toolbar-constants';
 
 const BASIC_SHAPES = [
@@ -46,13 +47,7 @@ interface ShapeMenuProps {
   activeToolId: string;
   lastShapeId: string;
   onLastShapeChange: (toolId: string) => void;
-  /**
-   * `key` is a glyph on the bar, which is what the compact bar wants. `tray`
-   * stands the shapes in the instrument tray as an object at instrument
-   * scale — a square, an arrow and a circle lying with the pens — so the wide
-   * bar has one run of things you pick up rather than a run of pens and then
-   * a picture of some shapes.
-   */
+
   variant?: 'key' | 'tray';
 }
 
@@ -95,14 +90,8 @@ export function ShapeMenu({
     setOpen(false);
   };
 
-  // In the tray the resting state is the cluster drawn at instrument scale.
-  // Once a shape is chosen the cluster gives way to that shape alone, drawn
-  // large in the same slot — the tray always shows what it is holding.
-  // `pt-6` re-centres against the slot: the clipping window starts 24px above
-  // it and ends level with its foot, so the raw middle of that window sits
-  // high.
   const trayArt = active ? (
-    <span className="relative flex h-full w-full items-center justify-center pt-6 text-fg transition-all duration-slow ease-out-quart motion-reduce:transition-none">
+    <span className="relative flex h-full w-full items-center justify-center text-fg transition-transform duration-slow ease-out-quart motion-reduce:transition-none">
       {isPolygon ? (
         <MiniShape kind={polygonKind} size={26} />
       ) : (
@@ -110,7 +99,12 @@ export function ShapeMenu({
       )}
     </span>
   ) : (
-    <ShapeClusterObject className="relative translate-y-3.5 transition-transform duration-slow ease-out-quart group-hover/slot:translate-y-2 motion-reduce:transition-none" />
+    <ShapeClusterObject
+      className={cn(
+        'relative text-[#967c5c] transition-transform duration-slow ease-out-quart',
+        'group-hover/slot:translate-y-0 motion-reduce:transition-none',
+      )}
+    />
   );
 
   const trigger =
@@ -146,13 +140,11 @@ export function ShapeMenu({
               tabIndex={active ? 0 : -1}
               aria-label={label}
               aria-current={active ? 'true' : undefined}
-              className={toolButtonClass(active)}
+              style={hueVars('shapes')}
+              className={toolKeyClass()}
             />
           }
         >
-          {/* Both arms at the same 18px as every other glyph on the bar: the
-              trigger changes what it draws when you pick a shape, not how
-              heavy it is. */}
           {isPolygon ? (
             <MiniShape kind={polygonKind} size={18} />
           ) : (
@@ -172,7 +164,13 @@ export function ShapeMenu({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       {variant === 'tray' ? (
-        <div className={INSTRUMENT_SLOT}>{trigger}</div>
+        <div
+          className={cn(INSTRUMENT_SLOT, 'tb-shapes-slot')}
+          data-held={active ? 'true' : undefined}
+          style={hueVars('shapes')}
+        >
+          {trigger}
+        </div>
       ) : (
         trigger
       )}

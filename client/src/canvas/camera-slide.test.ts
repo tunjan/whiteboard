@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   SLIDE_FRICTION,
+  SLIDE_MAX_STEP_MS,
+  SLIDE_REFERENCE_FRAME_MS,
   SLIDE_MAX_SPEED,
   SLIDE_MAX_ZOOM_RATE,
   SLIDE_MIN_RELEASE_SPEED,
@@ -50,30 +52,76 @@ describe('beginCameraSlide', () => {
 describe('stepCameraSlide', () => {
   it('travels along the release direction', () => {
     const slide = beginCameraSlide({ x: 1, y: 0 })!;
-    const { dx, dy } = stepCameraSlide(slide, 16);
-    expect(dx).toBeCloseTo(16);
+    const { dx, dy } = stepCameraSlide(slide, SLIDE_REFERENCE_FRAME_MS);
+    // Just under the full 16.67px the opening speed would cover, because the
+    // speed is already falling within the step.
+    expect(dx).toBeGreaterThan(15.5);
+    expect(dx).toBeLessThan(SLIDE_REFERENCE_FRAME_MS);
     expect(dy).toBe(0);
   });
 
-  it('sheds a fixed fraction of the speed per frame, whatever the frame took', () => {
+  it('sheds the friction per reference frame of elapsed time, not per call', () => {
     const start = beginCameraSlide({ x: 1, y: 0 })!;
-    expect(stepCameraSlide(start, 16).next!.speed).toBeCloseTo(
-      start.speed * (1 - SLIDE_FRICTION),
-    );
-    expect(stepCameraSlide(start, 8).next!.speed).toBeCloseTo(
-      start.speed * (1 - SLIDE_FRICTION),
+    expect(
+      stepCameraSlide(start, SLIDE_REFERENCE_FRAME_MS).next!.speed,
+    ).toBeCloseTo(start.speed * (1 - SLIDE_FRICTION));
+    // Half the elapsed time sheds half the friction (in log terms), so two
+    // 120Hz frames land exactly where one 60Hz frame does.
+    expect(
+      stepCameraSlide(start, SLIDE_REFERENCE_FRAME_MS / 2).next!.speed,
+    ).toBeCloseTo(start.speed * Math.sqrt(1 - SLIDE_FRICTION));
+  });
+
+  it('splits a step without changing where it lands', () => {
+    const slide = beginCameraSlide({ x: 1, y: 0 }, 0.004)!;
+    const whole = stepCameraSlide(slide, 20);
+    const first = stepCameraSlide(slide, 10);
+    const second = stepCameraSlide(first.next!, 10);
+    expect(first.dx + second.dx).toBeCloseTo(whole.dx);
+    expect(first.zoomFactor * second.zoomFactor).toBeCloseTo(whole.zoomFactor);
+    expect(second.next!.speed).toBeCloseTo(whole.next!.speed);
+    expect(second.next!.zoomRate).toBeCloseTo(whole.next!.zoomRate);
+  });
+
+  it('covers the same ground in the same time at any refresh rate', () => {
+    const coast = (hz: number) => {
+      let slide = beginCameraSlide({ x: 1.5, y: 0 });
+      let distance = 0;
+      let elapsed = 0;
+      while (slide && elapsed < 10_000) {
+        const step = stepCameraSlide(slide, 1000 / hz);
+        distance += step.dx;
+        elapsed += 1000 / hz;
+        slide = step.next;
+      }
+      return { distance, elapsed };
+    };
+    const baseline = coast(60);
+    for (const hz of [90, 120, 144, 240]) {
+      const run = coast(hz);
+      expect(run.distance).toBeCloseTo(baseline.distance, 1);
+      // Within a frame of the baseline: a coast can only come to rest on a
+      // frame boundary, so the last step's width is the remaining slack.
+      expect(Math.abs(run.elapsed - baseline.elapsed)).toBeLessThan(
+        SLIDE_REFERENCE_FRAME_MS,
+      );
+    }
+  });
+
+  it('clamps a stalled frame so a hitch cannot teleport the camera', () => {
+    const slide = beginCameraSlide({ x: 1, y: 0 })!;
+    expect(stepCameraSlide(slide, 5_000).dx).toBe(
+      stepCameraSlide(slide, SLIDE_MAX_STEP_MS).dx,
     );
   });
 
   it('scales the zoom exponentially over the elapsed time', () => {
     const slide = beginCameraSlide({ x: 0, y: 0 }, 0.004)!;
-    expect(stepCameraSlide(slide, 16).zoomFactor).toBeCloseTo(
-      Math.exp(0.004 * 16),
-    );
-    // Twice the frame, twice the log-zoom: half the frame rate lands the same
-    // scale change per frame regardless of when the frame is delivered.
-    expect(stepCameraSlide(slide, 32).zoomFactor).toBeCloseTo(
-      stepCameraSlide(slide, 16).zoomFactor ** 2,
+    expect(stepCameraSlide(slide, 16).zoomFactor).toBeGreaterThan(1);
+    // Twice the elapsed time is more than twice the log-zoom would be if the
+    // rate held, but less than it — the rate is decaying through the step.
+    expect(stepCameraSlide(slide, 32).zoomFactor).toBeLessThan(
+      stepCameraSlide(slide, 16).zoomFactor ** 2 * 1.001,
     );
   });
 

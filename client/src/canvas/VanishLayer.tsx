@@ -1,4 +1,5 @@
-import { cameraToTransform, type Camera } from './camera';
+import { type Camera } from './camera';
+import { useCameraTransform } from './use-camera-interaction';
 import { ShapeView } from './ShapeView';
 import { useVanishStore } from './use-vanish-store';
 
@@ -16,11 +17,12 @@ import { useVanishStore } from './use-vanish-store';
  * eye is following.
  */
 export function VanishLayer({ camera }: { camera: Camera }) {
+  const transform = useCameraTransform(camera);
   const ghosts = useVanishStore((s) => s.ghosts);
   if (ghosts.length === 0) return null;
   return (
     <svg className="pointer-events-none absolute inset-0 z-[var(--z-canvas-shapes)] h-full w-full">
-      <g transform={cameraToTransform(camera)}>
+      <g transform={transform}>
         {ghosts.map((ghost) => (
           // The animated opacity rides on this wrapper; `ShapeView` composites
           // the shape's own resolved opacity inside it, so a half-transparent

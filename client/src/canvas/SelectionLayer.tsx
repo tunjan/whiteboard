@@ -1,7 +1,8 @@
 import { useShallow } from 'zustand/react/shallow';
 import type { Shape } from '@whiteboard/shared';
 import type { Camera } from './camera';
-import { cameraToTransform, worldToScreen } from './camera';
+import { worldToScreen } from './camera';
+import { useCameraTransform } from './use-camera-interaction';
 import {
   getSelectionInfo,
   HANDLE_HIT_SCREEN,
@@ -40,6 +41,7 @@ interface SelectionLayerProps {
  * they can advertise the rotation cursor.
  */
 export function SelectionLayer({ camera }: SelectionLayerProps) {
+  const transform = useCameraTransform(camera);
   const selectedIds = useSelectionStore((s) => s.selectedIds);
   const marquee = useSelectionStore((s) => s.marquee);
   const snapGuides = useSelectionStore((s) => s.snapGuides);
@@ -98,7 +100,7 @@ export function SelectionLayer({ camera }: SelectionLayerProps) {
       {/* Conformal outlines, drawn in world space so curves stay exact; the
           stroke itself is screen-constant via non-scaling-stroke. */}
       {traced.length > 0 && (
-        <g transform={cameraToTransform(camera)} fill="none">
+        <g transform={transform} fill="none">
           {traced.map((t) => (
             <path
               key={t.id}
