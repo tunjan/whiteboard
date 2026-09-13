@@ -3,6 +3,7 @@ import {
   CircleDot,
   Crosshair,
   Grid2x2,
+  Map,
   Maximize2,
   Minus,
   Plus,
@@ -48,6 +49,8 @@ interface CanvasControlsProps {
   onZoomOut: () => void;
   onZoomReset: () => void;
   onZoomToFit: () => void;
+  minimapVisible: boolean;
+  onMinimapToggle: () => void;
   equations: Array<{ id: string; label: string; locked: boolean }>;
   onEquationSelect: (id: string) => void;
   disabled?: boolean;
@@ -96,6 +99,8 @@ export function CanvasControls({
   onZoomOut,
   onZoomReset,
   onZoomToFit,
+  minimapVisible,
+  onMinimapToggle,
   equations,
   onEquationSelect,
   disabled = false,
@@ -106,7 +111,7 @@ export function CanvasControls({
   return (
     <div
       data-ui-layer
-      className="absolute right-[env(safe-area-inset-right)] bottom-[env(safe-area-inset-bottom)] z-[var(--z-canvas-hud)] max-sm:bottom-[calc(4rem+env(safe-area-inset-bottom))] [@media(pointer:coarse)]:bottom-[calc(7rem+env(safe-area-inset-bottom))] select-none"
+      className="absolute right-[env(safe-area-inset-right)] bottom-[var(--wb-inset-bottom)] z-[var(--z-canvas-hud)] max-sm:bottom-[calc(4rem+var(--wb-inset-bottom))] [@media(pointer:coarse)]:bottom-[calc(7rem+var(--wb-inset-bottom))] select-none"
     >
       <TooltipProvider delay={300}>
         <Surface
@@ -163,10 +168,25 @@ export function CanvasControls({
             variant="ghost"
             size="icon-sm"
             label="Zoom to fit"
+            shortcut="Shift+1"
             disabled={disabled}
             onClick={onZoomToFit}
           >
             <Maximize2 />
+          </ControlButton>
+
+          <ControlButton
+            variant="ghost"
+            size="icon-sm"
+            label={minimapVisible ? 'Hide overview' : 'Show overview'}
+            // Pressed reads as a fill, never as a lift: chrome on the board has
+            // no relief to add to.
+            className="aria-pressed:bg-tb-track aria-pressed:text-fg"
+            aria-pressed={minimapVisible}
+            disabled={disabled}
+            onClick={onMinimapToggle}
+          >
+            <Map />
           </ControlButton>
 
           {equations.length ? (

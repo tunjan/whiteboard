@@ -35,7 +35,7 @@ export function UndoControls({
   return (
     <div
       data-ui-layer
-      className="absolute left-[env(safe-area-inset-left)] bottom-[env(safe-area-inset-bottom)] z-[var(--z-canvas-hud)] max-sm:bottom-[calc(4rem+env(safe-area-inset-bottom))] [@media(pointer:coarse)]:bottom-[calc(7rem+env(safe-area-inset-bottom))] select-none"
+      className="absolute left-[env(safe-area-inset-left)] bottom-[var(--wb-inset-bottom)] z-[var(--z-canvas-hud)] max-sm:bottom-[calc(4rem+var(--wb-inset-bottom))] [@media(pointer:coarse)]:bottom-[calc(7rem+var(--wb-inset-bottom))] select-none"
     >
       <TooltipProvider delay={300}>
         <Surface

@@ -55,55 +55,55 @@ export const COMPACT_MORE_TOOLS = [
 export const TOOL_GROUP = 'flex items-center gap-0.5 p-1';
 
 /**
- * The selected tool: the one key on the bar drawn as a solid chip, inverted
- * out of the slab.
+ * The selected tool: the `--tb-chip` fill, plus the ink stepping up from
+ * secondary to full. Fill and ink both move, which is what keeps it a clear
+ * step past the hover track without a second kind of mark.
  *
- * Selection is still a change of plane — nothing here is raised or sunk, since
- * a shadow under a key would compete with the instruments, the only things on
- * the bar meant to read as objects. What changed is which way the plane moves.
- * A selected key used to be its recess filled back to white; with the recesses
- * gone there is nothing left to fill, and white on a white slab is nothing at
- * all. So the fill goes the other way, to the darkest ink the theme has, and
- * inverts the glyph on top of it.
- *
- * It still costs the bar no colour, which is the part that mattered: the ink
- * swatches, the instruments and the sticker key are spending colour already.
+ * Same fill the style pill marks its chosen option with, so a chosen tool and
+ * a chosen stroke weight read the same. No border, no inset hairline, no lift:
+ * nothing on this bar is raised, and a cast shadow under a key would compete
+ * with the instruments, the only things here meant to read as objects.
  */
 export const TOOL_ACTIVE =
-  'border-transparent bg-fg text-surface hover:bg-fg hover:text-surface active:bg-fg active:text-surface';
+  'border-transparent bg-tb-chip text-fg hover:bg-tb-chip hover:text-fg active:bg-tb-chip';
 
 /**
  * Engaged but not selected — tool lock, and a shape already chosen inside the
- * shape menu. Outlined rather than filled: a fill means "this is the tool the
- * pointer is holding", and only one key on the bar may claim that at a time.
- * The pale fill sits about where the recess does, so on the bar this reads as
- * a ruled key rather than a second selection, and it still reads where it is
- * used off the bar, inside the insert popover, on white.
+ * shape menu. The track fill rather than the chip: the chip means
+ * "this is the tool the pointer is holding", and only one key on the bar may
+ * claim that at a time. Half a step instead of a whole one, held rather than
+ * hovered, which is what leaves the two distinguishable side by side.
+ *
+ * It keeps a hairline so it still reads inside the insert popover, where a
+ * fill this light is nothing at all.
  */
 export const TOOL_PRESSED =
-  'border-border-strong bg-panel text-fg hover:bg-panel active:bg-panel/90';
+  'border-border-strong bg-tb-track text-fg hover:bg-tb-track active:bg-tb-track';
 
 /**
- * Idle keys carry nothing at all — no chip, no border, no card underneath.
- * They are a glyph on the board, so they take the halo (`tb-glyph`) that keeps
- * them off whatever has been drawn there, and they are drawn a step darker
- * than they used to be: `fg-muted` was a tone chosen against a white slab, and
- * there is no slab now. Hover fills a wash under the key.
+ * Idle keys carry nothing at all — no fill, no border, nothing of their own.
+ * What they stand on is the bar's own ground, which is why they carry no
+ * `tb-glyph` halo: the halo is what keeps a glyph legible when there is
+ * nothing under it, and a halo over a ground is two grounds, which is a smudge.
  *
- * There is a single idle state now. It used to fork, because a key in a recess
- * hovered toward white while a key on the bar's slab had to go the other way,
- * and neither surface is left.
+ * Hover is the track fill arriving under the pointer, a step short of the
+ * selected key's chip.
  */
 export const TOOL_IDLE =
-  'tb-glyph border-transparent bg-transparent text-fg-secondary hover:bg-tb-track hover:text-fg active:bg-tb-track';
+  'border-transparent bg-transparent text-fg-secondary hover:bg-tb-track hover:text-fg active:bg-tb-track';
 
 /**
  * Round, because the bar is. Every key is a circle on a pill, and the flyouts
  * they open repeat it — one radius on the whole family instead of a ladder of
  * four that only held while the boxes were nested.
+ *
+ * `relative z-10` is what keeps a key above the plate's two rim layers, which
+ * are positioned and would otherwise paint over it. No easing utility: `.tb-key`
+ * owns the timing, because only `transform` springs and a per-property list is
+ * a rule rather than a class.
  */
 export const TOOL_GEOMETRY =
-  'tb-key relative group/button size-9 min-w-9 rounded-full p-0 duration-base ease-out-quart active:scale-[0.92] motion-reduce:active:scale-100';
+  'tb-key relative z-10 group/button size-9 min-w-9 rounded-full p-0 duration-base active:scale-[0.92] motion-reduce:active:scale-100';
 
 export function toolButtonClass(active: boolean, pressed = false) {
   return cn(
@@ -126,18 +126,44 @@ export function chromeButtonClass(pressed = false) {
  * A key in one of the bar's flyouts — the shapes grid, the sticker grid.
  * Stated once because it was stated four times, and three of those had drifted
  * apart on radius, on hover ink and on whether they had a pressed state at all.
+ *
+ * `rounded-[0.875rem]` rather than a named step: the flyout is an `lg-card`
+ * (22px) padded by 8px, and a key concentric inside it is 22 − 8 = 14. A
+ * radius picked off the scale instead leaves the gap between key and corner
+ * fatter at the corners than along the sides, which is the tell that two boxes
+ * were rounded separately rather than nested.
+ *
+ * The fills are the bar's: these grids sit on the same plate, so a chosen key
+ * takes the chip fill and a hovered one the track, exactly as on the bar.
  */
 export function menuItemClass(selected: boolean) {
   return cn(
-    'size-10 rounded-xl transition-all duration-fast ease-out-quart active:scale-95 motion-reduce:active:scale-100',
+    'size-10 rounded-[0.875rem] transition-all duration-fast ease-out-quart active:scale-95 motion-reduce:active:scale-100',
     selected
-      ? TOOL_PRESSED
-      : 'text-fg-secondary hover:bg-panel hover:text-fg active:bg-panel/80',
+      ? 'border-transparent bg-tb-chip text-fg hover:bg-tb-chip'
+      : 'text-fg-secondary hover:bg-tb-track hover:text-fg active:bg-tb-track',
   );
 }
 
 /** Icon size for a key on the bar. One constant so the groups stay optically level. */
 export const TOOL_ICON = 'size-4.5';
+
+/**
+ * A flyout opened from the bar — the shapes grid, the insert grid.
+ *
+ * The same plate as the bar, with the flyout card's corner. `border-0` drops
+ * the popover's own hairline, since `.lg` states the edge for the whole
+ * family and a border over it reads as two.
+ *
+ * It grows out of the key that opened it. `origin-(--transform-origin)` is the
+ * anchor point the positioner writes, so the scale runs from the trigger
+ * rather than from the flyout's own middle, and the menu keeps a spatial
+ * relationship to the thing that caused it. Paired with the rise the popover
+ * already had, and gone under reduced motion with the rest of it.
+ */
+export const TOOL_FLYOUT =
+  'lg lg-card border-0 origin-(--transform-origin) ' +
+  'data-open:zoom-in-95 data-closed:zoom-out-95';
 
 /**
  * The rule between two groups of keys. A hairline rather than a gap: the bar
@@ -183,6 +209,12 @@ export function ToolbarDivider({ className }: { className?: string } = {}) {
  * The third box is gone with the groove. It was a chip filling the recess to
  * mark the loaded instrument, and there is no recess to fill; the instruments
  * say it themselves by standing up out of the row.
+ *
+ * `tb-glyph` stays here and nowhere else on the bar. The keys gave up their
+ * halos when the bar became one plate — a halo over a ground is two
+ * grounds — but an instrument is not on the plate: its business end stands
+ * clear above the top edge, out over whatever has been drawn there, and up
+ * there the halo is the only thing separating it from the board.
  */
 export const INSTRUMENT_SLOT = 'relative w-12 shrink-0 self-stretch';
 
@@ -207,19 +239,48 @@ export const INSTRUMENT_ART_WIDTH = 36;
 export const INSTRUMENT_ART_HEIGHT = 72;
 
 /**
- * The tray's flat palette. One line around every part, and one fill inside it.
+ * The tray's palette.
  *
- * EDGE is that line — a soft shade rather than a black outline, so it draws
- * the silhouette without turning the objects into a set of stickers. BODY,
- * SEAM and DARK are the three neutrals every instrument is built from: the
- * white of a barrel, the joint printed across it, and the moulded black of a
- * cap or a grip. Shared so no two objects in the tray are white or black by
- * slightly different amounts.
+ * The four instruments are drawn the way Apple draws the tools in its own
+ * markup palettes, and the rule that matters most there is that **nothing is
+ * outlined**. An object is a set of flat fills meeting each other cleanly,
+ * lit from one side, and separated from what is behind it by a shadow rather
+ * than by a line. A hairline round every part is the illustration idiom — it
+ * makes a set of stickers — and it is the single thing that most reliably
+ * stops a drawing reading as an object.
+ *
+ * So the silhouette is carried by two things instead. BODY is pulled off pure
+ * white, far enough that a barrel keeps an edge against a white board on its
+ * own; SHADE is the same barrel turned away from the light, painted as one
+ * band down its right-hand side. Between them a white instrument reads as a
+ * cylinder on any ground, with no line anywhere on it.
+ *
+ * SEAM is a joint printed across a barrel, DARK and DARK_SHADE the moulded
+ * black of a grip or a cap and its own turned side. Shared so no two objects
+ * in the tray are white, black or shaded by slightly different amounts.
+ *
+ * EDGE is what is left of the old idiom, still worn by the shape stencil in
+ * `ShapeClusterObject` — the one object in the row that has not been redrawn.
  */
 export const INSTRUMENT_EDGE = 'rgba(12, 10, 9, 0.22)';
-export const INSTRUMENT_BODY = '#ffffff';
-export const INSTRUMENT_SEAM = '#e7e3de';
-export const INSTRUMENT_DARK = '#45403c';
+export const INSTRUMENT_BODY = '#f7f5f2';
+export const INSTRUMENT_SHADE = 'rgba(12, 10, 9, 0.1)';
+export const INSTRUMENT_SHEEN = 'rgba(255, 255, 255, 0.42)';
+export const INSTRUMENT_SEAM = '#e2ddd7';
+export const INSTRUMENT_DARK = '#3c3835';
+
+/**
+ * Where the light comes from, for every object in the tray at once: the left
+ * quarter of the box catches it and the right quarter turns away from it.
+ *
+ * Stated as two bands over the whole 28-wide box rather than per drawing,
+ * because each instrument clips them to its own silhouette — so one pair of
+ * numbers lights five differently shaped objects consistently, and a barrel
+ * that is narrower than another gets proportionally less of both, which is
+ * what happens to real cylinders.
+ */
+export const INSTRUMENT_SHEEN_BAND = { x: 0, width: 7.4 };
+export const INSTRUMENT_SHADE_BAND = { x: 17.8, width: 10.2 };
 
 /**
  * The shape menu's object: a drafting template, drawn to the same 28 x 56 box

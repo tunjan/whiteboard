@@ -1,9 +1,16 @@
 import { genId, type Point, type Shape } from '@whiteboard/shared';
-import { uploadImageFile } from '../board/blobs';
+import {
+  deleteLocalImageUrl,
+  imageDimensions,
+  imageHref,
+  setLocalImageUrl,
+  uploadImageFile,
+  type UploadedImage,
+} from '../board/blobs';
 import { screenToWorld } from './camera';
 import { getTopIndex } from './order';
 import { useCameraStore } from './use-camera-store';
-import { editor } from './use-document-store';
+import { editor, withoutUndo } from './use-document-store';
 import { useSelectionStore } from './use-selection-store';
 import { useToolStore } from './use-tool-store';
 
@@ -14,52 +21,91 @@ const MAX_PLACE = 600;
 const ACCEPT = 'image/png,image/jpeg,image/webp,image/gif';
 
 /**
- * Upload image files and create image shapes centered near `at`. Returns the
- * new shape ids (uploads run in parallel so one large file doesn't block the
- * rest; failures are skipped).
+ * Create image shapes centered near `at` and return their ids, in two phases
+ * (like pasted links). Phase 1 only reads each file's dimensions: the shapes
+ * appear immediately for this client, drawn from a local object URL. Phase 2
+ * compresses and uploads in the background, then patches the blob id in so
+ * peers — who see an empty placeholder until then — load the image too.
  */
 export async function placeImageFiles(
   files: File[],
   at: Point,
 ): Promise<string[]> {
-  const uploads = await Promise.allSettled(
-    files.filter((f) => f.type.startsWith('image/')).map(uploadImageFile),
-  );
+  const images = files.filter((f) => f.type.startsWith('image/'));
+  const dims = await Promise.all(images.map(imageDimensions));
   const ids: string[] = [];
-  let offset = 0;
-  for (const result of uploads) {
-    if (result.status === 'rejected') {
-      console.error('[image] upload failed', result.reason);
-      continue;
-    }
-    const up = result.value;
-    let w = up.naturalWidth || 300;
-    let h = up.naturalHeight || 200;
-    if (w > MAX_PLACE || h > MAX_PLACE) {
-      const scale = MAX_PLACE / Math.max(w, h);
-      w *= scale;
-      h *= scale;
-    }
-    const shape = {
-      id: genId(),
-      type: 'image',
-      x: at.x - w / 2 + offset,
-      y: at.y - h / 2 + offset,
-      rotation: 0,
-      index: getTopIndex(editor.getShapes()),
-      props: {
-        blobId: up.blobId,
-        w,
-        h,
-        naturalWidth: up.naturalWidth,
-        naturalHeight: up.naturalHeight,
-      },
-    } as Shape;
-    editor.createShape(shape);
-    ids.push(shape.id);
-    offset += 16;
-  }
+  // One transaction: a multi-image paste is a single undo step.
+  editor.transact(() => {
+    let offset = 0;
+    images.forEach((file, i) => {
+      const { width, height } = dims[i]!;
+      let w = width;
+      let h = height;
+      if (w > MAX_PLACE || h > MAX_PLACE) {
+        const scale = MAX_PLACE / Math.max(w, h);
+        w *= scale;
+        h *= scale;
+      }
+      const id = genId();
+      // Registered before the shape exists so its first render already has it.
+      setLocalImageUrl(id, URL.createObjectURL(file));
+      editor.createShape({
+        id,
+        type: 'image',
+        x: at.x - w / 2 + offset,
+        y: at.y - h / 2 + offset,
+        rotation: 0,
+        index: getTopIndex(editor.getShapes()),
+        props: {
+          blobId: '',
+          w,
+          h,
+          naturalWidth: width,
+          naturalHeight: height,
+        },
+      } as Shape);
+      ids.push(id);
+      offset += 16;
+    });
+  });
+  images.forEach((file, i) => void uploadPlacedImage(ids[i]!, file));
   return ids;
+}
+
+/**
+ * Upload a placed image and patch its blob id in. Written outside undo history
+ * (as link previews are): Ctrl+Z should step back over the whole paste, not
+ * peel the upload off it first.
+ */
+async function uploadPlacedImage(id: string, file: File): Promise<void> {
+  const localUrl = imageHref(id, '')!;
+  let up: UploadedImage;
+  try {
+    up = await uploadImageFile(file);
+  } catch (error) {
+    console.error('[image] upload failed', error);
+    deleteLocalImageUrl(id);
+    URL.revokeObjectURL(localUrl);
+    // Peers could never load it; remove the placeholder they're seeing.
+    withoutUndo(() => editor.deleteShapes([id]));
+    return;
+  }
+  // Rekey the preview rather than dropping it, so the switch to a blob id
+  // doesn't make this client re-download the bytes it already has.
+  setLocalImageUrl(up.blobId, localUrl);
+  const shape = editor.getShape(id);
+  if (shape?.type === 'image' && !shape.props.blobId) {
+    withoutUndo(() => {
+      editor.updateShape(id, {
+        props: {
+          blobId: up.blobId,
+          naturalWidth: up.naturalWidth,
+          naturalHeight: up.naturalHeight,
+        },
+      });
+    });
+  }
+  deleteLocalImageUrl(id);
 }
 
 /**

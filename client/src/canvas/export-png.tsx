@@ -15,6 +15,8 @@ import { compareIndex, editor } from './use-document-store';
 import { inkShape } from './ink-color';
 import { shapeRegistry } from './shapes/shape-registry';
 import { FrameView } from './shapes/frame';
+import { framePolygon } from './frame-geometry';
+import { resolveOpacity } from './opacity';
 import { withPhysChunk } from './png-phys';
 import { writePngToClipboard } from '@/board/clipboard-os';
 
@@ -327,6 +329,29 @@ function exportScale(): number {
   return Math.min(scale, Math.max(...PNG_EXPORT_SCALES));
 }
 
+/** Output pixel size for a `w`x`h` world-unit scene at the requested scale. */
+export function rasterSize(
+  w: number,
+  h: number,
+  requested: number,
+): { scale: number; outW: number; outH: number } {
+  // The floor comes first and the cap last, so `MAX_DIM` is the bound that
+  // always holds. The other order silently broke a sprawling board: a scene
+  // wider than `MAX_DIM / 0.1` world units had its scale capped below the
+  // floor, the floor raised it back above the cap, and the canvas came out
+  // past 8192 on a side. Over roughly 268 megapixels Chrome hands back a
+  // canvas that rasterizes fully transparent without throwing, so the export
+  // — and the clipboard copy sharing this path — produced a blank image with
+  // no error anywhere to say why.
+  const scale = Math.min(Math.max(requested, 0.1), MAX_DIM / w, MAX_DIM / h);
+  return {
+    scale,
+    // A scene thinner than one output pixel still has to be a real canvas.
+    outW: Math.max(1, Math.ceil(w * scale)),
+    outH: Math.max(1, Math.ceil(h * scale)),
+  };
+}
+
 /**
  * Rasterize a scene to a PNG blob at the largest scale the caps allow.
  *
@@ -346,13 +371,7 @@ async function renderPngBlob(
   // The user's chosen resolution (Settings → General → PNG Resolution). This
   // used to be `min(devicePixelRatio, 2)`, which made the same board export at
   // a different size depending on the monitor it happened to be opened on.
-  let scale = requestedScale ?? exportScale();
-  // `MAX_DIM` still wins: a sprawling board at 4x would otherwise allocate a
-  // canvas large enough to fail, so the request is silently reduced to fit.
-  scale = Math.min(scale, MAX_DIM / w, MAX_DIM / h);
-  scale = Math.max(scale, 0.1);
-  const outW = Math.ceil(w * scale);
-  const outH = Math.ceil(h * scale);
+  const { outW, outH, scale } = rasterSize(w, h, requestedScale ?? exportScale());
 
   const shapeMarkup = resolveCssVars(renderToStaticMarkup(tree));
   const inlined = await inlineBlobImages(shapeMarkup);
@@ -385,7 +404,7 @@ async function renderPngBlob(
  * Pass `renderSet` to restrict output to those shapes (used by the selection
  * export); omit it to render the whole page.
  */
-function renderTree(renderSet?: Set<string>, rootFrameId?: string): ReactNode {
+export function renderTree(renderSet?: Set<string>, rootFrameId?: string): ReactNode {
   const shapes = editor.getShapes();
   const byId = new Map(shapes.map((s) => [s.id, s]));
   const inSet = (id: string) => {
@@ -440,14 +459,37 @@ function renderTree(renderSet?: Set<string>, rootFrameId?: string): ReactNode {
     }
     const Component = shapeRegistry.getFor(shape)?.Component;
     return Component ? (
-      <Component key={shape.id} shape={inkShape(shape)} />
+      <g key={shape.id} opacity={shape.type === 'draw' && shape.props.inkKind === 'highlight' ? resolveOpacity(shape, (id) => byId.get(id), () => false) : undefined}>
+        <Component shape={inkShape(shape)} inkPass="underlay" />
+      </g>
     ) : null;
   };
 
   const topLevel = [...shapes]
     .sort(compareIndex)
     .filter((s) => inSet(s.id) && !hasRenderedFrameAncestor(s));
-  return <>{topLevel.map((shape) => render(shape, false))}</>;
+  const overlays = shapes.filter((shape) => inSet(shape.id) && shape.type === 'draw' && shape.props.inkKind === 'highlight').sort(compareIndex).map((shape) => {
+    const Component = shapeRegistry.getFor(shape)?.Component;
+    if (!Component) return null;
+    let content: ReactNode = <Component shape={inkShape(shape)} inkPass="overlay" />;
+    const seen = new Set<string>([shape.id]);
+    let parent = shape.parentId ? byId.get(shape.parentId) : undefined;
+    let hidden = shape.hidden;
+    while (parent && !seen.has(parent.id)) {
+      seen.add(parent.id);
+      hidden ||= parent.hidden;
+      if (parent.type === 'frame' && inSet(parent.id)) {
+        const clipId = `highlight-${shape.id}-${parent.id}`;
+        content = <g clipPath={`url(#${clipId})`}>
+          <defs><clipPath id={clipId}><polygon points={framePolygon(parent).map((p) => `${p.x},${p.y}`).join(' ')} /></clipPath></defs>
+          {content}
+        </g>;
+      }
+      parent = parent.parentId ? byId.get(parent.parentId) : undefined;
+    }
+    return hidden ? null : <g key={`highlight-${shape.id}`} opacity={resolveOpacity(shape, (id) => byId.get(id), () => false)}>{content}</g>;
+  });
+  return <>{topLevel.map((shape) => render(shape, false))}{overlays}</>;
 }
 
 /** Fetch each `/api/blobs/...` image and inline it as a data URL (canvas taint). */

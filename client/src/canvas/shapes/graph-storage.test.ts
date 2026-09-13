@@ -229,4 +229,60 @@ describe('graph expression storage', () => {
 
     expect(Y.encodeStateAsUpdate(doc).byteLength).toBe(before);
   });
+
+  it('hands back the same array when nothing in the list changed', () => {
+    const expressions = [curve('a', 'y=sin(x)'), curve('b', 'x^2+y^2=9')];
+    const m = modernShape(expressions);
+
+    const first = readGraphExpressions(m, m.get('props') as Record<string, unknown>);
+    const second = readGraphExpressions(m, m.get('props') as Record<string, unknown>);
+
+    // Identity, not just equality: `graph.tsx` memoizes its sampling on it, and
+    // a drag re-reads the shape every frame without touching the expressions.
+    expect(second).toBe(first);
+  });
+
+  it('hands back a new array once a row changes', () => {
+    const m = modernShape([curve('a', 'y=sin(x)')]);
+    const props = m.get('props') as Record<string, unknown>;
+    const first = readGraphExpressions(m, props);
+
+    syncYGraphExpressions(arrayOf(m), [curve('a', 'y=cos(x)')]);
+    const second = readGraphExpressions(m, props);
+
+    expect(second).not.toBe(first);
+    expect(second[0]!.expression).toBe('y=cos(x)');
+  });
+
+  it('hands back a new array when a row is added or removed', () => {
+    const m = modernShape([curve('a', 'y=sin(x)')]);
+    const props = m.get('props') as Record<string, unknown>;
+    const first = readGraphExpressions(m, props);
+
+    syncYGraphExpressions(arrayOf(m), [curve('a', 'y=sin(x)'), curve('b', 'y=x')]);
+    const grown = readGraphExpressions(m, props);
+    expect(grown).not.toBe(first);
+    expect(grown).toHaveLength(2);
+
+    syncYGraphExpressions(arrayOf(m), [curve('a', 'y=sin(x)')]);
+    const shrunk = readGraphExpressions(m, props);
+    expect(shrunk).not.toBe(grown);
+    expect(shrunk).toHaveLength(1);
+  });
+
+  it('notices a domain change, which is compared by value', () => {
+    const m = modernShape([
+      curve('a', 'y=sin(x)', { domain: { min: 0, max: 1 } }),
+    ]);
+    const props = m.get('props') as Record<string, unknown>;
+    const first = readGraphExpressions(m, props);
+
+    syncYGraphExpressions(arrayOf(m), [
+      curve('a', 'y=sin(x)', { domain: { min: 0, max: 2 } }),
+    ]);
+    const second = readGraphExpressions(m, props);
+
+    expect(second).not.toBe(first);
+    expect(second[0]!.domain).toEqual({ min: 0, max: 2 });
+  });
 });

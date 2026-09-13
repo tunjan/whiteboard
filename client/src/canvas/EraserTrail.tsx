@@ -39,12 +39,20 @@ export const EraserScribblePath = memo(function EraserScribblePath({
       return circlePath(last.x, last.y, size / 2);
     }
     return getInkPathData(scribble.points, size, scribble.state !== 'active', {
+      // The trail is a wedge, not a leaf: it tapers from a point at the tail to
+      // full width at the pointer, where a round cap closes it. Tapering the
+      // end too pinched the head back to a point, so the ribbon read as a
+      // symmetric sliver instead of a stroke being dragged. The reference
+      // outline is what supplies that cap: it carries the turn around the
+      // endpoint far enough to stay covered when the ribbon curls back.
+      inkAlgorithm: 'reference',
       simulatePressure: false,
       thinning: 0.5,
       smoothing: 0.5,
       streamline: 0.32,
       startTaper: scribble.taper,
-      endTaper: scribble.taper,
+      linearStartTaper: true,
+      endTaper: false,
       pressureEasing: 'linear',
     });
   }, [scribble, zoom]);

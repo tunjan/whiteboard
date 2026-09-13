@@ -18,6 +18,7 @@ export interface InkStrokeDynamics {
   streamline?: number;
   startTaper?: number | boolean;
   endTaper?: number | boolean;
+  linearStartTaper?: boolean;
   pressureEasing?: PressureEasing;
   pressureWarmup?: boolean;
   tiltAmount?: number;
@@ -278,7 +279,18 @@ export const DEFAULT_PENCIL_DYNAMICS = {
   // Round caps make a pencil stop where the pointer stops; a flick earns its
   // taper from the speed it was lifted at. See `liftTaperFor`.
   endTaper: false,
-} as const satisfies Required<Omit<InkStrokeDynamics, 'inkAlgorithm'>>;
+} as const satisfies Required<
+  Omit<InkStrokeDynamics, 'inkAlgorithm' | 'linearStartTaper'>
+>;
+
+/** Defaults for new reference ink; legacy geometry keeps its original defaults. */
+export const REFERENCE_PENCIL_DYNAMICS = {
+  ...DEFAULT_PENCIL_DYNAMICS,
+  simulatePressure: true,
+  smoothing: 0.62,
+  pressureWarmup: true,
+  tiltAmount: 0,
+} as const;
 
 /**
  * Legacy simulated-pressure strokes keep the flat response they were drawn
@@ -353,8 +365,10 @@ const engineOptions: FreehandEngineOptions = {
   easing: linearPressureEasing,
   startTaper: 0,
   endTaper: false,
+  linearStartTaper: false,
   pressureWarmup: false,
   tiltAmount: 0,
+  errorLimit: 0,
 };
 
 /**
@@ -377,22 +391,29 @@ export const EMPTY_INK_CENTERLINE: InkCenterlineGeometry = {
   length: 0,
 };
 
-/** Path and arc length from a single conditioned centerline. */
+/**
+ * Path and arc length from a single conditioned centerline.
+ *
+ * `errorLimit` coarsens only the emitted path, never the samples the length is
+ * measured on: dashes must stay where they are when the camera moves.
+ */
 export function getInkCenterlineGeometry(
   points: DrawPoint[],
   size: number,
   streamlineAmount = 0.5,
   inkAlgorithm?: 'reference',
+  last = true,
+  errorLimit = 0,
 ): InkCenterlineGeometry {
   const line = buildInkCenterline(
     points,
     size,
     streamlineAmount,
-    true,
+    last,
     inkAlgorithm,
   );
   return {
-    path: getInkCenterlinePathData(line),
+    path: getInkCenterlinePathData(line, errorLimit),
     length: centerlineLength(line),
   };
 }
@@ -461,12 +482,18 @@ export function maxInkRadius(
   return size * easing(0.5 + Math.abs(thinning) / 2) * tilt;
 }
 
-/** SVG path data for an ink stroke (local coordinates). */
+/**
+ * SVG path data for an ink stroke (local coordinates).
+ *
+ * `errorLimit` is the world-unit deviation the outline may carry because it is
+ * sub-pixel at the current camera; 0 renders the exact geometry.
+ */
 export function getInkPathData(
   points: DrawPoint[],
   size: number,
   last: boolean,
   dynamics: InkStrokeDynamics = {},
+  errorLimit = 0,
 ): string {
   engineOptions.inkAlgorithm = dynamics.inkAlgorithm;
   engineOptions.size = size;
@@ -482,6 +509,8 @@ export function getInkPathData(
   engineOptions.pressureWarmup = dynamics.pressureWarmup ?? false;
   engineOptions.startTaper = dynamics.startTaper ?? 0;
   engineOptions.endTaper = dynamics.endTaper ?? false;
+  engineOptions.linearStartTaper = dynamics.linearStartTaper ?? false;
   engineOptions.tiltAmount = dynamics.tiltAmount ?? 0;
+  engineOptions.errorLimit = errorLimit;
   return getFreehandPathData(points, engineOptions);
 }

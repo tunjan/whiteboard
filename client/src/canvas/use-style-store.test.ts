@@ -1,11 +1,10 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
-  defaultGroups,
+  defaultStyle,
   migrateStyle,
+  nextShapeStyle,
   PALETTE,
   SIZE_OPTIONS,
-  styleGroupForShape,
-  styleGroupForTool,
   useStyleStore,
 } from './use-style-store';
 
@@ -57,71 +56,63 @@ describe('stroke size scale', () => {
   });
 });
 
-describe('per-instrument style memory', () => {
+describe('one style for every tool', () => {
   beforeEach(() => {
-    useStyleStore.setState({ groups: defaultGroups() });
+    useStyleStore.setState(defaultStyle());
   });
 
-  it('opens the marker on yellow and everything else on ink', () => {
-    const { groups } = useStyleStore.getState();
-    expect(groups.marker.color).toBe(PALETTE.light[6]!.value);
-    expect(groups.pen.color).toBe(PALETTE.light[0]!.value);
-    expect(groups.shape.color).toBe(PALETTE.light[0]!.value);
-    expect(groups.text.color).toBe(PALETTE.light[0]!.value);
+  it('opens on the ink swatch', () => {
+    expect(nextShapeStyle().color).toBe(PALETTE.light[0]!.value);
   });
 
-  it('keeps each group independent', () => {
+  // The whole of the change: a colour chosen with one instrument in hand is the
+  // colour every other one lays down, the highlighter included.
+  it('shares one set of values across the tools', () => {
     const { setColor, setSize } = useStyleStore.getState();
-    setColor('pen', '#e03131');
-    setSize('marker', 10);
+    setColor('#e03131');
+    setSize(10);
 
-    const { groups } = useStyleStore.getState();
-    expect(groups.pen.color).toBe('#e03131');
-    expect(groups.marker.color).toBe(PALETTE.light[6]!.value);
-    expect(groups.shape.color).toBe(PALETTE.light[0]!.value);
-    expect(groups.marker.size).toBe(10);
-    expect(groups.pen.size).not.toBe(10);
+    expect(nextShapeStyle()).toMatchObject({ color: '#e03131', size: 10 });
   });
 
-  it('routes each tool to its group', () => {
-    expect(styleGroupForTool('draw')).toBe('pen');
-    expect(styleGroupForTool('highlighter')).toBe('marker');
-    expect(styleGroupForTool('text')).toBe('text');
-    expect(styleGroupForTool('equation')).toBe('text');
-    expect(styleGroupForTool('ellipse')).toBe('shape');
-    // Anything that styles like a shape and is not listed falls there too.
-    expect(styleGroupForTool('graph')).toBe('shape');
-  });
-
-  // A highlighter stroke is a draw shape like any other (see draw-tool.ts), so
-  // the pen is the only group a selected stroke can resolve to.
-  it('routes each shape type back to a group', () => {
-    expect(styleGroupForShape('draw')).toBe('pen');
-    expect(styleGroupForShape('text')).toBe('text');
-    expect(styleGroupForShape('rectangle')).toBe('shape');
-    expect(styleGroupForShape('mixed')).toBe('shape');
-  });
-
-  // v0 stored one flat style for every tool. Nobody should come back to a pen
-  // they never chose, so the value they were last drawing with is carried into
-  // every group — bar the marker, whose yellow is worth more than a colour it
-  // inherited from whatever the pen happened to be.
-  it('carries a v0 flat style into every group', () => {
+  // v0 stored one flat style for every tool, under these same names.
+  it('carries a v0 flat style through', () => {
     const migrated = migrateStyle(
       { color: '#e03131', size: 10, dash: 'dashed', stickerId: 'star' },
       0,
     );
 
-    expect(migrated.groups.pen).toMatchObject({
+    expect(migrated).toMatchObject({
       color: '#e03131',
       size: 10,
       dash: 'dashed',
     });
-    expect(migrated.groups.shape.color).toBe('#e03131');
-    expect(migrated.groups.text.size).toBe(10);
-    expect(migrated.groups.marker.color).toBe(PALETTE.light[6]!.value);
-    expect(migrated.groups.marker.size).toBe(10);
-    // Fields that never moved are untouched by the split.
+    // Fields that never moved are untouched by the migration.
+    expect(migrated.stickerId).toBe('star');
+  });
+
+  // v1 split the style per instrument. Collapsing it back takes the pen's
+  // values: of the four groups that is the one carrying what someone was last
+  // actually drawing with.
+  it('collapses a v1 per-instrument store onto the pen', () => {
+    const migrated = migrateStyle(
+      {
+        groups: {
+          pen: { color: '#e03131', size: 10, fill: 'none', dash: 'dotted' },
+          marker: { color: '#f1ac4b', size: 5 },
+          shape: { color: '#4465e9', size: 2 },
+          text: { color: '#099268', size: 2 },
+        },
+        stickerId: 'star',
+      },
+      1,
+    );
+
+    expect(migrated).toMatchObject({
+      color: '#e03131',
+      size: 10,
+      dash: 'dotted',
+    });
     expect(migrated.stickerId).toBe('star');
   });
 });

@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react';
 import type { GraphViewport } from '@whiteboard/shared';
-import { screenToWorld } from '../camera';
 import { formatAxisLabel, niceStep, tickValues } from '../grid';
 import {
   DEFAULT_GRAPH_CURVE_WIDTH,
@@ -16,7 +15,7 @@ import {
   formatIntersectionLabel,
 } from '../graph-intersections';
 import { useLodDetail } from '../lod';
-import { useCameraStore } from '../use-camera-store';
+import { normalizeWheelDelta } from '../use-wheel';
 import { breakUndoCapture, editor } from '../use-document-store';
 import { useSelectionStore } from '../use-selection-store';
 import { boxBounds, boxHitTest, rotationTransform } from './box-geometry';
@@ -31,7 +30,6 @@ const MIN_W = 220;
 const MIN_H = 160;
 const PLOT_PADDING = 16;
 // Wheel-zoom feel, mirrored from the board camera (use-wheel.ts).
-const WHEEL_LINE_HEIGHT = 16;
 const WHEEL_MAX_ZOOM_DELTA = 10;
 // Continuous wheel gestures coalesce into one undo step until this idle gap.
 const WHEEL_UNDO_IDLE_MS = 300;
@@ -127,34 +125,33 @@ export const graphUtil: ShapeUtil<'graph'> = {
         if (selected.length !== 1 || selected[0] !== shapeId) return;
         const current = editor.getShape(shapeId);
         if (!current || current.type !== 'graph') return;
+        const matrix = el.getScreenCTM();
+        if (!matrix) return;
+        const inverse = matrix.inverse();
+        const local = new DOMPoint(e.clientX, e.clientY).matrixTransform(inverse);
+        // The scene renders each shape at its local origin. Its screen matrix
+        // includes the camera, shape rotation, and all parent transforms.
+        const area = plotArea({ x: 0, y: 0, props: current.props });
         e.preventDefault();
         e.stopPropagation();
-
-        const camera = useCameraStore.getState().camera;
-        const rect = el.ownerSVGElement?.getBoundingClientRect();
-        const screen = {
-          x: e.clientX - (rect?.left ?? 0),
-          y: e.clientY - (rect?.top ?? 0),
-        };
-        const world = screenToWorld(screen, camera);
-        const area = plotArea(current);
+        const wheel = normalizeWheelDelta(e);
         // Build on the uncommitted viewport so events within one frame compose.
         const viewport = pendingViewport ?? current.props.viewport;
 
         let next: GraphViewport;
         if (e.ctrlKey || e.metaKey) {
-          const lineScale = e.deltaMode === 1 ? WHEEL_LINE_HEIGHT : 1;
           const delta = clampNum(
-            e.deltaY * lineScale,
+            wheel.y,
             -WHEEL_MAX_ZOOM_DELTA,
             WHEEL_MAX_ZOOM_DELTA,
           );
           // Match the camera direction: scroll up = zoom in = smaller range.
           const factor = 1 / (1 - delta / 100);
-          next = zoomViewport(viewport, area, world, factor);
+          next = zoomViewport(viewport, area, local, factor);
         } else {
-          const scale = (e.deltaMode === 1 ? WHEEL_LINE_HEIGHT : 1) / camera.z;
-          next = panViewport(viewport, area, e.deltaX * scale, e.deltaY * scale);
+          const dx = inverse.a * wheel.x + inverse.c * wheel.y;
+          const dy = inverse.b * wheel.x + inverse.d * wheel.y;
+          next = panViewport(viewport, area, dx, dy);
         }
 
         pendingViewport = next;
@@ -284,6 +281,7 @@ export const graphUtil: ShapeUtil<'graph'> = {
     return (
       <g
         ref={groupRef}
+        style={{ pointerEvents: 'auto' }}
         transform={rotationTransform(shape.x, shape.y, props.w, props.h, shape.rotation)}
       >
         <defs>

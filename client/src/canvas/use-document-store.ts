@@ -55,7 +55,12 @@ import { useHiddenStore } from './use-hidden-store';
 import { getLiveStrokeShapeId } from './use-live-stroke-store';
 import { resolveOpacity } from './opacity';
 import { clearVanishing, vanishShapes } from './use-vanish-store';
+import {
+  beginBoardLoad,
+  updateBoardLoading,
+} from '@/board/use-board-loading-store';
 import { useConnectionStore } from '@/collab/use-connection-store';
+import { startForegroundReconnect } from '@/collab/foreground-reconnect';
 import { startLatencyMonitor } from '@/collab/latency';
 import { noteActivity, startAttentionMonitor } from '@/collab/attention';
 import { bindVoiceProvider } from '@/collab/voice/voice-session';
@@ -1108,6 +1113,13 @@ export function loadBoard(
   useCommentsStore.getState().reset();
   useDocumentsStore.getState().reset();
   useCustomStickersStore.getState().reset();
+  // Mirrors the readiness flags below: a source the board does not have is a
+  // source it never has to wait for. Before the collab branch, so the status it
+  // sets for a board with no server is seen by the readiness subscription.
+  const stopBoardLoad = beginBoardLoad({
+    localSynced: !opts.persist,
+    remoteSynced: !opts.collab,
+  });
 
   const doc = new Y.Doc();
   const pages = doc.getMap('pages') as Y.Map<YPageMeta>;
@@ -1170,6 +1182,7 @@ export function loadBoard(
   let stopLatencyMonitor = () => {};
   let stopAttentionMonitor = () => {};
   let stopVoiceProvider = () => {};
+  let stopForegroundReconnect = () => {};
   if (opts.collab) {
     // One socket for the board document and every page document on it. Each
     // provider syncs its own document over it, so opening a page adds sync
@@ -1190,6 +1203,7 @@ export function loadBoard(
     stopLatencyMonitor = startLatencyMonitor(provider, setLocalLatency);
     stopAttentionMonitor = startAttentionMonitor();
     stopVoiceProvider = bindVoiceProvider(provider);
+    stopForegroundReconnect = startForegroundReconnect(socket);
     setActiveAwareness(provider.awareness ?? null);
   } else {
     useConnectionStore.getState().setStatus('disconnected');
@@ -1256,6 +1270,8 @@ export function loadBoard(
       closePageDocs();
       stopLatencyMonitor();
       stopAttentionMonitor();
+      stopForegroundReconnect();
+      stopBoardLoad();
       provider?.destroy();
       socket?.destroy();
       persistence?.destroy();
@@ -1269,6 +1285,7 @@ export function loadBoard(
 
   useCameraStore.getState().switchTo(boardId, DEFAULT_PAGE_ID);
   setLocalPage(DEFAULT_PAGE_ID);
+  trackPageSyncForLoading(pageDoc);
 
   // Restore only after every configured document source has hydrated. A manual
   // switch (including a deep link) clears `pageRestorePending`, so late sync
@@ -1297,6 +1314,7 @@ export function loadBoard(
     }
     if (!session || session.doc !== doc) return;
     session.pageRestorePending = false;
+    updateBoardLoading({ pageSettled: true });
     writePageSession(boardId, session.currentPageId);
   };
 
@@ -1323,12 +1341,17 @@ export function loadBoard(
     seedWhenSynced();
     restorePageFromSession();
     migrateOpenPage();
+    // Last: the restore above may have re-aimed the page the veil waits on, and
+    // this is the flag that can let it lift.
+    updateBoardLoading({ localSynced: true });
   });
   provider?.on('synced', () => {
     providerReady = true;
     seedWhenSynced();
     restorePageFromSession();
     migrateOpenPage();
+    // Last, for the same reason as the local handler above.
+    updateBoardLoading({ remoteSynced: true });
   });
   seedWhenSynced();
   restorePageFromSession();
@@ -1509,6 +1532,23 @@ function migrateLegacyPageShapes(pageId: string): void {
   });
 }
 
+/**
+ * Tell the loading veil about the open page's document, re-armed on switch.
+ *
+ * A late resolve for a page that is no longer open is dropped, so switching
+ * pages while one is still syncing re-aims the wait rather than deadlocking on
+ * a page nobody is looking at.
+ */
+function trackPageSyncForLoading(page: PageDoc): void {
+  updateBoardLoading({ pageSynced: page.synced });
+  if (page.synced) return;
+  const boardDoc = session?.doc;
+  void page.whenSynced.then(() => {
+    if (!session || session.doc !== boardDoc || session.pageDoc !== page) return;
+    updateBoardLoading({ pageSynced: true });
+  });
+}
+
 type PageSwitchSource = 'user' | 'follow' | 'restore' | 'integrity';
 
 /** Switch the active page as one coordinated interaction-state handoff. */
@@ -1520,6 +1560,7 @@ function switchToPageInternal(
   if (session.currentPageId === pageId) {
     if (source !== 'restore' && source !== 'integrity') {
       session.pageRestorePending = false;
+      updateBoardLoading({ pageSettled: true });
       writePageSession(session.boardId, pageId);
     }
     return false;
@@ -1527,6 +1568,7 @@ function switchToPageInternal(
 
   if (source !== 'restore' && source !== 'integrity') {
     session.pageRestorePending = false;
+    updateBoardLoading({ pageSettled: true });
   }
   completeInteractionBeforePageSwitch();
   if (source !== 'follow') stopFollowingForManualCameraChange();
@@ -1556,6 +1598,7 @@ function switchToPageInternal(
 
   useCameraStore.getState().switchTo(session.boardId, pageId);
   setLocalPage(pageId);
+  trackPageSyncForLoading(page);
   // Nothing to rebuild when the page was parked intact; otherwise derive it
   // from the document, which may still be arriving — the observer publishes
   // each batch as it lands.

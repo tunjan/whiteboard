@@ -1,4 +1,4 @@
-import { Eraser } from 'lucide-react';
+import { EraserGlyph } from '@/components/ui/glyphs';
 import { genId, type Point, type Shape } from '@whiteboard/shared';
 import { collectSubtree, pruneDegenerateGroups } from '../commands';
 import { generateKeyBetween } from '../order';
@@ -239,7 +239,7 @@ export function createEraserTool(): Tool {
     label: 'Eraser',
     hotkey: 'e',
     cursor: 'crosshair',
-    icon: Eraser,
+    icon: EraserGlyph,
     // Each sample extends the swept segment, so finer samples track a fast
     // curved swipe more accurately. Erasing is destructive; keep the fidelity.
     // Costs no document write until pointer-up, so this is not a hot path.

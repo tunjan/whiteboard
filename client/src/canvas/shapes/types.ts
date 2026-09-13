@@ -12,6 +12,8 @@ export interface ShapeComponentProps<T extends ShapeType> {
   /** True while this shape is selected (affects nothing rendered by the shape
    * itself, but available for shape-specific affordances later). */
   isSelected?: boolean;
+  /** Highlights are painted behind content and again as a light foreground tint. */
+  inkPass?: 'underlay' | 'overlay';
 }
 
 /**

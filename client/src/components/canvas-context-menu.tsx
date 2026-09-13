@@ -22,7 +22,9 @@ import {
   copySelectionToPngClipboard,
   exportSelectionToPng,
 } from '@/canvas/export-png';
+import { flipShapes } from '@/canvas/flip';
 import { deleteTargetIds } from '@/canvas/hierarchy';
+import { copyStyle, hasCopiedStyle, pasteStyle } from '@/canvas/style-clipboard';
 import {
   editor,
   moveShapesToPage,
@@ -130,6 +132,20 @@ export function CanvasContextMenu({ children }: { children: ReactNode }) {
         </ContextMenuItem>
         <ContextMenuItem
           disabled={!has}
+          onClick={() => copyStyle(editor, selectedIds)}
+        >
+          Copy style
+          <ContextMenuShortcut>⌥⌘C</ContextMenuShortcut>
+        </ContextMenuItem>
+        <ContextMenuItem
+          disabled={!has || !hasCopiedStyle()}
+          onClick={() => pasteStyle(editor, selectedIds)}
+        >
+          Paste style
+          <ContextMenuShortcut>⌥⌘V</ContextMenuShortcut>
+        </ContextMenuItem>
+        <ContextMenuItem
+          disabled={!has}
           // Not awaited: the clipboard write has to be issued while this click
           // is still the current task (see `writePngToClipboard`).
           onClick={() => {
@@ -231,6 +247,23 @@ export function CanvasContextMenu({ children }: { children: ReactNode }) {
             </ContextMenuItem>
           </ContextMenuSubContent>
         </ContextMenuSub>
+
+        {/* Outside the Align submenu, which needs two shapes to mean anything:
+            one shape can be flipped. */}
+        <ContextMenuItem
+          disabled={!has || allLocked}
+          onClick={() => flipShapes(editor, selectedIds, 'horizontal')}
+        >
+          Flip horizontal
+          <ContextMenuShortcut>⇧H</ContextMenuShortcut>
+        </ContextMenuItem>
+        <ContextMenuItem
+          disabled={!has || allLocked}
+          onClick={() => flipShapes(editor, selectedIds, 'vertical')}
+        >
+          Flip vertical
+          <ContextMenuShortcut>⇧V</ContextMenuShortcut>
+        </ContextMenuItem>
 
         <ContextMenuSeparator />
 

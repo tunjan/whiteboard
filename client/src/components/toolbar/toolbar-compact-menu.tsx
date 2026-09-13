@@ -1,14 +1,14 @@
 import { useState } from 'react';
 import {
-  ChevronDown,
-  ImagePlus,
-  Lock,
-  MoreHorizontal,
-  Plus,
-  Presentation,
-  Sticker,
-  Unlock as LockOpen,
-} from 'lucide-react';
+  ChevronDownGlyph,
+  ImageGlyph,
+  LockGlyph,
+  LockOpenGlyph,
+  MoreGlyph,
+  PlusGlyph,
+  StickerGlyph,
+  VideoGlyph,
+} from '@/components/ui/glyphs';
 import { blobUrl } from '@/board/blobs';
 import { pickAndAddStickers } from '@/board/custom-stickers';
 import { pickAndPlaceImages } from '@/canvas/place-image';
@@ -88,7 +88,7 @@ export function CompactMoreMenu({
               />
             }
           >
-            <MoreHorizontal className={TOOL_ICON} />
+            <MoreGlyph className={TOOL_ICON} />
           </TooltipTrigger>
           <TooltipContent side="top">
             <span>{label}</span>
@@ -132,7 +132,7 @@ export function CompactMoreMenu({
 
           <DropdownMenuSub>
             <DropdownMenuSubTrigger>
-              <Sticker className="size-4" />
+              <StickerGlyph className="size-4" />
               <span>Stickers</span>
             </DropdownMenuSubTrigger>
             <DropdownMenuSubContent className="w-52">
@@ -170,7 +170,7 @@ export function CompactMoreMenu({
               ))}
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => void pickAndAddStickers()}>
-                <Plus className="size-4" />
+                <PlusGlyph className="size-4" />
                 <span>Add PNG sticker</span>
               </DropdownMenuItem>
             </DropdownMenuSubContent>
@@ -178,16 +178,16 @@ export function CompactMoreMenu({
 
           <DropdownMenuSub>
             <DropdownMenuSubTrigger>
-              <ImagePlus className="size-4" />
+              <ImageGlyph className="size-4" />
               <span>Media</span>
             </DropdownMenuSubTrigger>
             <DropdownMenuSubContent className="w-52">
               <DropdownMenuItem onClick={() => void pickAndPlaceImages()}>
-                <ImagePlus className="size-4" />
+                <ImageGlyph className="size-4" />
                 <span>Add image</span>
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => setVideoOpen(true)}>
-                <Presentation className="size-4" />
+                <VideoGlyph className="size-4" />
                 <span>Add YouTube video</span>
               </DropdownMenuItem>
             </DropdownMenuSubContent>
@@ -200,16 +200,16 @@ export function CompactMoreMenu({
             onCheckedChange={toggleLock}
           >
             {locked ? (
-              <Lock className="size-4" />
+              <LockGlyph className="size-4" />
             ) : (
-              <LockOpen className="size-4" />
+              <LockOpenGlyph className="size-4" />
             )}
             <span>Tool lock</span>
             <DropdownMenuShortcut>Q</DropdownMenuShortcut>
           </DropdownMenuCheckboxItem>
 
           <DropdownMenuItem onClick={onHide}>
-            <ChevronDown className="size-4" />
+            <ChevronDownGlyph className="size-4" />
             <span>Hide toolbar</span>
           </DropdownMenuItem>
         </DropdownMenuContent>

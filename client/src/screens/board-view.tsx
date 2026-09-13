@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { startDocumentNotifications } from '@/board/document-notifications';
+import { useBoardLoadingStore } from '@/board/use-board-loading-store';
 import { boardRepository } from '@/board/server-board-repository';
 import { Canvas } from '@/canvas/Canvas';
 import { ensureGraphMath } from '@/canvas/graph-math';
@@ -17,8 +18,10 @@ import {
 import { setLocalUser } from '@/collab/presence';
 import { VoiceAudioSinks } from '@/collab/voice/VoiceAudioSinks';
 import { BoardChrome } from '@/components/board-chrome';
+import { BoardLoadingVeil } from '@/components/board-loading-veil';
 import { BoardTitleDialog } from '@/components/board-title-dialog';
 import { BoardUiLayer } from '@/components/board-ui-layer';
+import { useWakeLock } from '@/hooks/use-wake-lock';
 import { CanvasContextMenu } from '@/components/canvas-context-menu';
 import { AttentionToast } from '@/components/attention-toast';
 import { LatencyWarningToast } from '@/components/latency-warning-toast';
@@ -59,6 +62,11 @@ export function BoardView({ boardId }: { boardId: string }) {
   const pendingPage = useRef<string | null>(null);
   const pages = useDocumentStore((s) => s.doc.pages);
   const currentPageId = useDocumentStore((s) => s.currentPageId);
+  const boardReady = useBoardLoadingStore((s) => s.ready);
+
+  // Held for as long as the board is open, not just while it is being drawn
+  // on: watching someone else work is the common case here.
+  useWakeLock(boardReady);
 
   // Load board content + collaboration.
   useEffect(() => {
@@ -149,8 +157,11 @@ export function BoardView({ boardId }: { boardId: string }) {
       {/* Opened from the paste handler, not from a control, when a pasted PDF
           runs past the import limit. */}
       <PdfRangeDialog isTutor={identity?.isTutor ?? false} />
+      {/* Held until the board is up: asking a student who they are over a blank
+          canvas is a worse first impression than a half-second wait, and
+          `resolveIdentity` has long since answered by then. */}
       <NameDialog
-        open={needsName || editingIdentity}
+        open={boardReady && (needsName || editingIdentity)}
         editing={editingIdentity}
         initialName={identity?.name ?? ''}
         initialColor={identity?.color ?? assignedColor}
@@ -178,6 +189,10 @@ export function BoardView({ boardId }: { boardId: string }) {
           setRenamingBoard(false);
         }}
       />
+
+      {/* Last, and above every in-board band: nothing behind it is seen or
+          clicked until the board has actually finished joining. */}
+      <BoardLoadingVeil title={name} />
     </div>
   );
 }

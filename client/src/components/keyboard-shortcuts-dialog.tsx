@@ -1,4 +1,5 @@
 import { Fragment } from 'react';
+import { isCoarsePointer } from '@/canvas/platform';
 import { toolRegistry } from '@/canvas/tools/tool-registry';
 import '@/canvas/tools/register';
 import {
@@ -19,6 +20,8 @@ const EDIT_SHORTCUTS = [
   { label: 'Paste', keys: ['⌘/Ctrl', 'V'] },
   { label: 'Select all', keys: ['⌘/Ctrl', 'A'] },
   { label: 'Duplicate selection', keys: ['⌘/Ctrl', 'D'] },
+  { label: 'Copy style', keys: ['⌘/Ctrl', 'Alt', 'C'] },
+  { label: 'Paste style onto selection', keys: ['⌘/Ctrl', 'Alt', 'V'] },
   { label: 'Delete selection', keys: ['Delete'] },
   { label: 'Edit selected text or equation', keys: ['Enter'] },
 ] as const;
@@ -33,12 +36,16 @@ const ARRANGE_SHORTCUTS = [
   { label: 'Move selection', keys: ['Arrow keys'] },
   { label: 'Move selection by 10', keys: ['Shift', 'Arrow keys'] },
   { label: 'Lock selected objects', keys: ['Shift', 'L'] },
+  { label: 'Flip selection left to right', keys: ['Shift', 'H'] },
+  { label: 'Flip selection top to bottom', keys: ['Shift', 'V'] },
 ] as const;
 
 const VIEW_SHORTCUTS = [
   { label: 'Zoom in', keys: ['⌘/Ctrl', '+'] },
   { label: 'Zoom out', keys: ['⌘/Ctrl', '−'] },
   { label: 'Reset zoom', keys: ['⌘/Ctrl', '0'] },
+  { label: 'Zoom to fit the page', keys: ['Shift', '1'] },
+  { label: 'Zoom to the selection', keys: ['Shift', '2'] },
 ] as const;
 
 // The panel's own inline hints cover these while it is open, and vanish with it.
@@ -56,6 +63,19 @@ const GENERAL_SHORTCUTS = [
   { label: 'Reset tool and selection', keys: ['Esc'] },
   { label: 'Tool lock', keys: ['Q'] },
   { label: 'Borrow a tool while its key is held', keys: ['Hold tool key'] },
+] as const;
+
+/**
+ * The gestures, which are the half of this sheet a tablet can actually use —
+ * and the half nothing on screen announces. Listed only where there is a touch
+ * screen, since on a mouse none of them can be performed.
+ */
+const TOUCH_GESTURES = [
+  { label: 'Pan and zoom', keys: ['Two fingers'] },
+  { label: 'Undo', keys: ['Two-finger tap'] },
+  { label: 'Redo', keys: ['Three-finger tap'] },
+  { label: 'Context menu', keys: ['Press and hold'] },
+  { label: 'Zoom with one finger', keys: ['Double-tap, then drag'] },
 ] as const;
 
 function ShortcutKeys({ keys }: { keys: readonly string[] }) {
@@ -133,7 +153,7 @@ export function KeyboardShortcutsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      {/* Six sections, forty-nine rows: in one 32rem column that was three
+      {/* Six sections, fifty-five rows: in one 32rem column that was three
           screens of scrolling behind a full-height scrollbar. Reference sheets
           are read by scanning, not by scrolling, so the sections flow into
           balanced columns as the viewport allows — two from `sm`, three from
@@ -177,6 +197,13 @@ export function KeyboardShortcutsDialog({
             title="General"
             items={GENERAL_SHORTCUTS}
           />
+          {isCoarsePointer() && (
+            <ShortcutSection
+              id="touch-gestures-heading"
+              title="Touch"
+              items={TOUCH_GESTURES}
+            />
+          )}
         </div>
       </DialogContent>
     </Dialog>

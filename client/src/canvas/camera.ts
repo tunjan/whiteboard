@@ -27,10 +27,38 @@ export const DEFAULT_BASE_ZOOM = 1;
  */
 export const LOD_ZOOM_THRESHOLD = 0.4;
 
+/**
+ * Tolerance for treating the camera as already at actual size (100%).
+ *
+ * Zoom-to-selection has two answers depending on where it starts, so it needs a
+ * test for "is this 100%?" that survives the float error a pinch or an
+ * interpolated tween leaves behind — landing on 0.9999999 must still count.
+ */
+export const ACTUAL_SIZE_EPSILON = 0.01;
+
+/** Whether `zoom` is close enough to 1 to count as actual size. */
+export function isActualSize(zoom: number): boolean {
+  return Math.abs(zoom - 1) < ACTUAL_SIZE_EPSILON;
+}
+
 export type ZoomDirection = 'in' | 'out';
 
 export function clampZoom(z: number): number {
+  if (Number.isNaN(z)) return DEFAULT_CAMERA.z;
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));
+}
+
+/** Interpolate the visible world rectangle, including its inverse scale.
+ * This also preserves any shared focal point throughout a pure zoom. */
+export function interpolateCameraViewport(from: Camera, to: Camera, progress: number): Camera {
+  const t = Math.max(0, Math.min(1, progress));
+  if (t === 0) return from;
+  if (t === 1) return to;
+  return {
+    x: from.x + (to.x - from.x) * t,
+    y: from.y + (to.y - from.y) * t,
+    z: 1 / ((1 - t) / from.z + t / to.z),
+  };
 }
 
 export function discreteZoomSteps(baseZoom = DEFAULT_BASE_ZOOM): number[] {

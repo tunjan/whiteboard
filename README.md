@@ -10,19 +10,32 @@ built from the ground up.
 
 - Node.js 22+ (see `.nvmrc`)
 - npm 10+ (workspaces)
-- Docker (for Postgres) — only needed for server-backed persistence
+- PostgreSQL 16+ — only needed for server-backed persistence and collaboration. Docker is **optional**; native Postgres (e.g. via Homebrew) or managed cloud Postgres (Neon, Supabase) are fully supported.
 
 ## Setup
 
 ```bash
 npm install
-cp server/.env.example server/.env   # set TUTOR_PASSWORD and SESSION_SECRET
+cp server/.env.example server/.env   # set TUTOR_PASSWORD, SESSION_SECRET, and DATABASE_URL
 ```
 
-For server-backed board content (collaboration) you also need Postgres:
+For server-backed board content (collaboration), start Postgres and apply the schema:
+
+**Option A: Native macOS Postgres (Lightweight, no Docker)**
 
 ```bash
-npm run db:up      # start Postgres via docker-compose
+brew install postgresql@16
+brew services start postgresql@16
+createdb whiteboard
+# in server/.env: DATABASE_URL=postgres://localhost:5432/whiteboard
+npm run db:push
+```
+
+**Option B: Docker Compose**
+
+```bash
+npm run db:up      # start Postgres via docker-compose on port 5433
+# in server/.env: DATABASE_URL=postgres://whiteboard:whiteboard@localhost:5433/whiteboard
 npm run db:push    # create the schema (boards, board_documents)
 ```
 
@@ -87,3 +100,30 @@ npm run db:push     # apply the Drizzle schema
   (IndexedDB now, server REST in a later phase).
 - **Auth** — a single tutor credential (`TUTOR_PASSWORD`, constant-time
   compare) signs a `jose` JWT session cookie; gates the boards home only.
+
+## Database Migration & Backups
+
+To move an existing database (e.g. from Docker to native Postgres, or to a cloud provider):
+
+1. **Export dump from Docker container:**
+
+   ```bash
+   docker exec bestwhiteboard-postgres-1 pg_dump -U whiteboard -d whiteboard -Fc > whiteboard_backup.dump
+   ```
+
+2. **Restore to target database:**
+   ```bash
+   # Native local Postgres:
+   pg_restore -h localhost -p 5432 -d whiteboard --clean --if-exists whiteboard_backup.dump
+
+   # Or remote cloud database:
+   pg_restore -d "<REMOTE_DATABASE_URL>" --clean --if-exists whiteboard_backup.dump
+   ```
+
+> **Note on images:** Uploaded image assets live on the filesystem under `server/data/blobs`. When migrating or deploying to a new host, remember to copy this folder alongside your database.
+
+## Deployment & Cloudflare
+
+- **Cloudflare Tunnel (`cloudflared`):** Expose your local or VPS server (`localhost:3001`) to the internet. WebSockets and HTTP routes work out-of-the-box.
+- **Cloudflare CDN / DNS Proxy:** If using a VPS behind Cloudflare, ensure **WebSockets** are enabled under Cloudflare Dashboard -> _Network_.
+- **Cloudflare Pages:** You can host the static client (`client/dist` from `npm run build -w client`) on Cloudflare Pages, but the collaboration server (`server/`) requires a persistent Node.js runtime (e.g. Railway, Render, Fly.io, or a VPS) to maintain WebSocket connections and local blob storage.

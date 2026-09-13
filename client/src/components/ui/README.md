@@ -29,7 +29,9 @@ the whole app. Do not add `focus-visible:ring-*` to a component, and do not add
 `outline-none` to an interactive control — either one silently removes the only
 focus indicator that control has. Popup _containers_ (dialog, popover, menu
 positioners) and menu _items_ are the exceptions: they suppress the outline
-because a background highlight already signals focus.
+because a background highlight already signals focus. `input-group.tsx` is
+the third: the group draws the outline around the whole field when its control
+is focused, so the control drops its own.
 
 ## Token vocabulary
 

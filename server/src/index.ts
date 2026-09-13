@@ -42,12 +42,27 @@ const serveIndexHtml = async (c: Context) => {
     c.req.header('x-forwarded-proto'),
     c.req.header('x-forwarded-host'),
   );
+  // The shell names this build's hashed asset files, so a cached copy pins the
+  // whole app to an old release. `no-cache` still allows a conditional request
+  // — it means revalidate, not refetch. This matters most where there is no
+  // address bar to force a reload from: the board added to an iPad's Home
+  // Screen is a standalone app whose only route to a new build is this header.
+  c.header('Cache-Control', 'no-cache');
   return c.html(absolutePreviewUrls(index, origin));
 };
 
 // Ahead of the static handler: it would otherwise answer '/' with the file on
 // disk, whose preview tags are still relative.
 app.get('/', serveIndexHtml);
+// Vite fingerprints everything under /assets, so those files are immutable and
+// can be held for as long as the browser likes — which is what makes the
+// shell's `no-cache` cheap rather than a full re-download on every launch.
+app.use('/assets/*', async (c, next) => {
+  await next();
+  if (c.res.ok) {
+    c.res.headers.set('Cache-Control', 'public, max-age=31536000, immutable');
+  }
+});
 app.use('/*', serveStatic({ root: clientDist }));
 app.get('*', serveIndexHtml);
 

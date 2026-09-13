@@ -1,4 +1,4 @@
-import { Shapes } from 'lucide-react';
+import { PolygonGlyph } from '@/components/ui/glyphs';
 import {
   type Bounds,
   genId,
@@ -8,7 +8,7 @@ import {
 import { getTopIndex } from '../order';
 import { shapeRegistry } from '../shapes/shape-registry';
 import { useSelectionStore } from '../use-selection-store';
-import { groupStyle, useStyleStore } from '../use-style-store';
+import { nextShapeStyle, useStyleStore } from '../use-style-store';
 import { dragBoxSnapTargets, snappedBoxFromDrag } from './drag-box';
 import type { Tool, ToolContext, ToolPointerInfo } from './types';
 
@@ -28,7 +28,7 @@ export function createPolygonTool(): Tool {
     id: 'polygon',
     label: 'Polygon',
     cursor: 'crosshair',
-    icon: Shapes,
+    icon: PolygonGlyph,
     hidden: true,
 
     onPointerDown(info: ToolPointerInfo, ctx: ToolContext) {
@@ -38,7 +38,7 @@ export function createPolygonTool(): Tool {
       start = info.point;
       const id = genId();
       creatingId = id;
-      const style = groupStyle('shape');
+      const style = nextShapeStyle();
       const props: PolygonProps = {
         ...(util.getDefaultProps() as PolygonProps),
         w: 0,

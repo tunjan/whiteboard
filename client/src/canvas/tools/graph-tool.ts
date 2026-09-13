@@ -1,4 +1,4 @@
-import { ChartLine } from 'lucide-react';
+import { GraphGlyph } from '@/components/ui/glyphs';
 import {
   type Bounds,
   genId,
@@ -24,7 +24,7 @@ export function createGraphTool(): Tool {
     label: 'Function',
     hotkey: 'g',
     cursor: 'crosshair',
-    icon: ChartLine,
+    icon: GraphGlyph,
 
     onPointerDown(info: ToolPointerInfo, ctx: ToolContext) {
       if (info.button !== 0) return;

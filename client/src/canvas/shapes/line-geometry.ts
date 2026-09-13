@@ -402,22 +402,51 @@ export function tangentAnchor(points: readonly Vec[], atStart: boolean): Vec {
   return atStart ? points[1]! : points[points.length - 2]!;
 }
 
-/** Scale a polyline to fit newBounds, including its local origin. */
-export function resizePolyline(
-  points: readonly Vec[],
+/**
+ * Factor taking a span of `extent` to `target`. A span is never squeezed below
+ * one unit (or below itself, if already shorter): at zero it would have no
+ * extent left to scale back out. A span that is already zero stays as it is.
+ */
+function spanScale(extent: number, target: number): number {
+  if (extent <= 0) return 1;
+  return Math.max(target, Math.min(extent, 1)) / extent;
+}
+
+/**
+ * Scale a polyline so its padded bounds land on `newBounds`, including its
+ * local origin. `measured` is the geometry the shape's bounds are taken from
+ * (a sampled arc or spline rather than the control points) and `pad` the margin
+ * they add — the same two `getBounds` uses, so resizing a shape to its own
+ * bounds leaves it exactly as it was. The margin (stroke, arrowhead, label)
+ * does not scale; only the geometry inside it does, which is what lets a small
+ * shape follow the handle rather than lag behind it. Scaling the control
+ * points scales a polyline or spline exactly and an arc closely.
+ */
+export function resizePolyline<T extends Vec>(
+  points: readonly T[],
+  measured: readonly Vec[],
   pad: number,
   newBounds: Bounds,
-): { x: number; y: number; points: Vec[]; scale: number } {
-  const original = pointsBounds(points);
-  const initialWidth = original.maxX - original.minX + 2 * pad || 1;
-  const initialHeight = original.maxY - original.minY + 2 * pad || 1;
-  const sx = (newBounds.maxX - newBounds.minX) / initialWidth;
-  const sy = (newBounds.maxY - newBounds.minY) / initialHeight;
-  const scaled = points.map((point) => ({ x: point.x * sx, y: point.y * sy }));
-  const bounds = pointsBounds(scaled);
+): { x: number; y: number; points: T[]; scale: number } {
+  const original = pointsBounds(measured);
+  const sx = spanScale(
+    original.maxX - original.minX,
+    newBounds.maxX - newBounds.minX - 2 * pad,
+  );
+  const sy = spanScale(
+    original.maxY - original.minY,
+    newBounds.maxY - newBounds.minY - 2 * pad,
+  );
+  const scaled = points.map((point) => ({
+    ...point,
+    x: point.x * sx,
+    y: point.y * sy,
+  }));
+  // Centred, not pinned to a corner: where the geometry cannot shrink any
+  // further (or has no extent on an axis) it stays in the middle of the box.
   return {
-    x: newBounds.minX - (bounds.minX - pad),
-    y: newBounds.minY - (bounds.minY - pad),
+    x: (newBounds.minX + newBounds.maxX) / 2 - ((original.minX + original.maxX) / 2) * sx,
+    y: (newBounds.minY + newBounds.maxY) / 2 - ((original.minY + original.maxY) / 2) * sy,
     points: scaled,
     scale: (Math.abs(sx) + Math.abs(sy)) / 2,
   };

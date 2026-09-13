@@ -8,7 +8,19 @@
     />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
+    <!--
+      Added to the Home Screen on an iPad, the board runs with no browser
+      chrome at all, so it has to supply what the browser would have: the name
+      under the icon, and a status bar that reads over the board rather than
+      sitting above it (`viewport-fit=cover` above puts the page under it, and
+      the safe-area insets keep the chrome clear).
+    -->
+    <meta name="apple-mobile-web-app-title" content="Whiteboard" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f9f8f5" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0c0a09" />
     <meta name="description" content="A collaborative digital whiteboard for sketches, math equations, graphs, notes, and real-time tutoring." />
+    <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" type="image/png" href="/best-whiteboard-favicon.png" />
     <link rel="apple-touch-icon" href="/best-whiteboard-apple-touch-icon.png" />
 

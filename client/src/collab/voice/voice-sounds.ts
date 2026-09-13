@@ -1,4 +1,9 @@
-import { useVoiceStore } from './use-voice-store';
+import {
+  getAudioContext,
+  soundAllowed,
+  soundVolume,
+  withAudio,
+} from '@/lib/sound';
 
 export type VoiceSound =
   | 'join'
@@ -6,30 +11,6 @@ export type VoiceSound =
   | 'mute'
   | 'unmute'
   | 'error';
-
-let audioContext: AudioContext | null = null;
-
-function soundAllowed(): boolean {
-  if (typeof window === 'undefined') return false;
-  const { soundEffectsEnabled, soundEffectsVolume } =
-    useVoiceStore.getState();
-  const prefersReducedMotion =
-    typeof window.matchMedia === 'function' &&
-    window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  return (
-    soundEffectsEnabled &&
-    soundEffectsVolume > 0 &&
-    !prefersReducedMotion
-  );
-}
-
-function getAudioContext(): AudioContext | null {
-  if (typeof AudioContext === 'undefined') return null;
-  if (!audioContext || audioContext.state === 'closed') {
-    audioContext = new AudioContext();
-  }
-  return audioContext;
-}
 
 export function primeVoiceSounds(): void {
   if (!soundAllowed()) return;
@@ -40,20 +21,7 @@ export function primeVoiceSounds(): void {
 }
 
 export function playVoiceSound(sound: VoiceSound): void {
-  if (!soundAllowed()) return;
-  const context = getAudioContext();
-  if (!context) return;
-
-  const play = () => {
-    if (context.state === 'closed') return;
-    synthesize(context, sound, useVoiceStore.getState().soundEffectsVolume);
-  };
-
-  if (context.state === 'suspended') {
-    void context.resume().then(play).catch(() => {});
-  } else {
-    play();
-  }
+  withAudio((context) => synthesize(context, sound, soundVolume()));
 }
 
 function synthesize(

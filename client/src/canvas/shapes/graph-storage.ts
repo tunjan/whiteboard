@@ -95,20 +95,52 @@ export function expressionToY(expression: GraphExpression): YGraphExpression {
   return entry;
 }
 
+/** Last array handed out for a given stored list, kept for its identity. */
+const materialized = new WeakMap<Y.Array<YGraphExpression>, GraphExpression[]>();
+
+function expressionsEqual(
+  a: readonly GraphExpression[],
+  b: readonly GraphExpression[],
+): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    const x = a[i]!;
+    const y = b[i]!;
+    for (const key of EXPRESSION_KEYS) {
+      if (!fieldsEqual(x[key], y[key])) return false;
+    }
+  }
+  return true;
+}
+
 /**
  * Materialize a graph's expressions, accepting either storage form.
  *
  * Boards written before the promotion keep their list inside `props`; those are
  * read in place and only converted when edited, matching how draw strokes and
  * text shapes handle their own older forms.
+ *
+ * The result is shared, not rebuilt, when nothing in the list changed — the
+ * same trade `readPoints` makes, for the same reason. `yToShape` re-reads a
+ * shape on every mutation of it, so a fresh array here gave `props.expressions`
+ * a new identity on every frame of a drag, which invalidated the `curves` memo
+ * in `graph.tsx` and re-sampled curves whose viewport and sample count had not
+ * moved. An implicit expression costs ~7.6 ms a frame to re-sample; a drag
+ * patches only `x`/`y`, so all of it was recomputing an identical curve.
+ * Read it, don't mutate or retain it.
  */
 export function readGraphExpressions(
   m: Y.Map<unknown>,
   storedProps: Record<string, unknown>,
 ): GraphExpression[] {
-  const arr = m.get('expressions');
-  if (arr instanceof Y.Array) {
-    return (arr as Y.Array<YGraphExpression>).map(entryToExpression);
+  const stored = m.get('expressions');
+  if (stored instanceof Y.Array) {
+    const arr = stored as Y.Array<YGraphExpression>;
+    const next = arr.map(entryToExpression);
+    const previous = materialized.get(arr);
+    if (previous && expressionsEqual(previous, next)) return previous;
+    materialized.set(arr, next);
+    return next;
   }
   return Array.isArray(storedProps.expressions)
     ? (storedProps.expressions as GraphExpression[])

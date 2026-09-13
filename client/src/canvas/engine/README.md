@@ -58,10 +58,6 @@ convention). Bound arrows retain this app's ability to escape ancestor frame
 clips. Existing ink, geometry, fractional jitter, tool state machines, snapping,
 and connector routing remain in their established modules.
 
-The old camera-snapshot implementation is no longer used by `Canvas`. Its files
-and temporary benchmark switches are retained because they contain pre-existing
-work; snapshot-specific switches do not affect this renderer.
-
 ## Verification
 
 `scene.test.ts` covers signal isolation, ancestor invalidation, stacking,

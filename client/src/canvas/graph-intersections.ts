@@ -21,9 +21,42 @@ export const MAX_INTERSECTIONS = 40;
 
 const BISECTION_ITERATIONS = 40;
 
+/** Refine a sampled local minimum of |f| to locate a tangency. */
+function tangentRoot(
+  f: (x: number) => number,
+  lo: number,
+  hi: number,
+  tolerance: number,
+): number | null {
+  const ratio = (Math.sqrt(5) - 1) / 2;
+  let a = hi - ratio * (hi - lo);
+  let b = lo + ratio * (hi - lo);
+  let fa = Math.abs(f(a));
+  let fb = Math.abs(f(b));
+  for (let i = 0; i < 60; i += 1) {
+    if (!Number.isFinite(fa) || !Number.isFinite(fb)) return null;
+    if (fa < fb) {
+      hi = b;
+      b = a;
+      fb = fa;
+      a = hi - ratio * (hi - lo);
+      fa = Math.abs(f(a));
+    } else {
+      lo = a;
+      a = b;
+      fa = fb;
+      b = lo + ratio * (hi - lo);
+      fb = Math.abs(f(b));
+    }
+  }
+  const root = fa < fb ? a : b;
+  return Math.abs(f(root)) <= tolerance ? root : null;
+}
+
 /**
  * Roots of `f` over [xMin, xMax]: uniform scan for sign changes, refined by
- * bisection. A sign change across a pole (e.g. tan at pi/2) also brackets, so
+ * bisection, plus local minima of |f| for roots that only touch zero.
+ * A sign change across a pole (e.g. tan at pi/2) also brackets, so
  * candidates are only accepted when |f| actually vanishes at the limit.
  */
 function findRoots(
@@ -36,9 +69,29 @@ function findRoots(
   const roots: number[] = [];
   let prevX = viewport.xMin;
   let prevY = f(prevX);
+  let beforeX = prevX;
+  let beforeY = Number.NaN;
   for (let i = 1; i <= samples; i += 1) {
     const x = viewport.xMin + i * step;
     const y = f(x);
+    if (
+      Number.isFinite(beforeY) &&
+      Number.isFinite(prevY) &&
+      Number.isFinite(y) &&
+      Math.sign(beforeY) === Math.sign(prevY) &&
+      Math.sign(prevY) === Math.sign(y) &&
+      Math.abs(prevY) < Math.abs(beforeY) &&
+      Math.abs(prevY) <= Math.abs(y)
+    ) {
+      // A near miss must not count as a root just because the viewport is
+      // tall. Require convergence relative to the neighbouring samples too.
+      const localTolerance = Math.min(
+        tolerance,
+        Math.max(Math.abs(beforeY), Math.abs(y)) * 1e-10,
+      );
+      const root = tangentRoot(f, beforeX, x, localTolerance);
+      if (root !== null) roots.push(root);
+    }
     if (Number.isFinite(prevY) && Number.isFinite(y) && prevY * y <= 0) {
       let lo = prevX;
       let hi = x;
@@ -59,6 +112,8 @@ function findRoots(
         roots.push(root);
       }
     }
+    beforeX = prevX;
+    beforeY = prevY;
     prevX = x;
     prevY = y;
   }
@@ -153,6 +208,9 @@ export function formatIntersectionCoordinate(value: number): string {
 }
 
 /** Format an intersection point into a label, e.g. `(1.25, 0)` */
-export function formatIntersectionLabel(point: { x: number; y: number }): string {
+export function formatIntersectionLabel(point: {
+  x: number;
+  y: number;
+}): string {
   return `(${formatIntersectionCoordinate(point.x)}, ${formatIntersectionCoordinate(point.y)})`;
 }

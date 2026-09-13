@@ -35,8 +35,11 @@ export const HOVER_REVEAL =
  * them is on each control instead: the `tb-glyph` halo, and a translucent wash
  * on hover rather than the opaque chip a ghost control takes on a panel.
  *
- * Used by the canvas toolbar, the properties pill, and the two corner HUDs, so
- * every piece of chrome over the board disappears by the same rule.
+ * Used by the two corner HUDs and the board header. The canvas toolbar and the
+ * properties pill left this rule for Liquid Glass (section 9 of `index.css`):
+ * they are the layer you hold a pointer over, and a plate that stays put and
+ * lets the board through beat a control that disappears into it. Everything
+ * still on this rule is chrome you look past rather than aim at.
  */
 export const CHROME_ON_BOARD =
   'border-0 bg-transparent shadow-none [--chrome-hover:var(--color-tb-track)]';

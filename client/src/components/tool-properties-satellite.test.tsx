@@ -108,15 +108,24 @@ describe('ToolPropertiesSatellite', () => {
     expect(render('draw').match(/aria-checked="true"/g)).toHaveLength(2);
   });
 
-  // Four segments, so the sliding mark is a quarter wide — less the inset that
-  // holds it clear of its groove — and steps by that whole quarter, which is
-  // its own width plus the gap the inset leaves. Both stay percentages of the
-  // track, because a coarse pointer grows every key to 44px and a mark sized
-  // in fixed pixels would then sit half a key off.
+  // Four segments, so the sliding chip is a quarter wide — less the inset that
+  // holds it clear of the capsule's rim — and steps by that whole quarter, which
+  // is its own width plus the gap the inset leaves. Both stay percentages of the
+  // capsule, because a coarse pointer grows every key to 44px and a chip sized
+  // in fixed pixels would then sit half a key off. Written as a style rather
+  // than a class because one chip now serves three capsules of three different
+  // lengths — weight, colour, eraser mode — off the same formula.
   it('sizes the weight indicator in quarters, not pixels', () => {
     const html = render('draw');
-    expect(html).toContain('w-[calc(25%-6px)]');
+    expect(html).toContain('width:calc(25% - 6px)');
     expect(html).toMatch(/translateX\(calc\(\d+ \* \(100% \+ 6px\)\)\)/);
+  });
+
+  // Eight quick colours in the ramp, so the same formula has to come out in
+  // eighths there. A chip that only ever divided by four was the bug this
+  // guards: the ramp used to mark its choice with a ring instead.
+  it('divides the colour ramp by its own length, not the weight row', () => {
+    expect(render('draw')).toContain(`width:calc(${100 / 8}% - 6px)`);
   });
 });
 
@@ -138,8 +147,12 @@ describe('ToolPropertiesSatellite as a bar in its own right', () => {
     expect(html).toContain('rounded-full');
     expect(html).toContain('bg-transparent');
     expect(html).not.toContain('tb-shell');
-    // Its glyphs carry their own separation instead.
-    expect(html).toContain('tb-glyph');
+    // What the controls stand on is their own glass, one capsule per group —
+    // weight, colour, keys — and not a ground belonging to the bar.
+    expect(html.match(/\blg lg-pill\b/g)).toHaveLength(3);
+    // The glyph halo went with it: a halo is what carries a glyph with nothing
+    // under it, and these are on glass now. Two grounds is a smudge.
+    expect(html).not.toContain('tb-glyph');
     // Both were how the old riser hid the seam it shared with the bar. A
     // detached pill has no such seam, and a squared-off edge on one would
     // read as a piece that had come loose.
@@ -156,11 +169,25 @@ describe('ToolPropertiesSatellite as a bar in its own right', () => {
   });
 
   it('rises into place rather than unrolling out of the bar', () => {
-    expect(html).toContain('translate-y-0');
-    expect(render('select')).toContain('translate-y-1.5');
+    expect(html).toContain('data-visible="true"');
+    expect(render('select')).toContain('data-visible="false"');
+    expect(html).toContain('style-bar-motion');
     // Animating grid-template-rows was the flush riser's trick, and it looked
     // like the bar extruding a flange. A separate pill has to arrive as one.
     expect(html).not.toMatch(/grid-rows-\[[01]fr\]/);
+  });
+
+  // Tailwind's `translate-*` and `scale-*` utilities write the `translate` and
+  // `scale` properties, which a `transition-[opacity,transform]` does not
+  // cover: the rise and the shrink landed in one frame while only the fade
+  // ever eased. The motion moved to a rule that names the property it moves.
+  it('does not move itself with utilities the transition cannot reach', () => {
+    for (const tool of ['draw', 'select']) {
+      const markup = render(tool);
+      expect(markup).not.toContain('scale-[0.97]');
+      expect(markup).not.toContain('transition-[opacity,transform]');
+      expect(markup).not.toMatch(/\btranslate-y-\d/);
+    }
   });
 
   it('offers the rest of the palette where the quick row runs out', () => {
@@ -233,13 +260,15 @@ describe('ToolPropertiesSatellite corner nesting', () => {
   const html = render('draw');
 
   it('insets the key fill instead of rounding the key itself into the track', () => {
-    expect(html).toContain('inset-[3px] rounded-[13px]');
+    expect(html).toContain('inset-[3px] rounded-full');
   });
 
   it('uses the same inset and corner as the weight chip beside it', () => {
-    // The weight chip is the bar's other flush recess. Two constructions for
-    // one corner on one bar is how the pair drifts apart.
-    expect(html).toContain('inset-y-[3px] left-[3px] w-[calc(25%-6px)]');
-    expect(html).toContain('rounded-[13px]');
+    // The weight chip is the bar's other inset layer. Two constructions for one
+    // corner on one bar is how the pair drifts apart. A pill capsule makes the
+    // corner trivial — a concentric inset of a pill is a pill — which is what
+    // the old 16px recess needed a stepped-down 13px radius to fake.
+    expect(html).toContain('inset-y-[3px] left-[3px]');
+    expect(html).not.toContain('rounded-[13px]');
   });
 });

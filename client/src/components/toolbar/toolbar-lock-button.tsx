@@ -1,4 +1,4 @@
-import { Lock, Unlock as LockOpen } from 'lucide-react';
+import { LockGlyph, LockOpenGlyph } from '@/components/ui/glyphs';
 import { useToolLockStore } from '@/canvas/use-tool-lock-store';
 import { Button } from '@/components/ui/button';
 import { Kbd } from '@/components/ui/kbd';
@@ -12,7 +12,7 @@ import { chromeButtonClass, TOOL_ICON } from './toolbar-constants';
 export function ToolLockButton() {
   const locked = useToolLockStore((state) => state.locked);
   const toggle = useToolLockStore((state) => state.toggle);
-  const Icon = locked ? Lock : LockOpen;
+  const Icon = locked ? LockGlyph : LockOpenGlyph;
 
   return (
     <Tooltip>

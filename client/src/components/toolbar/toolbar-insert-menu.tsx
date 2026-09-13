@@ -1,5 +1,10 @@
 import { useState } from 'react';
-import { ImagePlus, Plus, Presentation, X } from 'lucide-react';
+import {
+  CloseGlyph,
+  ImageGlyph,
+  PlusGlyph,
+  VideoGlyph,
+} from '@/components/ui/glyphs';
 import type { CustomStickerMeta } from '@whiteboard/shared';
 import { blobUrl } from '@/board/blobs';
 import { pickAndAddStickers } from '@/board/custom-stickers';
@@ -35,6 +40,7 @@ import { cn } from '@/lib/utils';
 import {
   FlyoutCaret,
   menuItemClass,
+  TOOL_FLYOUT,
   TOOL_ICON,
   toolButtonClass,
 } from './toolbar-constants';
@@ -86,7 +92,7 @@ function CustomStickerItem({
             />
           }
         >
-          <X className="size-3 text-fg-muted hover:text-fg" />
+          <CloseGlyph className="size-3 text-fg-muted hover:text-fg" />
         </TooltipTrigger>
         <TooltipContent side="top">Remove for everyone</TooltipContent>
       </Tooltip>
@@ -111,7 +117,6 @@ export function InsertMenu({ active }: InsertMenuProps) {
   const boardStickers = sortedCustomStickers(customStickers);
   const selectedSticker = getSticker(stickerId);
   const SelectedIcon = selectedSticker.Icon;
-  const TriggerIcon = active && !custom ? SelectedIcon : ImagePlus;
 
   const label = active
     ? `${custom ? custom.label : selectedSticker.label} sticker selected`
@@ -139,8 +144,10 @@ export function InsertMenu({ active }: InsertMenuProps) {
                 className="size-4.5 object-contain"
                 draggable={false}
               />
+            ) : active ? (
+              <SelectedIcon className={TOOL_ICON} />
             ) : (
-              <TriggerIcon className={TOOL_ICON} />
+              <ImageGlyph className={TOOL_ICON} />
             )}
             <FlyoutCaret active={active} />
           </TooltipTrigger>
@@ -153,7 +160,7 @@ export function InsertMenu({ active }: InsertMenuProps) {
           side="top"
           align="center"
           sideOffset={8}
-          className="w-64"
+          className={cn(TOOL_FLYOUT, 'w-64 gap-2 p-2')}
         >
           <PopoverHeader>
             <PopoverTitle>Insert</PopoverTitle>
@@ -224,11 +231,11 @@ export function InsertMenu({ active }: InsertMenuProps) {
               type="button"
               variant="ghost"
               size="sm"
-              className="w-full justify-start text-sm text-fg-secondary hover:bg-panel hover:text-fg"
+              className="w-full justify-start rounded-[0.875rem] text-sm text-fg-secondary hover:bg-tb-track hover:text-fg"
               disabled={pending > 0}
               onClick={() => void pickAndAddStickers()}
             >
-              <Plus className="mr-1 size-4 text-fg-muted" aria-hidden="true" />
+              <PlusGlyph className="mr-1 size-4 text-fg-muted" aria-hidden="true" />
               {pending > 0 ? 'Removing background…' : 'Add PNG sticker'}
             </Button>
             {uploadError && (
@@ -240,13 +247,13 @@ export function InsertMenu({ active }: InsertMenuProps) {
               type="button"
               variant="ghost"
               size="sm"
-              className="w-full justify-start text-sm text-fg-secondary hover:bg-panel hover:text-fg"
+              className="w-full justify-start rounded-[0.875rem] text-sm text-fg-secondary hover:bg-tb-track hover:text-fg"
               onClick={() => {
                 setOpen(false);
                 void pickAndPlaceImages();
               }}
             >
-              <ImagePlus
+              <ImageGlyph
                 className="mr-1 size-4 text-fg-muted"
                 aria-hidden="true"
               />
@@ -256,13 +263,13 @@ export function InsertMenu({ active }: InsertMenuProps) {
               type="button"
               variant="ghost"
               size="sm"
-              className="w-full justify-start text-sm text-fg-secondary hover:bg-panel hover:text-fg"
+              className="w-full justify-start rounded-[0.875rem] text-sm text-fg-secondary hover:bg-tb-track hover:text-fg"
               onClick={() => {
                 setOpen(false);
                 setVideoOpen(true);
               }}
             >
-              <Presentation
+              <VideoGlyph
                 className="mr-1 size-4 text-fg-muted"
                 aria-hidden="true"
               />

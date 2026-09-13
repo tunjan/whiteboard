@@ -2,12 +2,17 @@ import { describe, expect, it } from 'vitest';
 import { MAX_ZOOM, MIN_ZOOM } from './camera';
 import {
   PINCH_PAN_THRESHOLD,
+  PINCH_ZOOM_RATE_STALE_MS,
   PINCH_ZOOM_THRESHOLD,
   PINCH_ZOOM_UPGRADE_THRESHOLD,
   nextPinchMode,
   pinchGesture,
+  pinchReleaseZoomRate,
   pruneStaleTouches,
+  trackPinchZoom,
   zoomFromDistance,
+  type PinchMode,
+  type PinchState,
 } from './pinch';
 
 describe('pinchGesture', () => {
@@ -134,5 +139,75 @@ describe('nextPinchMode', () => {
 
   it('never leaves zooming', () => {
     expect(nextPinchMode('zooming', start, at(100, 0, 0))).toBe('zooming');
+  });
+});
+
+describe('pinch zoom velocity', () => {
+  const pinchAt = (mode: PinchMode, zoom = 1, now = 1000): PinchState => ({
+    startDistance: 100,
+    startZoom: zoom,
+    startMidpoint: { x: 0, y: 0 },
+    lastMidpoint: { x: 0, y: 0 },
+    mode,
+    zoomRate: 0,
+    lastZoom: zoom,
+    lastZoomTime: now,
+  });
+
+  it('measures a spread as a positive rate and a close as a negative one', () => {
+    const spreading = pinchAt('zooming');
+    trackPinchZoom(spreading, 1.1, 1016);
+    expect(spreading.zoomRate).toBeGreaterThan(0);
+
+    const closing = pinchAt('zooming');
+    trackPinchZoom(closing, 0.9, 1016);
+    expect(closing.zoomRate).toBeLessThan(0);
+  });
+
+  it('converges on a steady rate and decays back toward zero when the fingers stop', () => {
+    const pinch = pinchAt('zooming');
+    let zoom = 1;
+    let now = 1000;
+    for (let i = 0; i < 20; i++) {
+      zoom *= Math.exp(0.004 * 16);
+      now += 16;
+      trackPinchZoom(pinch, zoom, now);
+    }
+    expect(pinch.zoomRate).toBeCloseTo(0.004, 4);
+
+    const moving = pinch.zoomRate;
+    for (let i = 0; i < 10; i++) {
+      now += 16;
+      trackPinchZoom(pinch, zoom, now);
+    }
+    expect(Math.abs(pinch.zoomRate)).toBeLessThan(moving / 10);
+  });
+
+  it('ignores samples that carry no time or no scale', () => {
+    const pinch = pinchAt('zooming');
+    trackPinchZoom(pinch, 2, 1000);
+    trackPinchZoom(pinch, 0, 1016);
+    expect(pinch.zoomRate).toBe(0);
+    expect(pinch.lastZoom).toBe(1);
+  });
+
+  it('releases the rate a zoom lifted at', () => {
+    const pinch = pinchAt('zooming');
+    trackPinchZoom(pinch, 1.1, 1016);
+    expect(pinchReleaseZoomRate(pinch, 1016)).toBe(pinch.zoomRate);
+  });
+
+  it('releases nothing from a pan, whatever the scale did', () => {
+    const pinch = pinchAt('panning');
+    trackPinchZoom(pinch, 1.1, 1016);
+    expect(pinchReleaseZoomRate(pinch, 1016)).toBe(0);
+  });
+
+  it('releases nothing from a scale that was set and then held', () => {
+    const pinch = pinchAt('zooming');
+    trackPinchZoom(pinch, 1.1, 1016);
+    expect(
+      pinchReleaseZoomRate(pinch, 1016 + PINCH_ZOOM_RATE_STALE_MS + 1),
+    ).toBe(0);
   });
 });

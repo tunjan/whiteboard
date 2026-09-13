@@ -7,6 +7,7 @@ import { spatialIndex } from '../use-document-store';
 import { useEnteredGroupStore } from '../use-entered-group-store';
 import { useCanvasUiStore } from '../use-canvas-ui-store';
 import { useSelectionStore } from '../use-selection-store';
+import { nextShapeStyle } from '../use-style-store';
 import { createSelectTool } from './select-tool';
 import type { ToolContext, ToolPointerInfo } from './types';
 
@@ -146,12 +147,31 @@ describe('select tool state machine', () => {
     useSelectionStore.getState().clear();
     useSelectionStore.getState().setMarquee(null);
     useSelectionStore.getState().setSnapGuides([]);
-    useSelectionStore.getState().setRotationCursor(null);
+    useSelectionStore.getState().setGestureCursor(null);
     useEnteredGroupStore.getState().exit();
     useCanvasUiStore.getState().setSnappingEnabled(true);
   });
 
   afterEach(() => spatialIndex.clear());
+
+  // Selecting is not a way of picking up a style. Clicking a red rectangle used
+  // to write its colour into the store, so the next stroke came out red; the
+  // bar now reads the selection instead, and the style new shapes inherit only
+  // moves when a control does.
+  it('leaves the style new shapes inherit alone when a shape is selected', () => {
+    const red = rectangle('a', 0, 0, 'a0');
+    red.props.color = '#e03131';
+    red.props.size = 10;
+    const { ctx } = context([red]);
+    const before = nextShapeStyle();
+
+    const tool = createSelectTool();
+    tool.onPointerDown?.(pointer(10, 10), ctx);
+    tool.onPointerUp?.(pointer(10, 10), ctx);
+
+    expect(useSelectionStore.getState().selectedIds).toEqual(['a']);
+    expect(nextShapeStyle()).toEqual(before);
+  });
 
   it('toggles with Shift-click but constrains a Shift-drag of an existing selection', () => {
     const a = rectangle('a', 0, 0, 'a0');
@@ -513,27 +533,53 @@ describe('select tool state machine', () => {
     );
 
     tool.onPointerDown?.(pointer(handle.x, handle.y), ctx);
-    const initialCursor = useSelectionStore.getState().rotationCursor;
+    const initialCursor = useSelectionStore.getState().gestureCursor;
     transactions.count = 0;
     tool.onPointerMove?.(pointer(target.x, target.y), ctx);
 
     expect(transactions.count).toBe(1);
-    expect(useSelectionStore.getState().rotationCursor).not.toBe(initialCursor);
-    expect(shapes.get(first.id)).toMatchObject({
-      parentId: parent.id,
-      x: expectedFirstCenter.x - 20,
-      y: expectedFirstCenter.y - 15,
-    });
-    expect(shapes.get(second.id)).toMatchObject({
-      parentId: parent.id,
-      x: expectedSecondCenter.x - 20,
-      y: expectedSecondCenter.y - 15,
-    });
+    expect(useSelectionStore.getState().gestureCursor).not.toBe(initialCursor);
+    expect(shapes.get(first.id)?.parentId).toBe(parent.id);
+    expect(shapes.get(first.id)?.x).toBeCloseTo(expectedFirstCenter.x - 20);
+    expect(shapes.get(first.id)?.y).toBeCloseTo(expectedFirstCenter.y - 15);
+    expect(shapes.get(second.id)?.parentId).toBe(parent.id);
+    expect(shapes.get(second.id)?.x).toBeCloseTo(expectedSecondCenter.x - 20);
+    expect(shapes.get(second.id)?.y).toBeCloseTo(expectedSecondCenter.y - 15);
     expect(shapes.get(first.id)?.rotation).toBeCloseTo(Math.PI / 2);
     expect(shapes.get(second.id)?.rotation).toBeCloseTo(Math.PI / 2);
 
     tool.onPointerUp?.(pointer(target.x, target.y), ctx);
-    expect(useSelectionStore.getState().rotationCursor).toBeNull();
+    expect(useSelectionStore.getState().gestureCursor).toBeNull();
+  });
+
+  it('promotes children a rotation swung clear of their frame', () => {
+    const parent = {
+      ...frame('frame', 0, 0, 'a0'),
+      props: { w: 200, h: 60, name: 'Frame' },
+    };
+    const first = { ...rectangle('first', 0, 15, 'a1'), parentId: parent.id };
+    const second = { ...rectangle('second', 160, 15, 'a2'), parentId: parent.id };
+    const stay = { ...rectangle('stay', 80, 15, 'a3'), parentId: parent.id };
+    const { ctx, shapes } = context([parent, first, second, stay]);
+    const tool = createSelectTool();
+    useSelectionStore.getState().setSelection([first.id, second.id]);
+    const info = getSelectionInfo(
+      [parent, first, second, stay],
+      [first.id, second.id],
+      1,
+    )!;
+    const handle = info.rotationHandles[0]!.point;
+    const target = rotatePoint(handle, info.center, Math.PI / 2);
+
+    tool.onPointerDown?.(pointer(handle.x, handle.y), ctx);
+    tool.onPointerMove?.(pointer(target.x, target.y), ctx);
+    expect(shapes.get(first.id)?.parentId).toBe(parent.id);
+
+    tool.onPointerUp?.(pointer(target.x, target.y), ctx);
+
+    expect(shapes.get(first.id)?.parentId).toBeNull();
+    expect(shapes.get(second.id)?.parentId).toBeNull();
+    expect(shapes.get(stay.id)?.parentId).toBe(parent.id);
   });
 
   it('uses the gesture snapshot instead of accumulating rotation drift', () => {

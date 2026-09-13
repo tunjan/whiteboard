@@ -1,4 +1,5 @@
 import { LATENCY_MESSAGE_PREFIX } from '@whiteboard/shared';
+import { useBoardLoadingStore } from '@/board/use-board-loading-store';
 import { useConnectionStore } from './use-connection-store';
 
 const MEASUREMENT_INTERVAL_MS = 5_000;
@@ -16,6 +17,10 @@ export function startLatencyMonitor(
 ): () => void {
   const measure = () => {
     if (useConnectionStore.getState().status !== 'connected') return;
+    // Until the board is ready the socket is still draining the initial sync
+    // burst, so a ping measures that burst rather than the connection — and
+    // comes back over the one-second warning threshold on a healthy link.
+    if (!useBoardLoadingStore.getState().ready) return;
     provider.sendStateless(`${LATENCY_MESSAGE_PREFIX}${performance.now()}`);
   };
   const onStatus = ({ status }: { status: string }) => {
@@ -37,9 +42,16 @@ export function startLatencyMonitor(
   provider.on('status', onStatus);
   provider.on('stateless', onStateless);
   const interval = setInterval(measure, MEASUREMENT_INTERVAL_MS);
+  // Sample the moment the board settles. Without this the first honest reading
+  // waits for the next tick, and the indicator sits on "Measuring connection"
+  // for up to five seconds after the board is usable.
+  const stopReadyWatch = useBoardLoadingStore.subscribe((state) => {
+    if (state.ready) measure();
+  });
 
   return () => {
     clearInterval(interval);
+    stopReadyWatch();
     provider.off('status', onStatus);
     provider.off('stateless', onStateless);
     useConnectionStore.getState().setLatency(null);

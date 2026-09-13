@@ -18,6 +18,11 @@ import {
 } from './use-document-store';
 import { useCameraStore } from './use-camera-store';
 import { useSelectionStore } from './use-selection-store';
+import { drawUtil } from './shapes/draw';
+import { beginLiveStroke, endLiveStroke } from './use-live-stroke-store';
+import { useEraserStore } from './use-eraser-store';
+import { renderTree } from './export-png';
+import { renderToStaticMarkup } from 'react-dom/server';
 
 const rect = (id: string, x = 0): RectangleShape => ({
   id,
@@ -52,6 +57,7 @@ beforeEach(() => {
   renders.mockClear();
 });
 afterEach(async () => {
+  endLiveStroke();
   await act(() => root.unmount());
   closeBoard();
   host.remove();
@@ -72,6 +78,49 @@ const mount = async (shapes: Shape[]) => {
 };
 
 describe('flat DOM rendering', () => {
+  it('keeps both highlight passes aligned, clipped, dimmed and culled', async () => {
+    await mount([
+      { id: 'frame', type: 'frame', x: 0, y: 0, rotation: 0, index: 'a0', props: { w: 400, h: 300, name: 'Page' } },
+      { id: 'wash', type: 'draw', x: 20, y: 40, rotation: 0, index: 'a1', parentId: 'frame', opacity: 0.8,
+        props: { ...drawUtil.getDefaultProps(), inkAlgorithm: 'reference', inkKind: 'highlight', thinning: 0, size: 20, points: [{ x: 0, y: 0 }, { x: 200, y: 0 }] } },
+      { ...rect('content'), index: 'a2' },
+    ]);
+    const underlay = element('wash');
+    const overlay = host.querySelector<HTMLDivElement>('[data-highlight-overlay="wash"]')!;
+    expect(underlay.querySelector('g[opacity="0.82"]')).not.toBeNull();
+    expect(overlay.querySelector('g[opacity="0.35"]')).not.toBeNull();
+    expect(Number(overlay.style.zIndex)).toBeGreaterThan(Number(element('content').style.zIndex));
+    expect(overlay.style.clipPath).toBe(underlay.style.clipPath);
+    await act(() => editor.updateShape('wash', { x: 80, rotation: 0.3 }));
+    expect(overlay.style.transform).toBe(underlay.style.transform);
+    await act(() => useEraserStore.setState({ marked: { wash: true } }));
+    expect(Number(overlay.style.opacity)).toBeCloseTo(0.8 * 0.32);
+    expect(overlay.style.opacity).toBe(underlay.style.opacity);
+    await act(() => beginLiveStroke('wash'));
+    expect(underlay.style.visibility).toBe('visible');
+    expect(overlay.style.visibility).toBe('hidden');
+    await act(() => endLiveStroke());
+    expect(overlay.style.visibility).toBe('visible');
+    await act(() => editor.updateShape('wash', { x: 100000 }));
+    expect(overlay.style.display).toBe('none');
+    expect(underlay.style.display).toBe('none');
+    useEraserStore.setState({ marked: {} });
+  });
+
+  it('exports the background wash before content and its tint after content', async () => {
+    await mount([
+      { id: 'wash', type: 'draw', x: 20, y: 40, rotation: 0, index: 'a0',
+        props: { ...drawUtil.getDefaultProps(), inkAlgorithm: 'reference', inkKind: 'highlight', thinning: 0, size: 20, points: [{ x: 0, y: 0 }, { x: 200, y: 0 }] } },
+      rect('content'),
+    ]);
+    const markup = renderToStaticMarkup(renderTree());
+    const below = markup.indexOf('opacity="0.82"');
+    const content = markup.indexOf('title="content"');
+    const above = markup.indexOf('opacity="0.35"');
+    expect(below).toBeGreaterThan(-1);
+    expect(content).toBeGreaterThan(below);
+    expect(above).toBeGreaterThan(content);
+  });
   it('retains containers and embedded DOM through transforms, reparenting, reorder, culling, and undo', async () => {
     await mount([
       rect('a'),

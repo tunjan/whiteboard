@@ -5,6 +5,7 @@ import type {
   FontFamily,
   FontWeight,
   LineSpline,
+  Shape,
   StrokeDash,
   TextAlign,
   TextProps,
@@ -13,12 +14,7 @@ import { orthogonalRoute } from '@/canvas/shapes/connector-routing';
 import { stabilizeTextPosition } from '@/canvas/shapes/text-measure';
 import { editor, useDocumentStore } from '@/canvas/use-document-store';
 import { useSelectionStore } from '@/canvas/use-selection-store';
-import {
-  paletteColors,
-  styleGroupForShape,
-  styleGroupForTool,
-  useStyleStore,
-} from '@/canvas/use-style-store';
+import { paletteColors, useStyleStore } from '@/canvas/use-style-store';
 import { useThemeStore } from '@/use-theme-store';
 
 // Draw shapes take a fill too, but only once the stroke closed on itself — an
@@ -110,6 +106,53 @@ export interface StyleControls {
 }
 
 /**
+ * The style properties a shape may carry, as one loose record — the panel reads
+ * the same handful across every shape type, and the union's per-type props
+ * would need narrowing at each of a dozen call sites to say so.
+ */
+interface StyleProps {
+  color?: string;
+  size?: number;
+  fillStyle?: FillStyle;
+  dash?: StrokeDash;
+  fontFamily?: FontFamily;
+  fontWeight?: FontWeight;
+  align?: TextAlign;
+  arrowStart?: boolean;
+  arrowEnd?: boolean;
+  topology?: ArrowTopology;
+  spline?: LineSpline;
+  bend?: number;
+}
+
+/**
+ * What the selection agrees on for one property: the value if every shape
+ * carrying it holds the same one, and undefined if they disagree or none does.
+ *
+ * This is the direction the reflection runs in. Selecting a shape used to write
+ * its style into the store, which meant clicking a red heading left the pen
+ * red; now the bar reads the selection while there is one, and the style new
+ * shapes inherit changes only when a control is actually moved.
+ */
+function useSharedValue<T>(
+  ids: string[],
+  read: (props: StyleProps, shape: Shape) => T | undefined,
+): T | undefined {
+  return useDocumentStore((s) => {
+    let shared: T | undefined;
+    for (const id of ids) {
+      const shape = id ? s.shapesById.get(id) : undefined;
+      if (!shape) continue;
+      const value = read(shape.props as StyleProps, shape);
+      if (value === undefined) continue;
+      if (shared === undefined) shared = value;
+      else if (shared !== value) return undefined;
+    }
+    return shared;
+  });
+}
+
+/**
  * Everything a style surface needs: which controls apply, what they currently
  * read, and what each one writes.
  *
@@ -120,6 +163,11 @@ export interface StyleControls {
  */
 export function useStyleControls(activeToolId: string): StyleControls {
   const {
+    color,
+    size,
+    fill,
+    dash,
+    opacity,
     arrowStart,
     arrowEnd,
     arrowTopology,
@@ -176,16 +224,28 @@ export function useStyleControls(activeToolId: string): StyleControls {
       : '';
   });
 
-  // Which remembered style this bar reads and writes. The active tool's, so the
-  // swatch row shows what the next stroke will be — except while selecting,
-  // where the subject is the selected shape and the group is the one an edit to
-  // it should be remembered in.
-  const group =
-    activeToolId === 'select'
-      ? styleGroupForShape(selectedType ?? '')
-      : styleGroupForTool(activeToolId);
-  const { color, size, fill, dash, opacity } = useStyleStore(
-    (s) => s.groups[group],
+  // What the selection reads as, property by property. Each falls back to the
+  // style new shapes inherit, which is what the bar shows with nothing selected
+  // and what it keeps showing for a property the selection does not carry.
+  const sharedColor = useSharedValue(selectedIds, (p) => p.color);
+  const sharedSize = useSharedValue(selectedIds, (p) => p.size);
+  const sharedFill = useSharedValue(selectedIds, (p) => p.fillStyle);
+  const sharedDash = useSharedValue(selectedIds, (p) => p.dash);
+  const sharedOpacity = useSharedValue(selectedIds, (_p, shape) =>
+    typeof shape.opacity === 'number' ? shape.opacity : undefined,
+  );
+  const sharedFontFamily = useSharedValue(selectedIds, (p) => p.fontFamily);
+  const sharedFontWeight = useSharedValue(selectedIds, (p) => p.fontWeight);
+  const sharedAlign = useSharedValue(selectedIds, (p) => p.align);
+  const sharedArrowStart = useSharedValue(selectedIds, (p) => p.arrowStart);
+  const sharedArrowEnd = useSharedValue(selectedIds, (p) => p.arrowEnd);
+  const sharedSpline = useSharedValue(selectedIds, (p) => p.spline);
+  // An arrow drawn before the topology prop existed says what it is by its
+  // bend, the same reading the arrow itself is rendered from.
+  const sharedTopology = useSharedValue(selectedIds, (p, shape) =>
+    shape.type === 'arrow'
+      ? (p.topology ?? (Math.abs(p.bend ?? 0) >= 0.5 ? 'arc' : 'straight'))
+      : undefined,
   );
 
   // The eraser paints nothing, so none of the drawing controls apply to it.
@@ -265,25 +325,21 @@ export function useStyleControls(activeToolId: string): StyleControls {
     const from = paletteColors(previousTheme.current);
     const to = paletteColors(theme);
     previousTheme.current = theme;
-    // Every group, not just the one on screen: an instrument put down on the
-    // light canvas has to come back on its counterpart colour, not on a hex
-    // that is now invisible.
-    const groups = useStyleStore.getState().groups;
-    for (const key of Object.keys(groups) as (keyof typeof groups)[]) {
-      const slot = from.findIndex((c) => c.value === groups[key].color);
-      const next = slot >= 0 ? to[slot] : undefined;
-      if (next) setColor(key, next.value);
-    }
+    const slot = from.findIndex(
+      (c) => c.value === useStyleStore.getState().color,
+    );
+    const next = slot >= 0 ? to[slot] : undefined;
+    if (next) setColor(next.value);
   }, [theme]);
 
   const applyColor = (value: string) => {
-    setColor(group, value);
+    setColor(value);
     for (const id of selectedIds)
       editor.updateShape(id, { props: { color: value } });
   };
 
   const applySize = (value: number) => {
-    setSize(group, value);
+    setSize(value);
     for (const id of selectedIds) {
       const shape = editor.getShape(id);
       if (shape && shape.type !== 'text') {
@@ -293,7 +349,7 @@ export function useStyleControls(activeToolId: string): StyleControls {
   };
 
   const applyFill = (value: FillStyle) => {
-    setFill(group, value);
+    setFill(value);
     for (const id of selectedIds) {
       const shape = editor.getShape(id);
       if (shape && FILLABLE.has(shape.type)) {
@@ -303,7 +359,7 @@ export function useStyleControls(activeToolId: string): StyleControls {
   };
 
   const applyDash = (value: StrokeDash) => {
-    setDash(group, value);
+    setDash(value);
     for (const id of selectedIds) {
       const shape = editor.getShape(id);
       if (shape && DASHABLE.has(shape.type)) {
@@ -315,7 +371,7 @@ export function useStyleControls(activeToolId: string): StyleControls {
   // Sets the opacity of the current selection (any shape type) and the style
   // default new shapes inherit.
   const applyOpacity = (value: number) => {
-    setOpacity(group, value);
+    setOpacity(value);
     for (const id of selectedIds) editor.updateShape(id, { opacity: value });
   };
 
@@ -397,18 +453,18 @@ export function useStyleControls(activeToolId: string): StyleControls {
     show,
     targetType,
     values: {
-      color,
-      size,
-      fill,
-      dash,
-      opacity,
-      arrowStart,
-      arrowEnd,
-      arrowTopology: arrowTopology ?? 'straight',
-      lineSpline: lineSpline ?? 'linear',
-      fontFamily,
-      fontWeight,
-      align,
+      color: sharedColor ?? color,
+      size: sharedSize ?? size,
+      fill: sharedFill ?? fill,
+      dash: sharedDash ?? dash,
+      opacity: sharedOpacity ?? opacity,
+      arrowStart: sharedArrowStart ?? arrowStart,
+      arrowEnd: sharedArrowEnd ?? arrowEnd,
+      arrowTopology: sharedTopology ?? arrowTopology ?? 'straight',
+      lineSpline: sharedSpline ?? lineSpline ?? 'linear',
+      fontFamily: sharedFontFamily ?? fontFamily,
+      fontWeight: sharedFontWeight ?? fontWeight,
+      align: sharedAlign ?? align,
       connectorLabel,
     },
     apply: {

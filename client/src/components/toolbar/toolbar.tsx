@@ -1,13 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { ChevronDown, ChevronUp } from 'lucide-react';
+import { ChevronDownGlyph, ChevronUpGlyph } from '@/components/ui/glyphs';
 import '@/canvas/tools/register';
 import { useToolStore } from '@/canvas/use-tool-store';
 import { Button } from '@/components/ui/button';
-import {
-  CHROME_ON_BOARD,
-  HOVER_REVEAL,
-  Surface,
-} from '@/components/ui/surface';
+import { HOVER_REVEAL, Surface } from '@/components/ui/surface';
 import { ToolPropertiesSatellite } from '@/components/tool-properties-satellite';
 import {
   Tooltip,
@@ -33,36 +29,7 @@ import { ToolLockButton } from './toolbar-lock-button';
 import { ShapeMenu } from './toolbar-shape-menu';
 import { ToolButton } from './toolbar-tool-button';
 
-/**
- * The canvas toolbar: one soft pill floating over the board, with the inking
- * tools lying in it as drawn instruments and everything else as glyph keys
- * either side of them.
- *
- * The bar is built the way the call panel is: the content is the thing you
- * see, and the chrome around it takes up as little as it can get away with.
- *
- *   · No card, and nothing casting the shape of one. The bar has no border and
- *     no shadow of its own; what it stands on is the board itself, blurred
- *     (`wb-chrome-blur`), with a halo on each glyph over that — the way a
- *     player's controls are burned into the picture rather than laid on a
- *     panel over it.
- *   · No recesses either. The three groups used to stand in grooves and the
- *     instruments in a fourth; all four are gone, and the space between the
- *     groups does the grouping. The instruments still break out of the row at
- *     both ends — tip above it and out over the canvas, handle fading out
- *     below — but they lie on the board now rather than in a tray.
- *   · The bar's own controls fade out. Lock and hide act on the bar rather
- *     than on the board, and at rest they are not there at all; they arrive
- *     on hover, on focus, and permanently on touch. Nothing is hidden that
- *     the pointer has not already reached.
- *   · What is left that can be filled: a wash under a hovered key, and one
- *     solid chip on the key being held. Menus stay opaque — a flyout over ink
- *     is unreadable — so the rule is that controls are transparent and the
- *     things they open are not.
- *
- * The active tool's quick properties ride above the bar in their own pill; see
- * `ToolPropertiesSatellite`.
- */
+/** Canvas controls on a plain floating bar. */
 export function Toolbar() {
   const activeToolId = useToolStore((state) => state.activeToolId);
   const [hidden, setHidden] = useState(false);
@@ -100,7 +67,7 @@ export function Toolbar() {
 
   return (
     <TooltipProvider delay={250}>
-      <div className="absolute bottom-[calc(0.75rem+env(safe-area-inset-bottom))] left-1/2 z-[var(--z-ui)] -translate-x-1/2">
+      <div className="absolute bottom-[calc(0.75rem+var(--wb-inset-bottom))] left-1/2 z-[var(--z-ui)] -translate-x-1/2">
         <Surface
           ref={toolbar.ref}
           mode="floating"
@@ -113,21 +80,8 @@ export function Toolbar() {
           onKeyDown={toolbar.onKeyDown}
           onFocusCapture={toolbar.onFocusCapture}
           className={cn(
-            'group/chrome relative flex w-max max-w-[calc(100vw-1rem)] items-center rounded-full',
-            // No card: no border and no shadow, so nothing draws the outline
-            // of a slab. What the row lies on is the board under it, blurred
-            // — one ground for the whole bar, which a per-glyph halo cannot
-            // give it once the keys are read as a row rather than one at a
-            // time. The halos stay on top of that for the dense boards.
-            //
-            // `CHROME_ON_BOARD` carries the `shadow-none`, which is not
-            // optional here: `Surface mode="floating"` brings a panel shadow,
-            // and a shadow cast by a box with nothing in it draws the outline
-            // of the card that was just removed. Its `bg-transparent` is
-            // overridden by `wb-chrome-blur`, which is unlayered and so beats
-            // every Tailwind utility (see section 8 of `index.css`).
-            CHROME_ON_BOARD,
-            'wb-chrome-blur',
+            'group/chrome relative flex w-max max-w-[calc(100vw-1rem)] items-center',
+            'toolbar-bar rounded-full',
             'p-1',
             'origin-bottom transition-[opacity,transform] duration-slow ease-out-quart',
             'motion-reduce:transition-none',
@@ -135,19 +89,12 @@ export function Toolbar() {
               'pointer-events-none translate-y-[calc(100%+0.75rem)] scale-[0.96] opacity-0',
           )}
         >
-          {/* Space is the grouping: 2px between keys in a group, 18px across
-              one, with no box anywhere on the bar to say it twice. */}
-          <div className="hidden items-stretch gap-2.5 sm:flex">
+          <div className="toolbar-desktop relative z-10 items-stretch gap-2.5">
             <div role="group" aria-label="Navigate" className={TOOL_GROUP}>
               {NAVIGATE_TOOLS.map((id) => (
                 <ToolButton key={id} toolId={id} />
               ))}
             </div>
-
-            {/* The shapes stand in the tray with the pens rather than beside
-                it as a glyph: both are things you pick up, and splitting them
-                across two idioms made the bar read as three groups here
-                instead of one. */}
             <InstrumentTray tools={INKING_TOOLS}>
               <ShapeMenu
                 variant="tray"
@@ -165,11 +112,6 @@ export function Toolbar() {
               <ToolButton toolId="comment" />
               <InsertMenu active={activeToolId === 'sticker'} />
             </div>
-
-            {/* The bar's own two controls, and the only things here that act
-                on the bar rather than on the board. They are not drawn at all
-                until the pointer is on the bar — by which time it has already
-                arrived at them — so at rest the bar is nothing but tools. */}
             <div
               className={cn(
                 'ms-0.5 flex items-center gap-0.5 self-center',
@@ -191,11 +133,7 @@ export function Toolbar() {
                     />
                   }
                 >
-                  {/* Drawn under tool weight, on a full-size target. It is a
-                      handle on the bar, not a thing on the board, and the one
-                      key here that is neither should not be the same size as
-                      an icon that is. */}
-                  <ChevronDown className="size-3.5" />
+                  <ChevronDownGlyph className="size-3.5" />
                 </TooltipTrigger>
                 <TooltipContent side="top">Hide toolbar</TooltipContent>
               </Tooltip>
@@ -205,7 +143,7 @@ export function Toolbar() {
           <div
             role="group"
             aria-label="Compact canvas tools"
-            className={cn(TOOL_GROUP, 'sm:hidden')}
+            className={cn(TOOL_GROUP, 'toolbar-compact relative z-10')}
           >
             {COMPACT_PRIMARY_TOOLS.map((id) => (
               <ToolButton key={id} toolId={id} />
@@ -217,9 +155,8 @@ export function Toolbar() {
             />
             <CompactMoreMenu activeToolId={activeToolId} onHide={hideToolbar} />
           </div>
-
-          <ToolPropertiesSatellite activeToolId={activeToolId} />
         </Surface>
+        {!hidden && <ToolPropertiesSatellite activeToolId={activeToolId} />}
 
         <Tooltip>
           <TooltipTrigger
@@ -234,13 +171,8 @@ export function Toolbar() {
                 aria-hidden={!hidden}
                 tabIndex={hidden ? 0 : -1}
                 className={cn(
-                  'absolute bottom-0 left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-full px-3.5 py-2',
-                  // The one control here that has to be found on an empty
-                  // board rather than recognised, so it keeps a wash under it
-                  // — the same wash a hovered key gets, no card. `tb-glyph`
-                  // for the chevron, and `tb-shell` only to strip the shadow
-                  // `Button variant="outline"` would otherwise bring.
-                  'tb-glyph border-transparent bg-tb-track tb-shell hover:bg-surface dark:border-transparent',
+                  'absolute bottom-0 left-1/2 flex -translate-x-1/2 items-center gap-1.5 px-3.5 py-2',
+                  'toolbar-bar rounded-full',
                   'transition-[opacity,transform] duration-slow ease-out-quart motion-reduce:transition-none',
                   hidden
                     ? 'translate-y-0 scale-100 opacity-100'
@@ -249,7 +181,7 @@ export function Toolbar() {
               />
             }
           >
-            <ChevronUp className="size-3.5 text-fg-muted" />
+            <ChevronUpGlyph className="size-3.5 text-fg-muted" />
             <span className="text-xs font-medium text-fg-secondary">Tools</span>
           </TooltipTrigger>
           <TooltipContent side="top">Show toolbar</TooltipContent>

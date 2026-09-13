@@ -1,11 +1,11 @@
-import { Sticker } from 'lucide-react';
+import { StickerGlyph } from '@/components/ui/glyphs';
 import { genId, type Shape, type StickerProps } from '@whiteboard/shared';
 import { getTopIndex } from '../order';
 import { shapeRegistry } from '../shapes/shape-registry';
 import { customStickerSize } from '../shapes/sticker';
 import { useCustomStickersStore } from '../use-custom-stickers-store';
 import { useStickerPopStore } from '../use-sticker-pop-store';
-import { groupStyle, useStyleStore } from '../use-style-store';
+import { nextShapeStyle, useStyleStore } from '../use-style-store';
 import type { Tool, ToolContext, ToolPointerInfo } from './types';
 
 /**
@@ -24,7 +24,7 @@ export function createStickerTool(): Tool {
     label: 'Sticker',
     hotkey: 's',
     cursor: 'crosshair',
-    icon: Sticker,
+    icon: StickerGlyph,
     hidden: true,
 
     onPointerDown(info: ToolPointerInfo, ctx: ToolContext) {
@@ -52,7 +52,7 @@ export function createStickerTool(): Tool {
         x: info.point.x - props.w / 2,
         y: info.point.y - props.h / 2,
         rotation: 0,
-        opacity: groupStyle('shape').opacity,
+        opacity: nextShapeStyle().opacity,
         index: getTopIndex(ctx.editor.getShapes()),
         props,
       } as Shape);

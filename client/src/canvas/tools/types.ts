@@ -10,6 +10,8 @@ export interface ToolPointerInfo {
   screenPoint: Point;
   /** Event timestamp in milliseconds, used for velocity-sensitive tools. */
   timestamp: number;
+  /** The view moved beneath a stationary pointer; this is not a hardware sample. */
+  isCameraMove?: boolean;
   /** Current screen-pixel-per-world-unit scale. */
   zoom: number;
   /** Pointer pressure 0..1 (0.5 for mouse without real pressure). */

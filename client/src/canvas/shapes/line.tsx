@@ -12,7 +12,24 @@ import {
 import { polylineLength } from './perfect-dash';
 import { dashProps, DrawnOutline } from './render-style';
 import { useLodDash } from '../lod';
+import type { LineShape } from '@whiteboard/shared';
 import type { ShapeUtil } from './types';
+
+/** The drawn centreline: an arc or spline, not the control points. */
+function lineCurve(s: LineShape) {
+  return curvePoints(s.props.points, s.props.bend ?? 0, s.props.spline ?? 'linear');
+}
+
+/** Margin the bounds reserve around the curve for the stroke or label. */
+function lineBoundsPad(s: LineShape): number {
+  const fontSize = Math.max(12, s.props.size * 3);
+  return s.props.label?.trim()
+    ? Math.max(
+        s.props.size / 2,
+        s.props.label.trim().length * fontSize * 0.3 + fontSize,
+      )
+    : s.props.size / 2;
+}
 
 export const lineUtil: ShapeUtil<'line'> = {
   type: 'line',
@@ -28,25 +45,7 @@ export const lineUtil: ShapeUtil<'line'> = {
     label: '',
   }),
 
-  getBounds: (s) => {
-    const fontSize = Math.max(12, s.props.size * 3);
-    const labelPad = s.props.label?.trim()
-      ? Math.max(
-          s.props.size / 2,
-          s.props.label.trim().length * fontSize * 0.3 + fontSize,
-        )
-      : s.props.size / 2;
-    return polylineBounds(
-      s.x,
-      s.y,
-      curvePoints(
-        s.props.points,
-        s.props.bend ?? 0,
-        s.props.spline ?? 'linear',
-      ),
-      labelPad,
-    );
-  },
+  getBounds: (s) => polylineBounds(s.x, s.y, lineCurve(s), lineBoundsPad(s)),
 
   hitTest: (s, p, tol) =>
     polylineHitTest(
@@ -66,7 +65,8 @@ export const lineUtil: ShapeUtil<'line'> = {
   resize: (initial, nb) => {
     const { x, y, points, scale } = resizePolyline(
       initial.props.points,
-      initial.props.size / 2,
+      lineCurve(initial),
+      lineBoundsPad(initial),
       nb,
     );
     return {

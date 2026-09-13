@@ -1,0 +1,19 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Scale bench</title>
+    <style>
+      /* An explicit pixel size, not a viewport-relative one. A hidden tab
+         reports innerWidth 0, which would leave the canvas 0x0 — and a 0x0
+         viewport disables culling entirely, so the run would measure a
+         configuration the app never actually renders. */
+      html, body { margin: 0; padding: 0; }
+      #root { width: 1400px; height: 900px; position: relative; overflow: hidden; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/scale-bench.tsx"></script>
+  </body>
+</html>

@@ -8,14 +8,67 @@ import { shapeRegistry } from '../shapes/shape-registry';
 import type { SpatialIndex } from '../spatial-index';
 import { paintOrder } from './paint-order';
 
-const cache = new WeakMap<
-  readonly Shape[],
-  {
-    byId: Map<string, Shape>;
-    rank: Map<string, number>;
-    frames: Extract<Shape, { type: 'frame' }>[];
+interface PickScene {
+  byId: Map<string, Shape>;
+  rank: Map<string, number>;
+  frames: Extract<Shape, { type: 'frame' }>[];
+}
+
+const cache = new WeakMap<readonly Shape[], PickScene>();
+
+// The snapshot array's identity changes on every edit, so an identity-keyed
+// cache alone rebuilds both maps and the paint order on the first pick after
+// any edit — and the hover indicator picks on every pointer move, so a peer
+// drawing is enough to pay that per frame. Ordinary edits (a move, a recolour,
+// a growing stroke) leave paint order alone, so the array that built the cache
+// is kept to diff the next one against: when only records changed, the ranks
+// carry over and `byId` is patched in place.
+let cachedFor: readonly Shape[] | null = null;
+
+const isFrame = (s: Shape): s is Extract<Shape, { type: 'frame' }> =>
+  s.type === 'frame';
+
+function buildScene(shapes: readonly Shape[]): PickScene {
+  const byId = new Map(shapes.map((s) => [s.id, s]));
+  return {
+    byId,
+    rank: new Map(paintOrder(byId).map((shape, rank) => [shape.id, rank])),
+    frames: shapes.filter(isFrame),
+  };
+}
+
+/** Carry `scene` onto `next`, or null when paint order could have moved. */
+function patchScene(
+  scene: PickScene,
+  previous: readonly Shape[],
+  next: readonly Shape[],
+): PickScene | null {
+  if (previous.length !== next.length) return null;
+  const changed: Shape[] = [];
+  for (let i = 0; i < next.length; i++) {
+    const before = previous[i]!,
+      after = next[i]!;
+    if (before === after) continue;
+    // Paint order reads exactly these three fields; membership is pinned by
+    // the ids matching position for position.
+    if (
+      before.id !== after.id ||
+      before.index !== after.index ||
+      before.parentId !== after.parentId ||
+      before.type !== after.type
+    )
+      return null;
+    changed.push(after);
   }
->();
+  for (const shape of changed) {
+    scene.byId.set(shape.id, shape);
+    if (isFrame(shape)) {
+      const at = scene.frames.findIndex((f) => f.id === shape.id);
+      if (at >= 0) scene.frames[at] = shape;
+    }
+  }
+  return scene;
+}
 
 /** Shared picking pipeline for selection, double-click, and context menus. */
 export function hitTestCanvas(
@@ -31,15 +84,14 @@ export function hitTestCanvas(
 ): Shape | null {
   let scene = cache.get(shapes);
   if (!scene) {
-    const byId = new Map(shapes.map((s) => [s.id, s]));
-    scene = {
-      byId,
-      rank: new Map(paintOrder(byId).map((shape, rank) => [shape.id, rank])),
-      frames: shapes.filter(
-        (s): s is Extract<Shape, { type: 'frame' }> => s.type === 'frame',
-      ),
-    };
+    const last = cachedFor && cache.get(cachedFor);
+    const patched = last && patchScene(last, cachedFor!, shapes);
+    // A patched scene is mutated in place, so the array it was built for must
+    // stop naming it; a fresh build leaves that entry correct and cached.
+    if (patched) cache.delete(cachedFor!);
+    scene = patched || buildScene(shapes);
     cache.set(shapes, scene);
+    cachedFor = shapes;
   }
   const candidates = new Set(
     index.search({

@@ -28,6 +28,7 @@ import {
   useDocumentStore,
 } from './use-document-store';
 import * as Y from 'yjs';
+import { useBoardLoadingStore } from '@/board/use-board-loading-store';
 import { residentPageDoc } from './page-docs';
 import { useCameraStore } from './use-camera-store';
 import { useCommentsStore } from './use-comments-store';
@@ -185,6 +186,21 @@ beforeEach(() => {
   dispose = loadBoard('test-doc-store', { persist: false, collab: false });
 });
 afterEach(() => dispose());
+
+describe('board loading readiness', () => {
+  // A board with neither a local cache nor a server has no source to wait for,
+  // so the loading veil must never come up over it — including here, where
+  // every other suite in this file relies on the board being usable at once.
+  it('is ready immediately for a board with no configured source', () => {
+    expect(useBoardLoadingStore.getState().ready).toBe(true);
+  });
+
+  it('is not ready again once the board is disposed', () => {
+    dispose();
+    expect(useBoardLoadingStore.getState().ready).toBe(false);
+    dispose = loadBoard('test-doc-store', { persist: false, collab: false });
+  });
+});
 
 describe('page transitions', () => {
   it('finishes the current interaction and ignores unknown page ids', () => {

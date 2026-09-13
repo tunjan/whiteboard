@@ -463,6 +463,12 @@ export function syncBoundArrows(
   shapes: readonly Shape[],
   editor: Editor,
   dirty: ReadonlySet<string> | null = null,
+  /** The store's own id index for the same snapshot, when the caller has one.
+   *  Building the equivalent Map here costs 0.44 ms at 10k shapes and 2.7 ms at
+   *  50k — paid on every frame of a drag that moves a bound shape, which is
+   *  exactly when candidates exist. Callers without an index (tests) fall back
+   *  to building one. */
+  byIdIndex?: ReadonlyMap<string, Shape>,
 ): void {
   if (dirty?.size === 0) return;
 
@@ -483,7 +489,8 @@ export function syncBoundArrows(
   }
   if (candidates.length === 0) return;
 
-  const byId = new Map(shapes.map((shape) => [shape.id, shape]));
+  const byId =
+    byIdIndex ?? new Map(shapes.map((shape) => [shape.id, shape]));
   const updates: Array<{
     id: string;
     points: Vec[];

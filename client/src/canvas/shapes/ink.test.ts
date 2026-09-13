@@ -8,12 +8,14 @@ import {
   LIFT_TAPER_MAX_WIDTHS,
   LIFT_TAPER_MIN_SPEED,
   STROKE_PROFILES,
+  getInkCenterlineGeometry,
   getInkCenterlinePath,
   getInkPathData,
   liftTaperFor,
   pencilStabilizationToStreamline,
 } from './ink';
 import { buildInkCenterline } from './ink-engine';
+import { INK_ERROR_SCREEN_PX, inkErrorLimit } from '../use-lod-store';
 
 describe('pencil outlines', () => {
   const dynamics = {
@@ -1188,5 +1190,223 @@ describe('lift taper', () => {
 
   it('reads a broken speed as no lift at all', () => {
     expect(liftTaperFor(Number.NaN, 10, 100)).toBe(0);
+  });
+});
+
+/**
+ * Points along the curve a path actually draws — the quadratics evaluated,
+ * not the control net they are steered by.
+ *
+ * The net is the wrong thing to measure a simplification against: it is the
+ * hull the curve sits inside, so it reads high where the curve bulges past a
+ * dropped vertex and low where the curve cuts a corner the net still turns.
+ * The second is the case this bound exists for.
+ */
+function curveSamples(d: string, per = 6): { x: number; y: number }[] {
+  const tokens = d.match(/[Mqta]|-?\d+(?:\.\d+)?/g) ?? [];
+  const points: { x: number; y: number }[] = [];
+  let x = 0;
+  let y = 0;
+  let controlX = 0;
+  let controlY = 0;
+  let hasControl = false;
+  let i = 0;
+  const quadratic = (
+    x0: number,
+    y0: number,
+    qx: number,
+    qy: number,
+    x1: number,
+    y1: number,
+  ) => {
+    for (let step = 1; step <= per; step++) {
+      const t = step / per;
+      const u = 1 - t;
+      points.push({
+        x: u * u * x0 + 2 * u * t * qx + t * t * x1,
+        y: u * u * y0 + 2 * u * t * qy + t * t * y1,
+      });
+    }
+  };
+  while (i < tokens.length) {
+    const command = tokens[i++]!;
+    if (command === 'M') {
+      x = Number(tokens[i++]);
+      y = Number(tokens[i++]);
+      points.push({ x, y });
+      hasControl = false;
+    } else if (command === 'q' || command === 't') {
+      const qx =
+        command === 'q'
+          ? x + Number(tokens[i++])
+          : hasControl
+            ? 2 * x - controlX
+            : x;
+      const qy =
+        command === 'q'
+          ? y + Number(tokens[i++])
+          : hasControl
+            ? 2 * y - controlY
+            : y;
+      const nextX = x + Number(tokens[i++]);
+      const nextY = y + Number(tokens[i++]);
+      quadratic(x, y, qx, qy, nextX, nextY);
+      controlX = qx;
+      controlY = qy;
+      x = nextX;
+      y = nextY;
+      hasControl = true;
+    } else if (command === 'a') {
+      i += 5;
+      x += Number(tokens[i++]);
+      y += Number(tokens[i++]);
+      points.push({ x, y });
+      hasControl = false;
+    }
+  }
+  return points;
+}
+
+/** Greatest distance from any point of `exact` to the polyline `simplified`. */
+function maxDeviation(
+  exact: { x: number; y: number }[],
+  simplified: { x: number; y: number }[],
+): number {
+  let worst = 0;
+  for (const point of exact) {
+    let nearest = Number.POSITIVE_INFINITY;
+    for (let i = 1; i < simplified.length; i++) {
+      const a = simplified[i - 1]!;
+      const b = simplified[i]!;
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const lengthSquared = dx * dx + dy * dy;
+      let t =
+        lengthSquared > 0
+          ? ((point.x - a.x) * dx + (point.y - a.y) * dy) / lengthSquared
+          : 0;
+      t = t < 0 ? 0 : t > 1 ? 1 : t;
+      const offsetX = point.x - (a.x + t * dx);
+      const offsetY = point.y - (a.y + t * dy);
+      nearest = Math.min(nearest, Math.hypot(offsetX, offsetY));
+    }
+    worst = Math.max(worst, nearest);
+  }
+  return worst;
+}
+
+const commandCount = (d: string) => (d.match(/[Mqta]/g) ?? []).length;
+
+describe('screen-referenced simplification', () => {
+  const dynamics = {
+    thinning: 0.5,
+    smoothing: 0.5,
+    streamline: 0.5,
+    startTaper: 0,
+    endTaper: false as const,
+  };
+  // A spiral, not a straight run or a single corner: a straight run coarsens
+  // under any rule at all, so it cannot tell a bounded perpendicular error
+  // apart from a minimum-spacing one. Curvature everywhere is the case the
+  // bound has to hold on.
+  const spiral = Array.from({ length: 160 }, (_, index) => {
+    const angle = index / 7;
+    const radius = 12 + index / 3;
+    return {
+      x: radius * Math.cos(angle),
+      y: radius * Math.sin(angle),
+      pressure: 0.5,
+    };
+  });
+
+  /**
+   * Wandering walks at the spacing a hand actually leaves, which is where the
+   * bound is hardest to hold: a coarsely sampled stroke gives the simplifier
+   * long runs to collapse, and the curve drawn through what survives cuts the
+   * corner by several times what the dropped points were allowed. The spiral
+   * above never puts it under half that strain.
+   */
+  const walks = (() => {
+    let seed = 987654321;
+    const random = () => {
+      seed = (seed * 1664525 + 1013904223) >>> 0;
+      return seed / 4294967296;
+    };
+    return Array.from({ length: 24 }, () => {
+      let x = 0;
+      let y = 0;
+      let angle = random() * 6.28;
+      return Array.from({ length: 30 }, () => {
+        angle += (random() - 0.5) * 1.2;
+        x += Math.cos(angle) * 6;
+        y += Math.sin(angle) * 6;
+        return { x, y, pressure: 0.4 + 0.4 * random() };
+      });
+    });
+  })();
+
+  it('renders exactly the same outline when no error is allowed', () => {
+    expect(getInkPathData(spiral, 8, true, dynamics, 0)).toBe(
+      getInkPathData(spiral, 8, true, dynamics),
+    );
+  });
+
+  it('spends fewer path commands as the error budget grows', () => {
+    const exact = commandCount(getInkPathData(spiral, 8, true, dynamics));
+    const loose = commandCount(getInkPathData(spiral, 8, true, dynamics, 0.8));
+    const looser = commandCount(getInkPathData(spiral, 8, true, dynamics, 3.2));
+
+    expect(loose).toBeLessThan(exact);
+    expect(looser).toBeLessThan(loose);
+  });
+
+  it('holds the drawn outline inside its on-screen budget at every band', () => {
+    // The end-to-end promise, in the units it is made in — and the only thing
+    // that says `CURVE_SAG_FACTOR` is big enough, since the tolerance the
+    // simplifier is handed is not the distance the drawn ink ends up moving.
+    //
+    // The ceiling carries a quarter-pixel of headroom over the budget and that
+    // headroom is load-bearing: one wandering fixture reaches 0.40px, and it
+    // does so at every factor tried between 3 and 4, so the last of it is not
+    // the budget at all — it is a stroke whose caps and endpoint run get
+    // rebuilt the moment any simplification happens. Tightening the divisor
+    // does not move it; only the tail beneath it moves.
+    const CEILING = INK_ERROR_SCREEN_PX + 0.1;
+    for (const stroke of [spiral, ...walks]) {
+      for (const size of [2, 8, 32]) {
+        const exact = curveSamples(getInkPathData(stroke, size, true, dynamics));
+        for (const zoom of [0.49, 0.3, 0.24, 0.12, 0.06]) {
+          const simplified = curveSamples(
+            getInkPathData(stroke, size, true, dynamics, inkErrorLimit(zoom)),
+          );
+          expect(maxDeviation(exact, simplified) * zoom).toBeLessThanOrEqual(
+            CEILING,
+          );
+        }
+      }
+    }
+  });
+
+  it('coarsens the painted centerline without moving the dash spacing', () => {
+    const exact = getInkCenterlineGeometry(spiral, 8, 0.5, undefined, true, 0);
+    const simplified = getInkCenterlineGeometry(
+      spiral,
+      8,
+      0.5,
+      undefined,
+      true,
+      inkErrorLimit(0.12),
+    );
+
+    expect(commandCount(simplified.path)).toBeLessThan(
+      commandCount(exact.path),
+    );
+    // Dashes are distributed along the conditioned samples, which the budget
+    // must not touch: a dashed stroke may not re-space itself on a zoom.
+    expect(simplified.length).toBe(exact.length);
+    expect(
+      maxDeviation(curveSamples(exact.path), curveSamples(simplified.path)) *
+        0.12,
+    ).toBeLessThanOrEqual(INK_ERROR_SCREEN_PX);
   });
 });

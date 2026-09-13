@@ -3,6 +3,7 @@ import {
   customType,
   index,
   pgTable,
+  primaryKey,
   text,
   timestamp,
 } from 'drizzle-orm/pg-core';
@@ -91,4 +92,27 @@ export const boardDocumentUpdates = pgTable(
       table.seq,
     ),
   ],
+);
+
+/**
+ * One tutor note per board per session date — the dated counterpart to
+ * `boards.privateNotes` / `boards.errorLog`, which are the board's standing
+ * notes. Same gating: served only by the requireTutor `/notes` endpoints, never
+ * by the Yjs doc.
+ *
+ * `date` is a plain 'YYYY-MM-DD' string in the tutor's own calendar rather than
+ * a timestamp: a session belongs to the day it was taught, and a timestamp would
+ * drift across a timezone change into the wrong day.
+ */
+export const boardSessionNotes = pgTable(
+  'board_session_notes',
+  {
+    boardId: text('board_id').notNull(),
+    date: text('date').notNull(),
+    body: text('body').notNull().default(''),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.boardId, table.date] })],
 );

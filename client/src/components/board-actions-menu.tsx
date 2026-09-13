@@ -10,8 +10,10 @@ import {
   Keyboard,
   Magnet,
   Moon,
+  Mouse,
   NotebookPen,
   PenTool,
+  Pointer,
   RotateCcw,
   Scaling,
   Volume2,
@@ -33,6 +35,11 @@ import {
   PNG_EXPORT_SCALES,
   useCanvasUiStore,
 } from '@/canvas/use-canvas-ui-store';
+import { isCoarsePointer } from '@/canvas/platform';
+import {
+  FINGER_ACTIONS,
+  type FingerAction,
+} from '@/canvas/touch-input';
 import { formatAttentionDuration } from '@/collab/attention-state';
 import { useVoiceStore } from '@/collab/voice/use-voice-store';
 import { Button } from '@/components/ui/button';
@@ -192,6 +199,58 @@ const PRESSURE_CURVE_LABELS: Record<PencilPressureCurve, string> = {
   medium: 'Medium',
   firm: 'Firm',
 };
+
+/**
+ * What one finger does, named for the outcome rather than the setting. "Auto"
+ * says what it decides on, because a mode that changes behaviour the first
+ * time a Pencil touches the glass is otherwise a surprise.
+ */
+const FINGER_ACTION_LABELS: Record<FingerAction, string> = {
+  auto: 'Automatic',
+  draw: 'Draws',
+  pan: 'Moves the board',
+};
+const FINGER_ACTION_HINTS: Record<FingerAction, string> = {
+  auto: 'Draws until a stylus is used on this device, then moves the board.',
+  draw: 'A finger uses the selected tool, as a mouse would.',
+  pan: 'Only a stylus or mouse draws. A tap still selects.',
+};
+
+/**
+ * Touch preferences. Shown only where there is a touch screen: on a mouse-only
+ * machine every option here describes something that cannot happen.
+ */
+function TouchSubmenu() {
+  const fingerAction = useCanvasUiStore((s) => s.fingerAction);
+  const setFingerAction = useCanvasUiStore((s) => s.setFingerAction);
+
+  return (
+    <DropdownMenuSub>
+      <DropdownMenuSubTrigger>
+        <Pointer />
+        Finger
+        <MenuValue>{FINGER_ACTION_LABELS[fingerAction]}</MenuValue>
+      </DropdownMenuSubTrigger>
+      <DropdownMenuSubContent className="w-[min(17rem,calc(100vw-1rem))]">
+        <DropdownMenuRadioGroup
+          value={fingerAction}
+          onValueChange={(value) => setFingerAction(value as FingerAction)}
+        >
+          {FINGER_ACTIONS.map((action) => (
+            <DropdownMenuRadioItem key={action} value={action}>
+              <span className="flex flex-col items-start gap-0.5">
+                {FINGER_ACTION_LABELS[action]}
+                <span className="text-fg-muted text-xs">
+                  {FINGER_ACTION_HINTS[action]}
+                </span>
+              </span>
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuSubContent>
+    </DropdownMenuSub>
+  );
+}
 
 function PenSubmenu() {
   const pencilStabilization = useCanvasUiStore((s) => s.pencilStabilization);
@@ -454,6 +513,8 @@ export function BoardActionsMenu({
   const setPngExportScale = useCanvasUiStore((s) => s.setPngExportScale);
   const snappingEnabled = useCanvasUiStore((s) => s.snappingEnabled);
   const setSnappingEnabled = useCanvasUiStore((s) => s.setSnappingEnabled);
+  const invertScroll = useCanvasUiStore((s) => s.invertScroll);
+  const setInvertScroll = useCanvasUiStore((s) => s.setInvertScroll);
   const debugPerformance = useCanvasUiStore((s) => s.debugPerformance);
   const setDebugPerformance = useCanvasUiStore((s) => s.setDebugPerformance);
   const lowGraphics = useCanvasUiStore((s) => s.lowGraphics);
@@ -559,7 +620,18 @@ export function BoardActionsMenu({
             <Magnet />
             Object snapping
           </DropdownMenuCheckboxItem>
+          {/* Names the device it acts on, because it deliberately does not act
+              on the other one: a trackpad already follows the system's natural
+              scrolling setting, and reversing it here would fight it. */}
+          <DropdownMenuCheckboxItem
+            checked={invertScroll}
+            onCheckedChange={setInvertScroll}
+          >
+            <Mouse />
+            Invert mouse scroll
+          </DropdownMenuCheckboxItem>
           <PenSubmenu />
+          {isCoarsePointer() && <TouchSubmenu />}
           <SoundSubmenu />
           {isTutor && <AttentionSubmenu />}
           {/* A student's boards get the default and no control: how much of a

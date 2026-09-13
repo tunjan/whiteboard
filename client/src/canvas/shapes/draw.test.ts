@@ -101,6 +101,53 @@ describe('draw hit-testing', () => {
   });
 });
 
+describe('draw resizing', () => {
+  /** A short pencil stroke: the ink margin is most of its box. */
+  const short: DrawShape = {
+    ...stroke(0),
+    x: 100,
+    y: 50,
+    props: {
+      ...stroke(0).props,
+      points: [
+        { x: 0, y: 0, pressure: 0.5 },
+        { x: 5, y: 3, pressure: 0.5 },
+        { x: 10, y: 0, pressure: 0.5 },
+      ],
+      size: 4,
+      thinning: 0.5,
+    },
+  };
+
+  function boundsAfter(shape: DrawShape, next: ReturnType<typeof drawUtil.resize>) {
+    return drawUtil.getBounds({
+      ...shape,
+      x: next.x,
+      y: next.y,
+      props: next.props as DrawShape['props'],
+    });
+  }
+
+  it('leaves a stroke untouched when resized to its own bounds', () => {
+    // Grabbing a handle without moving resizes to exactly this box; the
+    // stroke used to grow and shift on that first sample.
+    const next = drawUtil.resize(short, drawUtil.getBounds(short));
+    expect(next.x).toBeCloseTo(short.x, 9);
+    expect(next.y).toBeCloseTo(short.y, 9);
+    expect(next.props.points).toEqual(short.props.points);
+  });
+
+  it('lands on the requested box', () => {
+    const b = drawUtil.getBounds(short);
+    const target = { ...b, maxX: b.maxX + 20, maxY: b.maxY + 10 };
+    const after = boundsAfter(short, drawUtil.resize(short, target));
+    expect(after.minX).toBeCloseTo(target.minX, 9);
+    expect(after.minY).toBeCloseTo(target.minY, 9);
+    expect(after.maxX).toBeCloseTo(target.maxX, 9);
+    expect(after.maxY).toBeCloseTo(target.maxY, 9);
+  });
+});
+
 describe('closed strokes', () => {
   /** A 40-unit box drawn back to just short of its own start. */
   const loop: DrawPoint[] = [

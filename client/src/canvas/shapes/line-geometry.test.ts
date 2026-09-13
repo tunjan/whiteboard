@@ -1,4 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import type { ArrowShape, Bounds, LineShape } from '@whiteboard/shared';
+import { arrowUtil } from './arrow';
+import { lineUtil } from './line';
+import type { ShapeUtil } from './types';
 import {
   arrowPoints,
   arrowheadPath,
@@ -74,5 +78,65 @@ describe('line and arrow geometry', () => {
     expect(head).not.toContain('NaN');
     expect(head).toContain('M ');
     expect(head).toContain(' L 20 0 L ');
+  });
+});
+
+describe('connector resizing', () => {
+  const base = {
+    id: 'c',
+    x: 100,
+    y: 50,
+    rotation: 0,
+    index: 'a1',
+  };
+  const points = [
+    { x: 0, y: 0 },
+    { x: 40, y: 0 },
+  ];
+  const line = (props: Partial<LineShape['props']>): LineShape => ({
+    ...base,
+    type: 'line',
+    props: { ...lineUtil.getDefaultProps(), points, size: 2, ...props },
+  });
+  const arrow = (props: Partial<ArrowShape['props']>): ArrowShape => ({
+    ...base,
+    type: 'arrow',
+    props: { ...arrowUtil.getDefaultProps(), points, size: 2, ...props },
+  });
+
+  function expectBounds(actual: Bounds, expected: Bounds) {
+    expect(actual.minX).toBeCloseTo(expected.minX, 6);
+    expect(actual.minY).toBeCloseTo(expected.minY, 6);
+    expect(actual.maxX).toBeCloseTo(expected.maxX, 6);
+    expect(actual.maxY).toBeCloseTo(expected.maxY, 6);
+  }
+
+  // A group resize hands each member its own scaled box, starting from exactly
+  // its own bounds. A bent or labelled connector measured its curve and label
+  // there but scaled only its control points, so it blew up the moment a
+  // handle was grabbed — worst on a short, flat line.
+  it.each([
+    ['a bent line', line({ bend: 20 })],
+    ['a labelled line', line({ label: 'hello' })],
+    ['a bent arrow', arrow({ topology: 'arc', bend: 20 })],
+  ])('keeps %s in its own box', (_, shape) => {
+    const util = (shape.type === 'line' ? lineUtil : arrowUtil) as ShapeUtil;
+    const b = util.getBounds(shape as never);
+    const next = util.resize(shape as never, b);
+    expectBounds(
+      util.getBounds({ ...shape, x: next.x, y: next.y, props: next.props } as never),
+      b,
+    );
+  });
+
+  it('scales a labelled line to the requested box', () => {
+    const shape = line({ label: 'hello' });
+    const b = lineUtil.getBounds(shape);
+    const target = { ...b, maxX: b.maxX + 40 };
+    const next = lineUtil.resize(shape, target);
+    expectBounds(
+      lineUtil.getBounds({ ...shape, x: next.x, y: next.y, props: next.props }),
+      target,
+    );
   });
 });

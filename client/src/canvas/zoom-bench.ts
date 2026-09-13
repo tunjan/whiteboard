@@ -1,5 +1,5 @@
 // TEMPORARY perf harness — not part of the app. Delete with ./bench-flags.ts
-// and the `TEMPORARY` markers in Canvas.tsx / camera-snapshot.ts.
+// and the `TEMPORARY` markers in Canvas.tsx.
 //
 // Enable with `?zoombench=1200` on a board URL. Seeds N synthetic ink strokes,
 // then drives a scripted camera ramp through the camera store — the same store
@@ -7,8 +7,8 @@
 // frame-time distribution of each.
 //
 // The matrix is the measurement. Frame timings alone say a zoom is slow; they
-// cannot say which of the shape layer, the grid, the snapshot bitmap or the
-// frosted chrome is costing the frame. Switching one subsystem off at a time
+// cannot say which of the shape layer, the grid or the frosted chrome is
+// costing the frame. Switching one subsystem off at a time
 // and re-running the identical ramp does, and it does it without a profiler,
 // which matters because the engine in question is the one whose profiler is
 // least comparable to the other's.
@@ -85,7 +85,6 @@ interface RunResult {
   frames: number[];
   /** Wall time spent inside the driver's own rAF callback, per frame. */
   js: number[];
-  caps: number[];
   cull: number[];
   tree: number[];
 }
@@ -126,7 +125,6 @@ function run(mode: 'zoom' | 'pan'): Promise<RunResult> {
         resolve({
           frames: frames.slice(WARMUP),
           js: js.slice(WARMUP),
-          caps: benchCounters.caps.slice(),
           cull: benchCounters.cull.slice(),
           tree: benchCounters.tree.slice(),
         });
@@ -161,7 +159,6 @@ function line(label: string, r: RunResult): string {
     `max ${(f[f.length - 1] ?? 0).toFixed(0).padStart(4)}`,
     `>20ms ${((100 * slow) / f.length).toFixed(0).padStart(3)}%`,
     `js ${quantile(j, 0.5).toFixed(1)}/${quantile(j, 0.95).toFixed(1)}`,
-    `caps ${r.caps.length}@${(sum(r.caps) / Math.max(1, r.caps.length)).toFixed(1)}ms`,
     `cull ${r.cull.length}@${(sum(r.cull) / Math.max(1, r.cull.length)).toFixed(1)}`,
     `tree ${r.tree.length}@${(sum(r.tree) / Math.max(1, r.tree.length)).toFixed(1)}`,
   ].join('  ');
@@ -175,9 +172,6 @@ interface Config {
   name: string;
   noBg?: boolean;
   noShapes?: boolean;
-  noSnapshot?: boolean;
-  willChange?: boolean;
-  freezeBg?: boolean;
   /** Turn off the chrome's masked `backdrop-filter`. */
   lowGraphics?: boolean;
   /** Which ramps to run under this config. */
@@ -190,16 +184,11 @@ const CONFIGS: Config[] = [
   { name: 'baseline', modes: ['zoom', 'pan'] },
   { name: '-chrome blur', lowGraphics: true },
   { name: '-background', noBg: true },
-  { name: '-snapshot', noSnapshot: true },
-  { name: '-shapes', noShapes: true, noSnapshot: true },
-  { name: '+will-change', willChange: true },
-  { name: 'frozen bg', freezeBg: true },
-  { name: '-bg -snapshot', noBg: true, noSnapshot: true },
+  { name: '-shapes', noShapes: true },
   {
     name: 'bare',
     noBg: true,
     noShapes: true,
-    noSnapshot: true,
     lowGraphics: true,
   },
   // Repeat of the first line. The matrix is only readable if these two agree:
@@ -212,9 +201,6 @@ function apply(c: Config): void {
   useBenchFlags.setState({
     noBg: !!c.noBg,
     noShapes: !!c.noShapes,
-    noSnapshot: !!c.noSnapshot,
-    willChange: !!c.willChange,
-    freezeBg: !!c.freezeBg,
   });
   applyLowGraphics(!!c.lowGraphics);
 }

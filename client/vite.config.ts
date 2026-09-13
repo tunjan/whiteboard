@@ -22,6 +22,11 @@ export default defineConfig({
     format: 'es',
   },
   server: {
+    // TEMPORARY perf harness — delete with client/src/canvas/scale-bench.ts.
+    // Chrome gates the JS Self-Profiling API behind this document policy, and
+    // a sampled profile is the only thing that names the function a frame is
+    // actually inside. Dev server only; it never reaches a build.
+    headers: { 'Document-Policy': 'js-profiling' },
     port: 5173,
     // Listen on 0.0.0.0 so a real iPad/phone on the LAN can load the dev app.
     host: true,

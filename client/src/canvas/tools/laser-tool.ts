@@ -1,6 +1,6 @@
 import { genId, type Point } from '@whiteboard/shared';
 import { useLaserStore } from '../use-laser-store';
-import { LaserToolIcon } from './laser-tool-icon';
+import { LaserGlyph } from '@/components/ui/glyphs';
 import type { Tool, ToolPointerInfo } from './types';
 
 /**
@@ -17,7 +17,7 @@ export function createLaserTool(): Tool {
     label: 'Laser',
     hotkey: 'k',
     cursor: 'crosshair',
-    icon: LaserToolIcon,
+    icon: LaserGlyph,
     // Accumulates a polyline; the distance gate below already bounds how many
     // of these samples become points.
     wantsCoalescedSamples: true,

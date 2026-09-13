@@ -37,6 +37,31 @@ describe('EraserScribblePath', () => {
     expect(html).toContain('opacity="0.1"');
   });
 
+  it('widens from a point at the tail to full width under the pointer', () => {
+    const straight = Array.from({ length: 8 }, (_, i) => ({
+      x: i * 10,
+      y: 0,
+      pressure: 0.5,
+    }));
+    const html = renderToStaticMarkup(
+      <svg>
+        <EraserScribblePath
+          scribble={{ ...scribble, points: straight }}
+          zoom={1}
+          color="#000"
+          opacity={0.8}
+        />
+      </svg>,
+    );
+
+    const d = /d="([^"]+)"/.exec(html)?.[1] ?? '';
+    // Tapering both ends closed the head with the same 0.01 needle arc as the
+    // tail, so the ribbon read as a symmetric sliver instead of a stroke being
+    // dragged: the pointer end has to carry a full half-width round cap.
+    expect(d).toContain('a 6 6');
+    expect(d).toContain('a 0.01 0.01');
+  });
+
   it('keeps a short trail visible as a round physical tip', () => {
     const html = renderToStaticMarkup(
       <svg>

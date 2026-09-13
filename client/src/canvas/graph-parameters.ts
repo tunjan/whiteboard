@@ -5,11 +5,12 @@ import {
   parseGraphExpression,
 } from './graph-parser';
 
-export function collectGraphVariables(expressions: GraphExpression[]): string[] {
+export function collectGraphVariables(
+  expressions: GraphExpression[],
+): string[] {
   const definitions = createGraphFunctionDefinitions(expressions);
   const variables = new Set<string>();
   for (const expression of expressions) {
-    if (!expression.visible) continue;
     const parsed = parseGraphExpression(expression.expression, definitions);
     if (!parsed.ok) continue;
     for (const variable of parsed.variables) variables.add(variable);
@@ -21,7 +22,14 @@ export function reconcileGraphParameters(
   expressions: GraphExpression[],
   previous: Record<string, GraphParameter>,
 ): Record<string, GraphParameter> {
-  const next: Record<string, GraphParameter> = {};
+  const definitions = createGraphFunctionDefinitions(expressions);
+  // A draft may temporarily lose all its variables (including when cleared).
+  // Retain settings until every row can be parsed; hidden rows still own theirs.
+  const hasDraft = expressions.some(
+    (expression) =>
+      !parseGraphExpression(expression.expression, definitions).ok,
+  );
+  const next: Record<string, GraphParameter> = hasDraft ? { ...previous } : {};
   for (const variable of collectGraphVariables(expressions)) {
     next[variable] = previous[variable] ?? { ...DEFAULT_GRAPH_PARAMETER };
   }

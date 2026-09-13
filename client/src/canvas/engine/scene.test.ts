@@ -240,6 +240,27 @@ describe('scene picking', () => {
         ?.id,
     ).toBe('frame');
   });
+  it('keeps picking current after edits that reuse the cached paint order', () => {
+    const { shapes, index } = setup([
+      rectangle('box'),
+      rectangle('cover', { x: 80, index: 'a1' }),
+    ]);
+    const pick = (x: number) =>
+      hitTestCanvas([...shapes.values()], index, { x, y: 40 }, 0, options)?.id ??
+      null;
+    expect(pick(90)).toBe('cover');
+    // Same ids in the same order: the cache is carried over, so the moved
+    // shape must still be picked at its new position and not its old one.
+    shapes.set('cover', rectangle('cover', { x: 300, index: 'a1' }));
+    index.insert('cover', shapeRotatedBounds(shapes.get('cover')!));
+    expect(pick(90)).toBe('box');
+    expect(pick(310)).toBe('cover');
+    // Reordering invalidates it: 'box' now paints above the overlapping cover.
+    shapes.set('cover', rectangle('cover', { x: 80, index: 'a1' }));
+    shapes.set('box', rectangle('box', { index: 'a2' }));
+    index.insert('cover', shapeRotatedBounds(shapes.get('cover')!));
+    expect(pick(90)).toBe('box');
+  });
   it('lets frame interiors pass through to lower geometry', () => {
     const { shapes, index } = setup([
       rectangle('box'),

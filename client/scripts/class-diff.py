@@ -41,6 +41,9 @@ GOVERNED = "src/components/ui/"
 OUTLINE_EXEMPT = {
     "alert-dialog.tsx", "dialog.tsx", "popover.tsx", "sheet.tsx",
     "context-menu.tsx", "dropdown-menu.tsx", "tooltip.tsx",
+    # The group outlines itself when its control is focused, in place of
+    # the control's own ring.
+    "input-group.tsx",
 }
 # The raw palette is a section-2 primitive; components use semantic names.
 PALETTE = re.compile(r"^(bg|text|border|ring|fill|stroke|divide)-(stone|white|black)(-\d+)?$")

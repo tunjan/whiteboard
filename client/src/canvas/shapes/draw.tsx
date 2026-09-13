@@ -16,10 +16,17 @@ import {
   maxInkRadius,
 } from './ink';
 import { buildInkCenterline, type InkCenterline } from './ink-engine';
+import { resizePolyline } from './line-geometry';
 import type { DashProps } from './perfect-dash';
 import { dashProps, fillFor } from './render-style';
-import { useDotLength, useForceSolidInk, useLodDash } from '../lod';
+import {
+  useDotLength,
+  useForceSolidInk,
+  useInkErrorLimit,
+  useLodDash,
+} from '../lod';
 import type { ShapeUtil } from './types';
+import { highlightPaint, HIGHLIGHT_UNDERLAY_OPACITY, HIGHLIGHT_OVERLAY_OPACITY } from './highlight';
 
 /** Whether a stroke encloses a region that should be painted and clickable. */
 function isFilled(props: DrawProps): boolean {
@@ -66,6 +73,10 @@ export interface InkRender {
  *
  * `forceSolid` asks for the cheap centerline instead of the freehand outline;
  * see `useForceSolidInk` for when that trade is worth making.
+ *
+ * `errorLimit` is how far, in world units, either path may deviate from the
+ * exact one because the camera has pulled back far enough that the difference
+ * is sub-pixel; see `useInkErrorLimit`.
  */
 export function buildInkRender(
   props: DrawProps,
@@ -73,8 +84,12 @@ export function buildInkRender(
   isDrawing: boolean,
   dotLength: number,
   forceSolid = false,
+  errorLimit = 0,
 ): InkRender {
   const { size, dash, streamline } = props;
+  const highlight = props.inkKind === 'highlight';
+  const complete = props.inkAlgorithm !== 'reference' ||
+    (!isDrawing && props.isComplete !== false);
   const isDashed =
     (dash === 'dashed' || dash === 'dotted') && points.length >= 2;
   const filled = isFilled(props);
@@ -82,8 +97,15 @@ export function buildInkRender(
   // stroke's fill are all the same curve. Conditioning it is the expensive half
   // of a render, so it is built once here rather than once per consumer.
   const centerline =
-    isDashed || filled || forceSolid
-      ? getInkCenterlineGeometry(points, size, streamline, props.inkAlgorithm)
+    isDashed || filled || forceSolid || highlight
+      ? getInkCenterlineGeometry(
+          points,
+          size,
+          streamline,
+          props.inkAlgorithm,
+          complete,
+          errorLimit,
+        )
       : EMPTY_INK_CENTERLINE;
 
   if (isDashed) {
@@ -101,7 +123,7 @@ export function buildInkRender(
   // into one, has no centerline to stroke — only a dot, which the freehand
   // outline draws. Falling through keeps it visible rather than dropping it at
   // exactly the zoom the fallback was meant to help.
-  if (forceSolid && centerline.path !== '') {
+  if ((forceSolid || highlight) && centerline.path !== '') {
     return {
       stroked: true,
       d: centerline.path,
@@ -111,18 +133,24 @@ export function buildInkRender(
   }
   return {
     stroked: false,
-    d: getInkPathData(points, size, true, {
-      inkAlgorithm: props.inkAlgorithm,
-      simulatePressure: props.simulatePressure,
-      thinning: props.thinning,
-      smoothing: props.smoothing,
-      streamline,
-      startTaper: props.startTaper,
-      endTaper: props.endTaper,
-      pressureEasing: props.pressureEasing,
-      pressureWarmup: props.pressureWarmup,
-      tiltAmount: props.tiltAmount,
-    }),
+    d: getInkPathData(
+      points,
+      size,
+      complete,
+      {
+        inkAlgorithm: props.inkAlgorithm,
+        simulatePressure: props.simulatePressure,
+        thinning: props.thinning,
+        smoothing: props.smoothing,
+        streamline,
+        startTaper: props.startTaper,
+        endTaper: complete ? props.endTaper : false,
+        pressureEasing: props.pressureEasing,
+        pressureWarmup: props.pressureWarmup,
+        tiltAmount: props.tiltAmount,
+      },
+      errorLimit,
+    ),
     dash: null,
     fillPath: filled ? `${centerline.path} Z` : null,
   };
@@ -220,32 +248,29 @@ export const drawUtil: ShapeUtil<'draw'> = {
   },
 
   resize: (initial, nb) => {
-    const pad = initial.props.size / 2;
-    const pb0 = pointsBounds(initial.props.points);
-    const iw = pb0.maxX - pb0.minX + 2 * pad || 1;
-    const ih = pb0.maxY - pb0.minY + 2 * pad || 1;
-    const sx = (nb.maxX - nb.minX) / iw;
-    const sy = (nb.maxY - nb.minY) / ih;
-    const points = initial.props.points.map((p) => ({
-      ...p,
-      x: p.x * sx,
-      y: p.y * sy,
-    }));
-    const pb = pointsBounds(points);
-    return {
-      x: nb.minX - (pb.minX - pad),
-      y: nb.minY - (pb.minY - pad),
-      props: { ...initial.props, points },
-    };
+    // The same margin `getBounds` reserves: with half the brush here instead,
+    // a thinning stroke jumped the moment a handle was grabbed.
+    const { x, y, points } = resizePolyline(
+      initial.props.points,
+      initial.props.points,
+      maxInkRadius(initial.props.size, initial.props),
+      nb,
+    );
+    return { x, y, props: { ...initial.props, points } };
   },
 
-  Component: ({ shape }) => {
-    const { points, color, size, fillStyle } = shape.props;
+  Component: ({ shape, inkPass = 'overlay' }) => {
+    const { points, size, fillStyle } = shape.props;
+    const highlight = shape.props.inkKind === 'highlight';
+    const color = highlight ? highlightPaint(shape.props.color) : shape.props.color;
     // A dot is a zero-length dash, which browsers drop once the stroke is
     // sub-pixel wide — the dotted pencil vanished entirely when zoomed out.
     const dotLength = useDotLength();
     const dash = useLodDash(shape.props.dash ?? 'solid', size);
     const forceSolid = useForceSolidInk(size);
+    // Zoomed out, most of a stroke's path commands land inside a pixel. This
+    // is the deviation the engine may take to drop them; 0 at and above 1:1.
+    const errorLimit = useInkErrorLimit();
     if (points.length === 0) return null;
     // Always a settled stroke: while the local pointer is drawing one, the
     // canvas filters that shape out of this tree and the active-stroke layer
@@ -256,6 +281,7 @@ export const drawUtil: ShapeUtil<'draw'> = {
       false,
       dotLength,
       forceSolid,
+      errorLimit,
     );
     const b = pointsBounds(points);
     const cx = (b.minX + b.maxX) / 2;
@@ -283,6 +309,7 @@ export const drawUtil: ShapeUtil<'draw'> = {
       <path d={render.d} fill={color} transform={transform} />
     );
 
+    if (highlight) return <g opacity={inkPass === 'underlay' ? HIGHLIGHT_UNDERLAY_OPACITY : HIGHLIGHT_OVERLAY_OPACITY}>{ink}</g>;
     if (!render.fillPath) return ink;
     // Painted from the centerline closed back on itself, so the fill meets the
     // ink's inner edge rather than its outer one. Only closed strokes reach

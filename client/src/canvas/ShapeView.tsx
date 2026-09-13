@@ -20,18 +20,20 @@ import { shapeRegistry } from './shapes/shape-registry';
 export const ShapeView = memo(function ShapeView({
   shape,
   opacity = 1,
+  inkPass,
 }: {
   shape: Shape;
   opacity?: number;
+  inkPass?: 'underlay' | 'overlay';
 }) {
   const util = shapeRegistry.getFor(shape);
   if (!util) return null;
   const Component = util.Component;
   const painted = inkShape(shape);
-  if (opacity >= 1) return <Component shape={painted} />;
+  if (opacity >= 1) return <Component shape={painted} inkPass={inkPass} />;
   return (
     <g opacity={opacity}>
-      <Component shape={painted} />
+      <Component shape={painted} inkPass={inkPass} />
     </g>
   );
 });

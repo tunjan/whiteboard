@@ -12,7 +12,7 @@ import { SNAP_SCREEN, snapRegion, snapTargetShapes } from '../snap-targets';
 import { type PointSnapTarget, snapPoint } from '../snapping';
 import { useCameraStore } from '../use-camera-store';
 import { useSelectionStore } from '../use-selection-store';
-import { groupStyle, useStyleStore } from '../use-style-store';
+import { nextShapeStyle, useStyleStore } from '../use-style-store';
 import type { Tool, ToolContext, ToolPointerInfo } from './types';
 
 const CLICK_SCREEN_THRESHOLD = 4;
@@ -110,7 +110,7 @@ export function createLineTool(opts: LineToolOptions): Tool {
       const id = genId();
       creatingId = id;
       const base = util.getDefaultProps() as LineProps | ArrowProps;
-      const style = groupStyle('shape');
+      const style = nextShapeStyle();
       const connector = useStyleStore.getState();
       startTargetId =
         opts.type === 'arrow'

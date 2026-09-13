@@ -1,4 +1,4 @@
-import { Hand, Grab } from 'lucide-react';
+import { HandGlyph, HandGrabGlyph } from '@/components/ui/glyphs';
 import { cn } from '@/lib/utils';
 import { useCameraInteraction } from '../use-camera-interaction';
 
@@ -21,7 +21,7 @@ export function HandToolIcon({ className }: { className?: string }) {
           isDragging ? 'scale-75 opacity-0' : 'scale-100 opacity-100',
         )}
       >
-        <Hand className="size-full" />
+        <HandGlyph className="size-full" />
       </span>
       <span
         className={cn(
@@ -29,7 +29,7 @@ export function HandToolIcon({ className }: { className?: string }) {
           isDragging ? 'scale-100 opacity-100' : 'scale-75 opacity-0',
         )}
       >
-        <Grab className="size-full" />
+        <HandGrabGlyph className="size-full" />
       </span>
     </span>
   );

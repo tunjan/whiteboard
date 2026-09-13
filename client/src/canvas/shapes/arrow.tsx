@@ -16,7 +16,27 @@ import {
 import { polylineLength } from './perfect-dash';
 import { dashProps, DrawnOutline } from './render-style';
 import { useLodDash } from '../lod';
+import type { ArrowShape } from '@whiteboard/shared';
 import type { ShapeUtil } from './types';
+
+/** The drawn body: an arc or the straight/elbow path, not the control points. */
+function arrowBody(s: ArrowShape) {
+  return arrowPoints(
+    s.props.points,
+    s.props.topology ??
+      (Math.abs(s.props.bend ?? 0) >= 0.5 ? 'arc' : 'straight'),
+    s.props.bend ?? 0,
+  );
+}
+
+/** Margin the bounds reserve around the body for the heads or label. */
+function arrowBoundsPad(s: ArrowShape): number {
+  const fontSize = Math.max(12, s.props.size * 3);
+  const labelPad = s.props.label?.trim()
+    ? s.props.label.trim().length * fontSize * 0.3 + fontSize
+    : 0;
+  return Math.max(arrowheadLength(s.props.size), labelPad);
+}
 
 export const arrowUtil: ShapeUtil<'arrow'> = {
   type: 'arrow',
@@ -36,23 +56,7 @@ export const arrowUtil: ShapeUtil<'arrow'> = {
   }),
 
   // Pad bounds by the arrowhead length so heads aren't clipped/culled.
-  getBounds: (s) => {
-    const fontSize = Math.max(12, s.props.size * 3);
-    const labelPad = s.props.label?.trim()
-      ? s.props.label.trim().length * fontSize * 0.3 + fontSize
-      : 0;
-    return polylineBounds(
-      s.x,
-      s.y,
-      arrowPoints(
-        s.props.points,
-        s.props.topology ??
-          (Math.abs(s.props.bend ?? 0) >= 0.5 ? 'arc' : 'straight'),
-        s.props.bend ?? 0,
-      ),
-      Math.max(arrowheadLength(s.props.size), labelPad),
-    );
-  },
+  getBounds: (s) => polylineBounds(s.x, s.y, arrowBody(s), arrowBoundsPad(s)),
 
   hitTest: (s, p, tol) =>
     polylineHitTest(
@@ -73,7 +77,8 @@ export const arrowUtil: ShapeUtil<'arrow'> = {
   resize: (initial, nb) => {
     const { x, y, points, scale } = resizePolyline(
       initial.props.points,
-      arrowheadLength(initial.props.size),
+      arrowBody(initial),
+      arrowBoundsPad(initial),
       nb,
     );
     return {

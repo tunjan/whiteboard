@@ -738,28 +738,6 @@ function normalizeTokens(tokens: readonly Token[]): string {
   return normalized;
 }
 
-/** Every sum and integral in `tokens`, the ones nested inside them included. */
-function collectAggregates(
-  tokens: readonly Token[],
-  found: AggregateToken[] = [],
-): AggregateToken[] {
-  for (const token of tokens) {
-    if (token.type !== 'aggregate') continue;
-    found.push(token);
-    collectAggregates(token.from, found);
-    collectAggregates(token.to, found);
-    collectAggregates(token.body, found);
-  }
-  return found;
-}
-
-/** The variables a sum or integral binds, which are not sliders. */
-function boundNames(
-  aggregates: readonly AggregateToken[],
-): ReadonlySet<string> {
-  return new Set(aggregates.map((aggregate) => aggregate.index));
-}
-
 /**
  * The two halves of a coordinate `(a, b)` — the whole expression wrapped in one
  * pair of parentheses around a single top-level comma. Null for anything else,
@@ -964,8 +942,6 @@ function compileGraphFunctionDefinition(
   const bodyTokens = tokenize(source.body.trim(), userFunctions);
   const normalizedBody = normalizeTokens(bodyTokens);
   if (!normalizedBody) throw new Error('Enter a function body');
-  const aggregates = collectAggregates(bodyTokens);
-  const bound = boundNames(aggregates);
   const directVariables = new Set<string>();
   const dependencies = new Set<string>();
 
@@ -978,7 +954,7 @@ function compileGraphFunctionDefinition(
     if (node.type !== 'SymbolNode') return;
     const name = symbolName(node);
     if (!name) throw new Error('Invalid symbol');
-    if (isAggregateName(name) || bound.has(name)) return;
+    if (isAggregateName(name)) return;
     if (name === source.argument || CONSTANTS.has(name)) return;
     if (isFunctionSymbol(name, node, parent, userFunctions)) return;
     if (name === 'x' || name === 'y' || name === PARAMETRIC_VARIABLE) {
@@ -993,13 +969,14 @@ function compileGraphFunctionDefinition(
   };
 
   const evaluateRaw = compileNormalized(normalizedBody, visit);
+  const aggregates = compileAggregates(bodyTokens, visit);
   return {
     name: source.name,
     argument: source.argument,
     normalizedBody,
     directVariables: [...directVariables].sort((a, b) => a.localeCompare(b)),
     dependencies: [...dependencies].sort((a, b) => a.localeCompare(b)),
-    aggregates: compileAggregates(aggregates, visit),
+    aggregates,
     evaluateRaw,
   };
 }
@@ -1169,20 +1146,34 @@ interface CompiledAggregate {
 }
 
 /**
- * Compile the bodies, which are evaluated once per term rather than once per
- * expression. The same visitor as the expression around them validates them,
- * so a sum over `y` is refused wherever a bare `y` would be.
+ * Compile each body in its lexical scope. An index binds only its body, not
+ * its limits, sibling aggregates, or the expression surrounding the aggregate.
+ * Nested calls retain the outer indices while adding their own body binding.
  */
 function compileAggregates(
-  aggregates: readonly AggregateToken[],
+  tokens: readonly Token[],
   visit: SymbolVisitor,
+  bound: ReadonlySet<string> = new Set(),
 ): CompiledAggregate[] {
-  return aggregates.map((aggregate) => ({
-    name: aggregate.value,
-    kind: aggregate.kind,
-    index: aggregate.index,
-    body: compileNormalized(normalizeTokens(aggregate.body), visit),
-  }));
+  const compiled: CompiledAggregate[] = [];
+  for (const token of tokens) {
+    if (token.type !== 'aggregate') continue;
+    const bodyBound = new Set([...bound, token.index]);
+    const visitBody: SymbolVisitor = (node, parent) => {
+      if (node.type === 'SymbolNode' && bodyBound.has(symbolName(node)!)) return;
+      visit(node, parent);
+    };
+    compiled.push({
+      name: token.value,
+      kind: token.kind,
+      index: token.index,
+      body: compileNormalized(normalizeTokens(token.body), visitBody),
+    });
+    compiled.push(...compileAggregates(token.from, visit, bound));
+    compiled.push(...compileAggregates(token.to, visit, bound));
+    compiled.push(...compileAggregates(token.body, visit, bodyBound));
+  }
+  return compiled;
 }
 
 function sumSeries(
@@ -1371,8 +1362,6 @@ function compileCoordinateSide(
   definitions: GraphFunctionDefinitions,
 ): CompiledSide {
   const normalized = normalizeTokens(tokens);
-  const aggregates = collectAggregates(tokens);
-  const bound = boundNames(aggregates);
   let usesParameter = false;
   const userFunctions = new Set(definitions.keys());
   const dependencies = new Set<string>();
@@ -1386,7 +1375,7 @@ function compileCoordinateSide(
     if (node.type !== 'SymbolNode') return;
     const name = symbolName(node);
     if (!name) throw new Error('Invalid symbol');
-    if (isAggregateName(name) || bound.has(name)) return;
+    if (isAggregateName(name)) return;
     if (CONSTANTS.has(name)) return;
     if (name === PARAMETRIC_VARIABLE) {
       usesParameter = true;
@@ -1403,7 +1392,7 @@ function compileCoordinateSide(
   };
 
   const evaluate = compileNormalized(normalized, visit);
-  const compiled = compileAggregates(aggregates, visit);
+  const compiled = compileAggregates(tokens, visit);
   for (const dependency of dependencies) {
     addDefinitionVariables(dependency, definitions, variables);
   }
@@ -1553,8 +1542,6 @@ function parseGraphExpressionUncached(
     }
     const evaluationSource =
       kind === 'implicit' ? `(${left})-(${right!})` : normalized;
-    const aggregates = collectAggregates(tokens);
-    const bound = boundNames(aggregates);
     const variables = new Set<string>();
     const dependencies = new Set<string>();
     const visit: SymbolVisitor = (node, parent) => {
@@ -1566,7 +1553,7 @@ function parseGraphExpressionUncached(
       if (node.type !== 'SymbolNode') return;
       const name = symbolName(node);
       if (!name) throw new Error('Invalid symbol');
-      if (isAggregateName(name) || bound.has(name)) return;
+      if (isAggregateName(name)) return;
       if (
         name === 'x' ||
         (kind === 'implicit' && name === 'y') ||
@@ -1584,7 +1571,7 @@ function parseGraphExpressionUncached(
       variables.add(name);
     };
     const evaluateExpression = compileNormalized(evaluationSource, visit);
-    const compiledAggregates = compileAggregates(aggregates, visit);
+    const compiledAggregates = compileAggregates(tokens, visit);
     for (const dependency of dependencies) {
       addDefinitionVariables(dependency, definitions, variables);
     }

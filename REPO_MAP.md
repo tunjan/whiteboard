@@ -122,13 +122,12 @@ registry plus the page being looked at.
 | `ShapeView.tsx`                           | Polymorphic shape renderer invoking registered `ShapeUtil.Component`.                                                                                              |
 | `Background.tsx`                          | Dot grid, graph paper, line grid, or blank background renderer matching camera zoom/pan.                                                                           |
 | `SelectionLayer.tsx`                      | Selection bounding box, 8 resize handles, rotation handle, and custom shape handles. Shapes that expose `getIndicatorPath()` (connectors) are traced along their own outline instead of boxed. |
+| `HoverLayer.tsx`                          | Outline of the shape a click would select, under the select tool only. Traced or boxed by the same rules as the selection, and resolved through the select tool's own `topmostHit` so hover and click cannot disagree. |
 | `SelectionToolbar.tsx`                    | Floating quick-actions toolbar above active selection.                                                                                                             |
 | `CommentsLayer.tsx`                       | Canvas thread comment pins and popup dialogs.                                                                                                                      |
 | `CommentText.tsx`                         | Renders a comment body: Markdown marks as elements, `$…$` / `$$…$$` as MathJax-typeset math (shares the equation render cache).                                     |
 | `comment-markdown.ts`                     | Parser for the Markdown-with-LaTeX subset comment bodies are written in (`parseCommentMarkdown`, `parseInline`).                                                    |
-| `LaserLayer.tsx`                          | Real-time fading laser pointer trails.                                                                                                                             |
-| `DrawingCursor.tsx` / `EraserCursor.tsx` / `EraserTrail.tsx` | Dynamic SVG cursor overlays matching brush/eraser size, plus the eraser's swipe trail.                                                                                                           |
-| `TextEditorOverlay.tsx`                   | In-place rich/plain text editor overlay for text shapes.                                                                                                           |
+| `DrawingCursor.tsx` / `EraserTrail.tsx`   | Dynamic SVG cursor overlay matching brush size, plus the eraser's swipe trail.                                                                                                                   |
 | `ImageCropOverlay.tsx`                    | Visual image cropping controls.                                                                                                                                    |
 | `VideoPlayerOverlay.tsx`                  | YouTube iframe player overlay.                                                                                                                                     |
 | `CanvasControls.tsx` / `UndoControls.tsx` | Bottom-left/bottom-right zoom, mini-map, page navigation, and undo/redo HUD.                                                                                       |
@@ -147,11 +146,13 @@ registry plus the page being looked at.
 | `binding-graph.ts`                                                    | Dependency graph connecting arrow endpoints to target shapes.                                                           |
 | `order.ts` / `z-order.ts`                                             | Fractional indexing string generation and layer reordering commands (bring forward, send to back).                      |
 | `commands.ts`                                                         | Composite canvas actions: duplicate, group, ungroup, delete with cascade.                                               |
+| `align.ts` / `flip.ts`                                                | Align/distribute to a shared edge; mirror the selection across its own box. A flip negates rotation and reverses local asymmetry (ink and connector points, `bend`, bound anchors); read content (text, equations, images, media) is moved but never turned. |
 | `hierarchy.ts`                                                        | Parent-child tree traversal for groups and frames.                                                                      |
 | `page-names.ts`                                                       | Collision-free page naming (`getIncrementedName`): reuses a trailing counter instead of stacking suffixes.              |
 | `page-docs.ts`                                                        | The board's pages as separate CRDT documents: lazy creation, one shared websocket, pinning, and LRU residency.          |
 | `page-migration.ts`                                                   | Legacy boards, whose pages lived inside the board document. Moves one page into its own document, idempotently.         |
 | `clipboard.ts` / `board/clipboard-os.ts`                              | Internal and OS clipboard serialization for shapes, images, and text.                                                   |
+| `style-clipboard.ts`                                                  | Copy/paste style (⌥⌘C / ⌥⌘V). A property lands only where the target type's `getDefaultProps()` declares it, so the registry — not a second table — decides what a shape can take. Never writes the style new shapes inherit. |
 | `export-png.tsx` / `png-phys.ts`                                      | Headless SVG-to-Canvas PNG exporter with DPI scaling and physical metadata.                                             |
 | `graph-parser.ts` / `graph-sampler.ts` / `graph-intersections.ts`     | 2D graphing engine: parses expressions/parameters, samples curve vertices, computes Newton-Raphson curve intersections. |
 | `equation-render.ts` / `equation-source.ts`                           | MathJax display-equation SVG compilation and caching.                                                                   |
@@ -163,8 +164,9 @@ registry plus the page being looked at.
 #### Canvas Zustand Stores & Hooks
 
 - `use-selection-store.ts` — Selected shape IDs (`selectedIds: string[]`).
-- `use-style-store.ts` — Style new shapes inherit. Color, size, fill, dash and opacity are remembered per **style group** (`pen` / `marker` / `shape` / `text`) so the highlighter keeps its yellow while the pen keeps its ink; `styleGroupForTool` maps a tool to its group and `styleGroupForShape` maps a selected shape back. Font, arrow, spline, polygon and sticker settings have one consumer each and stay flat.
-- `use-style-controls.ts` — The one answer to "which style controls apply right now, and what does each one write?": derives the visibility flags from the active tool plus the selection, and returns setters that update the style store *and* every selected shape carrying that property. Consumed by `tool-properties-satellite.tsx`.
+- `use-hover-store.ts` — The shape the select tool is pointing at, resolved to what a click would catch (a group, not its child). Written per pointer move but only when the answer changes, so hovering within one shape re-renders nothing.
+- `use-style-store.ts` — Style new shapes inherit. Color, size, fill, dash and opacity are **one shared set** across every tool (tldraw's `stylesForNextShape`): a colour chosen with the pen in hand is what the rectangle tool and the highlighter lay down too. `nextShapeStyle()` reads it outside React. Font, arrow, spline, polygon and sticker settings sit alongside it. Only a control the user moved writes here — selecting a shape does not.
+- `use-style-controls.ts` — The one answer to "which style controls apply right now, what does each one read, and what does it write?": derives the visibility flags from the active tool plus the selection, reads each value from the selection where it agrees on one (falling back to the style store), and returns setters that update the style store *and* every selected shape carrying that property. Consumed by `tool-properties-satellite.tsx`.
 - `use-canvas-ui-store.ts` — Canvas HUD visibility, grid mode, performance stats toggles.
 - `use-tool-store.ts` / `use-tool-lock-store.ts` — Active tool ID and tool lock state.
 - `use-eraser-store.ts` / `use-eraser-cut-store.ts` — Precision path cutting state.
@@ -174,6 +176,8 @@ registry plus the page being looked at.
 - `use-documents-store.ts` — Board file attachment drawer, plus which attachments this user hasn't opened yet (`unread`, owned by `board/document-notifications.ts`).
 - `use-custom-stickers-store.ts` — User custom sticker library.
 - `use-camera-interaction.ts` / `use-wheel.ts` / `use-space-pan.ts` / `use-safari-gestures.ts` — Viewport pan/zoom input handling.
+- `touch-input.ts` — What a finger does, as pure decisions the canvas routes on: `fingerDraws` (the `fingerAction` preference — draw / pan / auto, where `auto` switches to pan once a stylus has been seen), `isFingerTap` (a pan that went nowhere, replayed to the tool so a finger can still select), and `multiTouchTapAction` (two-finger tap = undo, three = redo).
+- `platform.ts` — `isDarwin` / `isIos` / `isCoarsePointer`. Sniffing that changes *input semantics*, not styling.
 
 ---
 
@@ -225,6 +229,17 @@ All tools implement `Tool` (registered in `register.ts`):
 
 ---
 
+### `client/src/hooks/` — Cross-Screen Browser Adaptation
+
+| File                   | Responsibility                                                                                                                                                                                                                                               |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `keyboard-inset.ts`    | Pure: how much of the layout viewport the on-screen keyboard covers, derived from the visual viewport. iPadOS draws the keyboard *over* the page rather than shrinking it.                                                                                     |
+| `use-keyboard-inset.ts`| Publishes that as `--wb-keyboard-inset` on `<html>`; `--wb-inset-bottom` (section 3 of `index.css`) folds it together with the device safe area, and every bottom-anchored surface — toolbar, both corner HUDs, minimap, call panel — anchors to that instead. |
+| `use-wake-lock.ts`     | Holds a screen wake lock while a board is open, re-acquiring on every return to visibility (the OS drops it on backgrounding). A watched board is not an idle one.                                                                                            |
+| `use-hover-cursor.ts` / `use-roving-toolbar.ts` / `use-shape-anchor.ts` / `use-mobile.ts` | Pointer cursor resolution, toolbar arrow-key roving, shape-anchored overlay positioning, viewport width query.                                        |
+
+---
+
 ### `client/src/collab/` — Real-Time Presence, Follow & Voice
 
 | File                                          | Responsibility                                                                                               |
@@ -235,6 +250,7 @@ All tools implement `Tool` (registered in `register.ts`):
 | `use-presence-store.ts`                       | Zustand store tracking all active peers in the room.                                                         |
 | `use-follow-store.ts` / `follow-controls.tsx` | Viewport follow mode (smoothly locks camera to target peer's viewport).                                      |
 | `latency.ts` / `latency-warning-toast.tsx`    | Heartbeat latency ping/pong monitoring.                                                                      |
+| `foreground-reconnect.ts`                     | Reconnects the board socket the moment the tab returns to the foreground. iPadOS suspends a backgrounded tab's socket silently, and Hocuspocus's own retry is on a backoff by then. |
 | `attention.ts`                                | Publishes this client's own attention facts (input counter + tab visibility/focus) over awareness. No heartbeat: readers time the changes. |
 | `attention-state.ts`                          | Pure fold from those facts to `attentive`/`idle`/`away` on the reader's clock, plus the once-per-episode alert edge. |
 | `use-attention-store.ts` / `attention-toast.tsx` | Tutor-only read of every student's attention, and the toast it raises. Inert for students and when alerts are off. |
@@ -260,7 +276,7 @@ All tools implement `Tool` (registered in `register.ts`):
 | `page-menu.tsx`           | Multi-page list switcher, reordering, creation, and deletion.                                      |
 | `pdf-range-dialog.tsx`    | Which pages of an over-long PDF to import; also how the page limit is announced.                   |
 | `canvas-context-menu.tsx` | Right-click context menu (Cut, Copy, Paste, Bring to Front, Send to Back, Group, Lock).            |
-| `board-notes-dialog.tsx`  | Tutor-only private student notes.                                                                  |
+| `board-notes-dialog.tsx`  | Tutor-only student notes: standing notes, error log, and per-session dated notes on a calendar.                                                                  |
 | `board-actions-menu.tsx`  | Board ⋯ menu: dialogs, PNG copy/export + resolution, and all board preferences (theme, snapping, pen, sound, perf overlay, tutor-only attention thresholds). |
 | `music/music-player.tsx`  | Whiteboard background music audio player and playlist selector.                                    |
 
@@ -276,7 +292,7 @@ All tools implement `Tool` (registered in `register.ts`):
 | `db/client.ts`                                                | Postgres connection pool using `postgres.js` and Drizzle.                                                     |
 | `collab/hocuspocus.ts`                                        | Hocuspocus collaboration server: loads and debounces saves of binary Yjs state to Postgres `board_documents`. |
 | `auth/routes.ts` / `auth/jwt.ts` / `auth/password.ts`         | Tutor authentication with constant-time password check and JWT cookies.                                       |
-| `boards/routes.ts`                                            | Board CRUD endpoints (`/api/boards`) and tutor notes (`/api/boards/:id/notes`).                               |
+| `boards/routes.ts`                                            | Board CRUD endpoints (`/api/boards`), tutor notes (`/api/boards/:id/notes`) and dated session notes (`/api/boards/:id/sessions`).                               |
 | `blobs/routes.ts` / `blobs/store.ts`                          | Content-addressed binary storage (SHA256) for images and custom stickers.                                     |
 | `documents/routes.ts` / `documents/store.ts`                  | Board attachment storage with MIME validation (`/api/docs`).                                                  |
 | `links/routes.ts` / `links/fetch-remote.ts` / `links/meta.ts` | OpenGraph HTML scraper for link preview cards (downloads images to blob store).                               |

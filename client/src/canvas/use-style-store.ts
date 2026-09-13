@@ -94,18 +94,15 @@ export const SIZE_OPTIONS: SizeOption[] = [
 ];
 
 /**
- * Which pool of style a tool draws from and writes back to.
+ * The style new shapes inherit, shared by every tool that draws one.
  *
- * One global slot meant picking up the highlighter after writing in black gave
- * a black wash, and setting the pen to red set the text tool to red too. These
- * are groups rather than one slot per tool because the boundary people actually
- * notice is the instrument, not the shape: nobody wants the rectangle tool to
- * forget the colour they just gave the ellipse tool.
+ * One set rather than one per instrument: choosing a colour chooses *the*
+ * colour, so the rectangle tool lays down whatever the pen was last set to and
+ * the highlighter washes in it too. Only a control the user actually moved
+ * writes here — selecting a shape shows that shape's style on the bar without
+ * changing what the next one will be drawn with.
  */
-export type StyleGroup = 'pen' | 'marker' | 'shape' | 'text';
-
-/** The style values a group remembers. Everything else in the store is global. */
-export interface GroupStyle {
+export interface NextShapeStyle {
   /** Current stroke color for new shapes (and the last applied). */
   color: string;
   /** Current stroke width for new shapes. */
@@ -122,47 +119,7 @@ export interface GroupStyle {
   opacity: number;
 }
 
-const TOOL_GROUPS: Record<string, StyleGroup> = {
-  draw: 'pen',
-  highlighter: 'marker',
-  text: 'text',
-  equation: 'text',
-  rectangle: 'shape',
-  ellipse: 'shape',
-  polygon: 'shape',
-  line: 'shape',
-  arrow: 'shape',
-  frame: 'shape',
-  sticker: 'shape',
-};
-
-/**
- * Shape types, for the reverse direction: what the style panel reads while a
- * shape is selected, and what an eyedropped style is remembered as.
- *
- * `draw` resolves to the pen even though the highlighter writes draw shapes
- * too — nothing in the schema tells a marker stroke from a pen one (see
- * `draw-tool.ts`), so selecting a highlight remembers its colour as the pen's.
- */
-const SHAPE_GROUPS: Record<string, StyleGroup> = {
-  draw: 'pen',
-  text: 'text',
-  equation: 'text',
-};
-
-/** The group a tool creates shapes in. Unlisted tools style like a shape. */
-export function styleGroupForTool(toolId: string): StyleGroup {
-  return TOOL_GROUPS[toolId] ?? 'shape';
-}
-
-/** The group a selected shape's style belongs to. */
-export function styleGroupForShape(type: string): StyleGroup {
-  return SHAPE_GROUPS[type] ?? 'shape';
-}
-
-interface StyleStore {
-  /** Remembered style per instrument. See {@link StyleGroup}. */
-  groups: Record<StyleGroup, GroupStyle>;
+interface StyleStore extends NextShapeStyle {
   /** Whether new arrows draw an arrowhead at the start point. */
   arrowStart: boolean;
   /** Whether new arrows draw an arrowhead at the end point. */
@@ -181,11 +138,11 @@ interface StyleStore {
   fontWeight: FontWeight;
   /** Current horizontal alignment for new/edited text. */
   align: TextAlign;
-  setColor: (group: StyleGroup, color: string) => void;
-  setSize: (group: StyleGroup, size: number) => void;
-  setFill: (group: StyleGroup, fill: FillStyle) => void;
-  setDash: (group: StyleGroup, dash: StrokeDash) => void;
-  setOpacity: (group: StyleGroup, opacity: number) => void;
+  setColor: (color: string) => void;
+  setSize: (size: number) => void;
+  setFill: (fill: FillStyle) => void;
+  setDash: (dash: StrokeDash) => void;
+  setOpacity: (opacity: number) => void;
   setArrowStart: (arrowStart: boolean) => void;
   setArrowEnd: (arrowEnd: boolean) => void;
   setArrowTopology: (arrowTopology: ArrowTopology) => void;
@@ -197,32 +154,17 @@ interface StyleStore {
   setAlign: (align: TextAlign) => void;
 }
 
-/** Palette slot every group but the marker opens on: the ink swatch. */
+/** Palette slot every tool opens on: the ink swatch. */
 const DEFAULT_COLOR = PALETTE.light[0]!.value;
-/**
- * The marker's own slot. A highlighter is yellow until told otherwise — the
- * one group whose useful default is not the ink colour, since a 35% black wash
- * is a smudge rather than a highlight.
- */
-const DEFAULT_MARKER_COLOR = PALETTE.light[6]!.value;
 
-function defaultGroup(color = DEFAULT_COLOR): GroupStyle {
+/** The style a board opens on, before anyone has touched a control. */
+export function defaultStyle(): NextShapeStyle {
   return {
-    color,
+    color: DEFAULT_COLOR,
     size: BASE_STROKE_WIDTH,
     fill: 'none',
     dash: 'solid',
     opacity: 1,
-  };
-}
-
-/** A fresh set of groups, as a board opens for the first time. */
-export function defaultGroups(): Record<StyleGroup, GroupStyle> {
-  return {
-    pen: defaultGroup(),
-    marker: defaultGroup(DEFAULT_MARKER_COLOR),
-    shape: defaultGroup(),
-    text: defaultGroup(),
   };
 }
 
@@ -231,7 +173,7 @@ export function defaultGroups(): Record<StyleGroup, GroupStyle> {
 export const useStyleStore = create<StyleStore>()(
   persist(
     (set) => ({
-      groups: defaultGroups(),
+      ...defaultStyle(),
       arrowStart: false,
       arrowEnd: true,
       arrowTopology: 'straight',
@@ -241,11 +183,11 @@ export const useStyleStore = create<StyleStore>()(
       fontFamily: 'sans',
       fontWeight: 400,
       align: 'start',
-      setColor: (group, color) => set(patchGroup(group, { color })),
-      setSize: (group, size) => set(patchGroup(group, { size })),
-      setFill: (group, fill) => set(patchGroup(group, { fill })),
-      setDash: (group, dash) => set(patchGroup(group, { dash })),
-      setOpacity: (group, opacity) => set(patchGroup(group, { opacity })),
+      setColor: (color) => set({ color }),
+      setSize: (size) => set({ size }),
+      setFill: (fill) => set({ fill }),
+      setDash: (dash) => set({ dash }),
+      setOpacity: (opacity) => set({ opacity }),
       setArrowStart: (arrowStart) => set({ arrowStart }),
       setArrowEnd: (arrowEnd) => set({ arrowEnd }),
       setArrowTopology: (arrowTopology) => set({ arrowTopology }),
@@ -258,53 +200,51 @@ export const useStyleStore = create<StyleStore>()(
     }),
     {
       name: 'whiteboard:style',
-      version: 1,
+      version: 2,
       migrate: migrateStyle,
     },
   ),
 );
 
-/** Merge `patch` into one group, leaving the others alone. */
-function patchGroup(
-  group: StyleGroup,
-  patch: Partial<GroupStyle>,
-): (state: StyleStore) => Partial<StyleStore> {
-  return (state) => ({
-    groups: { ...state.groups, [group]: { ...state.groups[group], ...patch } },
-  });
+/** Read the style new shapes inherit outside React. */
+export function nextShapeStyle(): NextShapeStyle {
+  const { color, size, fill, dash, opacity } = useStyleStore.getState();
+  return { color, size, fill, dash, opacity };
 }
 
-/** Read one group's current style outside React. */
-export function groupStyle(group: StyleGroup): GroupStyle {
-  return useStyleStore.getState().groups[group];
+/** Whatever of a stored style is usable, over the defaults for the rest. */
+function carry(source: Partial<NextShapeStyle> | undefined): NextShapeStyle {
+  return {
+    ...defaultStyle(),
+    ...(typeof source?.color === 'string' ? { color: source.color } : null),
+    ...(typeof source?.size === 'number' ? { size: source.size } : null),
+    ...(source?.fill ? { fill: source.fill } : null),
+    ...(source?.dash ? { dash: source.dash } : null),
+    ...(typeof source?.opacity === 'number'
+      ? { opacity: source.opacity }
+      : null),
+  };
 }
 
 /**
- * v0 kept one flat set of values for every tool.
+ * v0 kept one flat set of values for every tool; v1 split them per instrument.
  *
- * Every group inherits them, so the style someone was last drawing with
- * survives the split — except the marker's colour, which takes its yellow
- * rather than whatever the pen happened to be set to.
+ * The split is gone again, so a v1 store collapses back onto the pen's values —
+ * of the four groups that is the one carrying what someone was last actually
+ * drawing with. v0 already stored the flat set under these names.
  */
 export function migrateStyle(persisted: unknown, version: number): StyleStore {
-  if (version >= 1) return persisted as StyleStore;
-  const { color, size, fill, dash, opacity, ...rest } =
-    (persisted ?? {}) as Partial<GroupStyle> & Record<string, unknown>;
-  const carried: GroupStyle = {
-    ...defaultGroup(),
-    ...(typeof color === 'string' ? { color } : null),
-    ...(typeof size === 'number' ? { size } : null),
-    ...(fill ? { fill } : null),
-    ...(dash ? { dash } : null),
-    ...(typeof opacity === 'number' ? { opacity } : null),
-  };
+  if (version >= 2) return persisted as StyleStore;
+  if (version === 1) {
+    const { groups, ...rest } = (persisted ?? {}) as {
+      groups?: Record<string, Partial<NextShapeStyle>>;
+    };
+    return { ...rest, ...carry(groups?.pen) } as StyleStore;
+  }
+  const { color, size, fill, dash, opacity, ...rest } = (persisted ??
+    {}) as Partial<NextShapeStyle> & Record<string, unknown>;
   return {
     ...rest,
-    groups: {
-      pen: carried,
-      marker: { ...carried, color: DEFAULT_MARKER_COLOR },
-      shape: { ...carried },
-      text: { ...carried },
-    },
+    ...carry({ color, size, fill, dash, opacity }),
   } as StyleStore;
 }

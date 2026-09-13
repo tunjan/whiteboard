@@ -1,4 +1,4 @@
-import { Type } from 'lucide-react';
+import { TextGlyph } from '@/components/ui/glyphs';
 import { genId, type Point, type Shape, type TextProps } from '@whiteboard/shared';
 import { getSnapGridStep, snapCoordinateToGrid } from '../grid';
 import { getTopIndex } from '../order';
@@ -14,7 +14,7 @@ import {
 import { useCameraStore } from '../use-camera-store';
 import { useCanvasUiStore } from '../use-canvas-ui-store';
 import { useSelectionStore } from '../use-selection-store';
-import { groupStyle, useStyleStore } from '../use-style-store';
+import { nextShapeStyle, useStyleStore } from '../use-style-store';
 import { useTextEditingStore } from '../use-text-editing-store';
 import type { Tool, ToolContext, ToolPointerInfo } from './types';
 
@@ -57,7 +57,7 @@ export function createTextTool(): Tool {
     const style = useStyleStore.getState();
     return {
       ...(util?.getDefaultProps() as TextProps),
-      color: groupStyle('text').color,
+      color: nextShapeStyle().color,
       fontFamily: style.fontFamily,
       fontWeight: style.fontWeight,
       align: style.align,
@@ -105,7 +105,7 @@ export function createTextTool(): Tool {
       x,
       y,
       rotation: 0,
-      opacity: groupStyle('text').opacity,
+      opacity: nextShapeStyle().opacity,
       index: getTopIndex(ctx.editor.getShapes()),
       props:
         width === null
@@ -126,7 +126,7 @@ export function createTextTool(): Tool {
     label: 'Text',
     hotkey: 't',
     cursor: 'text',
-    icon: Type,
+    icon: TextGlyph,
 
     onPointerDown(info: ToolPointerInfo, ctx: ToolContext) {
       if (info.button !== 0) return;

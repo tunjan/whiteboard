@@ -1,8 +1,6 @@
-import { MousePointer2 } from 'lucide-react';
+import { CursorGlyph } from '@/components/ui/glyphs';
 import {
-  type ArrowTopology,
   type Bounds,
-  type LineSpline,
   type Point,
   type Shape,
   boundsCenter,
@@ -12,16 +10,19 @@ import {
 } from '@whiteboard/shared';
 import {
   getSelectionInfo,
+  hitSelectionHandle,
   HANDLE_HIT_SCREEN,
   marqueeIntersectsMask,
   matchesMarquee,
-  ROTATION_HANDLE_HIT_SCREEN,
   shapeRotatedBounds,
   type MarqueeMode,
   type ResizeHandleId,
   type RotationHandleId,
+  type SelectionInfo,
 } from '../selection-geometry';
+import { resizeCursor } from '../resize-cursor';
 import { rotationCursor } from '../rotation-cursor';
+import { isCoarsePointer } from '../platform';
 import {
   descendantsOf,
   findCommonAncestor,
@@ -69,7 +70,6 @@ import { spatialIndex } from '../use-document-store';
 import { useCameraStore } from '../use-camera-store';
 import { useCanvasUiStore } from '../use-canvas-ui-store';
 import { useSelectionStore } from '../use-selection-store';
-import { styleGroupForShape, useStyleStore } from '../use-style-store';
 import { useTextEditingStore } from '../use-text-editing-store';
 import { useFrameEditingStore } from '../use-frame-editing-store';
 import { useVideoPlayingStore } from '../use-video-playing-store';
@@ -77,7 +77,8 @@ import { useImageCroppingStore } from '../use-image-cropping-store';
 import type { Editor } from '../editor';
 import type { Tool, ToolContext, ToolPointerInfo } from './types';
 
-const SHAPE_HIT_SCREEN = 4;
+/** Screen-px slop around the pointer when picking a shape. */
+export const SHAPE_HIT_SCREEN = 4;
 const DRAG_SLOP_SCREEN = 3;
 const ROTATE_SNAP = (15 * Math.PI) / 180;
 const RIGHT_ANGLE_SNAP = Math.PI / 2;
@@ -189,7 +190,8 @@ type SelectState =
     }
   | {
       type: 'rotate';
-      handle: RotationHandleId;
+      /** Which control started the gesture; `mobile` is the touch knob. */
+      handle: RotationHandleId | 'mobile';
       items: RotationItem[];
       center: Point;
       startAngle: number;
@@ -217,8 +219,13 @@ type SelectState =
       additive: boolean;
     };
 
-/** Topmost selectable shape under a world point, after an R-tree broad phase. */
-function topmostHit(shapes: Shape[], p: Point, tol: number): string | null {
+/**
+ * Topmost selectable shape under a world point, after an R-tree broad phase.
+ *
+ * Exported so the hover indicator can name the shape a click would land on
+ * rather than answer the question a second time and risk a different answer.
+ */
+export function topmostHit(shapes: Shape[], p: Point, tol: number): string | null {
   return (
     hitTestCanvas(shapes, spatialIndex, p, tol, {
       zoom: useCameraStore.getState().camera.z,
@@ -404,55 +411,6 @@ function computeResizeBounds(
   };
 }
 
-/** Reflect the (first) selected shape's style in the style panel. */
-function syncStyleFromSelection(editor: Editor): void {
-  const { selectedIds } = useSelectionStore.getState();
-  const first = selectedIds[0] ? editor.getShape(selectedIds[0]) : undefined;
-  if (!first) return;
-  const props = first.props as {
-    color?: string;
-    size?: number;
-    fillStyle?: 'none' | 'solid' | 'hatch' | 'crosshatch';
-    dash?: 'solid' | 'dashed' | 'dotted';
-    kind?: 'triangle' | 'diamond' | 'trapezoid' | 'pentagon' | 'hexagon';
-    fontFamily?: 'sans' | 'serif' | 'mono' | 'hand';
-    fontWeight?: 400 | 500 | 600 | 700;
-    align?: 'start' | 'middle' | 'end';
-    arrowStart?: boolean;
-    arrowEnd?: boolean;
-    topology?: ArrowTopology;
-    spline?: LineSpline;
-  };
-  const style = useStyleStore.getState();
-  // Picked up into the group the shape belongs to, so eyedropping a heading
-  // sets the text tool's colour and leaves the pen on the colour it was on.
-  const group = styleGroupForShape(first.type);
-  style.setOpacity(
-    group,
-    typeof first.opacity === 'number' ? first.opacity : 1,
-  );
-  if (typeof props.color === 'string') style.setColor(group, props.color);
-  if (typeof props.size === 'number') style.setSize(group, props.size);
-  if (props.fillStyle) style.setFill(group, props.fillStyle);
-  if (props.dash) style.setDash(group, props.dash);
-  if (props.kind) style.setPolygonKind(props.kind);
-  if (first.type === 'arrow') {
-    if (typeof props.arrowStart === 'boolean')
-      style.setArrowStart(props.arrowStart);
-    if (typeof props.arrowEnd === 'boolean') style.setArrowEnd(props.arrowEnd);
-    style.setArrowTopology(
-      props.topology ??
-        (Math.abs(first.props.bend ?? 0) >= 0.5 ? 'arc' : 'straight'),
-    );
-  }
-  if (first.type === 'line') style.setLineSpline(props.spline ?? 'linear');
-  if (first.type === 'text' && props.fontFamily)
-    style.setFontFamily(props.fontFamily);
-  if (first.type === 'text' && props.fontWeight)
-    style.setFontWeight(props.fontWeight);
-  if (first.type === 'text' && props.align) style.setAlign(props.align);
-}
-
 function hasCrossedDragSlop(start: Point, point: Point): boolean {
   return distance(start, point) >= DRAG_SLOP_SCREEN;
 }
@@ -496,6 +454,87 @@ function effectiveRotation(
   return rotation;
 }
 
+/**
+ * The shapes a rotation gesture turns: the selection plus the descendants that
+ * follow it, minus groups (which hold no rotation of their own) and any
+ * explicitly selected shape that is locked.
+ */
+function rotationItems(
+  shapes: Shape[],
+  selectionInfo: SelectionInfo,
+  editor: Editor,
+): RotationItem[] {
+  const items: RotationItem[] = [];
+  const explicit = new Set(selectionInfo.ids);
+  for (const id of moveTargetIds(shapes, selectionInfo.ids)) {
+    const initial = editor.getShape(id);
+    if (
+      !initial ||
+      (initial.locked && explicit.has(initial.id)) ||
+      initial.type === 'group'
+    ) {
+      continue;
+    }
+    const util = shapeRegistry.getFor(initial);
+    if (!util) continue;
+    items.push({
+      initial,
+      center: boundsCenter(util.getBounds(initial as never)),
+    });
+  }
+  return items;
+}
+
+/**
+ * Frames a finished rotation may have swung a child clear of: every frame
+ * ancestor of a rotated shape, minus the frames that turned themselves — their
+ * children rode along, so they still overlap.
+ */
+function kickoutRotatedFrameChildren(
+  items: RotationItem[],
+  editor: Editor,
+): void {
+  const rotated = new Set(items.map((item) => item.initial.id));
+  const frames = new Set<string>();
+  const seen = new Set<string>();
+  for (const item of items) {
+    let parentId = item.initial.parentId;
+    while (parentId && !seen.has(parentId)) {
+      seen.add(parentId);
+      const parent = editor.getShape(parentId);
+      if (!parent) break;
+      if (parent.type === 'frame' && !rotated.has(parent.id)) {
+        frames.add(parent.id);
+      }
+      parentId = parent.parentId;
+    }
+  }
+  for (const id of frames) kickoutOccludedFrameChildren(editor, id);
+}
+
+function rotateState(
+  selectionInfo: SelectionInfo,
+  info: ToolPointerInfo,
+  items: RotationItem[],
+  handle: RotationHandleId | 'mobile',
+): Extract<SelectState, { type: 'rotate' }> {
+  return {
+    type: 'rotate',
+    handle,
+    items,
+    center: selectionInfo.center,
+    startAngle: Math.atan2(
+      info.point.y - selectionInfo.center.y,
+      info.point.x - selectionInfo.center.x,
+    ),
+    initialSharedRotation: selectionInfo.rotation,
+    current: info.point,
+    shiftKey: info.shiftKey,
+    pointerType: info.pointerType,
+    completed: false,
+  };
+}
+
 export function createSelectTool(): Tool {
   let state: SelectState = { type: 'idle' };
 
@@ -532,9 +571,12 @@ export function createSelectTool(): Tool {
         });
       }
     });
-    useSelectionStore
-      .getState()
-      .setRotationCursor(rotationCursor(rotate.handle, target));
+    // Touch started this from the knob, which has no cursor to keep pointed.
+    if (rotate.handle !== 'mobile') {
+      useSelectionStore
+        .getState()
+        .setGestureCursor(rotationCursor(rotate.handle, target));
+    }
   }
 
   function createMoveState(
@@ -830,7 +872,7 @@ export function createSelectTool(): Tool {
   function clearTransientState(): void {
     useSelectionStore.getState().setMarquee(null);
     useSelectionStore.getState().setSnapGuides([]);
-    useSelectionStore.getState().setRotationCursor(null);
+    useSelectionStore.getState().setGestureCursor(null);
   }
 
   // Finish the gesture, keeping its result. The live drag already wrote the
@@ -853,11 +895,8 @@ export function createSelectTool(): Tool {
       if (finished.additive) {
         useSelectionStore.getState().toggle(finished.targetId);
       }
-      syncStyleFromSelection(ctx.editor);
     } else if (finished.type === 'pending-empty') {
       if (!finished.additive) useSelectionStore.getState().clear();
-    } else if (finished.type === 'marquee') {
-      syncStyleFromSelection(ctx.editor);
     } else if (finished.type === 'move') {
       reparentMovedRoots(finished, ctx, true);
     } else if (
@@ -865,6 +904,8 @@ export function createSelectTool(): Tool {
       finished.initial.type === 'frame'
     ) {
       kickoutOccludedFrameChildren(ctx.editor, finished.initial.id);
+    } else if (finished.type === 'rotate') {
+      kickoutRotatedFrameChildren(finished.items, ctx.editor);
     }
     clearTransientState();
     state = { type: 'idle' };
@@ -875,7 +916,7 @@ export function createSelectTool(): Tool {
     label: 'Select',
     hotkey: 'v',
     cursor: 'default',
-    icon: MousePointer2,
+    icon: CursorGlyph,
 
     onPointerDown(info: ToolPointerInfo, ctx: ToolContext) {
       if (info.button !== 0) return;
@@ -887,6 +928,7 @@ export function createSelectTool(): Tool {
         selection.selectedIds,
         zoom,
         ctx.editor.getShape,
+        isCoarsePointer(),
       );
 
       // 1a. Custom shape handles (connector endpoints/bend) take priority.
@@ -938,9 +980,13 @@ export function createSelectTool(): Tool {
 
       // 1b. Generic resize handles (single or group bounding box).
       if (selectionInfo) {
-        for (const handle of selectionInfo.handles) {
-          if (distance(info.point, handle.point) > HANDLE_HIT_SCREEN / zoom)
-            continue;
+        const hitHandle = hitSelectionHandle(selectionInfo, info.point);
+        const handle = hitHandle
+          ? selectionInfo.handles.find(
+              (candidate) => candidate.id === hitHandle,
+            )!
+          : null;
+        if (handle) {
           if (selectionInfo.isSingle) {
             const initial = ctx.editor.getShape(selectionInfo.ids[0]!);
             const util = initial ? shapeRegistry.getFor(initial) : undefined;
@@ -1020,56 +1066,49 @@ export function createSelectTool(): Tool {
               };
             }
           }
+          // Held for the whole drag: the pointer leaves the handle immediately,
+          // so without this the cursor snaps back to the tool's own the moment
+          // the resize it is describing actually begins.
+          if (state?.type === 'resize' || state?.type === 'group-resize') {
+            useSelectionStore
+              .getState()
+              .setGestureCursor(resizeCursor(handle.id, selectionInfo.rotation));
+          }
           return;
         }
 
         // Rotation lives in four invisible zones just outside the corners,
-        // leaving the top-center lane free for the contextual toolbar.
+        // leaving the top-center lane free for the contextual toolbar. Touch
+        // gets one visible knob in their place, tested first because it can
+        // sit over the box rather than outside it.
+        const knob = selectionInfo.mobileRotateHandle;
+        if (knob && distance(info.point, knob.point) <= knob.radius) {
+          const items = rotationItems(shapes, selectionInfo, ctx.editor);
+          if (items.length) {
+            state = rotateState(selectionInfo, info, items, 'mobile');
+          }
+          return;
+        }
         for (const handle of selectionInfo.rotationHandles) {
+          // The zone is a square that turns with the box, so it is tested in
+          // the box's own frame rather than by distance.
+          const local = rotatePoint(
+            info.point,
+            handle.point,
+            -selectionInfo.rotation,
+          );
           if (
-            distance(info.point, handle.point) >
-            ROTATION_HANDLE_HIT_SCREEN / zoom
+            Math.abs(local.x - handle.point.x) > handle.extent ||
+            Math.abs(local.y - handle.point.y) > handle.extent
           ) {
             continue;
           }
-          const items: RotationItem[] = [];
-          const rotationIds = moveTargetIds(shapes, selectionInfo.ids);
-          const explicit = new Set(selectionInfo.ids);
-          for (const id of rotationIds) {
-            const initial = ctx.editor.getShape(id);
-            if (
-              !initial ||
-              (initial.locked && explicit.has(initial.id)) ||
-              initial.type === 'group'
-            ) {
-              continue;
-            }
-            const util = shapeRegistry.getFor(initial);
-            if (!util) continue;
-            items.push({
-              initial,
-              center: boundsCenter(util.getBounds(initial as never)),
-            });
-          }
+          const items = rotationItems(shapes, selectionInfo, ctx.editor);
           if (items.length) {
-            state = {
-              type: 'rotate',
-              handle: handle.id,
-              items,
-              center: selectionInfo.center,
-              startAngle: Math.atan2(
-                info.point.y - selectionInfo.center.y,
-                info.point.x - selectionInfo.center.x,
-              ),
-              initialSharedRotation: selectionInfo.rotation,
-              current: info.point,
-              shiftKey: info.shiftKey,
-              pointerType: info.pointerType,
-              completed: false,
-            };
+            state = rotateState(selectionInfo, info, items, handle.id);
             useSelectionStore
               .getState()
-              .setRotationCursor(
+              .setGestureCursor(
                 rotationCursor(handle.id, selectionInfo.rotation),
               );
           }
@@ -1089,7 +1128,6 @@ export function createSelectTool(): Tool {
         const targetWasSelected = selectionBefore.includes(targetId);
         if (!info.shiftKey && !targetWasSelected) {
           selection.setSelection([targetId]);
-          syncStyleFromSelection(ctx.editor);
         }
         state = {
           type: 'pending-shape',
@@ -1151,7 +1189,6 @@ export function createSelectTool(): Tool {
               .setSelection([
                 ...new Set([...state.selectionBefore, state.targetId]),
               ]);
-            syncStyleFromSelection(ctx.editor);
           }
           const move = createMoveState(
             state.start,
@@ -1619,18 +1656,19 @@ export function createSelectTool(): Tool {
         selection.selectedIds,
         zoom,
         ctx.editor.getShape,
+        isCoarsePointer(),
       );
 
       // A frame corner handle is a direct "fit viewport to content" target.
       // Do this before the text-width special case because both live in the
       // generic handle list.
+      const doubleClickedHandle = selectionInfo
+        ? hitSelectionHandle(selectionInfo, info.point)
+        : null;
       if (selectionInfo?.isSingle) {
         const selected = ctx.editor.getShape(selectionInfo.ids[0]!);
-        const corner = selectionInfo.handles.find(
-          (candidate) =>
-            candidate.id.length === 2 &&
-            distance(info.point, candidate.point) <= HANDLE_HIT_SCREEN / zoom,
-        );
+        const corner =
+          doubleClickedHandle?.length === 2 ? doubleClickedHandle : null;
         if (corner && selected?.type === 'frame') {
           fitFrameToContent(ctx.editor, selected.id);
           return;
@@ -1641,11 +1679,10 @@ export function createSelectTool(): Tool {
       // returns to content-driven auto sizing. Keep the opposite side's center
       // as the visual pivot so rotated text does not jump.
       if (selectionInfo?.isSingle) {
-        const handle = selectionInfo.handles.find(
-          (candidate) =>
-            (candidate.id === 'e' || candidate.id === 'w') &&
-            distance(info.point, candidate.point) <= HANDLE_HIT_SCREEN / zoom,
-        );
+        const handle =
+          doubleClickedHandle === 'e' || doubleClickedHandle === 'w'
+            ? doubleClickedHandle
+            : null;
         const selected = ctx.editor.getShape(selectionInfo.ids[0]!);
         if (
           handle &&
@@ -1661,7 +1698,7 @@ export function createSelectTool(): Tool {
           const after = layoutTextProps(props);
           ctx.editor.updateShape(selected.id, {
             x:
-              handle.id === 'e'
+              handle === 'e'
                 ? selected.x
                 : selected.x + before.width - after.width,
             y: selected.y + (before.height - after.height) / 2,

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   nextDiscreteZoom,
+  interpolateCameraViewport,
   screenToWorld,
   worldToScreen,
   zoomCameraAtScreen,
@@ -36,9 +37,7 @@ describe('camera zoom math', () => {
     expect(screenAfter.y).toBeCloseTo(midpoint.y);
   });
 
-  // `useWheel` accumulates a frame's wheel events into one pan delta and one
-  // zoom factor, then commits once. That is only lossless if these two
-  // identities hold; if either breaks, coalescing silently changes the camera.
+  // Same-anchor zooms compose multiplicatively away from the zoom limits.
   it('composes successive zooms about one anchor multiplicatively', () => {
     const camera = { x: 120, y: -40, z: 2 };
     const anchor = { x: 320, y: 180 };
@@ -86,5 +85,34 @@ describe('camera zoom math', () => {
     expect(nextDiscreteZoom(1.4, 'in')).toBe(2);
     expect(nextDiscreteZoom(1.6, 'in')).toBe(4);
     expect(nextDiscreteZoom(1.6, 'out')).toBe(1);
+  });
+});
+
+
+describe('viewport animation', () => {
+  it('linearly interpolates the visible world bounds', () => {
+    const from = { x: -300, y: 150, z: 0.1 };
+    const to = { x: 250, y: -40, z: 8 };
+    for (const t of [0, 0.2, 0.5, 0.8, 1]) {
+      const camera = interpolateCameraViewport(from, to, t);
+      for (const screen of [{ x: 0, y: 0 }, { x: 1200, y: 800 }]) {
+        const a = screenToWorld(screen, from), b = screenToWorld(screen, to);
+        const actual = screenToWorld(screen, camera);
+        expect(actual.x).toBeCloseTo(a.x + (b.x - a.x) * t);
+        expect(actual.y).toBeCloseTo(a.y + (b.y - a.y) * t);
+      }
+    }
+  });
+
+  it('holds the focal point for the entire animation across extreme zooms', () => {
+    const from = { x: 180, y: -55, z: 0.05 };
+    const anchor = { x: 920, y: 170 };
+    const world = screenToWorld(anchor, from);
+    const to = zoomCameraAtScreen(from, anchor, 8);
+    for (const t of [0, 0.1, 0.5, 0.9, 1]) {
+      const actual = worldToScreen(world, interpolateCameraViewport(from, to, t));
+      expect(actual.x).toBeCloseTo(anchor.x);
+      expect(actual.y).toBeCloseTo(anchor.y);
+    }
   });
 });

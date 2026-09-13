@@ -1,5 +1,7 @@
+import { rotatedCursor } from './cursor-svg';
 import type { RotationHandleId } from './selection-geometry';
 
+/** Base angle of each corner's glyph, before the selection's own rotation. */
 const ROTATION_CURSOR_ANGLE: Record<RotationHandleId, number> = {
   'rotate-nw': 0,
   'rotate-ne': 90,
@@ -7,28 +9,21 @@ const ROTATION_CURSOR_ANGLE: Record<RotationHandleId, number> = {
   'rotate-sw': 270,
 };
 
-const rotationCursorCache = new Map<number, string>();
+/**
+ * A corner-oriented curved arrow. Its path spans 1..21 of the 32px box, so it
+ * is shifted to centre on the hotspot the glyph turns about.
+ */
+const ARROW = 'M21 21C21 12.72 14.28 6 6 6M11 1 6 6l5 5';
 
-/** A corner-oriented curved arrow, outlined so it stays legible on any canvas. */
+/** The rotate cursor for a corner zone on a selection turned by `rotation`. */
 export function rotationCursor(
   id: RotationHandleId,
   selectionRotation: number,
 ): string {
-  const rawAngle =
-    ROTATION_CURSOR_ANGLE[id] + (selectionRotation * 180) / Math.PI;
-  const angle = ((Math.round(rawAngle / 15) * 15) % 360 + 360) % 360;
-  const cached = rotationCursorCache.get(angle);
-  if (cached) return cached;
-  const arrow = 'M21 21C21 12.72 14.28 6 6 6M11 1 6 6l5 5';
-  const svg = `
-    <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28">
-      <g transform="rotate(${angle} 14 14)">
-        <path d="${arrow}" fill="none" stroke="white" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
-        <path d="${arrow}" fill="none" stroke="#202124" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/>
-      </g>
-    </svg>
-  `;
-  const cursor = `url("data:image/svg+xml,${encodeURIComponent(svg)}") 14 14, default`;
-  rotationCursorCache.set(angle, cursor);
-  return cursor;
+  return rotatedCursor({
+    path: ARROW,
+    angle: ROTATION_CURSOR_ANGLE[id] + (selectionRotation * 180) / Math.PI,
+    translate: [5, 5],
+    fallback: 'default',
+  });
 }

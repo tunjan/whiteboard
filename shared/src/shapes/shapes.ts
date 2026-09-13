@@ -81,6 +81,10 @@ export type PressureEasing =
 export interface DrawProps {
   /** Versioned geometry keeps existing documents visually stable. */
   inkAlgorithm?: 'reference';
+  /** New highlights use a background wash and a foreground tint. */
+  inkKind?: 'highlight';
+  /** False while samples are arriving; absent means a completed legacy stroke. */
+  isComplete?: boolean;
   /** Ink points in shape-local coordinates (append-only under the CRDT). */
   points: DrawPoint[];
   /** Whether the stroke ended near enough to its start to enclose a region. */

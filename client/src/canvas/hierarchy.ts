@@ -13,7 +13,23 @@ export function childrenOf(shapes: Shape[], parentId: string): Shape[] {
  */
 type ChildIndex = Map<string, Shape[]>;
 
+/**
+ * Keyed on the array, so the store's z-sorted view shares one index across
+ * every caller for as long as that view stands.
+ *
+ * The reuse note above only helped callers that had been written to hoist the
+ * index; the ones that call per id — `containerBounds` for each selected group
+ * in `getSelectionInfo`, `descendantsOf` for each root in `collectSubtree` —
+ * still paid a full pass each, 1.7 ms a frame for eight groups on a 10k page.
+ * That view is rebuilt (never mutated) on every mutation, so its identity is
+ * exactly the right invalidation key; a caller passing a fresh array simply
+ * misses and pays what it paid before.
+ */
+const indexCache = new WeakMap<readonly Shape[], ChildIndex>();
+
 function childIndex(shapes: Shape[]): ChildIndex {
+  const cached = indexCache.get(shapes);
+  if (cached) return cached;
   const byParent: ChildIndex = new Map();
   for (const s of shapes) {
     if (!s.parentId) continue;
@@ -21,6 +37,7 @@ function childIndex(shapes: Shape[]): ChildIndex {
     if (list) list.push(s);
     else byParent.set(s.parentId, [s]);
   }
+  indexCache.set(shapes, byParent);
   return byParent;
 }
 

@@ -18,7 +18,7 @@ vi.mock('./use-selection-store', () => ({
       selectedIds: state.selectedIds,
       marquee: null,
       snapGuides: [],
-      rotationCursor: null,
+      gestureCursor: null,
     }),
 }));
 
@@ -88,10 +88,33 @@ describe('SelectionLayer', () => {
   it('traces line members of a multi-selection', () => {
     const markup = markupFor([line, box], ['l1', 'r1']);
     expect(markup).toContain(TRACE);
-    // The group box still shows, and exactly one membership outline is a
-    // rectangle — the rectangle's; the line contributes the traced path.
+    // The selection box still shows, and exactly one membership outline is
+    // drawn — the rectangle's; the line contributes the traced path instead.
     expect(markup).toContain('<polygon');
-    expect(markup.match(/<rect[^>]*opacity="0\.5"/g) ?? []).toHaveLength(1);
+    expect(markup.match(/<polygon[^>]*opacity="0\.5"/g) ?? []).toHaveLength(1);
+  });
+
+  it('turns a membership outline with the shape it belongs to', () => {
+    const turned: Shape = { ...box, id: 'r2', rotation: Math.PI / 4 };
+    const markup = markupFor([box, turned], ['r1', 'r2']);
+    const outlines = markup.match(/<polygon[^>]*opacity="0\.5"[^>]*>/g) ?? [];
+    expect(outlines).toHaveLength(2);
+    // A 40x40 box turned an eighth turn spans 40*sqrt(2) across, but no
+    // corner of its outline may sit on that envelope's corners: an
+    // axis-aligned box would put all four there and stand clear of the shape.
+    const corners = outlines[1]!.match(/points="([^"]+)"/)![1]!.split(' ');
+    expect(corners).toHaveLength(4);
+    const xs = corners.map((c) => Number(c.split(',')[0]));
+    const ys = corners.map((c) => Number(c.split(',')[1]));
+    const width = Math.max(...xs) - Math.min(...xs);
+    expect(width).toBeCloseTo(40 * Math.SQRT2, 3);
+    for (let i = 0; i < 4; i++) {
+      // Each corner sits at the midpoint of one side of that envelope.
+      const onCornerOfEnvelope =
+        (xs[i] === Math.min(...xs) || xs[i] === Math.max(...xs)) &&
+        (ys[i] === Math.min(...ys) || ys[i] === Math.max(...ys));
+      expect(onCornerOfEnvelope).toBe(false);
+    }
   });
 
   it('gives every connector handle a grab zone that is its hover halo', () => {

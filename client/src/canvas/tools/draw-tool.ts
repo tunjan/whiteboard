@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react';
-import { Pencil } from 'lucide-react';
+import { PenGlyph } from '@/components/ui/glyphs';
 import {
   genId,
   type DrawPoint,
@@ -13,6 +13,9 @@ import { topFrameAtPoint } from '../frame-operations';
 import { getBottomIndex, getIndexAboveTopmostOf, getTopIndex } from '../order';
 import { InputsManager, isPenOrStylus } from '../inputs-manager';
 import {
+  DEFAULT_PENCIL_STABILIZATION,
+  REFERENCE_PENCIL_DYNAMICS,
+  STROKE_PROFILES,
   liftTaperFor,
   pencilStabilizationToStreamline,
   type EndTaperMode,
@@ -26,7 +29,8 @@ import {
   endLiveStroke,
   publishLiveStroke,
 } from '../use-live-stroke-store';
-import { groupStyle, styleGroupForTool } from '../use-style-store';
+import { nextShapeStyle } from '../use-style-store';
+import { playPenToolSound } from './pen-tool-sound';
 import type { Tool, ToolContext, ToolPointerInfo } from './types';
 
 /**
@@ -174,7 +178,7 @@ const PENCIL_CONFIG: DrawToolConfig = {
   id: 'draw',
   label: 'Draw',
   hotkey: 'd',
-  icon: Pencil,
+  icon: PenGlyph,
   ink: 'pencil',
 };
 
@@ -196,7 +200,7 @@ const MARKER_SIZE_SCALE = 6;
  * bury whatever it crosses that is not ink — an image, a graph, the grid. The
  * stroke's own opacity stays editable once it is selected, like any shape's.
  */
-const MARKER_OPACITY = 0.35;
+const MARKER_OPACITY = 1;
 
 /**
  * Marker stabilization and softening, as engine weights rather than the
@@ -352,7 +356,7 @@ export function createDrawTool(config: DrawToolConfig = PENCIL_CONFIG): Tool {
       if (!id) return;
       // Peers still receive every frame of the stroke: the document write is
       // unchanged, and is what makes them watch it being drawn.
-      ctx.editor.updateShape(id, { props: { points: points.slice() } });
+      ctx.editor.updateShape(id, { props: { points: points.slice(), isComplete: false } });
       // Same frame as the document write, so the rendered stroke and its
       // predicted tail always advance together.
       publishFrame();
@@ -455,6 +459,7 @@ export function createDrawTool(config: DrawToolConfig = PENCIL_CONFIG): Tool {
     ctx.editor.updateShape(sid, {
       props: {
         points: points.slice(),
+        isComplete: true,
         isClosed: isClosedStroke(),
         ...(continuing ? { endTaper: false } : liftTaper()),
       },
@@ -497,7 +502,7 @@ export function createDrawTool(config: DrawToolConfig = PENCIL_CONFIG): Tool {
         config.ink === 'marker'
           ? markerIndex(ctx.editor.getShapes(), worldOrigin)
           : getTopIndex(ctx.editor.getShapes()),
-      props: { ...strokeProps, points: points.slice() },
+      props: { ...strokeProps, isComplete: false, points: points.slice() },
     } as Shape);
     beginLiveStroke(sid);
     // A press that never moves still leaves a dot, so publish the seed rather
@@ -683,7 +688,7 @@ export function createDrawTool(config: DrawToolConfig = PENCIL_CONFIG): Tool {
     // sample a real velocity reading; letting it run here would reach back and
     // rewrite the width at the far end of ink this gesture never touched.
     velocitySeeded = true;
-    strokeProps = { ...shape.props };
+    strokeProps = { ...shape.props, isComplete: false };
     strokeOpacity = shape.opacity ?? 1;
     origin = { x: shape.x, y: shape.y };
     points = shape.props.points.slice();
@@ -912,6 +917,10 @@ export function createDrawTool(config: DrawToolConfig = PENCIL_CONFIG): Tool {
     // document write path is untouched — peers receive real samples per frame.
     wantsPredictedSamples: true,
 
+    onEnter() {
+      if (config.id === 'draw') playPenToolSound('activate');
+    },
+
     onPointerDown(info: ToolPointerInfo, ctx: ToolContext) {
       if (info.button !== 0) return;
       const util = shapeRegistry.get('draw');
@@ -964,14 +973,17 @@ export function createDrawTool(config: DrawToolConfig = PENCIL_CONFIG): Tool {
           return;
         }
       }
-      const style = groupStyle(styleGroupForTool(config.id));
+      const style = nextShapeStyle();
       if (config.ink === 'marker') {
         strokeOpacity = MARKER_OPACITY;
         strokeProps = {
           ...(util.getDefaultProps() as DrawProps),
           points: [],
+          inkAlgorithm: 'reference',
+          inkKind: 'highlight',
+          isComplete: false,
           color: style.color,
-          size: style.size * MARKER_SIZE_SCALE,
+          size: STROKE_PROFILES.highlight(style.size * MARKER_SIZE_SCALE).size,
           // A marker lays one flat band: no dash to break it up, no interior to
           // paint, and — with `thinning` at zero — no width profile for
           // pressure, its easing, or the tapers to shape.
@@ -993,11 +1005,16 @@ export function createDrawTool(config: DrawToolConfig = PENCIL_CONFIG): Tool {
         return;
       }
       strokeOpacity = style.opacity;
+      const profile = stylusInput
+        ? STROKE_PROFILES.realPressure(style.size)
+        : velocityPressure
+          ? STROKE_PROFILES.simulatePressure(style.size)
+          : STROKE_PROFILES.solid(style.size);
       strokeProps = {
         ...(util.getDefaultProps() as DrawProps),
         points: [],
         color: style.color,
-        size: style.size,
+        size: profile.size,
         dash: style.dash,
         // Only ever seen once the stroke closes on itself; an open squiggle
         // renders the same whatever the fill style is set to.
@@ -1005,19 +1022,23 @@ export function createDrawTool(config: DrawToolConfig = PENCIL_CONFIG): Tool {
         // The reference kernel simulates mouse pressure from sample travel;
         // stylus samples retain their calibrated hardware readings.
         inkAlgorithm: 'reference',
+        isComplete: false,
         simulatePressure: velocityPressure,
         pressureEasing: pressureEasingFor(pencil.pencilPressureCurve),
         pressureWarmup: stylusInput || velocityPressure,
-        thinning: pencil.pencilThinning,
+        thinning: !stylusInput && !velocityPressure
+          ? 0
+          : pencil.pencilThinning === REFERENCE_PENCIL_DYNAMICS.thinning
+            ? profile.thinning
+            : pencil.pencilThinning,
         smoothing: pencil.pencilSmoothing,
         // Quoted against the camera the stroke is being drawn at, so the hand
         // gets the same steadying zoomed out as it does at 1:1. Baked in here,
         // not read at render time — the shape must look the same at every zoom
         // once it exists.
-        streamline: pencilStabilizationToStreamline(
-          pencil.pencilStabilization,
-          zoomOnEnter,
-        ),
+        streamline: pencil.pencilStabilization === DEFAULT_PENCIL_STABILIZATION
+          ? profile.streamline
+          : pencilStabilizationToStreamline(pencil.pencilStabilization),
         startTaper: pencil.pencilStartTaper,
         // `velocity` writes its taper at the lift, where the speed that earns
         // it is finally known; until then the stroke ends in a round cap like
@@ -1096,6 +1117,7 @@ export function createDrawTool(config: DrawToolConfig = PENCIL_CONFIG): Tool {
     // orphaned shape. Commit it, matching onCommit's "keep what was drawn".
     onExit(ctx: ToolContext) {
       finalize(ctx);
+      if (config.id === 'draw') playPenToolSound('deactivate');
     },
 
     // A pinch (or tool switch) mid-stroke discards the partial stroke entirely.

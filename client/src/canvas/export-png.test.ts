@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { EquationShape, Shape } from '@whiteboard/shared';
 import { typesetEquation } from './equation-render';
-import { countInvalidEquations, isExportable } from './export-png';
+import { countInvalidEquations, isExportable, rasterSize } from './export-png';
 
 function equation(latex: string): EquationShape {
   return {
@@ -72,5 +72,38 @@ describe('export placeholder filtering', () => {
     } as Shape;
 
     expect(isExportable(rect)).toBe(true);
+  });
+});
+
+describe('raster sizing', () => {
+  it('keeps a sprawling scene inside the canvas cap', () => {
+    // 200k world units wide: the cap asks for 0.041, which the 0.1 floor used
+    // to override — producing a 20017px canvas. Over ~268 megapixels Chrome
+    // rasterizes fully transparent without throwing, so the export and the
+    // clipboard copy both came back blank.
+    const { outW, outH } = rasterSize(200166, 166, 1);
+    expect(outW).toBeLessThanOrEqual(8192);
+    expect(outH).toBeLessThanOrEqual(8192);
+  });
+
+  it('caps both axes of a scene that sprawls in each', () => {
+    const { outW, outH } = rasterSize(200000, 200000, 4);
+    expect(outW).toBeLessThanOrEqual(8192);
+    expect(outH).toBeLessThanOrEqual(8192);
+    expect(outW * outH).toBeLessThan(268_000_000);
+  });
+
+  it('honours the requested scale when it fits', () => {
+    expect(rasterSize(400, 300, 2)).toMatchObject({
+      scale: 2,
+      outW: 800,
+      outH: 600,
+    });
+  });
+
+  it('never returns a zero-pixel dimension', () => {
+    const { outW, outH } = rasterSize(10000, 0.01, 1);
+    expect(outW).toBeGreaterThan(0);
+    expect(outH).toBeGreaterThan(0);
   });
 });

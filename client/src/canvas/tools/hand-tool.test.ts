@@ -3,14 +3,20 @@ import { createHandTool } from './hand-tool';
 import type { ToolContext, ToolPointerInfo } from './types';
 
 const mocks = vi.hoisted(() => ({
+  stopCameraAnimation: vi.fn(),
   panByScreen: vi.fn(),
+  slideCamera: vi.fn(),
   setHandDragging: vi.fn(),
   stopFollowing: vi.fn(),
 }));
 
 vi.mock('../use-camera-store', () => ({
   useCameraStore: {
-    getState: () => ({ panByScreen: mocks.panByScreen }),
+    getState: () => ({
+      stopCameraAnimation: mocks.stopCameraAnimation,
+      panByScreen: mocks.panByScreen,
+      slideCamera: mocks.slideCamera,
+    }),
   },
 }));
 
@@ -61,6 +67,36 @@ describe('hand tool', () => {
 
     tool.onPointerUp?.(pointer(18, 14), context);
     expect(mocks.setHandDragging).toHaveBeenLastCalledWith(false);
+  });
+
+  it('hands the release velocity to the camera to coast on', () => {
+    const tool = createHandTool();
+
+    tool.onPointerDown?.(pointer(0, 0, { timestamp: 0 }), context);
+    // A steady 1 px/ms leftward drag, sampled every 16 ms.
+    for (let i = 1; i <= 8; i++) {
+      tool.onPointerMove?.(pointer(-16 * i, 0, { timestamp: 16 * i }), context);
+    }
+    tool.onPointerUp?.(pointer(-128, 0, { timestamp: 128 }), context);
+
+    const [velocity] = mocks.slideCamera.mock.calls[0]!;
+    expect(velocity.x).toBeLessThan(0);
+    expect(velocity.y).toBe(0);
+  });
+
+  it('does not coast after a drag that came to rest before lifting', () => {
+    const tool = createHandTool();
+
+    tool.onPointerDown?.(pointer(0, 0, { timestamp: 0 }), context);
+    for (let i = 1; i <= 8; i++) {
+      tool.onPointerMove?.(pointer(-16 * i, 0, { timestamp: 16 * i }), context);
+    }
+    // Held still for a third of a second, then released.
+    tool.onPointerUp?.(pointer(-128, 0, { timestamp: 460 }), context);
+
+    const [velocity] = mocks.slideCamera.mock.calls[0]!;
+    expect(velocity.x).toBe(0);
+    expect(velocity.y).toBe(0);
   });
 
   it('ignores secondary-button and zero-distance movement', () => {

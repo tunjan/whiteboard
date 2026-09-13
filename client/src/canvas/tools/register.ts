@@ -1,12 +1,12 @@
 // Registers all tools. Importing this module (once) populates the tool
 // registry, which the toolbar and keyboard routing iterate.
 import {
-  ArrowUpRight,
-  Circle,
-  Highlighter,
-  Slash,
-  Square,
-} from 'lucide-react';
+  ArrowGlyph,
+  EllipseGlyph,
+  HighlighterGlyph,
+  LineGlyph,
+  RectGlyph,
+} from '@/components/ui/glyphs';
 import { toolRegistry } from './tool-registry';
 import { createSelectTool } from './select-tool';
 import { createHandTool } from './hand-tool';
@@ -32,7 +32,7 @@ toolRegistry.register(
     id: 'highlighter',
     label: 'Highlighter',
     hotkey: 'i',
-    icon: Highlighter,
+    icon: HighlighterGlyph,
     ink: 'marker',
   }),
 );
@@ -49,7 +49,7 @@ toolRegistry.register(
     type: 'rectangle',
     label: 'Rectangle',
     hotkey: 'r',
-    icon: Square,
+    icon: RectGlyph,
   }),
 );
 toolRegistry.register(
@@ -58,7 +58,7 @@ toolRegistry.register(
     type: 'ellipse',
     label: 'Ellipse',
     hotkey: 'o',
-    icon: Circle,
+    icon: EllipseGlyph,
   }),
 );
 toolRegistry.register(
@@ -67,7 +67,7 @@ toolRegistry.register(
     type: 'line',
     label: 'Line',
     hotkey: 'l',
-    icon: Slash,
+    icon: LineGlyph,
   }),
 );
 toolRegistry.register(
@@ -76,7 +76,7 @@ toolRegistry.register(
     type: 'arrow',
     label: 'Arrow',
     hotkey: 'a',
-    icon: ArrowUpRight,
+    icon: ArrowGlyph,
   }),
 );
 toolRegistry.register(createEraserTool());

@@ -4,6 +4,7 @@ import {
   useLayoutEffect,
   useMemo,
   useRef,
+  useState,
 } from 'react';
 import type {
   DragEvent as ReactDragEvent,
@@ -19,8 +20,23 @@ import { FlatShapeLayer } from './FlatShapeLayer';
 import { useBenchFlags } from './bench-flags';
 import { Background } from './Background';
 import { CanvasControls } from './CanvasControls';
+import { Minimap } from './Minimap';
 import { UndoControls } from './UndoControls';
-import { nextDiscreteZoom, screenToWorld } from './camera';
+import {
+  type Camera,
+  isActualSize,
+  nextDiscreteZoom,
+  screenToWorld,
+  zoomCameraAtScreen,
+} from './camera';
+import { QuickZoomFrame } from './QuickZoomFrame';
+import { isDoubleTap, oneFingerZoomFactor } from './one-finger-zoom';
+import {
+  quickZoomBounds,
+  quickZoomFrameSize,
+  quickZoomOverviewZoom,
+} from './quick-zoom';
+import { useEdgeScroll } from './use-edge-scroll';
 import { viewportWorldBounds } from './geometry';
 import { PerformanceOverlay } from '@/components/performance-overlay';
 import { noteActivity } from '@/collab/attention';
@@ -28,7 +44,6 @@ import { CursorsLayer } from '@/collab/CursorsLayer';
 import { PeerSelectionLayer } from '@/collab/PeerSelectionLayer';
 import { CommentsLayer } from './CommentsLayer';
 import { DrawingCursor } from './DrawingCursor';
-import { EraserCursor } from './EraserCursor';
 import { LaserCursor } from './LaserCursor';
 import { EraserTrail } from './EraserTrail';
 import { LaserLayer } from './LaserLayer';
@@ -48,6 +63,7 @@ import { usePresenceStore } from '@/collab/use-presence-store';
 import { VanishLayer } from './VanishLayer';
 import { plotArea } from './shapes/graph';
 import { panViewport, zoomViewport } from './shapes/graph-interaction';
+import { HoverLayer } from './HoverLayer';
 import { SelectionLayer } from './SelectionLayer';
 import { SelectionToolbar } from './SelectionToolbar';
 import { TextEditorOverlay } from './TextEditorOverlay';
@@ -69,9 +85,11 @@ import {
   pasteShapes,
   wbClipToken,
 } from './clipboard';
+import { copyStyle, pasteStyle } from './style-clipboard';
 import { writeShapesToOsClipboard } from '@/board/clipboard-os';
 import { addFilesToRepository } from '@/board/documents';
 import { useDocumentsStore } from './use-documents-store';
+import { flipShapes } from './flip';
 import { deleteTargetIds, moveTargetIds } from './hierarchy';
 import { linkUrlsFromClipboard } from './link-url';
 import { placeImageFiles } from './place-image';
@@ -109,9 +127,15 @@ import { getSelectionInfo } from './selection-geometry';
 import { shapeRotatedBounds } from './shape-bounds';
 import { isSelectable } from './selectable';
 import { useHiddenStore } from './use-hidden-store';
+import { clearHover, updateHoverAt } from './use-hover-store';
 import { useLiveStrokeShapeId } from './use-live-stroke-store';
 import { useSelectionStore } from './use-selection-store';
-import { useSpacePan } from './use-space-pan';
+import {
+  MIDDLE_BUTTON,
+  RIGHT_BUTTON,
+  exceedsRightDragThreshold,
+  useSpacePan,
+} from './use-space-pan';
 import { springReturnTool, type SpringHold } from './spring-tool';
 import { useTextEditingStore } from './use-text-editing-store';
 import { useFrameEditingStore } from './use-frame-editing-store';
@@ -119,12 +143,19 @@ import { requestEquationFocus } from './equation-focus';
 import { useVideoPlayingStore } from './use-video-playing-store';
 import { useImageCroppingStore } from './use-image-cropping-store';
 import { useToolStore } from './use-tool-store';
+import {
+  fingerDraws,
+  isFingerTap,
+  multiTouchTapAction,
+} from './touch-input';
 import { useToolLockStore } from './use-tool-lock-store';
 import {
   TOUCH_PAN_SPEED,
   nextPinchMode,
   pinchGesture,
+  pinchReleaseZoomRate,
   pruneStaleTouches,
+  trackPinchZoom,
   zoomFromDistance,
   type PinchState,
 } from './pinch';
@@ -195,6 +226,12 @@ function readTilt(e: object): { x: number; y: number } {
 const STALE_TOUCH_MS = 2000;
 
 /**
+ * Tools under which a double-tap-and-drag is free to mean "zoom". Under the
+ * stroke tools that same gesture is two dots and a line, and this would eat it.
+ */
+const ONE_FINGER_ZOOM_TOOLS = new Set(['select', 'hand']);
+
+/**
  * How long a tool hotkey must be held for the press to read as a hold rather
  * than a tap, when the hand did nothing with the tool it borrowed.
  *
@@ -260,11 +297,16 @@ export function Canvas() {
   useContainerRect(containerRef);
   const sizeRef = useRef(size);
   sizeRef.current = size;
+  useLayoutEffect(() => {
+    useCameraStore.getState().setViewportSize(size.width, size.height);
+  }, [size.width, size.height]);
   const camera = useCameraStore((s) => s.camera);
   const following = useFollowStore((s) => s.following);
   const lastSummonApplied = useFollowStore((s) => s.lastSummonApplied);
   const background = useCanvasUiStore((s) => s.background);
   const setBackground = useCanvasUiStore((s) => s.setBackground);
+  const minimapVisible = useCanvasUiStore((s) => s.minimapVisible);
+  const setMinimapVisible = useCanvasUiStore((s) => s.setMinimapVisible);
   const debugPerformance = useCanvasUiStore((s) => s.debugPerformance);
   const activeToolId = useToolStore((s) => s.activeToolId);
   const cameraMoving = useCameraInteraction((s) => s.isMoving);
@@ -276,7 +318,7 @@ export function Canvas() {
   useSafariGestures(containerRef, false);
 
   // Which gesture owns the current pointer interaction.
-  const gesture = useRef<'pan' | 'tool' | null>(null);
+  const gesture = useRef<'pan' | 'tool' | 'zoom' | null>(null);
   // The pointer currently driving `gesture` (so stray pointers are ignored).
   const toolPointerId = useRef<number | null>(null);
   // A tool hotkey currently held down, and the tool it borrowed from. Null when
@@ -293,6 +335,10 @@ export function Canvas() {
   const activeTouches = useRef<
     Map<number, { x: number; y: number; t: number }>
   >(new Map());
+  // Where and when a finger-pan press started, while one is in flight. A press
+  // that pans nowhere is replayed to the active tool as a tap on release, so a
+  // finger that navigates can still point at things.
+  const fingerTap = useRef<{ x: number; y: number; t: number } | null>(null);
   // A pen (Apple Pencil) is down: finger touches are palm-rejected while it is.
   const penActive = useRef(false);
   // Last time any pen event was seen — lets a dropped pen-up self-heal.
@@ -304,9 +350,30 @@ export function Canvas() {
   const pinchGraphId = useRef<string | null>(null);
   // Finger separation last frame, for incremental graph-viewport zoom.
   const pinchLastDistance = useRef(0);
+  // The multi-finger gesture in flight, for the tap that means undo/redo: when
+  // it started, the most fingers it ever carried, and whether it moved the
+  // board. Resolved when the last finger lifts.
+  const multiTouch = useRef<{
+    t: number;
+    fingers: number;
+    moved: boolean;
+  } | null>(null);
   // Latched once ≥2 fingers touch, cleared only when all lift — suppresses tool
   // routing for the rest of a pinch so lifting one finger never draws a stray mark.
   const pinchLatch = useRef(false);
+  // A right-button press that has not yet decided between opening the context
+  // menu and panning the board.
+  const rightPointer = useRef<{
+    id: number;
+    x: number;
+    y: number;
+    dragged: boolean;
+  } | null>(null);
+  // Whether the next `contextmenu` belongs to a right press this handler has
+  // already dealt with, and must not reach the menu.
+  const swallowContextMenu = useRef(false);
+  // Set while dispatching our own `contextmenu`, which must not be swallowed.
+  const replayingContextMenu = useRef(false);
   // Long-press → context menu (touch has no right-click).
   const longPressTimer = useRef<number | null>(null);
   const longPressOrigin = useRef<{ x: number; y: number } | null>(null);
@@ -315,6 +382,28 @@ export function Canvas() {
   centerRef.current = { x: size.width / 2, y: size.height / 2 };
   // Last pointer position in container pixels; paste lands here (null = off-canvas).
   const pointerRef = useRef<{ x: number; y: number } | null>(null);
+  // The last pointer info handed to the active tool, replayed when edge
+  // scrolling moves the world out from under a stationary pointer.
+  const lastToolInfo = useRef<ToolPointerInfo | null>(null);
+  // A finger's previous tap, for double-tap-and-drag zoom detection.
+  const lastTap = useRef<{ x: number; y: number; t: number } | null>(null);
+  // The live one-finger zoom: where it started and the camera it started from.
+  const oneFingerZoom = useRef<{
+    anchor: { x: number; y: number };
+    camera: Camera;
+  } | null>(null);
+  // Quick Zoom: `Z` is held (armed), and the pressed gesture's state.
+  const quickZoomArmed = useRef(false);
+  const quickZoom = useRef<{ returnZoom: number; overviewZoom: number } | null>(
+    null,
+  );
+  // Only Quick Zoom's frame is React state — it is the one piece of this that
+  // has to paint.
+  const [quickZoomFrame, setQuickZoomFrame] = useState<{
+    center: { x: number; y: number };
+    width: number;
+    height: number;
+  } | null>(null);
 
   const ctx = useMemo<ToolContext>(
     () => ({
@@ -366,8 +455,9 @@ export function Canvas() {
       shapes,
       editor,
       changed === null ? null : bindingGraph.expand(changed),
+      shapesById,
     );
-  }, [shapes]);
+  }, [shapes, shapesById]);
   const equationItems = useMemo(
     () =>
       hasEquations
@@ -513,9 +603,48 @@ export function Canvas() {
 
   // End the active tool/pan gesture, either committing it (the pointer lifted
   // normally) or cancelling it (a pinch/pen stole the interaction).
+  // Re-deliver the last pointer position to the active tool after the camera
+  // has moved under it. The pointer is stationary on screen but the world point
+  // beneath it is not, and a drag in flight is defined in world coordinates —
+  // without this, edge scrolling would slide the board out from under the very
+  // shape being dragged to the edge.
+  const dispatchSyntheticMove = useCallback(() => {
+    const previous = lastToolInfo.current;
+    if (!previous || gesture.current !== 'tool') return;
+    const camera = useCameraStore.getState().camera;
+    const point = screenToWorld(previous.screenPoint, camera);
+    if (point.x === previous.point.x && point.y === previous.point.y && camera.z === previous.zoom) return;
+    const info: ToolPointerInfo = {
+      ...previous,
+      point,
+      isCameraMove: true,
+      zoom: camera.z,
+      timestamp: performance.now(),
+      // Predictions describe where the hardware was heading; a camera move is
+      // not pointer motion and must not replay them.
+      predicted: undefined,
+    };
+    lastToolInfo.current = info;
+    activeTool()?.onPointerMove?.(info, ctx);
+  }, [ctx]);
+
+  useEffect(() => useCameraStore.subscribe((next, prev) => {
+    if (next.camera === prev.camera || next.activeKey !== prev.activeKey) return;
+    const screen = pointerRef.current;
+    if (screen) setLocalCursor(screenToWorld(screen, next.camera));
+    dispatchSyntheticMove();
+  }), [dispatchSyntheticMove]);
+
+  const edgeScroll = useEdgeScroll({
+    getViewportSize: () => sizeRef.current,
+    onScroll: dispatchSyntheticMove,
+  });
+
   const endToolGesture = useCallback(
     (target: Element, mode: 'commit' | 'cancel') => {
       const id = toolPointerId.current;
+      edgeScroll.stop();
+      lastToolInfo.current = null;
       const wasToolGesture = gesture.current === 'tool';
       if (wasToolGesture) {
         const tool = activeTool();
@@ -535,7 +664,7 @@ export function Canvas() {
       toolPointerId.current = null;
       if (wasToolGesture) finishSpring();
     },
-    [ctx, finishSpring],
+    [ctx, finishSpring, edgeScroll],
   );
 
   const startToolGesture = useCallback(
@@ -549,10 +678,13 @@ export function Canvas() {
       gesture.current = 'tool';
       toolPointerId.current = e.pointerId;
       e.currentTarget.setPointerCapture(e.pointerId);
-      activeTool()?.onPointerDown?.(toInfo(e), ctx);
+      const info = toInfo(e);
+      lastToolInfo.current = info;
+      activeTool()?.onPointerDown?.(info, ctx);
     },
     [toInfo, ctx],
   );
+
 
   // A pointer position in container (canvas-relative) pixels.
   const screenPointOf = useCallback(
@@ -635,6 +767,9 @@ export function Canvas() {
       startMidpoint: g.midpoint,
       lastMidpoint: g.midpoint,
       mode: 'unsure',
+      zoomRate: 0,
+      lastZoom: useCameraStore.getState().camera.z,
+      lastZoomTime: performance.now(),
     };
     pinchLastDistance.current = g.distance;
     // If the pinch lands inside the sole selected graph's plot, it adjusts that
@@ -642,6 +777,84 @@ export function Canvas() {
     pinchGraphId.current = graphAtScreenPoint(g.midpoint);
     if (!pinchGraphId.current) stopFollowingForManualCameraChange();
   }, [graphAtScreenPoint]);
+
+  // Quick Zoom: pull back far enough to see the whole board, frame somewhere
+  // with the pointer, release to fly there.
+  const beginQuickZoom = useCallback(
+    (e: ReactPointerEvent): boolean => {
+      const { width, height } = sizeRef.current;
+      if (width <= 0 || height <= 0) return false;
+      const point = screenPointOf(e);
+      const store = useCameraStore.getState();
+      const camera = store.camera;
+      const overviewZoom = quickZoomOverviewZoom(
+        camera,
+        point,
+        width,
+        height,
+        quickZoomBounds(
+          viewportWorldBounds(camera, width, height),
+          spatialIndex.totalBounds(),
+        ),
+      );
+      stopFollowingForManualCameraChange();
+      quickZoom.current = { returnZoom: camera.z, overviewZoom };
+      gesture.current = 'zoom';
+      toolPointerId.current = e.pointerId;
+      e.currentTarget.setPointerCapture(e.pointerId);
+      store.setCamera(zoomCameraAtScreen(camera, point, overviewZoom));
+      setQuickZoomFrame({
+        center: point,
+        ...quickZoomFrameSize(overviewZoom, camera.z, width, height),
+      });
+      return true;
+    },
+    [screenPointOf],
+  );
+
+  // Drop out of Quick Zoom, optionally landing on the framed region.
+  const endQuickZoom = useCallback(
+    (point: { x: number; y: number } | null) => {
+      const active = quickZoom.current;
+      quickZoom.current = null;
+      setQuickZoomFrame(null);
+      if (!active) return;
+      if (point) {
+        useCameraStore.getState().animateZoomAtScreen(point, active.returnZoom);
+      }
+    },
+    [],
+  );
+
+  /**
+   * Drop whatever gesture a finger owns, because something else has taken the
+   * interaction over — a second finger arriving, or a long press turning into
+   * a context menu.
+   *
+   * A tool stroke and a finger pan both end here because both are things one
+   * finger can be doing, and the callers cannot know which: with
+   * `fingerAction: 'pan'` the very same press that used to start a stroke
+   * starts a pan instead. Ending a pan through `endToolGesture` would leave
+   * `useSpacePan` believing a drag was still in flight.
+   */
+  const abandonGesture = useCallback(
+    (target: Element) => {
+      if (gesture.current !== 'pan') {
+        endToolGesture(target, 'cancel');
+        return;
+      }
+      const id = toolPointerId.current;
+      fingerTap.current = null;
+      pan.cancel();
+      if (id !== null && target.hasPointerCapture(id)) {
+        target.releasePointerCapture(id);
+      }
+      gesture.current = null;
+      toolPointerId.current = null;
+      edgeScroll.stop();
+    },
+    [endToolGesture, pan, edgeScroll],
+  );
 
   const clearLongPress = useCallback(() => {
     if (longPressTimer.current !== null) {
@@ -662,6 +875,7 @@ export function Canvas() {
         } else if (gesture.current === 'pan') {
           gesture.current = null;
           toolPointerId.current = null;
+          fingerTap.current = null;
           pan.cancel();
           if (
             target &&
@@ -671,15 +885,24 @@ export function Canvas() {
             target.releasePointerCapture(pointerId);
           }
         }
+        if (gesture.current === 'zoom') {
+          gesture.current = null;
+          toolPointerId.current = null;
+        }
+        oneFingerZoom.current = null;
+        lastTap.current = null;
+        endQuickZoom(null);
+        edgeScroll.stop();
         if (pinchGraphId.current) breakUndoCapture();
         activeTouches.current.clear();
         pinch.current = null;
         pinchGraphId.current = null;
         pinchLatch.current = false;
+        multiTouch.current = null;
         penActive.current = false;
         pointerRef.current = null;
       }),
-    [clearLongPress, containerRef, endToolGesture, pan],
+    [clearLongPress, containerRef, endToolGesture, pan, endQuickZoom, edgeScroll],
   );
 
   // Arm a long-press on a one-finger touch: holding still for ~500ms aborts the
@@ -695,7 +918,7 @@ export function Canvas() {
       longPressTimer.current = window.setTimeout(() => {
         longPressTimer.current = null;
         longPressOrigin.current = null;
-        endToolGesture(target, 'cancel');
+        abandonGesture(target);
         const el = document.elementFromPoint(cx, cy) ?? target;
         el.dispatchEvent(
           new MouseEvent('contextmenu', {
@@ -708,18 +931,53 @@ export function Canvas() {
         );
       }, 500);
     },
-    [endToolGesture],
+    [abandonGesture],
   );
+
+  /**
+   * Open the context menu for a right press that turned out not to be a pan.
+   *
+   * A right press cannot mean "menu" until the pointer lifts — until then it
+   * might be a drag — so the `contextmenu` the browser fires for the press is
+   * swallowed and this dispatches one in its place at the release point. Same
+   * mechanism as the touch long-press above, and the same reason: it opens the
+   * menu through the path that already exists rather than a second one.
+   */
+  const replayContextMenu = useCallback((e: ReactPointerEvent) => {
+    const target =
+      document.elementFromPoint(e.clientX, e.clientY) ?? e.currentTarget;
+    replayingContextMenu.current = true;
+    target.dispatchEvent(
+      new MouseEvent('contextmenu', {
+        bubbles: true,
+        cancelable: true,
+        clientX: e.clientX,
+        clientY: e.clientY,
+        button: RIGHT_BUTTON,
+        view: window,
+      }),
+    );
+    replayingContextMenu.current = false;
+  }, []);
 
   const onPointerDown = useCallback(
     (e: ReactPointerEvent) => {
       // One measurement per gesture, so a rectangle that went stale for a
       // reason the invalidation listeners don't cover cannot mislocate a whole
       // stroke — only the moment before the hand landed.
+      useCameraStore.getState().stopCameraAnimation();
       invalidateContainerRect();
       publishCursorPosition(e.clientX, e.clientY);
+      // The hover outline promises what a click would catch; once the click has
+      // happened the selection box says it instead.
+      clearHover();
+      // A right press released somewhere this element never saw would otherwise
+      // leave the next context menu swallowed.
+      rightPointer.current = null;
+      swallowContextMenu.current = false;
 
-      // Touch: drive the active tool with one finger; two fingers = pinch/pan.
+      // Touch: one finger either drives the active tool or pans the board (see
+      // `fingerAction`); two fingers are always a pinch/pan.
       if (isTouchPointer(e)) {
         reconcileStaleTouches(e.timeStamp);
         if (penActive.current) return; // palm rejection while the pen is down
@@ -728,16 +986,67 @@ export function Canvas() {
           t: e.timeStamp,
         });
         if (activeTouches.current.size >= 2) {
-          // Second finger down → a pinch is starting: abort the one-finger stroke
-          // (the pinch branch in onPointerMove owns the camera now) and mute tool routing.
+          // Second finger down → a pinch is starting: abort the one-finger
+          // gesture (the pinch branch in onPointerMove owns the camera now)
+          // and mute tool routing.
           pinchLatch.current = true;
           clearLongPress();
-          endToolGesture(e.currentTarget, 'cancel');
+          abandonGesture(e.currentTarget);
+          // Only fingers on the board itself: two of them on a panel are a
+          // scroll or a stray rest, not a command aimed at the document.
+          if (isSurfaceEvent(e.target)) {
+            const tap = multiTouch.current;
+            multiTouch.current = tap
+              ? {
+                  ...tap,
+                  fingers: Math.max(tap.fingers, activeTouches.current.size),
+                }
+              : {
+                  t: e.timeStamp,
+                  fingers: activeTouches.current.size,
+                  moved: false,
+                };
+          }
           beginPinch();
           return;
         }
         if (pinchLatch.current) return; // mid-pinch: wait until all fingers lift
         if (!isSurfaceEvent(e.target)) return;
+        const ui = useCanvasUiStore.getState();
+        const drives = fingerDraws(ui.fingerAction, ui.penSeen);
+        // Double-tap and hold, then drag, to zoom with one finger. Under the
+        // stroke tools that same gesture is two dots and a line, so it is
+        // offered only where nothing is being accumulated — which, once the
+        // finger no longer draws at all, is everywhere.
+        const point = screenPointOf(e);
+        if (
+          (!drives ||
+            ONE_FINGER_ZOOM_TOOLS.has(useToolStore.getState().activeToolId)) &&
+          isDoubleTap(lastTap.current, point, e.timeStamp)
+        ) {
+          lastTap.current = null;
+          stopFollowingForManualCameraChange();
+          oneFingerZoom.current = {
+            anchor: point,
+            camera: { ...useCameraStore.getState().camera },
+          };
+          gesture.current = 'zoom';
+          toolPointerId.current = e.pointerId;
+          e.currentTarget.setPointerCapture(e.pointerId);
+          return;
+        }
+        lastTap.current = { ...point, t: e.timeStamp };
+        if (!drives) {
+          // The finger moves the board instead. Same drag machinery the middle
+          // button and Space use, so it inherits the release coast.
+          stopFollowingForManualCameraChange();
+          gesture.current = 'pan';
+          toolPointerId.current = e.pointerId;
+          fingerTap.current = { x: e.clientX, y: e.clientY, t: e.timeStamp };
+          pan.beginPan(e);
+          armLongPress(e);
+          return;
+        }
         startToolGesture(e);
         // A held eraser is still an erase gesture. Other touch tools keep the
         // long-press context menu, but cancelling an eraser after 500ms would
@@ -751,6 +1060,8 @@ export function Canvas() {
       if (e.pointerType === 'pen') {
         penActive.current = true;
         penLastSeen.current = e.timeStamp;
+        // The one fact `fingerAction: 'auto'` turns on: a stylus exists here.
+        useCanvasUiStore.getState().notePenSeen();
         // A resting finger may have started a stray stroke first — discard it.
         // But a *pen*-started gesture still active here means the previous
         // stroke's pointerup/lostpointercapture was dropped (common on Wacom
@@ -766,11 +1077,29 @@ export function Canvas() {
           endToolGesture(e.currentTarget, priorWasTouch ? 'cancel' : 'commit');
         }
       }
-      if (pan.isSpaceDown) {
+      // Quick Zoom takes the press before any tool sees it: `Z` is held, so
+      // this press is aiming the camera, not using the tool.
+      if (quickZoomArmed.current && beginQuickZoom(e)) return;
+      // Right-drag pans too, but only once the press has travelled: until then
+      // it is still a context menu, which `onPointerUp` opens on release.
+      if (e.button === RIGHT_BUTTON) {
+        rightPointer.current = {
+          id: e.pointerId,
+          x: e.clientX,
+          y: e.clientY,
+          dragged: false,
+        };
+        return;
+      }
+      // Middle-drag pans regardless of the active tool or any key held — the
+      // one pan gesture that costs nothing to reach mid-drawing.
+      if (pan.isSpaceDown || e.button === MIDDLE_BUTTON) {
+        // Without this the browser opens its own autoscroll widget on top.
+        if (e.button === MIDDLE_BUTTON) e.preventDefault();
         stopFollowingForManualCameraChange();
         gesture.current = 'pan';
         toolPointerId.current = e.pointerId;
-        pan.onPointerDown(e);
+        pan.beginPan(e);
         return;
       }
       startToolGesture(e);
@@ -778,11 +1107,15 @@ export function Canvas() {
     [
       pan,
       isSurfaceEvent,
+      abandonGesture,
       endToolGesture,
       startToolGesture,
+      armLongPress,
+      clearLongPress,
       reconcileStaleTouches,
       screenPointOf,
       beginPinch,
+      beginQuickZoom,
       publishCursorPosition,
     ],
   );
@@ -801,6 +1134,24 @@ export function Canvas() {
       if (rect && !(isTouchPointer(e) && pinchLatch.current)) {
         publishCursorPosition(e.clientX, e.clientY, rect);
       }
+      // What a click would select, outlined. Only while the select tool is idle:
+      // a pointer already in a gesture is committed to it, and no other tool
+      // acts on whatever happens to be underneath. Space-panning holds no
+      // button, so the gesture is checked as well as the buttons.
+      if (
+        rect &&
+        e.buttons === 0 &&
+        gesture.current === null &&
+        e.pointerType !== 'touch' &&
+        useToolStore.getState().activeToolId === 'select'
+      ) {
+        updateHoverAt(
+          screenToWorld(
+            { x: e.clientX - rect.left, y: e.clientY - rect.top },
+            useCameraStore.getState().camera,
+          ),
+        );
+      }
       // A real drag past the slop cancels the pending long-press.
       if (longPressOrigin.current) {
         const dx = e.clientX - longPressOrigin.current.x;
@@ -808,6 +1159,21 @@ export function Canvas() {
         if (Math.hypot(dx, dy) > 10) clearLongPress();
       }
       if (e.pointerType === 'pen') penLastSeen.current = e.timeStamp;
+      // Past the click slop, the right press was a drag: hand it to the same pan
+      // machinery the middle button and Space use.
+      const right = rightPointer.current;
+      if (
+        right &&
+        e.pointerId === right.id &&
+        !right.dragged &&
+        exceedsRightDragThreshold(e.clientX - right.x, e.clientY - right.y)
+      ) {
+        right.dragged = true;
+        stopFollowingForManualCameraChange();
+        gesture.current = 'pan';
+        toolPointerId.current = e.pointerId;
+        pan.beginPan(e);
+      }
       // Keep each live finger's position fresh and, while two are down, drive the
       // pinch directly from them (single source of truth — no separate Touch
       // Events listener that could desync from this routing).
@@ -847,6 +1213,7 @@ export function Canvas() {
             }
             pinch.current.lastMidpoint = g.midpoint;
             pinchLastDistance.current = g.distance;
+            if (multiTouch.current) multiTouch.current.moved = true;
             return;
           }
           // Two fingers can mean either a pan or a zoom, and committing to one
@@ -864,6 +1231,9 @@ export function Canvas() {
             pinch.current.startZoom = useCameraStore.getState().camera.z;
           }
           pinch.current.mode = mode;
+          if (mode !== 'unsure' && multiTouch.current) {
+            multiTouch.current.moved = true;
+          }
           if (mode !== 'unsure') {
             useCameraStore
               .getState()
@@ -879,6 +1249,15 @@ export function Canvas() {
                 (g.midpoint.x - pinch.current.lastMidpoint.x) * TOUCH_PAN_SPEED,
                 (g.midpoint.y - pinch.current.lastMidpoint.y) * TOUCH_PAN_SPEED,
               );
+            // Measured off the camera rather than off the finger separation, so
+            // the rate handed to the release coast is the one the board was
+            // actually moving at — zero once a spread has run into the zoom
+            // limits, however fast the fingers were still going.
+            trackPinchZoom(
+              pinch.current,
+              useCameraStore.getState().camera.z,
+              e.timeStamp,
+            );
           }
           // Tracked even while undecided so the deadband discards that motion
           // instead of releasing it as one jump when the mode resolves.
@@ -887,6 +1266,37 @@ export function Canvas() {
         }
       }
       if (e.pointerId !== toolPointerId.current) return;
+      if (gesture.current === 'zoom') {
+        const point = { x: e.clientX - (rect?.left ?? 0), y: e.clientY - (rect?.top ?? 0) };
+        const zooming = oneFingerZoom.current;
+        if (zooming) {
+          // Drag down to zoom in, up to zoom out, about where the second tap
+          // landed. Measured from the gesture's own start camera, so the whole
+          // drag is one absolute mapping rather than an accumulation that
+          // drifts.
+          useCameraStore
+            .getState()
+            .setCamera(
+              zoomCameraAtScreen(
+                zooming.camera,
+                zooming.anchor,
+                zooming.camera.z * oneFingerZoomFactor(point.y - zooming.anchor.y),
+              ),
+            );
+        } else if (quickZoom.current) {
+          const { overviewZoom, returnZoom } = quickZoom.current;
+          setQuickZoomFrame({
+            center: point,
+            ...quickZoomFrameSize(
+              overviewZoom,
+              returnZoom,
+              sizeRef.current.width,
+              sizeRef.current.height,
+            ),
+          });
+        }
+        return;
+      }
       if (gesture.current === 'pan') {
         pan.onPointerMove(e);
       } else if (gesture.current === 'tool') {
@@ -924,10 +1334,23 @@ export function Canvas() {
             });
           }
         }
+        lastToolInfo.current = info;
         tool.onPointerMove(info, ctx);
+        // Held against an edge, the drag keeps going by moving the board
+        // instead — but not for the hand tool, which *is* the board moving.
+        if (tool.id === 'hand') edgeScroll.stop();
+        else edgeScroll.track(info.screenPoint);
       }
     },
-    [pan, toInfo, ctx, containerRef, clearLongPress, publishCursorPosition],
+    [
+      pan,
+      toInfo,
+      ctx,
+      containerRef,
+      clearLongPress,
+      publishCursorPosition,
+      edgeScroll,
+    ],
   );
 
   // Forget a pointer that is no longer on the glass. Called from every path a
@@ -945,7 +1368,23 @@ export function Canvas() {
         pinchGraphId.current = null;
       }
     }
-    if (activeTouches.current.size === 0) pinchLatch.current = false;
+    if (activeTouches.current.size === 0) {
+      pinchLatch.current = false;
+      // Resolved on the way out rather than on the way in: whether fingers that
+      // went down together were a command or the start of a pinch is only
+      // settled by what they did before lifting.
+      const tap = multiTouch.current;
+      multiTouch.current = null;
+      if (tap) {
+        const action = multiTouchTapAction(
+          tap.fingers,
+          e.timeStamp - tap.t,
+          tap.moved,
+        );
+        if (action === 'undo') undo();
+        else if (action === 'redo') redo();
+      }
+    }
   }, []);
 
   const releaseTouch = useCallback(
@@ -956,11 +1395,69 @@ export function Canvas() {
     [clearLongPress, releaseTouchTracking],
   );
 
+  /** Close out a Quick Zoom / one-finger zoom gesture. */
+  const endZoomGesture = useCallback(
+    (e: ReactPointerEvent, land: boolean) => {
+      oneFingerZoom.current = null;
+      endQuickZoom(land ? screenPointOf(e) : null);
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      }
+      gesture.current = null;
+      toolPointerId.current = null;
+    },
+    [endQuickZoom, screenPointOf],
+  );
+
   const onPointerUp = useCallback(
     (e: ReactPointerEvent) => {
+      // Fingers leaving mid-spread keep the scale moving, the way a released
+      // pan keeps travelling. Read before `releaseTouch`, which tears the pinch
+      // down; `size === 2` is this finger plus the one still on the glass.
+      if (
+        isTouchPointer(e) &&
+        pinch.current &&
+        !pinchGraphId.current &&
+        activeTouches.current.size === 2
+      ) {
+        const zoomRate = pinchReleaseZoomRate(pinch.current, e.timeStamp);
+        if (zoomRate !== 0) {
+          useCameraStore.getState().slideCamera({ x: 0, y: 0 }, zoomRate);
+        }
+      }
+      const right = rightPointer.current;
+      if (right && e.pointerId === right.id) {
+        rightPointer.current = null;
+        // Platforms disagree about whether `contextmenu` rides the press or the
+        // release, so swallow either way and let the replay open the menu.
+        swallowContextMenu.current = true;
+        if (!right.dragged) replayContextMenu(e);
+      }
       releaseTouch(e);
+      edgeScroll.stop();
       if (e.pointerId !== toolPointerId.current) return;
+      if (gesture.current === 'zoom') {
+        endZoomGesture(e, true);
+        return;
+      }
       if (gesture.current === 'pan') {
+        const started = fingerTap.current;
+        fingerTap.current = null;
+        if (
+          started &&
+          isFingerTap(started, { x: e.clientX, y: e.clientY, t: e.timeStamp })
+        ) {
+          // The press panned nowhere, so it was a point rather than a drag:
+          // the tool sees an ordinary click and select, comment and sticker
+          // all work from a finger that otherwise only moves the board.
+          // Replayed before the release below, which would otherwise hand the
+          // camera whatever velocity the lift shook out of a stationary press.
+          const tool = activeTool();
+          const info = toInfo(e);
+          tool?.onPointerDown?.(info, ctx);
+          tool?.onPointerUp?.(info, ctx);
+          breakUndoCapture();
+        }
         pan.onPointerUp(e);
       }
       const wasToolGesture = gesture.current === 'tool';
@@ -977,17 +1474,35 @@ export function Canvas() {
       // with nothing in flight.
       if (wasToolGesture) finishSpring();
     },
-    [pan, toInfo, ctx, releaseTouch, finishSpring],
+    [
+      pan,
+      toInfo,
+      ctx,
+      releaseTouch,
+      finishSpring,
+      edgeScroll,
+      endZoomGesture,
+      replayContextMenu,
+    ],
   );
 
   // The browser fires pointercancel when it steals a touch (e.g. a pinch is
   // recognized) — abort the in-progress gesture rather than committing it.
   const onPointerCancel = useCallback(
     (e: ReactPointerEvent) => {
+      if (rightPointer.current?.id === e.pointerId) rightPointer.current = null;
       releaseTouch(e);
+      edgeScroll.stop();
       if (e.pointerId !== toolPointerId.current) return;
+      if (gesture.current === 'zoom') {
+        // A cancelled framing gesture leaves the camera where it is rather than
+        // flying somewhere the user did not choose.
+        endZoomGesture(e, false);
+        return;
+      }
       if (gesture.current === 'pan') {
         pan.onPointerUp(e);
+        fingerTap.current = null;
         gesture.current = null;
         toolPointerId.current = null;
       } else {
@@ -1000,7 +1515,7 @@ export function Canvas() {
         );
       }
     },
-    [pan, releaseTouch, endToolGesture],
+    [pan, releaseTouch, endToolGesture, edgeScroll, endZoomGesture],
   );
 
   // Capture being lost (the OS reclaiming the pointer) is a second signal that a
@@ -1008,7 +1523,13 @@ export function Canvas() {
   // too keeps the latch from outliving the gesture.
   const onLostPointerCapture = useCallback(
     (e: ReactPointerEvent) => {
+      if (rightPointer.current?.id === e.pointerId) rightPointer.current = null;
       releaseTouchTracking(e);
+      edgeScroll.stop();
+      if (e.pointerId === toolPointerId.current && gesture.current === 'zoom') {
+        endZoomGesture(e, false);
+        return;
+      }
       if (e.pointerId === toolPointerId.current) {
         // Same rationale as onPointerCancel: a pen/mouse losing capture is a
         // spurious OS event, so keep the stroke/drag; touch still discards.
@@ -1022,7 +1543,7 @@ export function Canvas() {
         toolPointerId.current = null;
       }
     },
-    [endToolGesture, releaseTouchTracking],
+    [endToolGesture, releaseTouchTracking, edgeScroll, endZoomGesture],
   );
 
   const onDoubleClick = useCallback(
@@ -1037,6 +1558,19 @@ export function Canvas() {
   // it). Does not preventDefault — the context menu opens normally.
   const onContextMenu = useCallback(
     (e: ReactMouseEvent) => {
+      // The press this belongs to is either still choosing between a menu and a
+      // pan, or has already been answered by `replayContextMenu`. Stopping
+      // propagation is what keeps it from the trigger wrapping this element;
+      // preventing the default is what keeps the browser's own menu shut.
+      if (
+        !replayingContextMenu.current &&
+        (rightPointer.current || swallowContextMenu.current)
+      ) {
+        swallowContextMenu.current = false;
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
       if (!isSurfaceEvent(e.target)) return;
       const info = toInfo(e);
       const tol = 4 / useCameraStore.getState().camera.z;
@@ -1188,6 +1722,42 @@ export function Canvas() {
     return () => tool?.onExit?.(ctx);
   }, [activeToolId, ctx]);
 
+  /**
+   * Frame the selection. Pressed at 100% it fits the selection to the viewport;
+   * pressed anywhere else it returns to 100% centred on the selection, so the
+   * shortcut toggles between "show me all of it" and "show it at true size"
+   * instead of doing nothing the second time it is pressed.
+   */
+  const onZoomToSelection = useCallback(() => {
+    const ids = useSelectionStore.getState().selectedIds;
+    const { width, height } = sizeRef.current;
+    if (!ids.length || width <= 0 || height <= 0) return;
+    const s = useCameraStore.getState();
+    const info = getSelectionInfo(
+      editor.getShapes(),
+      ids,
+      s.camera.z,
+      editor.getShape,
+    );
+    if (!info) return;
+    stopFollowingForManualCameraChange();
+    if (isActualSize(s.camera.z)) {
+      s.animateToBounds(info.bounds, width, height);
+    } else {
+      s.animateCenterOn(info.center, 1);
+    }
+  }, []);
+
+  /** Frame everything on the page, or return to the origin on an empty page. */
+  const onZoomToFit = useCallback(() => {
+    stopFollowingForManualCameraChange();
+    const s = useCameraStore.getState();
+    const bounds = spatialIndex.totalBounds();
+    const { width, height } = sizeRef.current;
+    if (!bounds) s.reset();
+    else s.animateToBounds(bounds, width, height);
+  }, []);
+
   // Keyboard: selection ops, z-order, delete, escape, and tool hotkeys.
   // (Full configurable shortcut sweep is Phase 27.)
   useEffect(() => {
@@ -1276,7 +1846,21 @@ export function Canvas() {
         }
         return;
       }
-      if (mod && e.key === 'c') {
+      // Style transfer, on the modifier pair Figma uses. Matched on `code`: on
+      // macOS Option rewrites `key` to the character it composes (⌥C is 'ç'),
+      // and it must come before the plain copy below, which on Windows/Linux
+      // would otherwise claim Ctrl+Alt+C.
+      if (mod && e.altKey && e.code === 'KeyC') {
+        e.preventDefault();
+        if (ids.length) copyStyle(editor, ids);
+        return;
+      }
+      if (mod && e.altKey && e.code === 'KeyV') {
+        e.preventDefault();
+        if (ids.length) pasteStyle(editor, ids);
+        return;
+      }
+      if (mod && !e.altKey && e.key === 'c') {
         if (ids.length) {
           copyShapes(editor, ids);
           void writeShapesToOsClipboard(editor, ids, clipboardToken());
@@ -1299,20 +1883,33 @@ export function Canvas() {
         e.preventDefault();
         stopFollowingForManualCameraChange();
         const s = useCameraStore.getState();
-        s.zoomAtScreen(centerRef.current, nextDiscreteZoom(s.camera.z, 'in'));
+        s.zoomAtScreen(centerRef.current, nextDiscreteZoom(s.camera.z, 'in', s.baseZoom));
         return;
       }
       if (mod && e.key === '-') {
         e.preventDefault();
         stopFollowingForManualCameraChange();
         const s = useCameraStore.getState();
-        s.zoomAtScreen(centerRef.current, nextDiscreteZoom(s.camera.z, 'out'));
+        s.zoomAtScreen(centerRef.current, nextDiscreteZoom(s.camera.z, 'out', s.baseZoom));
         return;
       }
       if (mod && e.key === '0') {
         e.preventDefault();
         stopFollowingForManualCameraChange();
         useCameraStore.getState().zoomAtScreen(centerRef.current, 1);
+        return;
+      }
+      // Shift+1 frames the page, Shift+2 the selection. Matched on `code`
+      // because Shift rewrites `key` to whatever the layout puts above the digit
+      // ('@' above 2 on US, '"' on UK).
+      if (e.shiftKey && !mod && !e.altKey && e.code === 'Digit1') {
+        e.preventDefault();
+        onZoomToFit();
+        return;
+      }
+      if (e.shiftKey && !mod && !e.altKey && e.code === 'Digit2') {
+        e.preventDefault();
+        onZoomToSelection();
         return;
       }
 
@@ -1387,6 +1984,14 @@ export function Canvas() {
         return;
       }
       if (mod || e.altKey) return;
+      // Hold Z to arm Quick Zoom — the press that follows aims the camera
+      // rather than using the tool. No tool claims this key, so nothing is
+      // shadowed; Cmd/Ctrl+Z has already returned above as undo.
+      if (e.key === 'z' || e.key === 'Z') {
+        e.preventDefault();
+        quickZoomArmed.current = true;
+        return;
+      }
       // Shape Lock: toggle the lock on the current selection. Must precede the
       // hotkey lookup, since byHotkey('L') would otherwise match the Line tool.
       if (e.shiftKey && (e.key === 'L' || e.key === 'l')) {
@@ -1398,6 +2003,18 @@ export function Canvas() {
               editor.updateShape(id, { locked: !allLocked });
           });
         }
+        return;
+      }
+      // Flip. Like Shape Lock above, these must precede the hotkey lookup: the
+      // bare keys belong to the Hand and Select tools.
+      if (e.shiftKey && (e.key === 'H' || e.key === 'h')) {
+        e.preventDefault();
+        if (ids.length) flipShapes(editor, ids, 'horizontal');
+        return;
+      }
+      if (e.shiftKey && (e.key === 'V' || e.key === 'v')) {
+        e.preventDefault();
+        if (ids.length) flipShapes(editor, ids, 'vertical');
         return;
       }
       // Tool Lock: keep the active creation tool after placing a shape.
@@ -1429,6 +2046,12 @@ export function Canvas() {
     };
     const onKeyUp = (e: KeyboardEvent) => {
       if (isTypingTarget(e.target)) return;
+      if (e.key === 'z' || e.key === 'Z') {
+        quickZoomArmed.current = false;
+        // Letting go of the key mid-frame lands on the frame, same as letting
+        // go of the pointer would.
+        endQuickZoom(pointerRef.current);
+      }
       releaseSpring(e);
       if (e.key !== 'Shift' && e.key !== 'Control' && e.key !== 'Meta') return;
       toolRegistry.get(useToolStore.getState().activeToolId)?.onKeyUp?.(e, ctx);
@@ -1439,7 +2062,7 @@ export function Canvas() {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
     };
-  }, [ctx, releaseSpring]);
+  }, [ctx, releaseSpring, endQuickZoom, onZoomToFit, onZoomToSelection]);
 
   // The single paste path (Cmd+V). Prefers our own tagged copy (editable
   // shapes), then a clipboard image or PDF, then the in-app buffer as a
@@ -1572,24 +2195,17 @@ export function Canvas() {
   const onZoomIn = useCallback(() => {
     stopFollowingForManualCameraChange();
     const s = useCameraStore.getState();
-    s.animateZoomAtScreen(center(), nextDiscreteZoom(s.camera.z, 'in'));
+    s.animateZoomAtScreen(center(), nextDiscreteZoom(s.camera.z, 'in', s.baseZoom));
   }, [center]);
   const onZoomOut = useCallback(() => {
     stopFollowingForManualCameraChange();
     const s = useCameraStore.getState();
-    s.animateZoomAtScreen(center(), nextDiscreteZoom(s.camera.z, 'out'));
+    s.animateZoomAtScreen(center(), nextDiscreteZoom(s.camera.z, 'out', s.baseZoom));
   }, [center]);
   const onZoomReset = useCallback(() => {
     stopFollowingForManualCameraChange();
     useCameraStore.getState().animateZoomAtScreen(center(), 1);
   }, [center]);
-  const onZoomToFit = useCallback(() => {
-    stopFollowingForManualCameraChange();
-    const s = useCameraStore.getState();
-    const bounds = spatialIndex.totalBounds();
-    if (!bounds) s.reset();
-    else s.animateToBounds(bounds, size.width, size.height);
-  }, [size.width, size.height]);
   const onEquationSelect = useCallback(
     (id: string) => {
       const shape = editor.getShape(id);
@@ -1611,18 +2227,17 @@ export function Canvas() {
   );
 
   const toolCursor = toolRegistry.get(activeToolId)?.cursor ?? 'default';
-  const rotationCursor = useSelectionStore((state) => state.rotationCursor);
+  const gestureCursor = useSelectionStore((state) => state.gestureCursor);
   const showDrawingCursor = activeToolId === 'draw' && !pan.isSpaceDown;
-  const showEraserCursor = activeToolId === 'eraser' && !pan.isSpaceDown;
   const showLaserCursor = activeToolId === 'laser' && !pan.isSpaceDown;
   const cursor =
     pan.isPanning || handDragging
       ? 'grabbing'
       : pan.isSpaceDown
         ? 'grab'
-        : showDrawingCursor || showEraserCursor || showLaserCursor
+        : showDrawingCursor || showLaserCursor
           ? 'none'
-          : (rotationCursor ?? toolCursor);
+          : (gestureCursor ?? toolCursor);
 
   return (
     <div
@@ -1645,6 +2260,9 @@ export function Canvas() {
       onDrop={onDrop}
       onPointerEnter={(e) => publishCursorPosition(e.clientX, e.clientY)}
       onPointerLeave={(e) => {
+        // Unconditional, unlike the cursor below: leaving the surface for a
+        // floating panel still means the pointer is no longer over a shape.
+        clearHover();
         const rect = getContainerRect(containerRef.current);
         const stillInsideViewport =
           rect &&
@@ -1702,6 +2320,9 @@ export function Canvas() {
       )}
 
       <PeerSelectionLayer camera={camera} />
+      {activeToolId === 'select' && !editingShape && !frameEditingShape && (
+        <HoverLayer camera={camera} />
+      )}
       {!editingShape && !frameEditingShape && (
         <SelectionLayer camera={camera} />
       )}
@@ -1712,8 +2333,14 @@ export function Canvas() {
       <LaserLayer camera={camera} />
       <EraserTrail camera={camera} />
       <CommentsLayer camera={camera} />
+      {quickZoomFrame && (
+        <QuickZoomFrame
+          center={quickZoomFrame.center}
+          width={quickZoomFrame.width}
+          height={quickZoomFrame.height}
+        />
+      )}
       {showDrawingCursor && <DrawingCursor containerRef={containerRef} />}
-      {showEraserCursor && <EraserCursor containerRef={containerRef} />}
       {showLaserCursor && <LaserCursor containerRef={containerRef} />}
 
       {editingShape?.type === 'text' && (
@@ -1732,6 +2359,8 @@ export function Canvas() {
         <ImageCropOverlay shape={croppingShape} camera={camera} />
       )}
 
+      {minimapVisible && <Minimap />}
+
       <UndoControls
         canUndo={canUndo}
         canRedo={canRedo}
@@ -1747,6 +2376,8 @@ export function Canvas() {
         onZoomOut={onZoomOut}
         onZoomReset={onZoomReset}
         onZoomToFit={onZoomToFit}
+        minimapVisible={minimapVisible}
+        onMinimapToggle={() => setMinimapVisible(!minimapVisible)}
         equations={equationItems}
         onEquationSelect={onEquationSelect}
       />

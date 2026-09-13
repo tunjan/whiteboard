@@ -134,6 +134,10 @@
        now, so every fill in the family has to composite over whatever has
        been drawn under it rather than over a known white slab. */
   --tb-track: rgba(12, 10, 9, 0.07);
+  /* Selection, one step past the hover track. A fill and nothing else: it is
+     painted as a layer *under* glyphs and swatches that set their own colour,
+     so it can never be an inversion. */
+  --tb-chip: rgba(12, 10, 9, 0.16);
 
   /* The selected key, and every other "this is the chosen one" mark in the
        toolbar family. It is the track's inverse — the recess filled back in
@@ -173,10 +177,24 @@
   --chrome-wash: rgba(255, 255, 255, 0.16);
   --chrome-wash-solid: rgba(255, 255, 255, 0.6);
 
+  /* The press flex on a toolbar key: it dips a hair past the pressed size and
+     comes back past its own edge before it lands. Overshoot is small — this is
+     a control, not a toy. See `.tb-key` in section 8. */
+  --tb-press-spring: cubic-bezier(0.32, 1.44, 0.58, 1);
+
   --grid-minor: rgba(12, 10, 9, 0.05);
   --grid-major: rgba(12, 10, 9, 0.1);
   --grid-dot: rgba(12, 10, 9, 0.25);
   --grid-axis: rgba(12, 10, 9, 0.4);
+
+  /* Minimap. Its own tokens rather than the board's: the overview is a plate
+     with an opaque ground of its own, and every mark on it is a flat fill read
+     straight into a 2D canvas — so these have to resolve to real colors, not
+     to `var(...)` chains a `getPropertyValue` would hand back unevaluated. */
+  --minimap-ground: #f3f2ef;
+  --minimap-shape: rgba(12, 10, 9, 0.38);
+  --minimap-selected: #1d4ed8;
+  --minimap-viewport: rgba(12, 10, 9, 0.12);
   --background: var(--bg-canvas);
   --foreground: var(--fg);
   --card: var(--bg-surface);
@@ -274,6 +292,7 @@
   /* Same relationship as the light theme, run the other way: the wash lifts
        off the dark board rather than sinking into a pale one. */
   --tb-track: rgba(250, 250, 249, 0.12);
+  --tb-chip: rgba(250, 250, 249, 0.22);
   --tb-accent: #57534e;
   --tb-accent-hover: #57534e;
   --tb-accent-fg: #fafaf9;
@@ -287,6 +306,11 @@
   --grid-major: rgba(250, 250, 249, 0.12);
   --grid-dot: rgba(250, 250, 249, 0.28);
   --grid-axis: rgba(250, 250, 249, 0.45);
+
+  --minimap-ground: #1c1917;
+  --minimap-shape: rgba(250, 250, 249, 0.38);
+  --minimap-selected: #60a5fa;
+  --minimap-viewport: rgba(250, 250, 249, 0.14);
   --background: var(--bg-canvas);
   --foreground: var(--fg);
   --card: var(--bg-surface);
@@ -439,6 +463,7 @@
 
   /* ---------- Toolbar ---------- */
   --color-tb-track: var(--tb-track);
+  --color-tb-chip: var(--tb-chip);
   --color-tb-accent: var(--tb-accent);
   --color-tb-accent-hover: var(--tb-accent-hover);
   --color-tb-accent-fg: var(--tb-accent-fg);
@@ -574,6 +599,21 @@
   button:not(:disabled),
   [role='button']:not(:disabled) {
     cursor: pointer;
+  }
+
+  /*
+     * The bottom edge floating chrome anchors to. Normally the device's own
+     * safe area; while an on-screen keyboard is up it is the keyboard, which
+     * iPadOS draws *over* the layout viewport rather than shrinking it — so
+     * without this the toolbar and the corner HUDs sit behind it.
+     * `--wb-keyboard-inset` is published by `use-keyboard-inset.ts`.
+     */
+  :root {
+    --wb-keyboard-inset: 0px;
+    --wb-inset-bottom: max(
+      env(safe-area-inset-bottom),
+      var(--wb-keyboard-inset)
+    );
   }
 
   /* iPad / Safari touch hardening. */
@@ -733,6 +773,42 @@
 
 .tool-panel-content {
   animation: tool-panel-content-in 180ms var(--panel-ease) both;
+}
+
+/* The style bar rides just above the toolbar and is pinned to its left edge,
+   so the only honest motion it has is straight up out of the bar and straight
+   back down into it.
+
+   Deliberately no scale. Three percent of a pill this wide is the better part
+   of twenty pixels of drift at the far end, which reads as the bar sliding off
+   an edge that is supposed to be nailed to the toolbar's padding — and it
+   resamples every swatch and glyph soft for the length of the move.
+
+   The offset goes on `transform`, not on the `translate` property: Tailwind's
+   `-translate-x-1/2` centring below `sm` owns `translate`, and the two compose
+   rather than overwrite, the same arrangement the anchored tool panel uses.
+   Getting this wrong is what the old animation did — it eased `transform`
+   while the utilities it was moving wrote `translate` and `scale`, so the rise
+   and the scale both landed in a single frame and only the fade ever ran. */
+.style-bar-motion {
+  transform: translateY(0);
+  opacity: 1;
+  transition:
+    transform var(--duration-slow) var(--ease-out-expo),
+    opacity var(--duration-base) var(--ease-out-quart);
+}
+
+/* Out is shorter than in, and eases *in* rather than out. An ease-out exit
+   spends its last third crawling at a few percent, which is what leaves a
+   ghost of the bar sitting on the canvas after the tool has already changed;
+   accelerating away clears the board while the pointer is still moving. */
+.style-bar-motion[data-visible='false'] {
+  transform: translateY(10px);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    transform var(--duration-base) ease-in,
+    opacity var(--duration-fast) ease-in;
 }
 
 /* The video panel changes between a pill, a floating player and a full-board
@@ -906,7 +982,47 @@
   animation: laser-tip-pulse 2s ease-in-out infinite;
 }
 
+/* The board loading veil's mark: one stroked square turning a quarter turn as
+   its corners round all the way to a circle and back. Two properties on one
+   element, one continuous loop — the point is a figure that is clearly still
+   working without the tick-tick of a spinner. `rx` is animated rather than
+   `border-radius` because this is an SVG rect, and both properties are
+   compositor-cheap enough to keep moving while the main thread decodes CRDT
+   updates. Cycle length is mirrored by nothing in JS: it is decoration. */
+@keyframes veil-mark-turn {
+  0% {
+    transform: rotate(0deg);
+  }
+
+  100% {
+    transform: rotate(90deg);
+  }
+}
+
+@keyframes veil-mark-round {
+  0%,
+  100% {
+    rx: 0;
+  }
+
+  50% {
+    rx: 14;
+  }
+}
+
+.veil-mark {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation:
+    veil-mark-turn 2.4s var(--ease-in-out-quart) infinite,
+    veil-mark-round 2.4s var(--ease-in-out-quart) infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .veil-mark {
+    animation: none;
+  }
+
   .laser-tip-glow {
     animation: none;
   }
@@ -917,6 +1033,10 @@
 
   .tool-panel-content {
     animation: none;
+  }
+
+  .style-bar-motion {
+    transition: none;
   }
 
   .video-panel-motion,
@@ -1070,12 +1190,16 @@
  * already relied on. Portaled surfaces — dialogs, popovers, menus, tooltips,
  * toasts — mount on `document.body`, outside `.wb-board` entirely, so they
  * always paint above the board and are deliberately not part of these scales.
+ * That is also why the loading veil covers only what is inside `.wb-board`:
+ * the dialogs and toasts it has to keep quiet during a join are gated at their
+ * own source instead, because no in-board layer could ever paint over them.
  * ========================================================================== */
 
 :root {
   /* Board root. */
   --z-canvas: 100;
   --z-ui: 300;
+  --z-veil: 400;
 
   /* Inside the canvas surface. */
   --z-canvas-background: 10;
@@ -1227,13 +1351,155 @@
   }
 }
 
+/**
+ * A key, anywhere in the floating layer. The property list is the same as it
+ * was; what is new is that `transform` gets its own timing function.
+ *
+ * Pressing a key is the one place the layer is allowed to behave like a
+ * material rather than a picture of one: press, flex, settle. A quart ease
+ * gives press and release the same dead stop, which reads as a state swap; the
+ * spring lets the key dip a hair past the pressed size and come back past its
+ * own edge before it lands, which is the flex. Everything else on the list
+ * keeps the quart — colour that overshoots is a flicker, not a flex.
+ *
+ * Stated here rather than as a utility because a per-property timing list is a
+ * rule, not a class, and because this file is unlayered and so wins over the
+ * `ease-*` utility the call sites would otherwise have to remember to drop.
+ */
 .tb-key {
   transition-property:
-    color, background-color, border-color, transform, box-shadow;
+    color, background-color, border-color, box-shadow, transform;
+  transition-timing-function:
+    var(--ease-out-quart), var(--ease-out-quart), var(--ease-out-quart),
+    var(--ease-out-quart), var(--tb-press-spring);
 }
 
 @media (prefers-reduced-motion: reduce) {
   .tb-key {
     transition: none;
+  }
+}
+
+/* ==========================================================================
+ * 9. The floating control layer
+ *
+ * The toolbar, the style pill above it, and the flyouts they open. One plain
+ * material: a solid ground, a hairline edge, and the ambient shadow that lifts
+ * it off the board. Nothing samples what is behind it, so there are no
+ * fallbacks here for low-graphics mode, Reduce Transparency, or engines
+ * without `backdrop-filter` — the resting state already is the fallback.
+ *
+ * State is carried by flat fills only, from section 1's toolbar tokens: a key
+ * under the pointer takes `--tb-track`, the chosen one the heavier `--tb-chip`.
+ * Nothing in this layer is raised or sunk.
+ * ========================================================================== */
+
+/**
+ * A plate. Callers supply the geometry (a capsule, or the flyout card) and
+ * their own padding.
+ */
+.lg {
+  position: relative;
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--s-toolbar);
+}
+
+/**
+ * Rounded, continuous geometry, stated rather than picked per call site: every
+ * capsule in the set is the same pill and every flyout the same corner, so the
+ * pieces read as related shapes rather than as separately rounded boxes. These
+ * are unlayered, which is also what lets them beat the `rounded-overlay` a
+ * popover brings with it without a second radius utility fighting it.
+ */
+.lg-pill {
+  border-radius: 9999px;
+}
+
+.lg-card {
+  border-radius: 1.375rem;
+}
+
+/** The chosen option. */
+.lg-chip {
+  background-color: var(--tb-chip);
+}
+
+/**
+ * A key's fill, as a layer inside the key rather than the key's own
+ * background, so it stays inset from the plate's edge. `:not(.lg-chip)` keeps
+ * a hover off the chosen key, which already carries the inverted fill.
+ */
+.lg-wash {
+  transition: background-color var(--duration-fast) var(--ease-out-quart);
+}
+
+.lg-key:hover > .lg-wash:not(.lg-chip),
+.lg-key:focus-visible > .lg-wash:not(.lg-chip) {
+  background-color: var(--tb-track);
+}
+
+/** The selection chip sliding between the segments of a switch. */
+.lg-travel {
+  transition:
+    transform var(--duration-base) var(--ease-out-quart),
+    background-color var(--duration-base) var(--ease-out-quart);
+}
+
+/**
+ * An option inside a flyout. Unlayered, so it beats the `aria-pressed:bg-panel`
+ * that `toggleVariants` brings with it rather than fighting it at each call
+ * site. Same fill as the bar's, so a chosen fill and a chosen stroke weight are
+ * marked the same way.
+ */
+.lg-option[aria-pressed='true'],
+.lg-option[data-pressed] {
+  background-color: var(--tb-chip);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lg-travel,
+  .lg-wash {
+    transition: none;
+  }
+}
+
+
+/* The toolbar bar and the show-toolbar pill: one plain plate. A solid ground,
+   a hairline, and the same ambient shadow the rest of the floating chrome
+   uses. Unlayered so it beats the `shadow-panel` `Surface mode="floating"`
+   brings and the `shadow-e1` on `Button variant="outline"`. */
+.toolbar-bar {
+  border: 1px solid var(--border);
+  background-color: var(--bg-surface);
+  box-shadow: var(--s-toolbar);
+}
+
+.toolbar-bar .tb-key {
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+}
+
+/* Switch before the full instrument row would overflow a narrow tablet. */
+.toolbar-desktop {
+  display: none;
+}
+.toolbar-compact {
+  display: flex;
+}
+@media (min-width: 760px) {
+  .toolbar-desktop {
+    display: flex;
+  }
+  .toolbar-compact {
+    display: none;
+  }
+}
+@media (pointer: coarse) {
+  .toolbar-bar .tb-key {
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
   }
 }

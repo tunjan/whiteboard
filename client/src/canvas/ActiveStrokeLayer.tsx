@@ -2,7 +2,9 @@ import { useLayoutEffect, useRef } from 'react';
 import { cameraToTransform, type Camera } from './camera';
 import { inkPaint } from './ink-color';
 import { isBelowPatternDetail, useDotLength } from './lod';
+import { inkErrorLimit } from './use-lod-store';
 import { buildInkRender } from './shapes/draw';
+import { highlightPaint, HIGHLIGHT_OVERLAY_OPACITY } from './shapes/highlight';
 import {
   getLiveStrokeFrame,
   setLiveStrokeSink,
@@ -28,10 +30,11 @@ export function ActiveStrokeLayer({ camera }: { camera: Camera }) {
   // A dot is a zero-length dash, which browsers drop once the stroke is
   // sub-pixel wide. Discrete, so this only re-renders when the zoom crosses it.
   const dotLength = useDotLength();
-  // The live stroke has to make the same simplification choice the committed
+  // The live stroke has to make the same simplification choices the committed
   // shape will, or the ink would visibly change character at pointer-up. Its
-  // brush size is only known per frame, so the threshold is evaluated inside
-  // `draw` against the zoom rather than read from a hook up here. Held in a ref
+  // brush size is only known per frame, so both the centerline threshold and
+  // the error budget are evaluated inside `draw` against the zoom rather than
+  // read from a hook up here. Held in a ref
   // and refreshed on every render: the sink closure below outlives the camera
   // prop it was created with, and re-registering it per zoom frame would tear
   // the sink down and rebuild it in the middle of a pinch.
@@ -56,7 +59,8 @@ export function ActiveStrokeLayer({ camera }: { camera: Camera }) {
       // Ink follows the viewer's theme here exactly as it will once the shape
       // is committed (`ShapeView`), or the stroke would change color under the
       // hand at pointer-up.
-      const color = inkPaint(frame.props.color);
+      const highlight = frame.props.inkKind === 'highlight';
+      const color = highlight ? highlightPaint(inkPaint(frame.props.color)) : inkPaint(frame.props.color);
       const { size } = frame.props;
       // `isClosed` is only ever written by the tool's `finalize`, after this
       // layer is gone, so a live stroke is never filled — the ink is all there
@@ -67,12 +71,13 @@ export function ActiveStrokeLayer({ camera }: { camera: Camera }) {
         true,
         dotLength,
         isBelowPatternDetail(zoomRef.current, size),
+        inkErrorLimit(zoomRef.current),
       );
       group.setAttribute(
         'transform',
         `translate(${frame.origin.x} ${frame.origin.y})`,
       );
-      group.setAttribute('opacity', String(frame.opacity));
+      group.setAttribute('opacity', String(frame.opacity * (highlight ? HIGHLIGHT_OVERLAY_OPACITY : 1)));
       ink.setAttribute('d', render.d);
       if (render.stroked) {
         ink.setAttribute('fill', 'none');

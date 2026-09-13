@@ -12,26 +12,15 @@ export interface BenchFlags {
   noBg: boolean;
   /** Mount no shapes at all (leaves background + chrome). */
   noShapes: boolean;
-  /** Never take a camera snapshot; move the live vectors instead. */
-  noSnapshot: boolean;
-  /** Put `will-change: transform` on the snapshot bitmap. */
-  willChange: boolean;
-  /** Freeze the grid at the snapshot's camera instead of the live one. */
-  freezeBg: boolean;
 }
 
 export const useBenchFlags = create<BenchFlags>(() => ({
   noBg: false,
   noShapes: false,
-  noSnapshot: false,
-  willChange: false,
-  freezeBg: false,
 }));
 
 /** Per-subsystem timings, collected by the render path, drained per run. */
 export const benchCounters = {
-  /** One entry per snapshot capture: its wall time. */
-  caps: [] as number[],
   /** One entry per spatial-index search. */
   cull: [] as number[],
   /** One entry per rebuild of the mounted shape tree. */
@@ -39,7 +28,6 @@ export const benchCounters = {
 };
 
 export function resetBenchCounters(): void {
-  benchCounters.caps.length = 0;
   benchCounters.cull.length = 0;
   benchCounters.tree.length = 0;
 }

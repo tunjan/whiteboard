@@ -18,6 +18,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
+import { cn } from '@/lib/utils';
 import {
   FlyoutCaret,
   INSTRUMENT_CLIP,
@@ -28,6 +29,7 @@ import {
   ShapeClusterGlyph,
   ShapeClusterObject,
   menuItemClass,
+  TOOL_FLYOUT,
   TOOL_ICON,
   toolButtonClass,
 } from './toolbar-constants';
@@ -179,7 +181,7 @@ export function ShapeMenu({
         side="top"
         align="center"
         sideOffset={8}
-        className="w-auto p-1.5"
+        className={cn(TOOL_FLYOUT, 'w-auto p-2')}
       >
         <PopoverHeader className="sr-only">
           <PopoverTitle>Shapes</PopoverTitle>

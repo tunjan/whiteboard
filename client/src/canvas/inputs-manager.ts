@@ -7,7 +7,7 @@ const STOP_SPEED = 0.01;
 /** Pressure/pointer evidence that distinguishes a stylus from a plain pointer. */
 export function isPenOrStylus(pointerType: string, pressure: number): boolean {
   return (
-    pointerType === 'pen' ||
+    (pointerType === 'pen' && Number.isFinite(pressure) && pressure > 0) ||
     (Number.isFinite(pressure) &&
       pressure > 0 &&
       pressure < 1 &&

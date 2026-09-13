@@ -1,4 +1,4 @@
-import { Frame } from 'lucide-react';
+import { FrameGlyph } from '@/components/ui/glyphs';
 import {
   type Bounds,
   genId,
@@ -9,7 +9,7 @@ import { getBottomIndex } from '../order';
 import { captureEnclosedShapes, topFrameAtPoint } from '../frame-operations';
 import { shapeRegistry } from '../shapes/shape-registry';
 import { useSelectionStore } from '../use-selection-store';
-import { groupStyle } from '../use-style-store';
+import { nextShapeStyle } from '../use-style-store';
 import { dragBoxSnapTargets, snappedBoxFromDrag } from './drag-box';
 import type { Tool, ToolContext, ToolPointerInfo } from './types';
 
@@ -32,7 +32,7 @@ export function createFrameTool(): Tool {
     label: 'Frame',
     hotkey: 'f',
     cursor: 'crosshair',
-    icon: Frame,
+    icon: FrameGlyph,
 
     onPointerDown(info: ToolPointerInfo, ctx: ToolContext) {
       if (info.button !== 0) return;
@@ -44,7 +44,7 @@ export function createFrameTool(): Tool {
       const shapes = ctx.editor.getShapes();
       const parentId = topFrameAtPoint(shapes, info.point)?.id ?? null;
       const count = shapes.filter((s) => s.type === 'frame').length;
-      const style = groupStyle('shape');
+      const style = nextShapeStyle();
       const props: FrameProps = {
         ...(util.getDefaultProps() as FrameProps),
         w: 0,

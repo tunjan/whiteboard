@@ -1,9 +1,11 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { BackgroundType } from './grid';
+import type { FingerAction } from './touch-input';
 import {
   DEFAULT_PENCIL_DYNAMICS,
   DEFAULT_PENCIL_STABILIZATION,
+  REFERENCE_PENCIL_DYNAMICS,
   type EndTaperMode,
   type PencilPressureCurve,
 } from './shapes/ink';
@@ -62,6 +64,30 @@ interface CanvasUiStore {
    * document, so this preference cannot change what peers or the board receive.
    */
   pencilPrediction: boolean;
+  /**
+   * What one finger on the glass does — see {@link FingerAction}. The tablet
+   * counterpart of the pen settings above: those shape the stroke a stylus
+   * lays down, this decides whether a finger is allowed to lay one at all.
+   */
+  fingerAction: FingerAction;
+  /**
+   * Whether a stylus has ever been used on this device. Written by the canvas
+   * the first time a `pen` pointer arrives, and read only by `fingerAction`'s
+   * `auto`, which has nothing else to go on: a tablet reports the same coarse
+   * pointer whether or not its owner has a Pencil.
+   */
+  penSeen: boolean;
+  /**
+   * Whether a mouse wheel scrolls the board the opposite way.
+   *
+   * Applies to a wheel and nothing else: a trackpad's two-finger scroll already
+   * follows the system's own natural-scrolling setting, and reversing it here
+   * would fight that setting and its inertia. `wheelPointerProfile` decides
+   * which events count.
+   */
+  invertScroll: boolean;
+  /** Whether the spatial overview of the page is shown in the corner. */
+  minimapVisible: boolean;
   /** Whether the on-canvas performance overlay (FPS/frame time) is shown. */
   debugPerformance: boolean;
   /**
@@ -98,6 +124,8 @@ interface CanvasUiStore {
    */
   pngExportScale: number;
   setBackground: (background: BackgroundType) => void;
+  setMinimapVisible: (minimapVisible: boolean) => void;
+  setInvertScroll: (invertScroll: boolean) => void;
   setSnappingEnabled: (snappingEnabled: boolean) => void;
   setEraserMode: (eraserMode: EraserMode) => void;
   setPencilStabilization: (pencilStabilization: number) => void;
@@ -109,6 +137,9 @@ interface CanvasUiStore {
   setPencilPressureCurve: (pencilPressureCurve: PencilPressureCurve) => void;
   setPencilTilt: (pencilTilt: number) => void;
   setPencilPrediction: (pencilPrediction: boolean) => void;
+  setFingerAction: (fingerAction: FingerAction) => void;
+  /** Record that a stylus has been used here. Idempotent, called per stroke. */
+  notePenSeen: () => void;
   setDebugPerformance: (debugPerformance: boolean) => void;
   setLowGraphics: (lowGraphics: boolean) => void;
   setAttentionAlertsEnabled: (attentionAlertsEnabled: boolean) => void;
@@ -143,15 +174,15 @@ export const DEFAULT_PNG_EXPORT_SCALE = 2;
 const PENCIL_DEFAULTS = {
   pencilStabilization: DEFAULT_PENCIL_STABILIZATION,
   pencilThinning: DEFAULT_PENCIL_DYNAMICS.thinning,
-  pencilSmoothing: DEFAULT_PENCIL_DYNAMICS.smoothing,
-  pencilSimulatePressure: DEFAULT_PENCIL_DYNAMICS.simulatePressure,
+  pencilSmoothing: REFERENCE_PENCIL_DYNAMICS.smoothing,
+  pencilSimulatePressure: REFERENCE_PENCIL_DYNAMICS.simulatePressure,
   pencilStartTaper: 0,
   // A lift that was still moving gets a taper and one that stopped does not,
   // which is what a nib does. The unconditional pointed finish is still on the
   // menu as `full`.
-  pencilEndTaper: 'velocity',
+  pencilEndTaper: 'off',
   pencilPressureCurve: 'medium',
-  pencilTilt: DEFAULT_PENCIL_DYNAMICS.tiltAmount,
+  pencilTilt: REFERENCE_PENCIL_DYNAMICS.tiltAmount,
   pencilPrediction: false,
 } as const;
 
@@ -170,6 +201,17 @@ const PENCIL_DEFAULTS = {
  * the pointer stops.
  */
 const PREVIOUS_PENCIL_PRESETS = [
+  {
+    pencilThinning: 0.5,
+    pencilSmoothing: 0.5,
+    pencilSimulatePressure: false,
+    pencilStartTaper: 0,
+    pencilEndTaper: 'velocity',
+    pencilStabilization: DEFAULT_PENCIL_STABILIZATION,
+    pencilPressureCurve: 'medium',
+    pencilTilt: 0.5,
+    pencilPrediction: false,
+  },
   {
     pencilThinning: 0.5,
     pencilSmoothing: 0.5,
@@ -200,12 +242,9 @@ function endTaperModeFrom(value: unknown): EndTaperMode {
 function migrateCanvasUiStore(persistedState: unknown): CanvasUiStore {
   const state = persistedState as Partial<CanvasUiStore>;
   const isUnchangedPreset = PREVIOUS_PENCIL_PRESETS.some(
-    (preset) =>
-      state.pencilThinning === preset.pencilThinning &&
-      state.pencilSmoothing === preset.pencilSmoothing &&
-      state.pencilSimulatePressure === preset.pencilSimulatePressure &&
-      state.pencilStartTaper === preset.pencilStartTaper &&
-      (state.pencilEndTaper as unknown) === preset.pencilEndTaper,
+    (preset) => Object.entries(preset).every(
+      ([key, value]) => (state as Record<string, unknown>)[key] === value,
+    ),
   );
 
   if (isUnchangedPreset) {
@@ -243,6 +282,8 @@ export const useCanvasUiStore = create<CanvasUiStore>()(
       background: 'graph',
       snappingEnabled: true,
       eraserMode: 'object',
+      invertScroll: false,
+      minimapVisible: true,
       debugPerformance: false,
       lowGraphics: false,
       attentionAlertsEnabled: true,
@@ -250,8 +291,12 @@ export const useCanvasUiStore = create<CanvasUiStore>()(
       attentionAwaySeconds: 15,
       pdfPageLimit: 10,
       pngExportScale: DEFAULT_PNG_EXPORT_SCALE,
+      fingerAction: 'auto',
+      penSeen: false,
       ...PENCIL_DEFAULTS,
       setBackground: (background) => set({ background }),
+      setMinimapVisible: (minimapVisible) => set({ minimapVisible }),
+      setInvertScroll: (invertScroll) => set({ invertScroll }),
       setSnappingEnabled: (snappingEnabled) => set({ snappingEnabled }),
       setEraserMode: (eraserMode) => set({ eraserMode }),
       setPencilStabilization: (pencilStabilization) =>
@@ -266,6 +311,10 @@ export const useCanvasUiStore = create<CanvasUiStore>()(
         set({ pencilPressureCurve }),
       setPencilTilt: (pencilTilt) => set({ pencilTilt }),
       setPencilPrediction: (pencilPrediction) => set({ pencilPrediction }),
+      setFingerAction: (fingerAction) => set({ fingerAction }),
+      notePenSeen: () => {
+        if (!useCanvasUiStore.getState().penSeen) set({ penSeen: true });
+      },
       setDebugPerformance: (debugPerformance) => set({ debugPerformance }),
       setLowGraphics: (lowGraphics) => {
         applyLowGraphics(lowGraphics);
@@ -283,7 +332,7 @@ export const useCanvasUiStore = create<CanvasUiStore>()(
     }),
     {
       name: 'whiteboard:canvas-ui',
-      version: 3,
+      version: 4,
       migrate: migrateCanvasUiStore,
       onRehydrateStorage: () => (state) => {
         if (state) applyLowGraphics(state.lowGraphics);

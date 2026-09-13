@@ -1,4 +1,4 @@
-import { MessageCircle } from 'lucide-react';
+import { CommentGlyph } from '@/components/ui/glyphs';
 import { useCommentsStore } from '../use-comments-store';
 import type { Tool, ToolPointerInfo } from './types';
 
@@ -19,7 +19,7 @@ export function createCommentTool(): Tool {
     label: 'Comment',
     hotkey: 'c',
     cursor: 'crosshair',
-    icon: MessageCircle,
+    icon: CommentGlyph,
 
     onPointerDown(info: ToolPointerInfo) {
       if (info.button !== 0) return;

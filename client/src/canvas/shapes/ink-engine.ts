@@ -12,6 +12,13 @@ export interface FreehandEngineOptions {
   startTaper: number | boolean;
   endTaper: number | boolean;
   easing?: (pressure: number) => number;
+  /**
+   * Ramp the start taper linearly instead of easing it out. A pencil wants the
+   * ease-out: its taper is a lead-in that should reach full width early and
+   * leave the body of the stroke uniform. A trail that is nothing but taper
+   * wants the straight ramp, so width tracks distance behind the pointer.
+   */
+  linearStartTaper?: boolean;
   /** Use the current five-brush-width pressure initialization model. */
   pressureWarmup?: boolean;
   /**
@@ -20,6 +27,13 @@ export interface FreehandEngineOptions {
    * exactly as it was.
    */
   tiltAmount?: number;
+  /**
+   * Perpendicular error, in world units, the emitted outline may carry on top
+   * of `TRACK_ERROR_LIMIT` because it is sub-pixel at the camera this render
+   * is for. Zero — the default, and everything at or above zoom 1 — leaves the
+   * geometry exactly as it was. See `inkErrorLimit` in `use-lod-store.ts`.
+   */
+  errorLimit?: number;
 }
 
 const MIN_PHYSICAL_PRESSURE = 0.025;
@@ -385,6 +399,9 @@ class InkBuffers {
   boundary = new Uint8Array(0);
   rawBoundary = new Uint8Array(0);
 
+  /** Centerline samples the emitted path keeps; see `simplifyCenterline`. */
+  centerlineKeep = new Int32Array(0);
+
   readonly writer = new CentiPixelPathWriter();
 
   ensureCapacity(required: number): void {
@@ -423,6 +440,8 @@ class InkBuffers {
     this.partitionEnd = new Int32Array(this.capacity);
     this.boundary = new Uint8Array(this.capacity);
     this.rawBoundary = new Uint8Array(this.capacity);
+
+    this.centerlineKeep = new Int32Array(this.capacity);
   }
 }
 
@@ -637,9 +656,11 @@ function streamline(
     const stepX = rawX - previousRawX;
     const stepY = rawY - previousRawY;
     const stepLength = vectorLength(stepX, stepY);
-    const uncapped = onePoleWeight(stepLength, response);
-    let weight = uncapped;
-    if (stepLength > MAX_FILTER_STEP) {
+    const uncapped = reference ? 0 : onePoleWeight(stepLength, response);
+    let weight = reference
+      ? last && i === stagedCount - 1 ? 1 : streamlineRawWeight(streamlineAmount)
+      : uncapped;
+    if (!reference && stepLength > MAX_FILTER_STEP) {
       // Applied everywhere, the clamp also lags genuine corners, cutting a
       // fast right angle inside its vertex by more than a brush width. So it
       // is released in proportion to how sharply the hand is actually
@@ -652,11 +673,6 @@ function streamline(
       );
       weight = uncapped - (uncapped - clampedWeight) * straightness;
     }
-    if (reference)
-      weight =
-        last && i === stagedCount - 1
-          ? 1
-          : streamlineRawWeight(streamlineAmount);
     previousRawX = rawX;
     previousRawY = rawY;
     const x = previousX + (rawX - previousX) * weight;
@@ -904,7 +920,9 @@ function calculateDynamics(
     const startRatio = startTaper > 0 ? clamp01(length / startTaper) : 1;
     const endRatio =
       endTaper > 0 ? clamp01((totalLength - length) / endTaper) : 1;
-    const startFactor = startRatio * (2 - startRatio);
+    const startFactor = options.linearStartTaper
+      ? startRatio
+      : startRatio * (2 - startRatio);
     const endFactor = 1 - (1 - endRatio) ** 3;
     radius *= Math.min(startFactor, endFactor);
     buffers.radius[i] = Math.max(MIN_RADIUS, radius);
@@ -1060,6 +1078,7 @@ function calculatePartitionTracks(
   size: number,
   smoothing: number,
   reference = false,
+  screenErrorLimit = 0,
 ): number {
   const localCount = 1 + Math.max(0, end - innerStart + 1);
   if (localCount <= 1) return 1;
@@ -1104,8 +1123,15 @@ function calculatePartitionTracks(
       buffers.vectorY[0] = dy / length;
     }
   }
-  const errorLimit =
-    (reference ? 1 : clamp01(smoothing)) * size * TRACK_ERROR_LIMIT;
+  // The brush-relative bound is what the stroke looks like drawn at 1:1; the
+  // screen-referenced one is what survives rasterization at the camera this
+  // render is for. Neither subsumes the other — a thick brush zoomed in wants
+  // the first, a thin one zoomed out the second — so the outline is allowed
+  // whichever error is larger.
+  const errorLimit = Math.max(
+    (reference ? 1 : clamp01(smoothing)) * size * TRACK_ERROR_LIMIT,
+    screenErrorLimit > 0 ? screenErrorLimit : 0,
+  );
   let trackCount = 0;
   let wasSharp = false;
   const append = (lx: number, ly: number, rx: number, ry: number) => {
@@ -1134,7 +1160,8 @@ function calculatePartitionTracks(
       const sharp = (prevDot < 0 && !wasSharp) || directionChange < 0.2;
       if (sharp) {
         const radius = buffers.radius[index]!;
-        const hard = directionChange <= -0.62;
+        const hard = directionChange <= -0.62 ||
+          buffers.runLength[end]! - buffers.runLength[index]! <= radius;
         const cx = hard ? buffers.inputX[index]! : centerX;
         const cy = hard ? buffers.inputY[index]! : centerY;
         const armX = -buffers.vectorY[prev]! * radius;
@@ -1142,9 +1169,24 @@ function calculatePartitionTracks(
         const cross =
           buffers.vectorX[prev]! * buffers.vectorY[next]! -
           buffers.vectorY[prev]! * buffers.vectorX[next]!;
-        const sweep = hard
-          ? Math.PI + 0.0001
-          : Math.acos(directionChange) * (cross < 0 ? -1 : 1);
+        if (!hard) {
+          // Bevel the outside of the turn and hold the inside at one point.
+          // Sweeping both edges around the center twists the ribbon at elbows.
+          const nextArmX = -buffers.vectorY[next]! * radius;
+          const nextArmY = buffers.vectorX[next]! * radius;
+          const innerX = (armX + nextArmX) / 2;
+          const innerY = (armY + nextArmY) / 2;
+          if (cross >= 0) {
+            append(cx + armX, cy + armY, cx - innerX, cy - innerY);
+            append(cx + nextArmX, cy + nextArmY, cx - innerX, cy - innerY);
+          } else {
+            append(cx + innerX, cy + innerY, cx - armX, cy - armY);
+            append(cx + innerX, cy + innerY, cx - nextArmX, cy - nextArmY);
+          }
+          wasSharp = true;
+          continue;
+        }
+        const sweep = Math.PI + 0.0001;
         const tolerance = Math.max(0.05, size * 0.02);
         const steps = Math.max(
           8,
@@ -1160,7 +1202,10 @@ function calculatePartitionTracks(
           const angle = (sweep * k) / steps;
           const ox = armX * Math.cos(angle) - armY * Math.sin(angle);
           const oy = armX * Math.sin(angle) + armY * Math.cos(angle);
-          append(cx + ox, cy + oy, cx - ox, cy - oy);
+          const reverseAngle = sweep - angle;
+          append(cx + ox, cy + oy,
+            cx + armX * Math.cos(reverseAngle) - armY * Math.sin(reverseAngle),
+            cy + armX * Math.sin(reverseAngle) + armY * Math.cos(reverseAngle));
         }
         wasSharp = true;
         continue;
@@ -1282,6 +1327,7 @@ function writePartition(
   size: number,
   smoothing: number,
   reference = false,
+  screenErrorLimit = 0,
 ): void {
   if (start === end) {
     writeDot(start);
@@ -1295,6 +1341,7 @@ function writePartition(
     size,
     smoothing,
     reference,
+    screenErrorLimit,
   );
   if (count <= 1) {
     writeDot(start);
@@ -1407,31 +1454,87 @@ export function buildInkCenterline(
  * `p[i]`, the control the next segment wants — and the closing `t` onto the
  * final sample degenerates to the straight run to the lift position.
  */
-export function getInkCenterlinePathData(line: InkCenterline): string {
+/**
+ * Choose the centerline samples the emitted path will be drawn through, under
+ * the same windowed perpendicular bound {@link simplifyTracks} applies to the
+ * outline, and write them to `buffers.centerlineKeep`.
+ *
+ * An index list rather than a compaction of `line` itself: the same conditioned
+ * samples measure the arc length dashes are distributed along and answer hit
+ * tests, and neither may move because the camera pulled back. Only what is
+ * painted coarsens.
+ */
+function simplifyCenterline(line: InkCenterline, tolerance: number): number {
   const count = line.count;
+  const keep = buffers.centerlineKeep;
+  if (tolerance <= 0 || count <= 2) {
+    for (let i = 0; i < count; i++) keep[i] = i;
+    return count;
+  }
+  const toleranceSquared = tolerance * tolerance;
+  const lastIndex = count - 1;
+  let output = 1;
+  let anchor = 0;
+  keep[0] = 0;
+
+  while (anchor < lastIndex) {
+    let best = anchor + 1;
+    const windowEnd = Math.min(anchor + SIMPLIFY_WINDOW, lastIndex);
+
+    candidate: for (let target = anchor + 2; target <= windowEnd; target++) {
+      for (let point = anchor + 1; point < target; point++) {
+        if (
+          segmentDistanceSquared(
+            line.x[point]!,
+            line.y[point]!,
+            line.x[anchor]!,
+            line.y[anchor]!,
+            line.x[target]!,
+            line.y[target]!,
+          ) > toleranceSquared
+        ) {
+          break candidate;
+        }
+      }
+      best = target;
+    }
+
+    keep[output++] = best;
+    anchor = best;
+  }
+
+  return output;
+}
+
+export function getInkCenterlinePathData(
+  line: InkCenterline,
+  tolerance = 0,
+): string {
+  if (line.count < 2) return '';
+  const keep = buffers.centerlineKeep;
+  const count = simplifyCenterline(line, tolerance);
   if (count < 2) return '';
+  const x = (i: number) => line.x[keep[i]!]!;
+  const y = (i: number) => line.y[keep[i]!]!;
   const writer = buffers.writer;
   writer.reset(count * 24 + 64);
-  writer.moveTo(toCenti(line.x[0]!), toCenti(line.y[0]!));
+  writer.moveTo(toCenti(x(0)), toCenti(y(0)));
   if (count === 2) {
-    const targetX = toCenti(line.x[1]!);
-    const targetY = toCenti(line.y[1]!);
+    const targetX = toCenti(x(1));
+    const targetY = toCenti(y(1));
     writer.quadraticTo(targetX, targetY, targetX, targetY);
     return writer.finish();
   }
   writer.quadraticTo(
-    toCenti(line.x[1]!),
-    toCenti(line.y[1]!),
-    midpointCenti(line.x[1]!, line.x[2]!),
-    midpointCenti(line.y[1]!, line.y[2]!),
+    toCenti(x(1)),
+    toCenti(y(1)),
+    midpointCenti(x(1), x(2)),
+    midpointCenti(y(1), y(2)),
   );
   for (let i = 2; i < count - 1; i++) {
-    writer.smoothTo(
-      midpointCenti(line.x[i]!, line.x[i + 1]!),
-      midpointCenti(line.y[i]!, line.y[i + 1]!),
-    );
+    writer.smoothTo(midpointCenti(x(i), x(i + 1)), midpointCenti(y(i), y(i + 1)));
   }
-  writer.smoothTo(toCenti(line.x[count - 1]!), toCenti(line.y[count - 1]!));
+  writer.smoothTo(toCenti(x(count - 1)), toCenti(y(count - 1)));
   return writer.finish();
 }
 
@@ -1476,6 +1579,7 @@ export function getFreehandPathData(
       options.size,
       options.smoothing,
       options.inkAlgorithm === 'reference',
+      options.errorLimit ?? 0,
     );
   }
   return buffers.writer.finish();

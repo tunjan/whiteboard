@@ -1,4 +1,4 @@
-import { blobUrl } from '../../board/blobs';
+import { imageHref } from '../../board/blobs';
 import { useLodDetail } from '../lod';
 import { boxBounds, boxHitTest, rotationTransform } from './box-geometry';
 import { mergedRectPath, useMergedCorners } from './image-merge';
@@ -40,7 +40,7 @@ export const imageUtil: ShapeUtil<'image'> = {
     const { blobId, w, h, crop } = shape.props;
     const detail = useLodDetail();
     const squared = useMergedCorners(shape);
-    if (!blobId) return null;
+    const href = imageHref(shape.id, blobId);
     // With a crop, draw the full source scaled so the crop sub-rect fills the
     // box; the clipPath below keeps only the box region visible.
     const fullW = crop ? w / crop.w : w;
@@ -53,6 +53,20 @@ export const imageUtil: ShapeUtil<'image'> = {
     // Where a neighbouring image is flush against an edge, the corners on it are
     // squared so the pair reads as one block instead of leaving a notch.
     const outline = mergedRectPath(shape.x, shape.y, w, h, radius, squared);
+    // Another client's paste whose upload hasn't landed yet: hold its place.
+    if (!href) {
+      return (
+        <g transform={rotationTransform(shape.x, shape.y, w, h, shape.rotation)}>
+          <path
+            d={outline}
+            fill="var(--color-muted)"
+            stroke="var(--color-border)"
+            strokeWidth={1.5}
+            vectorEffect="non-scaling-stroke"
+          />
+        </g>
+      );
+    }
     // Zoomed far out the drop shadow is sub-pixel; skip it (and its filter).
     const shadow = detail === 'high';
     return (
@@ -82,7 +96,7 @@ export const imageUtil: ShapeUtil<'image'> = {
         </defs>
         <g filter={shadow ? `url(#${shadowId})` : undefined}>
           <image
-            href={blobUrl(blobId)}
+            href={href}
             x={imgX}
             y={imgY}
             width={fullW}

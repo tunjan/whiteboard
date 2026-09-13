@@ -3,6 +3,26 @@ export function blobUrl(id: string): string {
   return `/api/blobs/${id}`;
 }
 
+// Object URLs for images this client placed itself, so it shows them before the
+// upload lands and never re-downloads its own bytes afterwards. Keyed by shape
+// id while the upload is pending, then by blob id once the server assigns one.
+const localImageUrls = new Map<string, string>();
+
+export function setLocalImageUrl(key: string, url: string): void {
+  localImageUrls.set(key, url);
+}
+
+export function deleteLocalImageUrl(key: string): void {
+  localImageUrls.delete(key);
+}
+
+/** Where an image shape's bytes load from; null while a peer's upload is pending. */
+export function imageHref(shapeId: string, blobId: string): string | null {
+  return (
+    localImageUrls.get(blobId || shapeId) ?? (blobId ? blobUrl(blobId) : null)
+  );
+}
+
 // Downscale large photos before upload to keep boards light and sync fast.
 const COMPRESS_OPTS = {
   maxSizeMB: 1,
@@ -61,7 +81,7 @@ export async function uploadImageBlob(
   return id;
 }
 
-async function imageDimensions(
+export async function imageDimensions(
   blob: Blob,
 ): Promise<{ width: number; height: number }> {
   try {

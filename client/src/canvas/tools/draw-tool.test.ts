@@ -1182,9 +1182,8 @@ describe('highlighter (marker ink)', () => {
   });
 
   it('is wider than the pen at the same size, and translucent', () => {
-    useStyleStore.getState().setSize('pen', 2);
-    useStyleStore.getState().setSize('marker', 2);
-    useStyleStore.getState().setOpacity('pen', 1);
+    useStyleStore.getState().setSize(2);
+    useStyleStore.getState().setOpacity(1);
     const pen = context();
     createDrawTool().onPointerDown?.(pointer(0, 0), pen.ctx);
     createDrawTool().onPointerUp?.(pointer(0, 0), pen.ctx);
@@ -1198,15 +1197,16 @@ describe('highlighter (marker ink)', () => {
 
     if (penShape.type !== 'draw' || markerShape.type !== 'draw') return;
     expect(markerShape.props.size).toBeGreaterThan(penShape.props.size);
-    expect(markerShape.opacity).toBeLessThan(1);
+    // Translucency is applied independently by the two render passes.
+    expect(markerShape.props.inkKind).toBe('highlight');
+    expect(markerShape.opacity).toBe(1);
     expect(penShape.opacity).toBe(1);
   });
 
-  // The two instruments remember their own colour. Sharing one slot meant
-  // reaching for the highlighter after writing in black laid a black wash.
-  it('inks from the marker slot, leaving the pen on its own colour', () => {
-    useStyleStore.getState().setColor('pen', '#1d1d1d');
-    useStyleStore.getState().setColor('marker', '#f1ac4b');
+  // One colour for every instrument: the marker washes in whatever the pen was
+  // last set to, rather than keeping a slot of its own.
+  it('inks from the same colour the pen does', () => {
+    useStyleStore.getState().setColor('#f1ac4b');
 
     const wash = context();
     marker().onPointerDown?.(pointer(0, 0), wash.ctx);
@@ -1218,7 +1218,7 @@ describe('highlighter (marker ink)', () => {
 
     if (washShape.type !== 'draw' || penShape.type !== 'draw') return;
     expect(washShape.props.color).toBe('#f1ac4b');
-    expect(penShape.props.color).toBe('#1d1d1d');
+    expect(penShape.props.color).toBe('#f1ac4b');
   });
 
   it('lands under the drawing, where the pen lands on top of it', () => {

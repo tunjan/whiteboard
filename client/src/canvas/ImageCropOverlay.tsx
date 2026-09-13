@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ImageShape } from '@whiteboard/shared';
-import { blobUrl } from '../board/blobs';
+import { imageHref } from '../board/blobs';
 import type { Camera } from './camera';
 import { worldToScreen } from './camera';
 import { editor } from './use-document-store';
@@ -165,7 +165,7 @@ export function ImageCropOverlay({
     camera,
   );
   const deg = (shape.rotation * 180) / Math.PI;
-  const href = blobUrl(shape.props.blobId);
+  const href = imageHref(shape.id, shape.props.blobId) ?? undefined;
 
   const handlePos = (id: HandleId) => {
     const cx =

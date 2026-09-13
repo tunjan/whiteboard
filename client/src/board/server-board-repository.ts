@@ -66,7 +66,21 @@ export class ServerBoardRepository implements BoardRepository {
   }
 
   async get(id: string): Promise<BoardMeta | undefined> {
-    return loadCache()[id];
+    const cached = loadCache()[id];
+    if (cached) return cached;
+    // A share link is the first time this browser has heard of the board, so
+    // the cache — which only `list()` fills, and only for a tutor — has nothing.
+    // Ask for the name alone; the rest of `BoardMeta` is management data this
+    // caller has no way to know and no use for.
+    try {
+      const res = await api(`/${encodeURIComponent(id)}/title`);
+      if (!res.ok) return undefined;
+      const { name } = (await res.json()) as { name: string };
+      const now = Date.now();
+      return { id, name, createdAt: now, updatedAt: now, lastOpenedAt: now };
+    } catch {
+      return undefined; // Offline — the caller keeps its placeholder.
+    }
   }
 
   async create(name: string): Promise<BoardMeta> {

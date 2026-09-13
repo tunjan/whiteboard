@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildInkCenterline } from './ink-engine';
 import { getInkPathData } from './ink';
+import { buildInkRender, drawUtil } from './draw';
 
 const dynamics = {
   inkAlgorithm: 'reference' as const,
@@ -10,6 +11,33 @@ const dynamics = {
 };
 
 describe('reference ink pipeline', () => {
+  it('keeps the live tip filtered and pins it only at completion, including dashes', () => {
+    const points = [0, 20, 40, 60].map((x) => ({ x, y: 0, pressure: 0.5 }));
+    for (const dash of ['solid', 'dashed'] as const) {
+      const props = { ...drawUtil.getDefaultProps(), ...dynamics, points, streamline: 0.5, dash, isComplete: false };
+      const live = buildInkRender(props, points, true, 0);
+      const remote = buildInkRender(props, points, false, 0);
+      const done = buildInkRender({ ...props, isComplete: true }, points, false, 0);
+      expect(live.d).toBe(remote.d);
+      expect(done.d).not.toBe(live.d);
+      expect(done.d).toBe(buildInkRender({ ...props, isComplete: undefined }, points, false, 0).d);
+    }
+  });
+
+  it('uses constant-width centerlines for highlights and retains tap dots', () => {
+    const points = [0, 20, 40, 60].map((x) => ({ x, y: 0 }));
+    const props = { ...drawUtil.getDefaultProps(), ...dynamics, points, inkKind: 'highlight' as const, thinning: 0 };
+    expect(buildInkRender(props, points, false, 0).stroked).toBe(true);
+    const dot = buildInkRender(props, points.slice(0, 1), false, 0);
+    expect(dot.stroked).toBe(false);
+    expect(dot.d).toMatch(/^M /);
+  });
+
+  it('does not reshape legacy ink when a completion flag is absent', () => {
+    const points = [0, 20, 40, 60].map((x) => ({ x, y: 0 }));
+    const props = { ...drawUtil.getDefaultProps(), points };
+    expect(buildInkRender(props, points, true, 0).d).toBe(buildInkRender(props, points, false, 0).d);
+  });
   it('applies the specified per-sample IIR weight and pins the completed endpoint', () => {
     const points = [0, 20, 40, 60].map((x) => ({ x, y: 0, pressure: 0.5 }));
     const line = buildInkCenterline(points, 1, 0.5, true, 'reference');

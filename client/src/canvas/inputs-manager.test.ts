@@ -52,6 +52,8 @@ describe('isPenOrStylus', () => {
 
   it('keeps neutral and contact-edge standard pointers out', () => {
     expect(isPenOrStylus('mouse', 0)).toBe(false);
+    expect(isPenOrStylus('pen', 0)).toBe(false);
+    expect(isPenOrStylus('pen', NaN)).toBe(false);
     expect(isPenOrStylus('mouse', 0.5)).toBe(false);
     expect(isPenOrStylus('touch', 1)).toBe(false);
   });

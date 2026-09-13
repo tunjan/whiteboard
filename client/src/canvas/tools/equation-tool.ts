@@ -1,4 +1,4 @@
-import { Sigma } from 'lucide-react';
+import { SigmaGlyph } from '@/components/ui/glyphs';
 import {
   boundsCenter,
   genId,
@@ -11,7 +11,7 @@ import { ensureEquationRenderer } from '../equation-render';
 import { getTopIndex } from '../order';
 import { shapeRegistry } from '../shapes/shape-registry';
 import { useSelectionStore } from '../use-selection-store';
-import { groupStyle } from '../use-style-store';
+import { nextShapeStyle } from '../use-style-store';
 import type { Tool, ToolContext, ToolPointerInfo } from './types';
 
 function placeEquation(point: Point, ctx: ToolContext): void {
@@ -21,7 +21,7 @@ function placeEquation(point: Point, ctx: ToolContext): void {
   const props = {
     ...(util.getDefaultProps() as EquationProps),
     // Match every other tool: new shapes take the current drawing color.
-    color: groupStyle('text').color,
+    color: nextShapeStyle().color,
   };
   const id = genId();
   const shape = {
@@ -47,7 +47,7 @@ export function createEquationTool(): Tool {
     label: 'Equation',
     hotkey: 'm',
     cursor: 'crosshair',
-    icon: Sigma,
+    icon: SigmaGlyph,
 
     // Start the (lazy, sizeable) MathJax load when the tool is picked, so the
     // renderer is usually warm by the time the first equation is placed.

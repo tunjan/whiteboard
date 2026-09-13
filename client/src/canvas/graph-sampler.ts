@@ -59,7 +59,7 @@ const CONTOUR_EDGES: readonly (readonly number[])[] = [
 const SADDLE_CONNECTED = [0, 1, 2, 3] as const;
 const SADDLE_CROSSED = [3, 0, 1, 2] as const;
 
-/** Where the segment `a → b` crosses zero, by linear interpolation. */
+/** Find an actual zero on an edge; a sign change alone may be a pole. */
 function interpolateZero(
   aX: number,
   aY: number,
@@ -67,11 +67,32 @@ function interpolateZero(
   bY: number,
   valueA: number,
   valueB: number,
-): ContourPoint {
-  const denominator = valueA - valueB;
-  const t =
-    denominator === 0 ? 0.5 : Math.min(1, Math.max(0, valueA / denominator));
-  return { x: aX + (bX - aX) * t, y: aY + (bY - aY) * t };
+  evaluate: (x: number, y: number) => number,
+): ContourPoint | null {
+  if (valueA === 0) return { x: aX, y: aY };
+  if (valueB === 0) return { x: bX, y: bY };
+  const tolerance = Math.min(Math.abs(valueA), Math.abs(valueB)) * 1e-6;
+  let lo = 0;
+  let hi = 1;
+  let loValue = valueA;
+  // Linear relations usually converge on the first probe. Nonlinear ones use
+  // bisection, and must reduce the residual relative to both original ends.
+  const scale = Math.max(Math.abs(valueA), Math.abs(valueB));
+  let t = valueA / scale / (valueA / scale - valueB / scale);
+  for (let i = 0; i < 32; i += 1) {
+    const point = { x: aX + (bX - aX) * t, y: aY + (bY - aY) * t };
+    const value = evaluate(point.x, point.y);
+    if (!Number.isFinite(value)) return null;
+    if (Math.abs(value) <= tolerance) return point;
+    if (loValue < 0 === value < 0) {
+      lo = t;
+      loValue = value;
+    } else {
+      hi = t;
+    }
+    t = (lo + hi) / 2;
+  }
+  return null;
 }
 
 function stitchContourLines(
@@ -108,7 +129,9 @@ function stitchContourLines(
     let currentKey = startKey;
 
     while (true) {
-      const nextIndex = adjacency.get(currentKey)?.find((index) => !used.has(index));
+      const nextIndex = adjacency
+        .get(currentKey)
+        ?.find((index) => !used.has(index));
       if (nextIndex === undefined) break;
       used.add(nextIndex);
       const line = lines[nextIndex]!;
@@ -135,10 +158,7 @@ function sampleImplicitGraphExpression(
     32,
     Math.min(320, Math.round(horizontalSamples * 0.55)),
   );
-  const rows = Math.max(
-    32,
-    Math.min(240, Math.round(verticalSamples * 0.55)),
-  );
+  const rows = Math.max(32, Math.min(240, Math.round(verticalSamples * 0.55)));
   const xStep = (viewport.xMax - viewport.xMin) / columns;
   const yStep = (viewport.yMax - viewport.yMin) / rows;
   const stride = columns + 1;
@@ -162,7 +182,7 @@ function sampleImplicitGraphExpression(
   const cornerY = [0, 0, 0, 0];
   const cornerValue = [0, 0, 0, 0];
 
-  const edgePoint = (edge: number): ContourPoint => {
+  const edgePoint = (edge: number): ContourPoint | null => {
     const a = CONTOUR_EDGE_CORNERS[edge * 2]!;
     const b = CONTOUR_EDGE_CORNERS[edge * 2 + 1]!;
     return interpolateZero(
@@ -172,6 +192,7 @@ function sampleImplicitGraphExpression(
       cornerY[b]!,
       cornerValue[a]!,
       cornerValue[b]!,
+      evaluate,
     );
   };
 
@@ -224,7 +245,9 @@ function sampleImplicitGraphExpression(
         edges = connected ? SADDLE_CONNECTED : SADDLE_CROSSED;
       }
       for (let i = 0; i < edges.length; i += 2) {
-        lines.push({ a: edgePoint(edges[i]!), b: edgePoint(edges[i + 1]!) });
+        const a = edgePoint(edges[i]!);
+        const b = edgePoint(edges[i + 1]!);
+        if (a && b) lines.push({ a, b });
       }
     }
   }

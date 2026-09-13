@@ -55,7 +55,7 @@ export function VoiceAudioSinks() {
         <Surface
           role="status"
           aria-live="polite"
-          className="absolute bottom-[max(1rem,env(safe-area-inset-bottom))] left-1/2 z-[var(--z-ui-alert)] -translate-x-1/2 p-1.5"
+          className="absolute bottom-[max(1rem,var(--wb-inset-bottom))] left-1/2 z-[var(--z-ui-alert)] -translate-x-1/2 p-1.5"
         >
           <Button
             type="button"

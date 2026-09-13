@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect } from 'react';
 import { paletteColors, useStyleStore } from '@/canvas/use-style-store';
+import { useKeyboardInset } from '@/hooks/use-keyboard-inset';
 import { parseBoardId, usePathname } from '@/router';
 import { applyTheme, useThemeStore } from '@/use-theme-store';
 
@@ -18,6 +19,10 @@ const BoardView = lazy(() =>
 
 // Router: `/board/:id` opens a board; anything else shows the board list.
 export function App() {
+  // Both screens are full-height and never scroll, so neither gets out of an
+  // on-screen keyboard's way on its own.
+  useKeyboardInset();
+
   useEffect(() => {
     applyTheme(useThemeStore.getState().theme);
   }, []);
@@ -28,15 +33,11 @@ export function App() {
   useEffect(() => {
     let prev = paletteColors(useThemeStore.getState().theme);
     const remap = () => {
-      const { groups, setColor } = useStyleStore.getState();
+      const { color, setColor } = useStyleStore.getState();
       const next = paletteColors(useThemeStore.getState().theme);
       if (next === prev) return;
-      // Each instrument remembers its own colour, so each is remapped by its
-      // own slot — the highlighter's yellow and the pen's ink move together.
-      for (const key of Object.keys(groups) as (keyof typeof groups)[]) {
-        const i = prev.findIndex((c) => c.value === groups[key].color);
-        if (i !== -1 && next[i]) setColor(key, next[i].value);
-      }
+      const i = prev.findIndex((c) => c.value === color);
+      if (i !== -1 && next[i]) setColor(next[i].value);
       prev = next;
     };
     return useThemeStore.subscribe(remap);

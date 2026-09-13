@@ -33,9 +33,7 @@ interface DrawingCursorProps {
 /** A pencil that follows mouse and pen hover without re-rendering. */
 export function DrawingCursor({ containerRef }: DrawingCursorProps) {
   const cursorRef = useRef<HTMLDivElement>(null);
-  // The pencil cursor is only ever shown for the pen, so it shows the pen's
-  // remembered colour.
-  const color = useStyleStore((state) => state.groups.pen.color);
+  const color = useStyleStore((state) => state.color);
 
   useHoverCursor(containerRef, cursorRef);
 

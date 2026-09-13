@@ -23,6 +23,11 @@ export interface PinchState {
   startMidpoint: Point;
   lastMidpoint: Point;
   mode: PinchMode;
+  /** Smoothed scale velocity, in natural-log zoom units per ms. */
+  zoomRate: number;
+  /** Zoom and timestamp {@link trackPinchZoom} last measured a rate against. */
+  lastZoom: number;
+  lastZoomTime: number;
 }
 
 /** Finger separation change that classifies an undecided gesture as a zoom. */
@@ -56,6 +61,48 @@ export function nextPinchMode(
     current.midpoint.y - start.midpoint.y,
   );
   return travel > PINCH_PAN_THRESHOLD ? 'panning' : 'unsure';
+}
+
+/**
+ * Weight of each new zoom-rate sample. A pinch is two fingers on glass, and the
+ * per-event rate between them is noisy enough that handing the raw last sample
+ * to the release coast would sometimes throw a scale the fingers were not
+ * setting; averaging across a handful of events keeps only the motion that
+ * lasted.
+ */
+export const PINCH_ZOOM_RATE_SMOOTHING = 0.4;
+/**
+ * A pinch that has not moved for this long lifts with no scale left in it. The
+ * distinction the coast turns on is between a scale still being changed as the
+ * fingers leave and one that was set and then held.
+ */
+export const PINCH_ZOOM_RATE_STALE_MS = 60;
+
+/**
+ * Fold this frame's zoom into the pinch's scale velocity. Measured in log space
+ * because that is the space the coast integrates in, and the space in which
+ * spreading and closing the fingers by the same amount are the same rate.
+ */
+export function trackPinchZoom(
+  pinch: PinchState,
+  zoom: number,
+  now: number,
+): void {
+  const elapsed = now - pinch.lastZoomTime;
+  if (!(elapsed > 0) || !(zoom > 0) || !(pinch.lastZoom > 0)) return;
+  const sample = Math.log(zoom / pinch.lastZoom) / elapsed;
+  pinch.zoomRate += (sample - pinch.zoomRate) * PINCH_ZOOM_RATE_SMOOTHING;
+  pinch.lastZoom = zoom;
+  pinch.lastZoomTime = now;
+}
+
+/**
+ * The scale velocity to coast on when the fingers lift: zero unless the gesture
+ * was a zoom that was still being made at the moment of release.
+ */
+export function pinchReleaseZoomRate(pinch: PinchState, now: number): number {
+  if (pinch.mode !== 'zooming') return 0;
+  return now - pinch.lastZoomTime > PINCH_ZOOM_RATE_STALE_MS ? 0 : pinch.zoomRate;
 }
 
 function clamp(n: number, min: number, max: number): number {

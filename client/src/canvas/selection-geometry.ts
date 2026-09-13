@@ -55,22 +55,83 @@ export const RESIZE_HANDLES: ResizeHandleId[] = [
   'w',
 ];
 
-/** Screen-px inset beyond each edge for the invisible corner rotation zones. */
-const ROTATE_CORNER_OFFSET = 18;
-/** Screen-px radius of each corner rotation hit zone. */
-export const ROTATION_HANDLE_HIT_SCREEN = 14;
+/**
+ * The corner rotation zone is a square of this many resize-hit-target extents,
+ * centred that same distance diagonally outside the corner. So it fills the
+ * quadrant from the corner outwards and stops there, which is what keeps it
+ * clear of the corner's own resize target.
+ */
+const ROTATE_CORNER_FACTOR = 1.62;
 /**
  * Screen-px radius of a resize or shape handle's grab zone. Shared so the
  * circle the overlay draws around a hovered handle is the circle the select
  * tool actually tests against.
  */
 export const HANDLE_HIT_SCREEN = 10;
-/**
- * Screen-px side of a drawn resize handle. Shared with the overlay so the
- * pruning below (which drops handles that would overlap on a small box) uses
- * the size the handles are actually painted at.
- */
+/** Screen-px side of a drawn resize handle. Shared with the overlay. */
 export const HANDLE_SCREEN = 7;
+/**
+ * The unit every degeneracy threshold below is a multiple of: the nominal
+ * screen size of a handle. Kept separate from `HANDLE_SCREEN` (what a handle is
+ * painted at) because it measures the room a handle *needs*, grip zone
+ * included, not the square that is drawn.
+ */
+const HANDLE_UNIT_SCREEN = 8;
+/**
+ * Below two handle units on an axis (16 screen px) a box cannot carry both of
+ * the corners on that axis' short edges without them overlapping.
+ */
+const TINY_SCREEN = 2 * HANDLE_UNIT_SCREEN;
+/**
+ * Below four handle units on an axis (32 screen px) the two opposing hit
+ * targets on that axis would meet in the middle and leave no band of the
+ * interior free to grab the shape by.
+ */
+const SMALL_SCREEN = 4 * HANDLE_UNIT_SCREEN;
+/** Screen-px half-extent of a resize handle's hit target on a fine pointer. */
+const HIT_TARGET_SCREEN = 6;
+/** Fingers are blunter than cursors, so every touch target grows by this. */
+const COARSE_HIT_FACTOR = 1.75;
+/**
+ * Applied to every hit target regardless of pointer: the raw extent is sized
+ * for the widest handle spacing, and trimming it keeps neighbouring targets
+ * from touching on a box that is merely small rather than tiny.
+ */
+const HIT_TARGET_TRIM = 0.75;
+/** A corner's square target is this multiple of the larger axis extent. */
+const CORNER_HIT_FACTOR = 1.5;
+/** Touch rotate knob offset from the box, as a multiple of the hit extent. */
+const MOBILE_ROTATE_OFFSET = 1.5;
+
+/**
+ * The eight handles in clockwise order from the top, so that adding a step per
+ * 45 degrees rotates a handle to the one that now occupies its place. Used to
+ * pick a cursor for a handle on a rotated box.
+ */
+export const ORDERED_RESIZE_HANDLES = [
+  'n',
+  'ne',
+  'e',
+  'se',
+  's',
+  'sw',
+  'w',
+  'nw',
+] as const;
+
+/** The handle that sits where `handle` does once the box turns by `rotation`. */
+export function rotateResizeHandle(
+  handle: ResizeHandleId,
+  rotation: number,
+): ResizeHandleId {
+  const turn = Math.PI * 2;
+  const normalized = ((rotation % turn) + turn) % turn;
+  const steps = Math.round(normalized / (Math.PI / 4));
+  const index = ORDERED_RESIZE_HANDLES.indexOf(
+    handle as (typeof ORDERED_RESIZE_HANDLES)[number],
+  );
+  return ORDERED_RESIZE_HANDLES[(index + steps) % 8]!;
+}
 
 export interface SelectionInfo {
   ids: string[];
@@ -90,8 +151,24 @@ export interface SelectionInfo {
   corners: { nw: Point; ne: Point; se: Point; sw: Point };
   /** Generic resize handles; empty when the shape exposes custom handles. */
   handles: { id: ResizeHandleId; point: Point }[];
-  /** Invisible FigJam-style rotation targets just beyond each corner. */
-  rotationHandles: { id: RotationHandleId; point: Point }[];
+  /**
+   * Invisible rotation targets just beyond each corner. `extent` is the square
+   * half-extent of the zone in world units, measured along the box axes: the
+   * zone turns with the box, so a hit test has to run in the box's own frame.
+   */
+  rotationHandles: { id: RotationHandleId; point: Point; extent: number }[];
+  /**
+   * Single visible rotation knob for coarse pointers, which get no corner
+   * zones: a finger cannot hover to discover an invisible target, and four of
+   * them around a small box would swallow the box. Null on fine pointers.
+   */
+  mobileRotateHandle: { point: Point; radius: number } | null;
+  /**
+   * Half-extent of a resize handle's hit target along each box axis, in world
+   * units. Per-axis because a box that is short on one axis has its targets on
+   * that axis halved, so the two opposing ones leave the middle free.
+   */
+  hitTarget: { x: number; y: number };
   /** Shape-specific handles (e.g. connector endpoints/bend); null otherwise. */
   customHandles: ShapeHandle[] | null;
   isSingle: boolean;
@@ -127,25 +204,150 @@ function boundsCorners(bounds: Bounds): Point[] {
 }
 
 /**
- * Drops handles that would land on top of each other on a small box. An edge
- * handle sits at a midpoint, so it clears the two corners it lies between only
- * once that axis is two handle widths long. When neither axis has that much
- * room the corners collide as well, and one bottom-right grip is all that fits.
+ * The corners of one shape's own oriented box, in world space, clockwise from
+ * its top-left. Used for the membership outlines a multi-selection draws around
+ * each of its elements: the axis-aligned envelope of a rotated shape stands
+ * well clear of it on every side, which reads as the selection having caught
+ * something bigger than what is actually in it. Null for an empty group, which
+ * has no box.
  */
-function prunedHandles(
-  ids: readonly ResizeHandleId[],
-  bounds: Bounds,
+export function shapeOutlineCorners(
+  shape: Shape,
+  /** All page shapes. Only read when `shape` is a group. */
+  allShapes: Shape[],
+): Point[] | null {
+  const bounds = shapeControlBounds(shape, allShapes);
+  if (!bounds) return null;
+  const corners = boundsCorners(bounds);
+  const rotation = pageRotation(shape);
+  if (!rotation) return corners;
+  const center = boundsCenter(bounds);
+  return corners.map((corner) => rotatePoint(corner, center, rotation));
+}
+
+/**
+ * How degenerate the box is, in the two senses that change what it can carry.
+ *
+ * *Tiny* on an axis means the handles on that axis' short edges would overlap,
+ * so the set has to be culled. *Small* means they still fit but their grab
+ * zones would meet across the middle, leaving nowhere to grab the shape
+ * itself — that one is answered by shrinking the zones rather than by dropping
+ * handles, so the box keeps its full set right down to the tiny threshold.
+ */
+interface SelectionScale {
+  isTinyX: boolean;
+  isTinyY: boolean;
+  isSmallX: boolean;
+  isSmallY: boolean;
+  hitTarget: { x: number; y: number };
+}
+
+function selectionScale(
+  width: number,
+  height: number,
   zoom: number,
+  coarse: boolean,
+): SelectionScale {
+  const tiny = TINY_SCREEN / zoom;
+  const small = SMALL_SCREEN / zoom;
+  const isSmallX = width < small;
+  const isSmallY = height < small;
+  const base = (HIT_TARGET_SCREEN / zoom) * (coarse ? COARSE_HIT_FACTOR : 1);
+  const trim = HIT_TARGET_TRIM * (coarse ? COARSE_HIT_FACTOR : 1);
+  return {
+    isTinyX: width < tiny,
+    isTinyY: height < tiny,
+    isSmallX,
+    isSmallY,
+    hitTarget: {
+      x: (isSmallX ? base / 2 : base) * trim,
+      y: (isSmallY ? base / 2 : base) * trim,
+    },
+  };
+}
+
+/**
+ * Culls the handle set down to what the box has room for, in stages.
+ *
+ * A box tiny on either axis keeps only the two corners of one diagonal: the
+ * other two would sit on top of them, and the edge handles between them have
+ * no room at all. A box tiny on *both* axes keeps a single corner, so that
+ * whatever is left of its interior stays grabbable. Touch drops the edge
+ * handles outright — a finger covers the whole edge of a modest box, and the
+ * corners it would shadow are the ones that do more.
+ */
+function degradedHandles(
+  ids: readonly ResizeHandleId[],
+  scale: SelectionScale,
+  coarse: boolean,
 ): ResizeHandleId[] {
-  const room = (2 * HANDLE_SCREEN) / zoom;
-  const w = bounds.maxX - bounds.minX;
-  const h = bounds.maxY - bounds.minY;
-  if (w < room && h < room) return ids.filter((id) => id === 'se');
+  const showOnlyOneHandle = scale.isTinyX && scale.isTinyY;
+  if (showOnlyOneHandle) return ids.filter((id) => id === 'nw');
+  const hideAlternateCorners = scale.isTinyX || scale.isTinyY;
   return ids.filter((id) => {
-    if (id === 'n' || id === 's') return w >= room;
-    if (id === 'e' || id === 'w') return h >= room;
-    return true;
+    const isCorner = id.length === 2;
+    if (!isCorner) return !hideAlternateCorners && !coarse;
+    return !hideAlternateCorners || id === 'nw' || id === 'se';
   });
+}
+
+/**
+ * Half-side of a corner rotation zone, in world units: the nominal resize hit
+ * extent scaled up, so the zone stays a fixed screen size and always the same
+ * amount bigger than the corner target it sits beyond. The nominal extent
+ * rather than the box's own `hitTarget` — that one is trimmed and halved to
+ * keep neighbouring targets apart *inside* the box, which is not a constraint
+ * out where these zones sit.
+ */
+function cornerZoneExtent(zoom: number): number {
+  return (HIT_TARGET_SCREEN / zoom) * ROTATE_CORNER_FACTOR;
+}
+
+/**
+ * Where the touch rotate knob sits, in the box's own frame with the origin at
+ * its top-left corner. Above the box by default. Media keeps its top edge
+ * clear — a finger there covers the frame of the picture people are aiming at —
+ * so images and video take the lane below instead, except while the box is
+ * turned far enough (between 1.6 and 2.4 quarter turns) that "below" has swung
+ * back up under the contextual toolbar. A narrow box puts the knob out to the
+ * left, where it cannot cover what little width there is.
+ */
+function mobileRotateOffset(
+  scale: SelectionScale,
+  width: number,
+  height: number,
+  isMedia: boolean,
+  rotation: number,
+): Point {
+  const { x: hx, y: hy } = scale.hitTarget;
+  if (scale.isSmallX) {
+    return { x: -hx * MOBILE_ROTATE_OFFSET, y: height / 2 };
+  }
+  const quarterTurns = clampRotation(rotation) / (Math.PI / 2);
+  const nearToolbar = quarterTurns > 1.6 && quarterTurns < 2.4;
+  return {
+    x: width / 2,
+    y:
+      isMedia && !nearToolbar
+        ? height + hy * MOBILE_ROTATE_OFFSET
+        : -hy * MOBILE_ROTATE_OFFSET,
+  };
+}
+
+/** Selection rotation on [0, 2pi), the interval the knob's lane test assumes. */
+function clampRotation(rotation: number): number {
+  const turn = Math.PI * 2;
+  return ((rotation % turn) + turn) % turn;
+}
+
+/** Media reads top-edge-first, so its rotate knob moves out of that lane. */
+function isMediaShape(shape: Shape | null): boolean {
+  return shape?.type === 'image' || shape?.type === 'video';
+}
+
+/** Screen-constant, but never smaller than a fingertip at low zoom. */
+function mobileRotateRadius(zoom: number): number {
+  return Math.max(14 / zoom, 20 / Math.max(1, zoom));
 }
 
 /** The box's own axis-aligned frame: page space rotated about the origin. */
@@ -181,6 +383,8 @@ export function getSelectionInfo(
    *  per-frame path during drags and pans. Selection order never matters here —
    *  the single-shape path takes `ids[0]` and the multi path unions bounds. */
   getShape?: (id: string) => Shape | undefined,
+  /** Touch or pen without hover: bigger targets, one visible rotate knob. */
+  coarsePointer = false,
 ): SelectionInfo | null {
   if (ids.length === 0) return null;
   const selected: Shape[] = [];
@@ -239,9 +443,16 @@ export function getSelectionInfo(
     // tool so a frame rotation carries its whole subtree.
     const noHandles = shape.locked || isGroup;
     const customHandles = noHandles ? null : (util.getHandles?.(shape) ?? null);
+    const scale = selectionScale(
+      maxX - minX,
+      maxY - minY,
+      zoom,
+      coarsePointer,
+    );
 
     let handles: { id: ResizeHandleId; point: Point }[] = [];
     let rotationHandles: SelectionInfo['rotationHandles'] = [];
+    let mobileRotateHandle: SelectionInfo['mobileRotateHandle'] = null;
     if (!noHandles && !customHandles) {
       // Text has two intentional resize gestures: corners scale typography;
       // horizontal side handles set a fixed wrap width. Vertical-only handles
@@ -251,17 +462,37 @@ export function getSelectionInfo(
         shape.type === 'text'
           ? (['nw', 'ne', 'e', 'se', 'sw', 'w'] as ResizeHandleId[])
           : RESIZE_HANDLES;
-      handles = prunedHandles(resizeHandles, { minX, minY, maxX, maxY }, zoom).map((id) => ({
-        id,
-        point: handlePts[id],
-      }));
-      const d = ROTATE_CORNER_OFFSET / zoom;
-      rotationHandles = [
-        { id: 'rotate-nw', point: rot(minX - d, minY - d) },
-        { id: 'rotate-ne', point: rot(maxX + d, minY - d) },
-        { id: 'rotate-se', point: rot(maxX + d, maxY + d) },
-        { id: 'rotate-sw', point: rot(minX - d, maxY + d) },
-      ];
+      handles = degradedHandles(resizeHandles, scale, coarsePointer).map(
+        (id) => ({ id, point: handlePts[id] }),
+      );
+      // A corner zone on a tiny box would cover the corner handle it sits
+      // beyond, so rotation gives way to resizing there.
+      const canRotate = !scale.isTinyX && !scale.isTinyY;
+      const d = cornerZoneExtent(zoom);
+      if (canRotate && !coarsePointer) {
+        rotationHandles = [
+          { id: 'rotate-nw', point: rot(minX - d, minY - d), extent: d },
+          { id: 'rotate-ne', point: rot(maxX + d, minY - d), extent: d },
+          { id: 'rotate-se', point: rot(maxX + d, maxY + d), extent: d },
+          { id: 'rotate-sw', point: rot(minX - d, maxY + d), extent: d },
+        ];
+      }
+      // The knob replaces the corner zones on touch, and goes once the box is
+      // small on both axes: at that size it would sit further from the shape
+      // than the shape is wide.
+      if (coarsePointer && !(scale.isSmallX && scale.isSmallY)) {
+        const offset = mobileRotateOffset(
+          scale,
+          maxX - minX,
+          maxY - minY,
+          isMediaShape(shape),
+          rotation,
+        );
+        mobileRotateHandle = {
+          point: rot(minX + offset.x, minY + offset.y),
+          radius: mobileRotateRadius(zoom),
+        };
+      }
     }
 
     return {
@@ -273,6 +504,8 @@ export function getSelectionInfo(
       corners,
       handles,
       rotationHandles,
+      mobileRotateHandle,
+      hitTarget: scale.hitTarget,
       customHandles,
       isSingle: true,
     };
@@ -324,7 +557,17 @@ export function getSelectionInfo(
     (shape) => !shape.locked && shape.type !== 'group',
   );
   const resizable = selected.some((shape) => !shape.locked);
-  const d = ROTATE_CORNER_OFFSET / zoom;
+  const width = maxX - minX;
+  const height = maxY - minY;
+  const scale = selectionScale(width, height, zoom, coarsePointer);
+  const showCornerRotate =
+    canRotateAll && !coarsePointer && !scale.isTinyX && !scale.isTinyY;
+  const showMobileRotate =
+    canRotateAll && coarsePointer && !(scale.isSmallX && scale.isSmallY);
+  // A multi-selection has no single shape to read as media, so its knob keeps
+  // the default lane above the box.
+  const knob = mobileRotateOffset(scale, width, height, false, rotation);
+  const d = cornerZoneExtent(zoom);
   return {
     ids: selected.map((s) => s.id),
     bounds,
@@ -333,22 +576,76 @@ export function getSelectionInfo(
     center,
     corners,
     handles: resizable
-      ? prunedHandles(RESIZE_HANDLES, alignedBounds, zoom).map((id) => ({
+      ? degradedHandles(RESIZE_HANDLES, scale, coarsePointer).map((id) => ({
           id,
           point: groupPts[id],
         }))
       : [],
-    rotationHandles: canRotateAll
+    rotationHandles: showCornerRotate
       ? [
-          { id: 'rotate-nw', point: fromAligned(minX - d, minY - d) },
-          { id: 'rotate-ne', point: fromAligned(maxX + d, minY - d) },
-          { id: 'rotate-se', point: fromAligned(maxX + d, maxY + d) },
-          { id: 'rotate-sw', point: fromAligned(minX - d, maxY + d) },
+          { id: 'rotate-nw', point: fromAligned(minX - d, minY - d), extent: d },
+          { id: 'rotate-ne', point: fromAligned(maxX + d, minY - d), extent: d },
+          { id: 'rotate-se', point: fromAligned(maxX + d, maxY + d), extent: d },
+          { id: 'rotate-sw', point: fromAligned(minX - d, maxY + d), extent: d },
         ]
       : [],
+    mobileRotateHandle: showMobileRotate
+      ? {
+          point: fromAligned(minX + knob.x, minY + knob.y),
+          radius: mobileRotateRadius(zoom),
+        }
+      : null,
+    hitTarget: scale.hitTarget,
     customHandles: null,
     isSingle: false,
   };
+}
+
+/**
+ * Half-extents, in world units and along the box's own axes, of the area that
+ * grabs `handle`. A corner is a square centred on it; an edge handle is the
+ * band running the whole length of that edge, so a side can be grabbed
+ * anywhere along it rather than only at its midpoint.
+ */
+export function selectionHandleExtent(
+  info: SelectionInfo,
+  handle: ResizeHandleId,
+): Point {
+  const { x: hx, y: hy } = info.hitTarget;
+  if (handle.length === 2) {
+    const corner = CORNER_HIT_FACTOR * Math.max(hx, hy);
+    return { x: corner, y: corner };
+  }
+  const width = info.alignedBounds.maxX - info.alignedBounds.minX;
+  const height = info.alignedBounds.maxY - info.alignedBounds.minY;
+  return handle === 'n' || handle === 's'
+    ? { x: width / 2, y: hy }
+    : { x: hx, y: height / 2 };
+}
+
+/**
+ * The resize handle under a world point, or null. Corners are tested before
+ * edges so the stretch of band an edge shares with a corner does not steal it.
+ */
+export function hitSelectionHandle(
+  info: SelectionInfo,
+  point: Point,
+): ResizeHandleId | null {
+  const hits = (handle: { id: ResizeHandleId; point: Point }): boolean => {
+    const local = rotateFromOrigin(
+      { x: point.x - handle.point.x, y: point.y - handle.point.y },
+      -info.rotation,
+    );
+    const extent = selectionHandleExtent(info, handle.id);
+    return Math.abs(local.x) <= extent.x && Math.abs(local.y) <= extent.y;
+  };
+  for (const handle of info.handles) {
+    if (handle.id.length === 2 && hits(handle)) return handle.id;
+  }
+  for (const handle of info.handles) {
+    if (handle.id.length === 1 && hits(handle)) return handle.id;
+  }
+  return null;
 }
 
 /**

@@ -6,10 +6,12 @@ import {
   getSelectionInfo,
   HANDLE_HIT_SCREEN,
   HANDLE_SCREEN,
-  ROTATION_HANDLE_HIT_SCREEN,
-  shapeRotatedBounds,
+  selectionHandleExtent,
+  shapeOutlineCorners,
 } from './selection-geometry';
 import { rotationCursor } from './rotation-cursor';
+import { resizeCursor } from './resize-cursor';
+import { isCoarsePointer } from './platform';
 import { shapeRegistry } from './shapes/shape-registry';
 import { useDocumentStore } from './use-document-store';
 import { useSelectionStore } from './use-selection-store';
@@ -24,6 +26,8 @@ const SNAP = '#e5484d';
 const SNAP_TICK = 3;
 /** Screen-px radius of a connector handle's solid grip dot. */
 const GRIP = 4;
+/** Screen-px radius of the drawn touch rotate knob (its target is larger). */
+const MOBILE_ROTATE = 11;
 
 interface SelectionLayerProps {
   camera: Camera;
@@ -63,6 +67,7 @@ export function SelectionLayer({ camera }: SelectionLayerProps) {
     selectedIds,
     camera.z,
     (id) => shapesRecord[id],
+    isCoarsePointer(),
   );
   const single = info?.isSingle ? shapesRecord?.[info.ids[0]!] : undefined;
   const locked = !!single?.locked;
@@ -111,21 +116,25 @@ export function SelectionLayer({ camera }: SelectionLayerProps) {
         </g>
       )}
 
-      {/* Per-shape outlines for multi-selection (so membership is visible). */}
+      {/* Per-shape outlines for multi-selection (so membership is visible).
+          Each follows its own shape's orientation rather than the axis-aligned
+          envelope of it: a box around a turned shape sits clear of it on every
+          side, and reads as the selection having caught something larger. */}
       {info && !info.isSingle &&
         selectedIds.map((id) => {
           const shape = shapesRecord?.[id];
           if (!shape || tracedIds.has(id)) return null;
-          const b = shapeRotatedBounds(shape);
-          const tl = toScreen({ x: b.minX, y: b.minY });
-          const br = toScreen({ x: b.maxX, y: b.maxY });
+          const outline = shapeOutlineCorners(shape, shapes);
+          if (!outline) return null;
           return (
-            <rect
+            <polygon
               key={id}
-              x={tl.x}
-              y={tl.y}
-              width={br.x - tl.x}
-              height={br.y - tl.y}
+              points={outline
+                .map((corner) => {
+                  const sp = toScreen(corner);
+                  return `${sp.x},${sp.y}`;
+                })
+                .join(' ')}
               fill="none"
               stroke={ACCENT}
               strokeWidth={1}
@@ -153,52 +162,116 @@ export function SelectionLayer({ camera }: SelectionLayerProps) {
             )}
             {info.rotationHandles.map((handle) => {
               const p = toScreen(handle.point);
+              // Square, and turned with the box: the same zone the select tool
+              // tests, so hover and grab agree on a rotated selection.
+              const side = handle.extent * 2 * camera.z;
               return (
-                <circle
+                <rect
                   key={handle.id}
                   data-rotation-handle={handle.id}
-                  cx={p.x}
-                  cy={p.y}
-                  r={ROTATION_HANDLE_HIT_SCREEN}
+                  x={p.x - side / 2}
+                  y={p.y - side / 2}
+                  width={side}
+                  height={side}
+                  transform={`rotate(${(info.rotation * 180) / Math.PI} ${p.x} ${p.y})`}
                   fill="transparent"
                   pointerEvents="all"
                   style={{ cursor: rotationCursor(handle.id, info.rotation) }}
                 />
               );
             })}
-            {info.handles.map((h) => {
-              const p = toScreen(h.point);
-              const isTextWidthHandle =
-                single?.type === 'text' && (h.id === 'e' || h.id === 'w');
-              if (isTextWidthHandle) {
-                return (
+            {/* Corners last: their invisible cursor targets overlap the ends
+                of the edge bands, and the one painted on top is the one the
+                pointer reads — which has to be the one the select tool picks. */}
+            {[...info.handles]
+              .sort((a, b) => a.id.length - b.id.length)
+              .map((h) => {
+                const p = toScreen(h.point);
+                const isTextWidthHandle =
+                  single?.type === 'text' && (h.id === 'e' || h.id === 'w');
+                // The handle advertises which way it drags. The painted square
+                // is smaller than the tool's target, so the cursor is carried by
+                // an invisible rect of the target's size — hover and grab then
+                // begin at the same place.
+                const cursor = resizeCursor(h.id, info.rotation);
+                const extent = selectionHandleExtent(info, h.id);
+                const ex = extent.x * camera.z;
+                const ey = extent.y * camera.z;
+                const target = (
                   <rect
-                    key={h.id}
-                    x={p.x - 3}
-                    y={p.y - 8}
-                    width={6}
-                    height={16}
-                    rx={3}
-                    fill="var(--background, var(--bg-canvas, #ffffff))"
-                    stroke={ACCENT}
-                    strokeWidth={1.5}
+                    x={p.x - ex}
+                    y={p.y - ey}
+                    width={ex * 2}
+                    height={ey * 2}
+                    transform={
+                      info.rotation
+                        ? `rotate(${(info.rotation * 180) / Math.PI} ${p.x} ${p.y})`
+                        : undefined
+                    }
+                    fill="transparent"
+                    pointerEvents="all"
+                    style={{ cursor }}
                   />
                 );
-              }
-              return (
-                <rect
-                  key={h.id}
-                  x={p.x - HANDLE_SCREEN / 2}
-                  y={p.y - HANDLE_SCREEN / 2}
-                  width={HANDLE_SCREEN}
-                  height={HANDLE_SCREEN}
-                  rx={1.5}
-                  fill="var(--background, var(--bg-canvas, #ffffff))"
-                  stroke={ACCENT}
-                  strokeWidth={1.5}
-                />
-              );
-            })}
+                if (isTextWidthHandle) {
+                  return (
+                    <g key={h.id}>
+                      <rect
+                        x={p.x - 3}
+                        y={p.y - 8}
+                        width={6}
+                        height={16}
+                        rx={3}
+                        fill="var(--background, var(--bg-canvas, #ffffff))"
+                        stroke={ACCENT}
+                        strokeWidth={1.5}
+                      />
+                      {target}
+                    </g>
+                  );
+                }
+                return (
+                  <g key={h.id}>
+                    <rect
+                      x={p.x - HANDLE_SCREEN / 2}
+                      y={p.y - HANDLE_SCREEN / 2}
+                      width={HANDLE_SCREEN}
+                      height={HANDLE_SCREEN}
+                      rx={1.5}
+                      fill="var(--background, var(--bg-canvas, #ffffff))"
+                      stroke={ACCENT}
+                      strokeWidth={1.5}
+                    />
+                    {target}
+                  </g>
+                );
+              })}
+            {info.mobileRotateHandle &&
+              (() => {
+                const p = toScreen(info.mobileRotateHandle.point);
+                return (
+                  <g>
+                    <circle
+                      cx={p.x}
+                      cy={p.y}
+                      r={MOBILE_ROTATE}
+                      fill="var(--background, var(--bg-canvas, #ffffff))"
+                      stroke={ACCENT}
+                      strokeWidth={1.5}
+                    />
+                    {/* The same curved arrow the rotate cursor draws. */}
+                    <path
+                      d="M21 21C21 12.72 14.28 6 6 6M11 1 6 6l5 5"
+                      transform={`translate(${p.x} ${p.y}) scale(0.5) translate(-11 -11)`}
+                      fill="none"
+                      stroke={ACCENT}
+                      strokeWidth={3}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </g>
+                );
+              })()}
           </g>
         );
       })()}

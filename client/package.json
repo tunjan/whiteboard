@@ -34,6 +34,7 @@
     "pdfjs-dist": "^6.3.289",
     "rbush": "^4.0.1",
     "react": "^19.0.0",
+    "react-day-picker": "^10.0.1",
     "react-dom": "^19.0.0",
     "shadcn": "^4.15.0",
     "tailwind-merge": "^3.6.0",

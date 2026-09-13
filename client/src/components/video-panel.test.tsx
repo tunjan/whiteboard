@@ -49,7 +49,7 @@ vi.mock('@/collab/voice/video-session', () => ({
 }));
 
 const IDENTITY: Identity = { name: 'Tutor', color: '#DC2626', isTutor: true };
-const ANCHOR_CLASS = 'bottom-[calc(3.25rem+env(safe-area-inset-bottom))]';
+const ANCHOR_CLASS = 'bottom-[calc(3.25rem+var(--wb-inset-bottom))]';
 
 function render(identity: Identity | null = IDENTITY): string {
   return renderToStaticMarkup(<VideoPanel identity={identity} />);

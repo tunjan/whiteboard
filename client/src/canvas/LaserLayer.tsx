@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Point } from '@whiteboard/shared';
 import { usePresenceStore } from '@/collab/use-presence-store';
-import { cameraToTransform, type Camera } from './camera';
+import { worldToScreen, type Camera } from './camera';
+import { LaserMark } from './LaserMark';
 import { useDocumentStore } from './use-document-store';
 import {
   LASER_FADE_MS,
@@ -9,34 +10,9 @@ import {
   type LaserStroke,
 } from './use-laser-store';
 
-// A fixed, saturated red rather than the theme's destructive token: the laser
-// should read as a bright physical pointer in both light and dark mode, not
-// shift with the theme (light mode's destructive red is too muted/dark).
-const LASER_COLOR = '#FF3B30';
-const LASER_CORE_COLOR = '#FFFFFF';
-
-// Neon bloom: stacked translucent strokes fake a gaussian falloff. A real
-// feGaussianBlur would blur in user space — scaling with zoom, unlike the
-// non-scaling strokes it wraps — and is skipped outright when a straight
-// stroke gives the path a zero-height bounding box.
-const GLOW_LAYERS = [
-  { width: 28, opacity: 0.05 },
-  { width: 21, opacity: 0.07 },
-  { width: 15, opacity: 0.1 },
-  { width: 11, opacity: 0.16 },
-];
-const LASER_BODY_WIDTH = 7;
-const LASER_CORE_WIDTH = 2.5;
-
-// The tip of the laser stroke shines as a concentrated laser spot.
-const TIP_BLOOM_LAYERS = [
-  { r: 12, opacity: 0.12 },
-  { r: 6, opacity: 0.25 },
-];
-const TIP_BODY_RADIUS = 3.5;
-const TIP_CORE_RADIUS = 1.25;
-
-function pathFor(points: Point[]): string {
+function pathFor(worldPoints: Point[], camera: Camera): string {
+  // Project first so both the line and its blur stay the same size at any zoom.
+  const points = worldPoints.map((point) => worldToScreen(point, camera));
   const first = points[0];
   if (!first) return '';
   if (points.length === 1) {
@@ -111,79 +87,27 @@ export function LaserLayer({ camera }: { camera: Camera }) {
   if (strokes.length === 0) return null;
 
   return (
-    <svg className="pointer-events-none absolute inset-0 z-[var(--z-canvas-indicator)] h-full w-full">
-      <g transform={cameraToTransform(camera)}>
-        {strokes.map((stroke) => {
-          let opacity = 1;
-          if (stroke.done) {
-            // The hold happens upstream — the store only marks a stroke done
-            // once drawing has been idle for LASER_HOLD_MS — so a done stroke
-            // fades from the moment it is first seen here. Not yet stamped =
-            // first render since it finished: full opacity, as if stamped now.
-            const start = fadeStart.current.get(stroke.id);
-            opacity = start === undefined ? 1 : 1 - (now - start) / LASER_FADE_MS;
-            if (opacity <= 0) return null;
-          }
-          const d = pathFor(stroke.points);
-          const tip = stroke.points[stroke.points.length - 1];
-          return (
-            <g
-              key={stroke.id}
-              opacity={opacity}
-              fill="none"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              stroke={LASER_COLOR}
-            >
-              {GLOW_LAYERS.map((layer) => (
-                <path
-                  key={layer.width}
-                  d={d}
-                  strokeWidth={layer.width}
-                  strokeOpacity={layer.opacity}
-                  vectorEffect="non-scaling-stroke"
-                />
-              ))}
-              <path
-                d={d}
-                strokeWidth={LASER_BODY_WIDTH}
-                vectorEffect="non-scaling-stroke"
-              />
-              <path
-                d={d}
-                stroke={LASER_CORE_COLOR}
-                strokeWidth={LASER_CORE_WIDTH}
-                vectorEffect="non-scaling-stroke"
-              />
-              {tip && (
-                <g
-                  transform={`translate(${tip.x}, ${tip.y}) scale(${1 / camera.z})`}
-                  stroke="none"
-                >
-                  {TIP_BLOOM_LAYERS.map((layer) => (
-                    <circle
-                      key={layer.r}
-                      r={layer.r}
-                      fill={LASER_COLOR}
-                      opacity={layer.opacity}
-                    />
-                  ))}
-                  <circle
-                    r={TIP_BODY_RADIUS}
-                    fill={LASER_COLOR}
-                    opacity={0.9}
-                  />
-                  <circle
-                    r={TIP_CORE_RADIUS}
-                    fill={LASER_CORE_COLOR}
-                    opacity={1}
-                  />
-                </g>
-              )}
-            </g>
-          );
-        })}
-      </g>
+    <svg
+      aria-hidden="true"
+      className="pointer-events-none absolute inset-0 z-[var(--z-canvas-indicator)] h-full w-full"
+    >
+      {strokes.map((stroke) => {
+        let opacity = 1;
+        if (stroke.done) {
+          // The hold happens upstream — the store only marks a stroke done
+          // once drawing has been idle for LASER_HOLD_MS — so a done stroke
+          // fades from the moment it is first seen here. Not yet stamped =
+          // first render since it finished: full opacity, as if stamped now.
+          const start = fadeStart.current.get(stroke.id);
+          opacity = start === undefined ? 1 : 1 - (now - start) / LASER_FADE_MS;
+          if (opacity <= 0) return null;
+        }
+        return (
+          <g key={stroke.id} opacity={Math.min(1, opacity)}>
+            <LaserMark d={pathFor(stroke.points, camera)} />
+          </g>
+        );
+      })}
     </svg>
   );
 }

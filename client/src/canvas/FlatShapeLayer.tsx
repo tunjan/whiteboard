@@ -1,5 +1,5 @@
 import { memo, useLayoutEffect, useMemo, useRef } from 'react';
-import { react, transact } from '@tldraw/state';
+import { computed, react, transact } from '@tldraw/state';
 import type { Shape } from '@whiteboard/shared';
 import { cameraToTransform } from './camera';
 import { CanvasScene, type SceneNode } from './engine/scene';
@@ -40,6 +40,8 @@ export const FlatShapeLayer = memo(function FlatShapeLayer({
   height: number;
 }) {
   const scene = useMemo(() => new CanvasScene(spatialIndex), []);
+  // TEMPORARY perf harness — delete with ./scale-bench.ts.
+  (globalThis as unknown as { __scene?: CanvasScene }).__scene = scene;
   const layer = useRef<HTMLDivElement>(null);
   const containers = useMemo(() => new Map<string, HTMLDivElement>(), []);
 
@@ -49,14 +51,17 @@ export const FlatShapeLayer = memo(function FlatShapeLayer({
       const cropping = useImageCroppingStore.getState().croppingId;
       const playing = useVideoPlayingStore.getState().playingId;
       const live = useLiveStrokeStore.getState().shapeId;
+      const liveShape = live ? useDocumentStore.getState().shapesById.get(live) : undefined;
+      const liveHighlight = liveShape?.type === 'draw' && liveShape.props.inkKind === 'highlight';
       const frame = useFrameEditingStore.getState().editingId;
       const suppressed = new Set(
-        [editing, cropping, playing, live].filter((id): id is string => !!id),
+        [editing, cropping, playing, liveHighlight ? null : live].filter((id): id is string => !!id),
       );
       const pinned = new Set([
         ...useSelectionStore.getState().selectedIds,
         ...suppressed,
       ]);
+      if (live) pinned.add(live);
       if (frame) pinned.add(frame);
       scene.ui.set({
         hidden: useHiddenStore.getState().hidden,
@@ -145,9 +150,52 @@ const ShapeList = memo(function ShapeList({
 }) {
   const ids = useSignalValue(scene.ids);
   return ids.map((id) => (
-    <ShapeContainer key={id} node={scene.record(id)} containers={containers} />
+    <ShapePair key={id} node={scene.record(id)} containers={containers} />
   ));
 });
+
+const ShapePair = memo(function ShapePair({ node, containers }: {
+  node: SceneNode;
+  containers: Map<string, HTMLDivElement>;
+}) {
+  return <>
+    <ShapeContainer node={node} containers={containers} />
+    <HighlightOverlay node={node} />
+  </>;
+});
+
+/** Share the owner's transform, mask and visibility across both ink passes. */
+function HighlightOverlay({ node }: { node: SceneNode }) {
+  const isHighlight = useMemo(() => computed(`is highlight:${node.id}`, () => {
+    const shape = node.content.get();
+    return shape?.type === 'draw' && shape.props.inkKind === 'highlight';
+  }), [node]);
+  if (!useSignalValue(isHighlight)) return null;
+  return <HighlightOverlayContent node={node} />;
+}
+
+function HighlightOverlayContent({ node }: { node: SceneNode }) {
+  const shape = useSignalValue(node.content);
+  const ref = useRef<HTMLDivElement>(null);
+  const fragments = useEraserCutStore((s) => s.fragments[node.id]);
+  useLayoutEffect(() => {
+    const update = () => {
+      const element = ref.current!;
+      Object.assign(element.style, node.presentation.get());
+      element.style.zIndex = String(1_000_000 + node.z.get());
+      element.style.display = node.scene.visible.get().has(node.id) ? '' : 'none';
+      if (useLiveStrokeStore.getState().shapeId === node.id) element.style.visibility = 'hidden';
+    };
+    const stop = react(`highlight overlay:${node.id}`, update);
+    const unsubscribe = useLiveStrokeStore.subscribe(update);
+    return () => { stop(); unsubscribe(); };
+  }, [node]);
+  return <div ref={ref} data-highlight-overlay={node.id} style={{ position: 'absolute', width: 1, height: 1, transformOrigin: '0 0' }}>
+    <svg width="1" height="1" overflow="visible" style={{ display: 'block', overflow: 'visible' }}>
+      {fragments ? <CutPreview node={node} fragments={fragments} inkPass="overlay" /> : shape ? <ShapeView shape={shape} inkPass="overlay" /> : null}
+    </svg>
+  </div>;
+}
 
 const ShapeContainer = memo(function ShapeContainer({
   node,
@@ -206,7 +254,7 @@ const ShapeContent = memo(function ShapeContent({ node }: { node: SceneNode }) {
   const shape = useSignalValue(node.content);
   const fragments = useEraserCutStore((s) => s.fragments[node.id]);
   if (!shape) return null;
-  if (fragments) return <CutPreview node={node} fragments={fragments} />;
+  if (fragments) return <CutPreview node={node} fragments={fragments} inkPass="underlay" />;
   if (shape.type === 'frame')
     return (
       <>
@@ -214,7 +262,7 @@ const ShapeContent = memo(function ShapeContent({ node }: { node: SceneNode }) {
         <LiveFrameHeading node={node} />
       </>
     );
-  return <ShapeView shape={shape} />;
+  return <ShapeView shape={shape} inkPass="underlay" />;
 });
 
 /** Keep the heading upright and screen-sized without reconciling shape content. */
@@ -270,9 +318,11 @@ function LiveFrameHeading({ node }: { node: SceneNode }) {
 function CutPreview({
   node,
   fragments,
+  inkPass,
 }: {
   node: SceneNode;
   fragments: Shape[];
+  inkPass?: 'underlay' | 'overlay';
 }) {
   // Fragments still use page coordinates. Cancel only their owner's transform;
   // the owner's clip, opacity and stacking slot continue to apply.
@@ -281,7 +331,7 @@ function CutPreview({
   return (
     <g transform={matrixCss(inverse(shapeMatrix(shape)))}>
       {fragments.map((piece) => (
-        <ShapeView key={piece.id} shape={piece} />
+        <ShapeView key={piece.id} shape={piece} inkPass={inkPass} />
       ))}
     </g>
   );
