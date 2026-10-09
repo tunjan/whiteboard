@@ -10,6 +10,7 @@ import type {
   Shape,
   TextShape,
 } from '@whiteboard/shared';
+import { packShapeBase, readShapeBase, SHAPE_BASE_KEY } from '@whiteboard/shared';
 import './shapes/register';
 import {
   compareIndex,
@@ -338,7 +339,9 @@ describe('page transitions', () => {
     const secondPageId = createPage('Page 2');
 
     peerEditsPage(firstPageId, (shapes) => {
-      (shapes.get('rect-0') as Y.Map<unknown>).set('x', 5000);
+      const m = shapes.get('rect-0') as Y.Map<unknown>;
+      const next = { ...readShapeBase(m), x: 5000 } as Record<string, unknown>;
+      m.set(SHAPE_BASE_KEY, packShapeBase((field) => next[field]));
       shapes.delete('rect-1');
     });
 
@@ -366,7 +369,9 @@ describe('page transitions', () => {
     createPage('Page 2');
 
     peerEditsPage(firstPageId, (shapes) => {
-      (shapes.get('rect-a') as Y.Map<unknown>).set('x', 300);
+      const m = shapes.get('rect-a') as Y.Map<unknown>;
+      const next = { ...readShapeBase(m), x: 300 } as Record<string, unknown>;
+      m.set(SHAPE_BASE_KEY, packShapeBase((field) => next[field]));
     });
 
     setCurrentPage(firstPageId);
@@ -1160,12 +1165,7 @@ describe('edits arriving from outside this client', () => {
       const published = shapeStore.sorted.get();
       fromPeer((shapes) => {
         const m = new Y.Map<unknown>();
-        m.set('id', `peer-${n}`);
-        m.set('type', 'rectangle');
-        m.set('x', n);
-        m.set('y', 0);
-        m.set('rotation', 0);
-        m.set('index', `a${n}`);
+        m.set(SHAPE_BASE_KEY, [`peer-${n}`, 'rectangle', n, 0, 0, `a${n}`]);
         m.set('props', {
           w: 10,
           h: 10,
@@ -1190,12 +1190,7 @@ describe('edits arriving from outside this client', () => {
   it('does not delay a local edit, or leave one queued behind it', () => {
     fromPeer((shapes) => {
       const m = new Y.Map<unknown>();
-      m.set('id', 'peer');
-      m.set('type', 'rectangle');
-      m.set('x', 0);
-      m.set('y', 0);
-      m.set('rotation', 0);
-      m.set('index', 'a1');
+      m.set(SHAPE_BASE_KEY, ['peer', 'rectangle', 0, 0, 0, 'a1']);
       m.set('props', {
         w: 10,
         h: 10,

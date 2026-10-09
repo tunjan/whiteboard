@@ -1,5 +1,5 @@
 import * as Y from 'yjs';
-import type { Shape } from '@whiteboard/shared';
+import { readShapeBase, type Shape } from '@whiteboard/shared';
 import { BindingGraph } from './binding-graph';
 import { compareShapeOrder } from './engine/paint-order';
 import type { Bounds } from './geometry';
@@ -22,8 +22,15 @@ import { SpatialIndex } from './spatial-index';
 
 export type YShape = Y.Map<unknown>;
 
-export function yToShape(m: YShape): Shape {
-  const type = m.get('type');
+/**
+ * The shape `m` stores, or null for a map without a packed base — one written
+ * before the format change and not yet rewritten (`npm run migrate:shapes`), as
+ * a stale local cache can hold until the server's copy syncs in.
+ */
+export function yToShape(m: YShape): Shape | null {
+  const base = readShapeBase(m);
+  if (!base) return null;
+  const type = base.type;
   const storedProps =
     (m.get('props') as Record<string, unknown> | undefined) ?? {};
   const props =
@@ -48,19 +55,7 @@ export function yToShape(m: YShape): Shape {
               expressions: readGraphExpressions(m, storedProps),
             }
           : storedProps;
-  return {
-    id: m.get('id'),
-    type,
-    x: m.get('x'),
-    y: m.get('y'),
-    rotation: m.get('rotation'),
-    index: m.get('index'),
-    parentId: m.get('parentId'),
-    locked: m.get('locked'),
-    hidden: m.get('hidden'),
-    opacity: m.get('opacity'),
-    props,
-  } as Shape;
+  return { ...base, props } as Shape;
 }
 
 /**
@@ -88,7 +83,6 @@ export function collectTouchedShapeIds(
           [...e.keys.keys()].some(
             (key) =>
               key === 'props' ||
-              key === 'type' ||
               key === 'text' ||
               key === 'points' ||
               key === 'expressions',
@@ -222,6 +216,7 @@ export class PageDerivedState {
     const bounds: (Bounds & { id: string })[] = [];
     for (const [id, m] of source) {
       const shape = yToShape(m);
+      if (!shape) continue;
       this.cache.set(id, shape);
       const b = indexBounds(shape);
       if (b) bounds.push({ ...b, id });
@@ -244,9 +239,9 @@ export class PageDerivedState {
     const entering: Shape[] = [];
     for (const id of ids) {
       const m = source.get(id);
+      const shape = m ? yToShape(m) : null;
       const prev = this.cache.get(id);
-      if (m) {
-        const shape = yToShape(m);
+      if (shape) {
         this.cache.set(id, shape);
         const b = indexBounds(shape);
         if (b) this.index.insert(id, b);

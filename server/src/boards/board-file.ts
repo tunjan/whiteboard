@@ -12,6 +12,7 @@ import {
 } from '../blobs/store';
 import { extForDocId, isValidDocId, readDoc, saveDoc } from '../documents/store';
 import { postgresDocumentStorage } from '../collab/document-persistence';
+import { migrateShapes } from '../collab/migrate-shapes';
 import { hocuspocus } from '../collab/hocuspocus';
 
 /**
@@ -165,6 +166,8 @@ function decodeDocument(base64: unknown): Y.Doc {
   } catch {
     throw new BoardFileError('Malformed board file');
   }
+  // A file exported before shapes were packed.
+  migrateShapes(doc);
   return doc;
 }
 

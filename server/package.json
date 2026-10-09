@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "db:push": "drizzle-kit push",
-    "migrate:ink": "tsx src/scripts/migrate-ink.ts"
+    "migrate:ink": "tsx src/scripts/migrate-ink.ts",
+    "migrate:shapes": "tsx src/scripts/migrate-ink.ts"
   },
   "dependencies": {
     "@hocuspocus/server": "^4.2.0",

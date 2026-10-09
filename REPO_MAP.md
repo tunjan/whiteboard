@@ -54,7 +54,7 @@ registry plus the page being looked at.
 
 **Page document** (Hocuspocus name: `<boardId>/pages/<pageId>`, from `pageDocumentName` in `@whiteboard/shared`):
 
-- `shapes` (Y.Map): That page's shapes, and nothing else.
+- `shapes` (Y.Map): That page's shapes, and nothing else. Each shape is a Y.Map whose base fields (id, type, x, y, rotation, index, parentId, locked, hidden, opacity) are one positional array under `base` (`packShapeBase` / `readShapeBase` in `shared/src/shapes/base.ts`), beside `props` and any sequence (`text`, `points`, `expressions`). Older per-field maps are rewritten by `npm run migrate:shapes -w server`.
 - Residency is managed by `page-docs.ts`: the open page and any page pinned for its undo history stay in memory, plus the two most recently used beyond them. Eviction is skipped entirely when a board has neither a local cache nor a server, since there would be nowhere to reload from.
 - A page document is created and written to before it has synced — the shapes carry their own ids, so a cross-page move into a page nobody has opened merges when it arrives, with no round trip.
 - Deleting a page removes it from the registry (every client then drops its local copy) and `DELETE /api/pages/:boardId/:pageId` deletes the stored row, which the CRDT protocol has no way to express.

@@ -2,6 +2,7 @@ import * as Y from 'yjs';
 import {
   encodeInkChunk,
   inkChunkDimension,
+  readShapeBase,
   type DrawPoint,
 } from '@whiteboard/shared';
 
@@ -130,7 +131,10 @@ export function migrateInk(doc: Y.Doc): InkMigrationResult {
   doc.transact(() => {
     for (const name of names) {
       for (const shape of doc.getMap<unknown>(name).values()) {
-        if (!(shape instanceof Y.Map) || shape.get('type') !== 'draw') continue;
+        if (!(shape instanceof Y.Map)) continue;
+        // Per-field before migrate-shapes.ts packed it; either may come first.
+        const type = shape.get('type') ?? readShapeBase(shape)?.type;
+        if (type !== 'draw') continue;
         const stored = shape.get('points');
         const props = shape.get('props') as Record<string, unknown> | undefined;
         const propsPoints = Array.isArray(props?.points)

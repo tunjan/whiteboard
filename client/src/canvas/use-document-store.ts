@@ -38,7 +38,12 @@ import {
   type YShape,
 } from './page-derived';
 import { transact } from '@tldraw/state';
-import { REMOVED_MESSAGE } from '@whiteboard/shared';
+import {
+  packShapeBase,
+  readShapeBase,
+  REMOVED_MESSAGE,
+  SHAPE_BASE_KEY,
+} from '@whiteboard/shared';
 import { boardKey, isViewOnly, setBoardAccess } from '@/board/board-access';
 import { publishDocumentChanges } from './engine/document-changes';
 import { shapeStore } from './engine/shape-store';
@@ -219,16 +224,10 @@ function readPages(pages: Y.Map<YPageMeta>): PageMeta[] {
 
 function shapeToY(shape: Shape): YShape {
   const m = new Y.Map<unknown>();
-  m.set('id', shape.id);
-  m.set('type', shape.type);
-  m.set('x', shape.x);
-  m.set('y', shape.y);
-  m.set('rotation', shape.rotation);
-  m.set('index', shape.index);
-  if (shape.parentId !== undefined) m.set('parentId', shape.parentId);
-  if (shape.locked !== undefined) m.set('locked', shape.locked);
-  if (shape.hidden !== undefined) m.set('hidden', shape.hidden);
-  if (shape.opacity !== undefined) m.set('opacity', shape.opacity);
+  m.set(
+    SHAPE_BASE_KEY,
+    packShapeBase((field) => shape[field as keyof Shape]),
+  );
   if (shape.type === 'text') {
     // Text is a sequence CRDT, not a scalar property. Concurrent insert/delete
     // operations then merge by character identity instead of overwriting the
@@ -285,14 +284,6 @@ function syncYText(text: Y.Text, next: string): void {
   if (insert) text.insert(prefix, insert);
 }
 
-/**
- * A Y.Map set is never free, even with the value it already holds: it emits a
- * new item to every peer and leaves the old one behind as a tombstone.
- */
-function setIfChanged(m: YShape, key: string, value: unknown): void {
-  if (m.get(key) !== value) m.set(key, value);
-}
-
 function sameProps(
   a: Record<string, unknown>,
   b: Record<string, unknown>,
@@ -304,18 +295,37 @@ function sameProps(
   );
 }
 
+const PATCHABLE_BASE_FIELDS = [
+  'x',
+  'y',
+  'rotation',
+  'index',
+  'parentId',
+  'locked',
+  'hidden',
+  'opacity',
+] as const;
+
 function applyPatchToY(m: YShape, patch: ShapePatch): void {
-  if (patch.x !== undefined) setIfChanged(m, 'x', patch.x);
-  if (patch.y !== undefined) setIfChanged(m, 'y', patch.y);
-  if (patch.rotation !== undefined) setIfChanged(m, 'rotation', patch.rotation);
-  if (patch.index !== undefined) setIfChanged(m, 'index', patch.index);
-  if (patch.parentId !== undefined) setIfChanged(m, 'parentId', patch.parentId);
-  if (patch.locked !== undefined) setIfChanged(m, 'locked', patch.locked);
-  if (patch.hidden !== undefined) setIfChanged(m, 'hidden', patch.hidden);
-  if (patch.opacity !== undefined) setIfChanged(m, 'opacity', patch.opacity);
+  const base = readShapeBase(m)!;
+  // Written whole, and only when a field actually changed: a Y.Map set is never
+  // free, even with the value it already holds — it emits a new item to every
+  // peer and leaves the old one behind as a tombstone.
+  let nextBase: Record<string, unknown> | null = null;
+  for (const field of PATCHABLE_BASE_FIELDS) {
+    const value = patch[field];
+    if (value !== undefined && base[field] !== value) {
+      (nextBase ??= { ...base })[field] = value;
+    }
+  }
+  if (nextBase) {
+    const fields = nextBase;
+    m.set(SHAPE_BASE_KEY, packShapeBase((field) => fields[field]));
+  }
   if (patch.props) {
+    const type = base.type;
     const nextProps = { ...patch.props };
-    if (m.get('type') === 'text' && typeof nextProps.text === 'string') {
+    if (type === 'text' && typeof nextProps.text === 'string') {
       const existing = m.get('text');
       let text: Y.Text;
       if (existing instanceof Y.Text) {
@@ -328,7 +338,7 @@ function applyPatchToY(m: YShape, patch: ShapePatch): void {
       syncYText(text, nextProps.text);
       delete nextProps.text;
     }
-    if (m.get('type') === 'draw' && Array.isArray(nextProps.points)) {
+    if (type === 'draw' && Array.isArray(nextProps.points)) {
       const arr = ensurePointsArray(m);
       const points = nextProps.points as DrawPoint[];
       syncYPoints(arr, points);
@@ -336,7 +346,7 @@ function applyPatchToY(m: YShape, patch: ShapePatch): void {
       if (nextProps.isComplete === true) compactYPoints(arr, points);
       delete nextProps.points;
     }
-    if (m.get('type') === 'graph' && Array.isArray(nextProps.expressions)) {
+    if (type === 'graph' && Array.isArray(nextProps.expressions)) {
       syncYGraphExpressions(
         ensureGraphExpressionsArray(m),
         nextProps.expressions as GraphExpression[],
@@ -351,17 +361,17 @@ function applyPatchToY(m: YShape, patch: ShapePatch): void {
       // gesture that began before the upload landed writes back the props it
       // snapshotted, '' included, which would strand every peer on the
       // placeholder for good.
-      if (m.get('type') === 'image' && current.blobId && !merged.blobId) {
+      if (type === 'image' && current.blobId && !merged.blobId) {
         merged.blobId = current.blobId;
         if (current.thumbBlobId && !merged.thumbBlobId)
           merged.thumbBlobId = current.thumbBlobId;
       }
       // Once a legacy shape has a Y.Text, remove its stale scalar copy.
-      if (m.get('type') === 'text' && m.get('text') instanceof Y.Text) {
+      if (type === 'text' && m.get('text') instanceof Y.Text) {
         delete merged.text;
       }
       if (
-        m.get('type') === 'graph' &&
+        type === 'graph' &&
         m.get('expressions') instanceof Y.Array
       ) {
         delete merged.expressions;
@@ -1301,11 +1311,20 @@ export async function duplicatePage(id: string): Promise<string> {
         // Inserted before it is patched: a clone is unintegrated until it lands
         // in a document, and reading one back before then sees nothing.
         target.shapes.set(cloneId, clone);
-        clone.set('id', cloneId);
-        const parentId = m.get('parentId');
+        const base = readShapeBase(m)!;
+        const parentId =
+          typeof base.parentId === 'string'
+            ? (idMap.get(base.parentId) ?? null)
+            : null;
         clone.set(
-          'parentId',
-          typeof parentId === 'string' ? (idMap.get(parentId) ?? null) : null,
+          SHAPE_BASE_KEY,
+          packShapeBase((field) =>
+            field === 'id'
+              ? cloneId
+              : field === 'parentId'
+                ? parentId
+                : base[field as keyof typeof base],
+          ),
         );
         remapClonedBindings(clone, idMap);
       }
@@ -1329,7 +1348,7 @@ type StoredBinding = { shapeId: string } | null | undefined;
  * addressing a shape on another page.
  */
 function remapClonedBindings(clone: YShape, idMap: Map<string, string>): void {
-  if (clone.get('type') !== 'arrow') return;
+  if (readShapeBase(clone)!.type !== 'arrow') return;
   const props = clone.get('props') as
     { bindings?: { start: StoredBinding; end: StoredBinding } } | undefined;
   const bindings = props?.bindings;
@@ -1549,7 +1568,7 @@ export const editor: Editor = {
       if (cached) return cached;
     }
     const m = session?.currentShapes.get(id);
-    return m ? yToShape(m) : undefined;
+    return (m && yToShape(m)) ?? undefined;
   },
   getShapes: () => {
     if (!session) return [];

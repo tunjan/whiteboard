@@ -1,8 +1,11 @@
 /**
- * Rewrite every stored stroke into the binary ink chunk format.
+ * Rewrite every stored stroke into the binary ink chunk format, and every
+ * shape's base fields into their packed entry (see migrate-shapes.ts).
  *
- *   npm run migrate:ink -w server            # dry run: report, write nothing
- *   npm run migrate:ink -w server -- --apply # rewrite the documents that need it
+ *   npm run migrate:shapes -w server            # dry run: report, write nothing
+ *   npm run migrate:shapes -w server -- --apply # rewrite the documents that need it
+ *
+ * (`migrate:ink` is the same script.)
  *
  * Stop the server first. A running server holds open documents in memory and
  * appends to their logs; this script replaces a document's snapshot and drops
@@ -15,6 +18,7 @@ import { db } from '../db/client';
 import { boardDocumentUpdates, boardDocuments } from '../db/schema';
 import { postgresDocumentStorage } from '../collab/document-persistence';
 import { migrateInk } from '../collab/migrate-ink';
+import { migrateShapes } from '../collab/migrate-shapes';
 
 const apply = process.argv.includes('--apply');
 
@@ -32,6 +36,7 @@ async function main(): Promise<void> {
   const names = await documentNames();
   let documents = 0;
   let strokes = 0;
+  let shapes = 0;
   let bytesBefore = 0;
   let bytesAfter = 0;
 
@@ -48,20 +53,23 @@ async function main(): Promise<void> {
 
     const before = Y.encodeStateAsUpdateV2(doc).byteLength;
     const { migrated } = migrateInk(doc);
-    if (migrated === 0) continue;
+    const { migrated: packed } = migrateShapes(doc);
+    if (migrated === 0 && packed === 0) continue;
     const snapshot = Y.encodeStateAsUpdateV2(doc);
     documents++;
     strokes += migrated;
+    shapes += packed;
     bytesBefore += before;
     bytesAfter += snapshot.byteLength;
     console.log(
-      `${name}: ${migrated} strokes, ${before} -> ${snapshot.byteLength} bytes`,
+      `${name}: ${migrated} strokes, ${packed} shapes, ${before} -> ${snapshot.byteLength} bytes`,
     );
     if (apply) await postgresDocumentStorage.compact(name, snapshot);
   }
 
   console.log(
-    `${apply ? 'Migrated' : 'Would migrate'} ${strokes} strokes in ` +
+    `${apply ? 'Migrated' : 'Would migrate'} ${strokes} strokes and ` +
+      `${shapes} shapes in ` +
       `${documents} of ${names.length} documents; ` +
       `${bytesBefore} -> ${bytesAfter} bytes.`,
   );

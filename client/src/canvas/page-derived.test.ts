@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
+import {
+  packShapeBase,
+  readShapeBase,
+  SHAPE_BASE_FIELDS,
+  SHAPE_BASE_KEY,
+} from '@whiteboard/shared';
 import './shapes/register';
 import {
   PageDerivedState,
@@ -19,12 +25,24 @@ function put(
   extra: Record<string, unknown> = {},
 ): void {
   const m = new Y.Map<unknown>();
-  m.set('id', id);
-  m.set('type', 'rectangle');
-  m.set('x', 0);
-  m.set('y', 0);
-  m.set('rotation', 0);
-  m.set('index', index);
+  const base: Record<string, unknown> = {
+    id,
+    type: 'rectangle',
+    x: 0,
+    y: 0,
+    rotation: 0,
+    index,
+  };
+  for (const [key, value] of Object.entries(extra)) {
+    if ((SHAPE_BASE_FIELDS as readonly string[]).includes(key)) {
+      base[key] = value;
+      delete extra[key];
+    }
+  }
+  m.set(
+    SHAPE_BASE_KEY,
+    packShapeBase((field) => base[field]),
+  );
   m.set('props', {
     w: 10,
     h: 10,
@@ -35,6 +53,15 @@ function put(
   });
   for (const [key, value] of Object.entries(extra)) m.set(key, value);
   shapes.set(id, m);
+}
+
+/** What a client's `updateShape` writes for a change to base fields. */
+function setBase(m: YShape, fields: Record<string, unknown>): void {
+  const next = { ...readShapeBase(m), ...fields } as Record<string, unknown>;
+  m.set(
+    SHAPE_BASE_KEY,
+    packShapeBase((field) => next[field]),
+  );
 }
 
 const ids = (derived: PageDerivedState) =>
@@ -78,7 +105,7 @@ describe('PageDerivedState', () => {
     const before = derived.sortedShapes();
     const minX = derived.index.getBounds('a')!.minX;
 
-    shapes.get('a')!.set('x', 50);
+    setBase(shapes.get('a')!, { x: 50 });
     expect(derived.patch(shapes, ['a'])).toEqual([]);
 
     expect(derived.sortedShapes()).not.toBe(before);
@@ -96,7 +123,7 @@ describe('PageDerivedState', () => {
     derived.sortedShapes();
 
     put(shapes, 'c', 'a0');
-    shapes.get('a')!.set('index', 'a3');
+    setBase(shapes.get('a')!, { index: 'a3' });
     shapes.delete('b');
     const removed = derived.patch(shapes, ['a', 'b', 'c']);
 
@@ -195,7 +222,7 @@ describe('PageDerivedState', () => {
     shapes.observeDeep((events) =>
       collectTouchedShapeIds(events, shapes, dirty),
     );
-    shapes.get('a')!.set('x', 7);
+    setBase(shapes.get('a')!, { x: 7 });
 
     expect(parked.canPatch(dirty.size)).toBe(true);
     active.adopt(parked);
@@ -238,7 +265,7 @@ describe('collectTouchedShapeIds', () => {
     put(shapes, 'b', 'a2');
     const { touched, content } = watch(shapes);
 
-    shapes.get('a')!.set('x', 5);
+    setBase(shapes.get('a')!, { x: 5 });
     shapes.get('b')!.set('props', { w: 20 });
 
     expect([...touched].sort()).toEqual(['a', 'b']);
