@@ -199,11 +199,11 @@ function naturalSplineSegments(points: readonly Vec[]): CubicSegment[] {
     ];
   }
 
-  const lower = new Array<number>(n).fill(1);
-  const diagonal = new Array<number>(n).fill(4);
-  const upper = new Array<number>(n).fill(1);
-  const rhsX = new Array<number>(n);
-  const rhsY = new Array<number>(n);
+  const lower = Array.from<number>({ length: n }).fill(1);
+  const diagonal = Array.from<number>({ length: n }).fill(4);
+  const upper = Array.from<number>({ length: n }).fill(1);
+  const rhsX = Array.from<number>({ length: n });
+  const rhsY = Array.from<number>({ length: n });
   lower[0] = 0;
   diagonal[0] = 2;
   upper[n - 1] = 0;
@@ -223,7 +223,7 @@ function naturalSplineSegments(points: readonly Vec[]): CubicSegment[] {
     rhsX[i] = rhsX[i]! - factor * rhsX[i - 1]!;
     rhsY[i] = rhsY[i]! - factor * rhsY[i - 1]!;
   }
-  const derivatives = new Array<Vec>(n);
+  const derivatives = Array.from<Vec>({ length: n });
   derivatives[n - 1] = {
     x: rhsX[n - 1]! / diagonal[n - 1]!,
     y: rhsY[n - 1]! / diagonal[n - 1]!,

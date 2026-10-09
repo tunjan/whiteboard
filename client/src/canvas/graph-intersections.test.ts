@@ -51,6 +51,23 @@ describe('graph intersections', () => {
     expect(yAxis[0]!.y).toBeCloseTo(3, 5);
   });
 
+  it('reports a point once even when its copies straddle a dedupe cell edge', () => {
+    // One sample per unit, so x ≈ 2.5 sits on a rounding boundary. The
+    // curve-curve scan lands a hair below it, the x-axis
+    // bisection a hair above, and both must still read as one point.
+    const c = '2.500000000001';
+    const points = findGraphIntersections(
+      [expression(`sin(x - ${c})`), expression(`x - ${c}`)],
+      { xMin: 0, xMax: 240, yMin: -5, yMax: 5 },
+      {},
+      240,
+    );
+    const atRoot = points.filter(
+      (p) => Math.abs(p.x - 2.5) < 1e-3 && Math.abs(p.y) < 1e-3,
+    );
+    expect(atRoot).toHaveLength(1);
+  });
+
   it('finds intersections between two curves', () => {
     const points = findGraphIntersections(
       [expression('x^2'), expression('2 - x')],

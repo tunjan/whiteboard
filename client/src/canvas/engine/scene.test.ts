@@ -4,9 +4,10 @@ import {
   type Shape,
   type RectangleShape,
   type FrameShape,
+  type DrawShape,
 } from '@whiteboard/shared';
 import '../shapes/register';
-import { CanvasScene } from './scene';
+import { CanvasScene, type SceneUi } from './scene';
 import { SpatialIndex } from '../spatial-index';
 import { shapeRotatedBounds } from '../shape-bounds';
 import { intersectConvexPolygons, polygonCss } from './clipping';
@@ -42,6 +43,35 @@ const frame = (id: string, patch: Partial<FrameShape> = {}): FrameShape => ({
   index: 'a0',
   props: { w: 100, h: 100, name: 'Frame' },
   ...patch,
+});
+const EMPTY_UI: SceneUi = {
+  hidden: {},
+  erasing: {},
+  suppressed: new Set(),
+  pinned: new Set(),
+};
+const ink = (id: string, highlight = false): DrawShape => ({
+  id,
+  type: 'draw',
+  x: 0,
+  y: 0,
+  rotation: 0,
+  index: 'a0',
+  props: {
+    points: [
+      { x: 0, y: 0 },
+      { x: 10, y: 10 },
+    ],
+    color: '#000',
+    size: 3,
+    dash: 'solid',
+    isClosed: false,
+    simulatePressure: true,
+    thinning: 0.5,
+    smoothing: 0.5,
+    streamline: 0.5,
+    ...(highlight ? { inkKind: 'highlight' as const } : {}),
+  },
 });
 function setup(initial: Shape[]) {
   const shapes = new Map(initial.map((s) => [s.id, s]));
@@ -124,7 +154,7 @@ describe('canvas scene', () => {
     expect(scene.visible.get().has('far')).toBe(false);
     scene.camera.set({ x: 0.001, y: 0.001, z: 1 });
     expect(search).toHaveBeenCalledTimes(1);
-    scene.ui.set({ ...scene.ui.get(), pinned: new Set(['far']) });
+    scene.setUi({ ...EMPTY_UI, pinned: new Set(['far']) });
     expect(scene.visible.get().has('far')).toBe(true);
     stop();
   });
@@ -136,8 +166,86 @@ describe('canvas scene', () => {
     ]);
     scene.viewport.set({ width: 800, height: 600 });
     expect(scene.visible.get().has('child')).toBe(false);
-    scene.ui.set({ ...scene.ui.get(), pinned: new Set(['parent']) });
+    scene.setUi({ ...EMPTY_UI, pinned: new Set(['parent']) });
     expect(scene.visible.get().has('child')).toBe(true);
+  });
+
+  it('keeps selection out of the per-shape presentation signals', () => {
+    const { scene } = setup([rectangle('a'), rectangle('b')]);
+    const presentation = vi.fn();
+    const stop = react('presentation', () =>
+      presentation(scene.record('a').presentation.get()),
+    );
+    expect(presentation).toHaveBeenCalledTimes(1);
+    scene.setUi({ ...EMPTY_UI, pinned: new Set(['a', 'b']) });
+    expect(presentation).toHaveBeenCalledTimes(1);
+    // Rebuilding the same pins does not republish them either.
+    scene.setUi({ ...EMPTY_UI, pinned: new Set(['a', 'b']) });
+    expect(scene.uiEpoch.get()).toBe(1);
+    // The overlays it does read still reach it.
+    scene.setUi({ ...EMPTY_UI, hidden: { a: true } });
+    expect(presentation).toHaveBeenCalledTimes(2);
+    expect(scene.record('a').presentation.get().visibility).toBe('hidden');
+    stop();
+  });
+
+  it('re-cuts the cull only when a shape could have moved', () => {
+    const a = rectangle('a');
+    const { scene, update } = setup([a, rectangle('b', { index: 'a1' })]);
+    scene.viewport.set({ width: 800, height: 600 });
+    const stop = react('visibility', () => scene.visible.get());
+    const epoch = scene.boundsEpoch.get();
+    const document = scene.documentEpoch.get();
+    // Reordering and reparenting cannot change a footprint.
+    update({ ...a, index: 'a9' });
+    update({ ...a, index: 'a9', parentId: 'b' });
+    update({ ...a, index: 'a9', parentId: 'b', opacity: 0.5 });
+    expect(scene.boundsEpoch.get()).toBe(epoch);
+    // Every change is still published for consumers that cache a whole frame.
+    expect(scene.documentEpoch.get()).toBe(document + 3);
+    update({ ...a, index: 'a9', parentId: 'b', opacity: 0.5, x: 40 });
+    expect(scene.boundsEpoch.get()).toBeGreaterThan(epoch);
+    stop();
+  });
+
+  it('drops records for deleted shapes but keeps named ancestors', () => {
+    const { scene, shapes, index } = setup([
+      frame('parent'),
+      rectangle('child', { parentId: 'parent' }),
+      rectangle('loose', { x: 300 }),
+    ]);
+    // A pruned id hands out a fresh node; a retained one keeps its identity.
+    const loose = scene.record('loose');
+    const parent = scene.record('parent');
+    shapes.delete('loose');
+    index.remove('loose');
+    scene.apply(shapes, new Set(['loose']));
+    expect(scene.record('loose')).not.toBe(loose);
+    // 'parent' is gone from the document but 'child' still names it, so the
+    // node `child`'s presentation is subscribed to has to survive.
+    shapes.delete('parent');
+    index.remove('parent');
+    scene.apply(shapes, new Set(['parent']));
+    expect(scene.record('parent')).toBe(parent);
+    // Once nothing names it, it goes.
+    shapes.set('child', rectangle('child'));
+    scene.apply(shapes, new Set(['child', 'parent']));
+    expect(scene.record('parent')).not.toBe(parent);
+  });
+
+  it('publishes highlighter ink as its own list', () => {
+    const { scene, shapes, update } = setup([ink('a', true), ink('b')]);
+    expect(scene.highlightIds.get()).toEqual(['a']);
+    const published = vi.fn();
+    const stop = react('highlights', () => published(scene.highlightIds.get()));
+    update({ ...ink('a', true), x: 10 });
+    expect(published).toHaveBeenCalledTimes(1);
+    update(ink('b', true));
+    expect(scene.highlightIds.get()).toEqual(['a', 'b']);
+    shapes.delete('a');
+    scene.apply(shapes, new Set(['a']));
+    expect(scene.highlightIds.get()).toEqual(['b']);
+    stop();
   });
 
   it('invalidates content for in-place point edits from document diffs', () => {

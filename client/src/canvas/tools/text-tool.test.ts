@@ -99,24 +99,15 @@ describe('click to create', () => {
     expect(shape.y).toBeCloseTo(50 - halfLine);
   });
 
-  it('anchors the click point to the edge the alignment implies', () => {
-    // The box is empty at birth, so its width is the minimum. What matters is
-    // which of its edges the click point ends up on.
-    const half = MIN_TEXT_WIDTH / 2;
-    const cases = [
-      { align: 'start' as const, x: 50 },
-      { align: 'middle' as const, x: 50 - half },
-      { align: 'end' as const, x: 50 - MIN_TEXT_WIDTH },
-    ];
-
-    for (const { align, x } of cases) {
+  it('puts the click point on the left edge whatever the alignment', () => {
+    for (const align of ['start', 'middle', 'end'] as const) {
       useStyleStore.getState().setAlign(align);
       const { ctx, shapes } = context();
       const tool = createTextTool();
       tool.onPointerDown!(pointer(50, 50), ctx);
       tool.onPointerUp!(pointer(50, 50), ctx);
       expect(created(shapes)!.props.align).toBe(align);
-      expect(created(shapes)!.x).toBeCloseTo(x);
+      expect(created(shapes)!.x).toBeCloseTo(50);
     }
   });
 });

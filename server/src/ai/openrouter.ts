@@ -123,3 +123,42 @@ export async function chatCompletion(
   }
   return content;
 }
+
+/** Transcribe one dictated clip to plain text. */
+export async function transcribe(
+  model: string,
+  audio: string,
+  format: string,
+): Promise<string> {
+  const key = env.openRouterApiKey;
+  if (!key) throw new NotConfiguredError('OPENROUTER_API_KEY is not set');
+
+  let response: Response;
+  try {
+    response = await fetch('https://openrouter.ai/api/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${key}`,
+        'content-type': 'application/json',
+        'x-title': 'Whiteboard',
+      },
+      body: JSON.stringify({ model, input_audio: { data: audio, format } }),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+  } catch (error) {
+    throw new UpstreamError(
+      error instanceof Error && error.name === 'TimeoutError'
+        ? 'Transcription took too long'
+        : 'Could not reach OpenRouter',
+    );
+  }
+
+  const body = (await response.json().catch(() => null)) as {
+    text?: string;
+    error?: { message?: string };
+  } | null;
+  if (!response.ok) {
+    throw new UpstreamError(body?.error?.message ?? `HTTP ${response.status}`);
+  }
+  return body?.text?.trim() ?? '';
+}

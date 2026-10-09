@@ -407,8 +407,9 @@ describe('select tool state machine', () => {
 
     tool.onPointerDown?.(pointer(east.x, east.y), ctx);
     const target = info.bounds.minX + width * 2;
-    tool.onPointerMove?.(pointer(target, east.y, { altKey: true }), ctx);
-    tool.onPointerUp?.(pointer(target, east.y, { altKey: true }), ctx);
+    // Command suspends snapping for the drag; Alt would resize from the centre.
+    tool.onPointerMove?.(pointer(target, east.y, { metaKey: true }), ctx);
+    tool.onPointerUp?.(pointer(target, east.y, { metaKey: true }), ctx);
 
     // `b` shows its height to the page, so doubling the box's width has to
     // double `h` and leave `w` alone.
@@ -416,7 +417,7 @@ describe('select tool state machine', () => {
     expect(shapes.get('a')?.props).toMatchObject({ w: 80, h: 30 });
   });
 
-  it('scales an off-axis member uniformly rather than shearing it', () => {
+  it('pins the whole gesture to a uniform scale when a member is off-axis', () => {
     const a = rectangle('a', 0, 0, 'a0');
     const b = { ...rectangle('b', 80, 0, 'a1'), rotation: Math.PI / 4 };
     const { ctx, shapes } = context([a, b]);
@@ -427,14 +428,17 @@ describe('select tool state machine', () => {
     const target = info.bounds.minX + (info.bounds.maxX - info.bounds.minX) * 2;
 
     tool.onPointerDown?.(pointer(east.x, east.y), ctx);
-    tool.onPointerMove?.(pointer(target, east.y, { altKey: true }), ctx);
-    tool.onPointerUp?.(pointer(target, east.y, { altKey: true }), ctx);
+    tool.onPointerMove?.(pointer(target, east.y, { metaKey: true }), ctx);
+    tool.onPointerUp?.(pointer(target, east.y, { metaKey: true }), ctx);
 
-    // A width-only drag cannot stretch a 45° shape without shearing it, so it
-    // keeps its proportions and takes the smaller factor on both axes.
+    // A width-only drag cannot stretch a 45° shape without shearing it. Rather
+    // than let that member fall behind the rest of the selection, the drag
+    // becomes uniform for everything in it: the width doubles, so does the
+    // height, and every member keeps its proportions.
     const props = shapes.get('b')!.props as { w: number; h: number };
     expect(props.w / props.h).toBeCloseTo(40 / 30);
-    expect(props.w).toBeCloseTo(40);
+    expect(props.w).toBeCloseTo(80);
+    expect(shapes.get('a')?.props).toMatchObject({ w: 80, h: 60 });
   });
 
   it('resizes from where the handle was grabbed, not where the cursor is', () => {
@@ -445,10 +449,69 @@ describe('select tool state machine', () => {
     // Grabbed 3px outside the east edge; the edge should follow the drag, not
     // jump to meet the cursor.
     tool.onPointerDown?.(pointer(43, 15), ctx);
-    tool.onPointerMove?.(pointer(53, 15, { altKey: true }), ctx);
-    tool.onPointerUp?.(pointer(53, 15, { altKey: true }), ctx);
+    tool.onPointerMove?.(pointer(53, 15, { metaKey: true }), ctx);
+    tool.onPointerUp?.(pointer(53, 15, { metaKey: true }), ctx);
 
     expect(shapes.get('a')?.props).toMatchObject({ w: 50, h: 30 });
+  });
+
+  it('resizes about the box centre while Alt is held', () => {
+    const { ctx, shapes } = context([rectangle('a', 0, 0, 'a0')]);
+    const tool = createSelectTool();
+    useSelectionStore.getState().setSelection(['a']);
+
+    // The east edge goes from 40 to 60, twice as far from the centre at 20 —
+    // so the west edge travels the same distance the other way.
+    tool.onPointerDown?.(pointer(40, 15), ctx);
+    tool.onPointerMove?.(pointer(60, 15, { altKey: true, metaKey: true }), ctx);
+    tool.onPointerUp?.(pointer(60, 15, { altKey: true, metaKey: true }), ctx);
+
+    expect(shapes.get('a')).toMatchObject({ x: -20 });
+    expect(shapes.get('a')?.props).toMatchObject({ w: 80, h: 30 });
+  });
+
+  it('mirrors a shape dragged past its own anchor instead of collapsing it', () => {
+    // An L, so which way it faces is readable from the points alone.
+    const stroke: Extract<Shape, { type: 'draw' }> = {
+      id: 'a',
+      type: 'draw',
+      x: 0,
+      y: 0,
+      rotation: 0,
+      index: 'a0',
+      props: {
+        points: [
+          { x: 0, y: 0 },
+          { x: 0, y: 30 },
+          { x: 40, y: 30 },
+        ],
+        isClosed: false,
+        color: '#111',
+        size: 1,
+      },
+    };
+    const { ctx, shapes } = context([stroke]);
+    const tool = createSelectTool();
+    useSelectionStore.getState().setSelection(['a']);
+    const info = getSelectionInfo([stroke], ['a'], 1)!;
+    const east = info.handles.find((handle) => handle.id === 'e')!.point;
+    const width = info.bounds.maxX - info.bounds.minX;
+
+    // Dragged a box-width past the west edge, so the box comes out the same
+    // width again on the other side of the anchor it was pinned to.
+    tool.onPointerDown?.(pointer(east.x, east.y), ctx);
+    const target = info.bounds.minX - width;
+    tool.onPointerMove?.(pointer(target, east.y, { metaKey: true }), ctx);
+    tool.onPointerUp?.(pointer(target, east.y, { metaKey: true }), ctx);
+
+    const after = shapes.get('a') as Extract<Shape, { type: 'draw' }>;
+    const xs = after.props.points.map((point) => point.x);
+    expect(Math.max(...xs) - Math.min(...xs)).toBeCloseTo(40);
+    // The mirror is carried by the geometry, not by an inverted box: the foot
+    // of the L that ran east now runs west.
+    expect(after.props.points[2]!.x).toBeLessThan(after.props.points[0]!.x);
+    // And the whole stroke has crossed the anchor it was pinned to.
+    expect(shapeRotatedBounds(after).maxX).toBeCloseTo(info.bounds.minX);
   });
 
   it('does not snap or show guides when snapping is disabled', () => {
@@ -480,13 +543,13 @@ describe('select tool state machine', () => {
     expect(useSelectionStore.getState().selectedIds).toEqual([]);
   });
 
-  it('rotates from an exterior corner target', () => {
+  it('rotates from the knob and resizes from the corner beside it', () => {
     const shape = rectangle('a', 0, 0, 'a0');
     const { ctx, shapes } = context([shape]);
     const tool = createSelectTool();
     useSelectionStore.getState().setSelection([shape.id]);
     const info = getSelectionInfo([shape], [shape.id], 1)!;
-    const handle = info.rotationHandles[0]!.point;
+    const handle = info.rotateHandle!.point;
     const dx = handle.x - info.center.x;
     const dy = handle.y - info.center.y;
 
@@ -501,6 +564,21 @@ describe('select tool state machine', () => {
     );
 
     expect(shapes.get(shape.id)?.rotation).toBeCloseTo(Math.PI / 2);
+
+    // Just outside a corner is no longer a rotation zone: it resizes.
+    const turned = shapes.get(shape.id)!;
+    const cornerInfo = getSelectionInfo([turned], [turned.id], 1)!;
+    const corner = cornerInfo.handles.find((h) => h.id === 'se')!.point;
+    const outside = rotatePoint(
+      { x: corner.x + 3, y: corner.y + 3 },
+      corner,
+      turned.rotation,
+    );
+    tool.onPointerDown?.(pointer(outside.x, outside.y), ctx);
+    tool.onPointerMove?.(pointer(outside.x + 10, outside.y + 10), ctx);
+    tool.onPointerUp?.(pointer(outside.x + 10, outside.y + 10), ctx);
+    expect(shapes.get(shape.id)?.rotation).toBeCloseTo(Math.PI / 2);
+    expect(shapes.get(shape.id)).not.toMatchObject({ props: turned.props });
   });
 
   it('rotates a parented multi-selection as one rigid body', () => {
@@ -517,7 +595,7 @@ describe('select tool state machine', () => {
       [first.id, second.id],
       1,
     )!;
-    const handle = info.rotationHandles[0]!.point;
+    const handle = info.rotateHandle!.point;
     const target = rotatePoint(handle, info.center, Math.PI / 2);
     const firstCenter = { x: first.x + 20, y: first.y + 15 };
     const secondCenter = { x: second.x + 20, y: second.y + 15 };
@@ -533,12 +611,11 @@ describe('select tool state machine', () => {
     );
 
     tool.onPointerDown?.(pointer(handle.x, handle.y), ctx);
-    const initialCursor = useSelectionStore.getState().gestureCursor;
     transactions.count = 0;
     tool.onPointerMove?.(pointer(target.x, target.y), ctx);
 
     expect(transactions.count).toBe(1);
-    expect(useSelectionStore.getState().gestureCursor).not.toBe(initialCursor);
+    expect(useSelectionStore.getState().gestureCursor).toBe('grabbing');
     expect(shapes.get(first.id)?.parentId).toBe(parent.id);
     expect(shapes.get(first.id)?.x).toBeCloseTo(expectedFirstCenter.x - 20);
     expect(shapes.get(first.id)?.y).toBeCloseTo(expectedFirstCenter.y - 15);
@@ -568,7 +645,7 @@ describe('select tool state machine', () => {
       [first.id, second.id],
       1,
     )!;
-    const handle = info.rotationHandles[0]!.point;
+    const handle = info.rotateHandle!.point;
     const target = rotatePoint(handle, info.center, Math.PI / 2);
 
     tool.onPointerDown?.(pointer(handle.x, handle.y), ctx);
@@ -593,7 +670,7 @@ describe('select tool state machine', () => {
       [first.id, second.id],
       1,
     )!;
-    const handle = info.rotationHandles[2]!.point;
+    const handle = info.rotateHandle!.point;
     const halfway = rotatePoint(handle, info.center, Math.PI / 4);
     const target = rotatePoint(handle, info.center, Math.PI / 2);
 
@@ -615,7 +692,7 @@ describe('select tool state machine', () => {
 
     useSelectionStore.getState().setSelection([shiftShape.id]);
     const shiftInfo = getSelectionInfo([shiftShape], [shiftShape.id], 1)!;
-    const shiftHandle = shiftInfo.rotationHandles[0]!.point;
+    const shiftHandle = shiftInfo.rotateHandle!.point;
     const shiftTarget = rotatePoint(shiftHandle, shiftInfo.center, requested);
     tool.onPointerDown?.(
       pointer(shiftHandle.x, shiftHandle.y, { shiftKey: true }),
@@ -635,7 +712,7 @@ describe('select tool state machine', () => {
 
     useSelectionStore.getState().setSelection([freeShape.id]);
     const freeInfo = getSelectionInfo([freeShape], [freeShape.id], 1)!;
-    const freeHandle = freeInfo.rotationHandles[0]!.point;
+    const freeHandle = freeInfo.rotateHandle!.point;
     const freeTarget = rotatePoint(freeHandle, freeInfo.center, requested);
     tool.onPointerDown?.(pointer(freeHandle.x, freeHandle.y), ctx);
     tool.onPointerMove?.(pointer(freeTarget.x, freeTarget.y), ctx);
@@ -652,7 +729,7 @@ describe('select tool state machine', () => {
     const tool = createSelectTool();
     useSelectionStore.getState().setSelection([shape.id]);
     const info = getSelectionInfo([shape], [shape.id], 1)!;
-    const handle = info.rotationHandles[0]!.point;
+    const handle = info.rotateHandle!.point;
     const target = rotatePoint(handle, info.center, (87 * Math.PI) / 180);
 
     tool.onPointerDown?.(

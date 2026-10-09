@@ -1,5 +1,7 @@
 import type { Bounds, ShapeMap } from '@whiteboard/shared';
-import { spatialIndex, useDocumentStore } from '../use-document-store';
+import { spatialIndex } from '../use-document-store';
+import { shapeStore } from '../engine/shape-store';
+import { useStoreValue } from '../use-shapes';
 import { boxBounds } from './box-geometry';
 
 /**
@@ -109,7 +111,10 @@ export function squaredCorners(
  * no longer align to the axes the contact test is expressed in.
  */
 export function useMergedCorners(shape: ShapeMap['image']): number {
-  return useDocumentStore((s) => {
+  return useStoreValue(() => {
+    // The spatial index is not a signal, so a neighbour arriving from outside
+    // the current contact set is only seen by re-running on every publish.
+    shapeStore.sorted.get();
     if (shape.rotation) return 0;
     const rect = boxBounds(shape.x, shape.y, shape.props.w, shape.props.h);
     const neighbors: Bounds[] = [];
@@ -120,12 +125,12 @@ export function useMergedCorners(shape: ShapeMap['image']): number {
       maxY: rect.maxY + CONTACT_TOLERANCE,
     })) {
       if (id === shape.id) continue;
-      const other = s.shapesById.get(id);
+      const other = shapeStore.peek(id);
       if (!other || other.type !== 'image' || other.rotation) continue;
       neighbors.push(boxBounds(other.x, other.y, other.props.w, other.props.h));
     }
     return squaredCorners(rect, neighbors);
-  });
+  }, [shape]);
 }
 
 function corner(r: number, x: number, y: number): string {

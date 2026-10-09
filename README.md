@@ -57,8 +57,11 @@ become playlists, and supported audio files (`.mp3`, `.m4a`, `.wav`, `.ogg`,
 
 The server boots without Postgres (auth works on its own); Postgres is only
 needed once boards sync through the server. The boards home screen is gated
-behind the single tutor password (`/api/auth/login`); board links
-(`/board/:id`) are open by capability URL.
+behind the single tutor password (`/api/auth/login`, rate-limited). Students
+open a board through its share link (`/board/:id?k=…`); the tutor can make
+that link view-only, turn it off, replace it, or remove a student from the
+Share popover. After pulling this change, run `npm run db:push -w server` to
+add the `share_key` / `share_mode` columns.
 
 ## Repository layout
 

@@ -137,6 +137,39 @@ function drawPoints(shape: Shape | undefined): DrawProps['points'] | undefined {
 }
 
 describe('draw tool stroke lifecycle', () => {
+  it('writes the live stroke to the document five times a second', () => {
+    // Timers only: faking rAF too would leave it undefined for later tests
+    // once `useRealTimers` restores node's (absent) original.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const { ctx, shapes } = context();
+      const tool = createDrawTool();
+      const docXs = () =>
+        drawPoints([...shapes.values()][0])?.map((p) => p.x);
+
+      withSynchronousFrames(() => {
+        tool.onPointerDown?.(pointer(0, 0), ctx);
+        tool.onPointerMove?.(pointer(10, 0), ctx);
+        vi.advanceTimersByTime(100);
+        tool.onPointerMove?.(pointer(20, 0), ctx);
+      });
+      // Drawn locally every frame, but peers have not been sent it yet.
+      expect(docXs()).toEqual([0]);
+
+      // The hand then pauses: no move arrives, and the points drawn so far
+      // still go out when the interval ends.
+      vi.advanceTimersByTime(100);
+      expect(docXs()).toEqual([0, 10, 20]);
+
+      withSynchronousFrames(() => tool.onPointerMove?.(pointer(30, 0), ctx));
+      tool.onPointerUp?.(pointer(30, 0), ctx);
+      // The lift writes the whole stroke without waiting for the interval.
+      expect(docXs()).toEqual([0, 10, 20, 30]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('onCommit keeps every sample, even ones the chord could describe', () => {
     const { ctx, shapes } = context();
     const tool = createDrawTool();
@@ -999,7 +1032,7 @@ describe('straight-segment mode', () => {
     expect(Math.hypot(bridge[0]!.x - 85, bridge[0]!.y - 10)).toBeCloseTo(1, 12);
     expect(Math.hypot(bridge[3]!.x - 90, bridge[3]!.y - 20)).toBeCloseTo(1, 12);
     expect(bridge.map((point) => point.y)).toEqual(
-      [...bridge.map((point) => point.y)].sort((a, b) => a - b),
+      bridge.map((point) => point.y).sort((a, b) => a - b),
     );
     expect(bridge[1]!.pressure).toBeLessThan(bridge[0]!.pressure!);
     expect(bridge[2]!.pressure).toBeLessThan(bridge[3]!.pressure!);
@@ -1348,5 +1381,53 @@ describe('stylus tilt capture', () => {
     const mouse = drawWith({ pointerType: 'mouse', pressure: 0.5 });
     if (mouse?.type !== 'draw') throw new Error('n/a');
     expect(mouse.props.points[0]).not.toHaveProperty('tiltX');
+  });
+});
+
+describe('hold to snap', () => {
+  /** A wobbly triangle traced corner to corner, ending back at the start. */
+  const triangle: [number, number][] = [];
+  const corners: [number, number][] = [[0, 200], [100, 0], [200, 200], [0, 200]];
+  for (let e = 0; e < 3; e++) {
+    const [ax, ay] = corners[e]!;
+    const [bx, by] = corners[e + 1]!;
+    for (let i = 0; i < 30; i++) {
+      const t = i / 30;
+      triangle.push([ax + (bx - ax) * t + Math.sin(i) * 2, ay + (by - ay) * t]);
+    }
+  }
+  triangle.push([4, 198]);
+
+  function drawAndHold(holdMs: number): Shape | undefined {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const { ctx, shapes } = context();
+      const tool = createDrawTool();
+      tool.onPointerDown?.(pointer(...triangle[0]!), ctx);
+      for (const [x, y] of triangle.slice(1)) tool.onPointerMove?.(pointer(x, y), ctx);
+      vi.advanceTimersByTime(holdMs);
+      // Drift after the snap is ignored; the lift commits the clean shape.
+      tool.onPointerMove?.(pointer(60, 150), ctx);
+      tool.onPointerUp?.(pointer(60, 150), ctx);
+      return [...shapes.values()][0];
+    } finally {
+      vi.useRealTimers();
+    }
+  }
+
+  it('replaces a held stroke with its clean shape', () => {
+    const shape = drawAndHold(600);
+    const props = shape?.type === 'draw' ? shape.props : undefined;
+    // Resampled evenly, closing exactly on its first point.
+    expect(props?.points![0]).toEqual(props?.points!.at(-1));
+    expect(props?.isClosed).toBe(true);
+    // Sharp corners need the stabilizer and tapers off.
+    expect(props?.streamline).toBe(0);
+    expect(props?.endTaper).toBe(false);
+  });
+
+  it('keeps the stroke as drawn when lifted before the hold', () => {
+    const shape = drawAndHold(200);
+    expect(drawPoints(shape)!.length).toBeGreaterThan(80);
   });
 });

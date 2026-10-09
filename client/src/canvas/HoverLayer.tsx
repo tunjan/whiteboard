@@ -1,18 +1,14 @@
-import type { Shape } from '@whiteboard/shared';
-import type { Camera } from './camera';
-import { worldToScreen } from './camera';
-import { useCameraTransform } from './use-camera-interaction';
+import { cameraToTransform, worldToScreen } from './camera';
+import { useCameraFollow } from './use-camera-interaction';
 import { isCoarsePointer } from './platform';
 import { shapeOutlineCorners } from './selection-geometry';
 import { shapeRegistry } from './shapes/shape-registry';
-import { useDocumentStore } from './use-document-store';
+import { useShape } from './use-shapes';
+import { useGroupSubtree } from './use-group-subtree';
 import { useHoverStore } from './use-hover-store';
 import { useSelectionStore } from './use-selection-store';
 
-/** Stable empty array for the non-group path (see `isGroup`). */
-const NO_SHAPES: Shape[] = [];
-
-const ACCENT = 'var(--action-solid, #3b82f6)';
+const ACCENT = 'var(--link, #2563eb)';
 /** Faint enough to read as "this is what you would get", not as a selection. */
 const OPACITY = 0.45;
 
@@ -28,17 +24,15 @@ const OPACITY = 0.45;
  * promising something that is not about to happen. Coarse pointers, which have
  * no hover at all, are turned away here.
  */
-export function HoverLayer({ camera }: { camera: Camera }) {
+export function HoverLayer() {
   const hoveredId = useHoverStore((s) => s.hoveredId);
   const selected = useSelectionStore((s) => s.selectedIds);
-  const shape = useDocumentStore((s) =>
-    hoveredId ? s.shapesById.get(hoveredId) : undefined,
-  );
+  const shape = useShape(hoveredId);
   // A group's box is derived from its descendants, so it is the one case that
-  // has to watch the whole page; everything else depends on its own shape only.
+  // has to watch more than its own shape — its subtree, not the page.
   const isGroup = shape?.type === 'group';
-  const shapes = useDocumentStore((s) => (isGroup ? s.shapes : NO_SHAPES));
-  const transform = useCameraTransform(camera);
+  const shapes = useGroupSubtree(hoveredId ? [hoveredId] : []);
+  const [camera, follow] = useCameraFollow<SVGGElement>();
 
   // The selected shape already has a box around it, and drawing a second one
   // inside it just thickens the line.
@@ -52,17 +46,19 @@ export function HoverLayer({ camera }: { camera: Camera }) {
       <svg className="pointer-events-none absolute inset-0 z-[var(--z-canvas-indicator)] h-full w-full">
         {/* World space, so a curve is traced exactly; the stroke stays a
             constant screen width via non-scaling-stroke. */}
-        <g transform={transform} fill="none">
-          <path
-            d={traced.d}
-            transform={traced.transform}
-            stroke={ACCENT}
-            strokeWidth={1.5}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            opacity={OPACITY}
-            vectorEffect="non-scaling-stroke"
-          />
+        <g ref={follow}>
+          <g transform={cameraToTransform(camera)} fill="none">
+            <path
+              d={traced.d}
+              transform={traced.transform}
+              stroke={ACCENT}
+              strokeWidth={1.5}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              opacity={OPACITY}
+              vectorEffect="non-scaling-stroke"
+            />
+          </g>
         </g>
       </svg>
     );
@@ -72,21 +68,23 @@ export function HoverLayer({ camera }: { camera: Camera }) {
   if (!outline) return null;
   return (
     <svg className="pointer-events-none absolute inset-0 z-[var(--z-canvas-indicator)] h-full w-full">
-      <polygon
-        points={outline
-          .map((corner) => {
-            const p = worldToScreen(corner, camera);
-            return `${p.x},${p.y}`;
-          })
-          .join(' ')}
-        fill="none"
-        stroke={ACCENT}
-        strokeWidth={1.5}
-        // Dashed for a group, for the same reason its selection box is: the box
-        // bounds shapes rather than being one.
-        strokeDasharray={isGroup ? '4 3' : undefined}
-        opacity={OPACITY}
-      />
+      <g ref={follow}>
+        <polygon
+          points={outline
+            .map((corner) => {
+              const p = worldToScreen(corner, camera);
+              return `${p.x},${p.y}`;
+            })
+            .join(' ')}
+          fill="none"
+          stroke={ACCENT}
+          strokeWidth={1.5}
+          // Dashed for a group, for the same reason its selection box is: the
+          // box bounds shapes rather than being one.
+          strokeDasharray={isGroup ? '4 3' : undefined}
+          opacity={OPACITY}
+        />
+      </g>
     </svg>
   );
 }

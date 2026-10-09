@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { BackgroundType } from './grid';
+import type { RasterCacheMode } from './raster-grid';
 import type { FingerAction } from './touch-input';
 import {
   DEFAULT_PENCIL_DYNAMICS,
@@ -17,6 +18,15 @@ import {
  * meaningful half — boxes, text, arrows, polygons — are removed whole in both.
  */
 export type EraserMode = 'object' | 'precision';
+
+/**
+ * Which implementation draws the committed shapes — see `shape-renderer.ts`.
+ *
+ * Spelled out here rather than imported from the renderer table: the table
+ * imports both layers, and a preference store that pulled them in would make
+ * every consumer of a checkbox depend on the whole canvas.
+ */
+export type ShapeRendererChoice = 'auto' | 'dom-svg' | 'canvas-2d';
 
 interface CanvasUiStore {
   background: BackgroundType;
@@ -86,18 +96,50 @@ interface CanvasUiStore {
    * which events count.
    */
   invertScroll: boolean;
-  /** Whether the spatial overview of the page is shown in the corner. */
+  /**
+   * Whether the spatial overview of the page is shown in the corner.
+   *
+   * Off until asked for. It is the largest object the board's chrome can put
+   * on the screen and it answers a question — where am I on the page — that
+   * only comes up on a page big enough to get lost on. Shown by default it
+   * outweighed the drawing it was a map of.
+   */
   minimapVisible: boolean;
   /** Whether the on-canvas performance overlay (FPS/frame time) is shown. */
   debugPerformance: boolean;
   /**
-   * Whether to drop the effects that cost a compositor pass per frame. Today
-   * that is the chrome's frosted ground: `backdrop-filter` has to re-read and
-   * re-blur the board under the toolbar and the four corner HUDs on every
-   * frame, which is exactly the frames a stroke is being drawn in. With it off
-   * the same chrome falls back to an opaque wash (see `--chrome-wash-solid`).
+   * Which renderer draws the committed shapes. Changing it remounts the shape
+   * layer — the scene's signal graph is rebuilt from the document, exactly as
+   * a page switch does — so it is a preference, not a per-frame setting.
+   *
+   * `?renderer=` still wins over it, so a link can pin one implementation for
+   * an A/B without disturbing whatever the person on the other end prefers.
+   * `auto` picks by page size — see `AUTO_CANVAS_2D_SHAPES`.
+   */
+  shapeRenderer: ShapeRendererChoice;
+  /**
+   * Whether the DOM/SVG layer caches the shape tree into raster tiles.
+   * `auto` is the measured gate — Firefox, on a scene with something in it —
+   * and the two explicit values are for looking at the difference on one
+   * machine. Inert under the Canvas2D renderer, which has no SVG to cache.
+   */
+  rasterCache: RasterCacheMode;
+  /**
+   * Whether to drop the chrome's decoration on a machine that cannot spare it.
+   * The `backdrop-filter` under the toolbar and the four corner HUDs used to
+   * be the whole of this setting and is now gone from the stylesheet outright
+   * — it re-read and re-blurred the board on every frame of a pan or a zoom,
+   * about twenty points of GPU. What is left is the glass layer's own
+   * ornament: with this on, the toolbar's sheen and bevel planes are dropped
+   * and its capsules fall back to a plain opaque surface.
    */
   lowGraphics: boolean;
+  /**
+   * Whether the grid fades out toward the screen edges, the way it does on the
+   * loading veil. Off by default: at the edges it hides the grid you might be
+   * lining something up against.
+   */
+  groundFade: boolean;
   /**
    * Whether the tutor is shown when a student stops paying attention. Tutor-only
    * in effect: every client publishes its own attention facts, but nothing is
@@ -125,6 +167,7 @@ interface CanvasUiStore {
   pngExportScale: number;
   setBackground: (background: BackgroundType) => void;
   setMinimapVisible: (minimapVisible: boolean) => void;
+  setGroundFade: (groundFade: boolean) => void;
   setInvertScroll: (invertScroll: boolean) => void;
   setSnappingEnabled: (snappingEnabled: boolean) => void;
   setEraserMode: (eraserMode: EraserMode) => void;
@@ -141,6 +184,8 @@ interface CanvasUiStore {
   /** Record that a stylus has been used here. Idempotent, called per stroke. */
   notePenSeen: () => void;
   setDebugPerformance: (debugPerformance: boolean) => void;
+  setShapeRenderer: (shapeRenderer: ShapeRendererChoice) => void;
+  setRasterCache: (rasterCache: RasterCacheMode) => void;
   setLowGraphics: (lowGraphics: boolean) => void;
   setAttentionAlertsEnabled: (attentionAlertsEnabled: boolean) => void;
   setAttentionIdleSeconds: (attentionIdleSeconds: number) => void;
@@ -157,7 +202,7 @@ interface CanvasUiStore {
  * another app trips it.
  */
 export const ATTENTION_IDLE_RANGE = { min: 30, max: 300, step: 15 } as const;
-export const ATTENTION_AWAY_RANGE = { min: 5, max: 120, step: 5 } as const;
+export const ATTENTION_AWAY_RANGE = { min: 1, max: 120, step: 1 } as const;
 
 /**
  * Bounds for the PDF import limit. Ten covers the worksheet and past-paper
@@ -239,8 +284,21 @@ function endTaperModeFrom(value: unknown): EndTaperMode {
   return value === true ? 'full' : 'off';
 }
 
+/**
+ * `dom-svg` was the only default before `auto` existed, so a saved `dom-svg` is
+ * indistinguishable from never having opened the menu and moves to `auto`.
+ * `canvas-2d` could only have been picked on purpose, so it stays.
+ */
+function shapeRendererFrom(value: unknown): ShapeRendererChoice | undefined {
+  return value === 'canvas-2d' ? value : undefined;
+}
+
 function migrateCanvasUiStore(persistedState: unknown): CanvasUiStore {
-  const state = persistedState as Partial<CanvasUiStore>;
+  const { shapeRenderer, ...rest } = persistedState as Partial<CanvasUiStore>;
+  const kept = shapeRendererFrom(shapeRenderer);
+  const state: Partial<CanvasUiStore> = kept
+    ? { ...rest, shapeRenderer: kept }
+    : rest;
   const isUnchangedPreset = PREVIOUS_PENCIL_PRESETS.some(
     (preset) => Object.entries(preset).every(
       ([key, value]) => (state as Record<string, unknown>)[key] === value,
@@ -283,9 +341,12 @@ export const useCanvasUiStore = create<CanvasUiStore>()(
       snappingEnabled: true,
       eraserMode: 'object',
       invertScroll: false,
-      minimapVisible: true,
+      minimapVisible: false,
       debugPerformance: false,
+      shapeRenderer: 'auto',
+      rasterCache: 'auto',
       lowGraphics: false,
+      groundFade: false,
       attentionAlertsEnabled: true,
       attentionIdleSeconds: 90,
       attentionAwaySeconds: 15,
@@ -296,6 +357,7 @@ export const useCanvasUiStore = create<CanvasUiStore>()(
       ...PENCIL_DEFAULTS,
       setBackground: (background) => set({ background }),
       setMinimapVisible: (minimapVisible) => set({ minimapVisible }),
+      setGroundFade: (groundFade) => set({ groundFade }),
       setInvertScroll: (invertScroll) => set({ invertScroll }),
       setSnappingEnabled: (snappingEnabled) => set({ snappingEnabled }),
       setEraserMode: (eraserMode) => set({ eraserMode }),
@@ -316,6 +378,8 @@ export const useCanvasUiStore = create<CanvasUiStore>()(
         if (!useCanvasUiStore.getState().penSeen) set({ penSeen: true });
       },
       setDebugPerformance: (debugPerformance) => set({ debugPerformance }),
+      setShapeRenderer: (shapeRenderer) => set({ shapeRenderer }),
+      setRasterCache: (rasterCache) => set({ rasterCache }),
       setLowGraphics: (lowGraphics) => {
         applyLowGraphics(lowGraphics);
         set({ lowGraphics });
@@ -332,7 +396,7 @@ export const useCanvasUiStore = create<CanvasUiStore>()(
     }),
     {
       name: 'whiteboard:canvas-ui',
-      version: 4,
+      version: 5,
       migrate: migrateCanvasUiStore,
       onRehydrateStorage: () => (state) => {
         if (state) applyLowGraphics(state.lowGraphics);

@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils';
 
 const toggleVariants = cva(
   // Hover tracks the host surface, same as Button — see the note there.
-  "group/toggle inline-flex items-center justify-center gap-1 rounded-control text-sm font-medium whitespace-nowrap transition-colors hover:bg-[var(--chrome-hover,var(--color-panel))] hover:text-fg disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-danger-control-border aria-pressed:bg-panel [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  "group/toggle inline-flex items-center justify-center gap-1 rounded-control text-sm font-medium whitespace-nowrap transition-colors hover:bg-[var(--chrome-hover,var(--color-panel))] hover:text-fg disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-danger-control-border aria-pressed:bg-tb-seg-chip aria-pressed:text-fg [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
       variant: {
@@ -15,9 +15,9 @@ const toggleVariants = cva(
       },
       size: {
         default:
-          'h-9 min-w-9 px-2.5 has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2',
+          'h-8 min-w-8 px-2.5 has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2',
         sm: 'h-8 min-w-8 px-2.5 has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5',
-        lg: 'h-10 min-w-10 px-2.5 has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2',
+        lg: 'h-9 min-w-9 px-2.5 has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2',
       },
     },
     defaultVariants: {

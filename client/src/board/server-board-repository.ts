@@ -3,6 +3,7 @@ import {
   type BoardRepository,
   genBoardId,
 } from '@whiteboard/shared';
+import { boardKey } from '@/board/board-access';
 import { boardRoom } from '@/canvas/use-document-store';
 
 // Postgres is authoritative; a localStorage cache + outbox keep the home screen
@@ -15,7 +16,8 @@ const OUTBOX_KEY = 'whiteboard:boards-outbox';
 type OutboxOp =
   | { kind: 'upsert'; board: BoardMeta }
   | { kind: 'delete'; id: string }
-  | { kind: 'opened'; id: string };
+  | { kind: 'opened'; id: string }
+  | { kind: 'favorite'; id: string; favorite: boolean };
 
 function loadCache(): Record<string, BoardMeta> {
   try {
@@ -46,6 +48,21 @@ function api(path: string, init?: RequestInit): Promise<Response> {
   });
 }
 
+/**
+ * Boards a student is connected to right now. Outside `BoardRepository` on
+ * purpose: it is live server state, not board metadata, and has no offline
+ * answer — an empty set is the honest one.
+ */
+export async function fetchLiveBoardIds(): Promise<Set<string>> {
+  try {
+    const res = await api('/live');
+    if (res.ok) return new Set((await res.json()) as string[]);
+  } catch {
+    // Offline — nobody is known to be live.
+  }
+  return new Set();
+}
+
 export class ServerBoardRepository implements BoardRepository {
   async list(): Promise<BoardMeta[]> {
     await this.flush();
@@ -73,7 +90,9 @@ export class ServerBoardRepository implements BoardRepository {
     // Ask for the name alone; the rest of `BoardMeta` is management data this
     // caller has no way to know and no use for.
     try {
-      const res = await api(`/${encodeURIComponent(id)}/title`);
+      const res = await api(
+        `/${encodeURIComponent(id)}/title?k=${encodeURIComponent(boardKey())}`,
+      );
       if (!res.ok) return undefined;
       const { name } = (await res.json()) as { name: string };
       const now = Date.now();
@@ -130,6 +149,16 @@ export class ServerBoardRepository implements BoardRepository {
     await this.flush();
   }
 
+  async setFavorite(id: string, favorite: boolean): Promise<void> {
+    const cache = loadCache();
+    const board = cache[id];
+    if (!board) return;
+    board.favorite = favorite;
+    saveCache(cache);
+    this.enqueue({ kind: 'favorite', id, favorite });
+    await this.flush();
+  }
+
   private enqueue(op: OutboxOp): void {
     const ops = loadOutbox();
     ops.push(op);
@@ -150,9 +179,14 @@ export class ServerBoardRepository implements BoardRepository {
               })
             : op.kind === 'delete'
               ? await api(`/${encodeURIComponent(op.id)}`, { method: 'DELETE' })
-              : await api(`/${encodeURIComponent(op.id)}/opened`, {
-                  method: 'POST',
-                });
+              : op.kind === 'favorite'
+                ? await api(`/${encodeURIComponent(op.id)}`, {
+                    method: 'PATCH',
+                    body: JSON.stringify({ favorite: op.favorite }),
+                  })
+                : await api(`/${encodeURIComponent(op.id)}/opened`, {
+                    method: 'POST',
+                  });
         if (res.status === 401) return; // not signed in yet — retry after login
         // Drop the op on success or any other 4xx (avoid a stuck queue).
         ops = ops.slice(1);

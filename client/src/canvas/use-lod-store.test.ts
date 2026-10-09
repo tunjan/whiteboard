@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { useCameraStore } from './use-camera-store';
 import {
   INK_ERROR_SCREEN_PX,
+  imageThumbCutoff,
+  impostorCutoff,
   inkErrorLimit,
   patternCutoff,
   useLodStore,
@@ -103,6 +105,81 @@ describe('inkErrorLimit', () => {
       after.add(
         `${patternCutoff(zoom)}|${detail}|${dots}|${inkErrorLimit(zoom)}`,
       );
+    }
+    expect(after.size).toBe(before.size);
+  });
+});
+
+// The whole-shape counterpart to `patternCutoff`: below this footprint a shape
+// covers too few pixels for its silhouette to read, and a box of the same
+// weight is indistinguishable from its geometry.
+describe('impostorCutoff', () => {
+  it('paints every shape as itself until the page pulls back', () => {
+    expect(impostorCutoff(2)).toBe(0);
+    expect(impostorCutoff(1)).toBe(0);
+    expect(impostorCutoff(0.5)).toBe(0);
+  });
+
+  it('rises as the camera pulls out, one value per zoom octave', () => {
+    expect(impostorCutoff(0.26)).toBe(impostorCutoff(0.49));
+    expect(impostorCutoff(0.13)).toBe(impostorCutoff(0.25));
+    expect(impostorCutoff(0.25)).toBeCloseTo(2 * impostorCutoff(0.49), 10);
+  });
+
+  // Conservative in the same direction `inkErrorLimit` is: the band's upper
+  // zoom edge sets the cutoff, so a shape is impostored once it is comfortably
+  // under the screen budget rather than the moment it crosses it.
+  it('never impostors a shape bigger on screen than the budget', () => {
+    for (let zoom = 0.02; zoom < 0.5; zoom += 0.005) {
+      expect(impostorCutoff(zoom) * zoom).toBeLessThanOrEqual(4);
+    }
+  });
+
+  it('impostors a stroke only once it is a smudge', () => {
+    // At zoom 0.4 the cutoff is 8 world units, so a 12-unit scribble — 4.8 CSS
+    // px, still a shape — keeps its geometry, and a 6-unit one — 2.4 px, a
+    // smudge — becomes a box.
+    expect(12 > impostorCutoff(0.4)).toBe(true);
+    expect(6 <= impostorCutoff(0.4)).toBe(true);
+  });
+
+  it('adds no publishes of its own across a full zoom-out ramp', () => {
+    // It shares `inkErrorLimit`'s octave edges exactly, so every value it
+    // changes at is already a publish. A ramp that published more after it was
+    // added would be paying a full re-render per octave for it.
+    let zoom = 1;
+    const before = new Set<string>();
+    const after = new Set<string>();
+    for (let i = 0; i < 160; i++) {
+      zoom *= 0.05 ** (1 / 160);
+      const shared = `${patternCutoff(zoom)}|${inkErrorLimit(zoom)}`;
+      before.add(shared);
+      after.add(`${shared}|${impostorCutoff(zoom)}`);
+    }
+    expect(after.size).toBe(before.size);
+  });
+});
+
+describe('imageThumbCutoff', () => {
+  it('draws originals at and above the pattern threshold, and in export', () => {
+    expect(imageThumbCutoff(1)).toBe(0);
+    expect(imageThumbCutoff(0.5)).toBe(0);
+  });
+
+  it('never lets a thumbnail exceed 256 CSS px on screen', () => {
+    for (let z = 0.49; z > 0.01; z *= 0.93)
+      expect(imageThumbCutoff(z) * z).toBeLessThanOrEqual(256);
+  });
+
+  it('adds no publishes of its own across a full zoom-out ramp', () => {
+    let zoom = 1;
+    const before = new Set<string>();
+    const after = new Set<string>();
+    for (let i = 0; i < 160; i++) {
+      zoom *= 0.05 ** (1 / 160);
+      const shared = `${patternCutoff(zoom)}|${inkErrorLimit(zoom)}|${impostorCutoff(zoom)}`;
+      before.add(shared);
+      after.add(`${shared}|${imageThumbCutoff(zoom)}`);
     }
     expect(after.size).toBe(before.size);
   });

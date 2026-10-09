@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef } from 'react';
-import type { GraphViewport } from '@whiteboard/shared';
 import { formatAxisLabel, niceStep, tickValues } from '../grid';
 import {
   DEFAULT_GRAPH_CURVE_WIDTH,
@@ -8,20 +7,21 @@ import {
 import { useGraphMathReady } from '../graph-math';
 import { mergeGraphParameters } from '../graph-parameters';
 import { createGraphFunctionDefinitions } from '../graph-parser';
-import { sampleGraphExpression } from '../graph-sampler';
+import { useGraphCurves } from '../graph-sample-client';
 import { useGraphAnimationStore } from '../use-graph-animation-store';
-import {
-  findGraphIntersections,
-  formatIntersectionLabel,
-} from '../graph-intersections';
+import { formatIntersectionLabel } from '../graph-intersections';
+import { placePointLabels, type LabelBox } from '../graph-label-layout';
 import { useLodDetail } from '../lod';
 import { normalizeWheelDelta } from '../use-wheel';
 import { breakUndoCapture, editor } from '../use-document-store';
 import { useSelectionStore } from '../use-selection-store';
 import { boxBounds, boxHitTest, rotationTransform } from './box-geometry';
 import { graphToScreen, panViewport, zoomViewport } from './graph-interaction';
+import { createGraphViewportWriter } from './graph-viewport-writer';
+import { PaintedShadow, roundedRectPath } from './painted-shadow';
 import { polylineLength } from './perfect-dash';
 import { dashProps, strokeLineCap } from './render-style';
+import { measureTextWidth } from './text-measure';
 import type { ShapeUtil } from './types';
 
 const DEFAULT_W = 420;
@@ -50,16 +50,12 @@ export function plotArea(shape: { x: number; y: number; props: { w: number; h: n
   return { x, y, w, h };
 }
 
-function pathFromSegment(
-  segment: { x: number; y: number }[],
-  viewport: GraphViewport,
-  area: { x: number; y: number; w: number; h: number },
-): string {
-  return segment
-    .map((point, index) => {
-      const screen = graphToScreen(point, viewport, area);
-      return `${index === 0 ? 'M' : 'L'}${screen.x.toFixed(2)} ${screen.y.toFixed(2)}`;
-    })
+function pathFromPoints(points: readonly { x: number; y: number }[]): string {
+  return points
+    .map(
+      (point, index) =>
+        `${index === 0 ? 'M' : 'L'}${point.x.toFixed(2)} ${point.y.toFixed(2)}`,
+    )
     .join(' ');
 }
 
@@ -67,6 +63,11 @@ function stepFor(range: number, size: number): number {
   const targetCount = Math.max(2, Math.floor(size / 70));
   return niceStep(Math.abs(range) / targetCount);
 }
+
+const GRAPH_CARD_RADIUS = 8;
+const GRAPH_SHADOW_BLUR = 6;
+const GRAPH_SHADOW_DY = 4;
+const GRAPH_SHADOW_OPACITY = 0.08;
 
 export const graphUtil: ShapeUtil<'graph'> = {
   type: 'graph',
@@ -103,23 +104,13 @@ export const graphUtil: ShapeUtil<'graph'> = {
       const el = groupRef.current;
       if (!el) return;
       let undoTimer: number | null = null;
-      // Wheel events outrun frames — a trackpad emits well over 100 a second,
-      // and each one written straight through is a shape update the CRDT keeps
-      // and every peer receives. Gestures accumulate here and commit once per
-      // frame instead.
-      let pendingViewport: GraphViewport | null = null;
-      let commitFrame = 0;
-      const commit = () => {
-        commitFrame = 0;
-        if (!pendingViewport) return;
-        editor.updateShape(shapeId, { props: { viewport: pendingViewport } });
-        pendingViewport = null;
+      const writer = createGraphViewportWriter(shapeId, () => {
         if (undoTimer !== null) window.clearTimeout(undoTimer);
         undoTimer = window.setTimeout(() => {
           undoTimer = null;
           breakUndoCapture();
         }, WHEEL_UNDO_IDLE_MS);
-      };
+      });
       const onWheel = (e: WheelEvent) => {
         const selected = useSelectionStore.getState().selectedIds;
         if (selected.length !== 1 || selected[0] !== shapeId) return;
@@ -135,10 +126,7 @@ export const graphUtil: ShapeUtil<'graph'> = {
         e.preventDefault();
         e.stopPropagation();
         const wheel = normalizeWheelDelta(e);
-        // Build on the uncommitted viewport so events within one frame compose.
-        const viewport = pendingViewport ?? current.props.viewport;
 
-        let next: GraphViewport;
         if (e.ctrlKey || e.metaKey) {
           const delta = clampNum(
             wheel.y,
@@ -147,22 +135,20 @@ export const graphUtil: ShapeUtil<'graph'> = {
           );
           // Match the camera direction: scroll up = zoom in = smaller range.
           const factor = 1 / (1 - delta / 100);
-          next = zoomViewport(viewport, area, local, factor);
+          writer.update((viewport) =>
+            zoomViewport(viewport, area, local, factor),
+          );
         } else {
           const dx = inverse.a * wheel.x + inverse.c * wheel.y;
           const dy = inverse.b * wheel.x + inverse.d * wheel.y;
-          next = panViewport(viewport, area, dx, dy);
+          writer.update((viewport) => panViewport(viewport, area, dx, dy));
         }
-
-        pendingViewport = next;
-        if (!commitFrame) commitFrame = requestAnimationFrame(commit);
       };
       el.addEventListener('wheel', onWheel, { passive: false });
       return () => {
         el.removeEventListener('wheel', onWheel);
-        if (commitFrame) cancelAnimationFrame(commitFrame);
         // Don't strand the tail of a gesture that ended on unmount.
-        commit();
+        writer.flush();
         if (undoTimer !== null) {
           window.clearTimeout(undoTimer);
           // The gesture is over for good, so close its undo step now rather
@@ -183,8 +169,7 @@ export const graphUtil: ShapeUtil<'graph'> = {
     const clippedXAxis = Math.max(area.y, Math.min(area.y + area.h, xAxis));
     const clippedYAxis = Math.max(area.x, Math.min(area.x + area.w, yAxis));
     const clipId = `graph-clip-${safeId(shape.id)}`;
-    const shadowId = `graph-shadow-${safeId(shape.id)}`;
-    // Zoomed far out the card drop shadow is sub-pixel; skip it (and its filter).
+    // Zoomed far out the card drop shadow is sub-pixel; skip it.
     const shadow = detail === 'high';
     const samples = Math.max(180, Math.round(area.w * 1.4));
     const verticalSamples = Math.max(120, Math.round(area.h * 1.4));
@@ -195,6 +180,7 @@ export const graphUtil: ShapeUtil<'graph'> = {
     const mathReady = useGraphMathReady();
     const functionDefinitions = useMemo(
       () => createGraphFunctionDefinitions(props.expressions),
+      // eslint-disable-next-line react-hooks/exhaustive-deps
       [props.expressions, mathReady],
     );
 
@@ -210,52 +196,19 @@ export const graphUtil: ShapeUtil<'graph'> = {
     );
 
     // Sampling is the expensive part of drawing a graph — a contour pass alone
-    // evaluates the expression ~65k times. Every one of these inputs changes the
-    // curve; anything else that re-renders this component (a selection change, a
-    // theme flip, a parent re-render) reuses the result.
-    const curves = useMemo(
-      () =>
-        props.expressions.map((expression) => ({
-          expression,
-          result: sampleGraphExpression(
-            expression,
-            viewport,
-            parameters,
-            samples,
-            verticalSamples,
-            functionDefinitions,
-          ),
-        })),
-      [
-        props.expressions,
+    // evaluates the expression ~65k times — so it runs in a worker, along with
+    // the intersection root finding.
+    const { curves, intersections } = useGraphCurves(
+      {
+        expressions: props.expressions,
         viewport,
         parameters,
         samples,
         verticalSamples,
-        functionDefinitions,
-        mathReady,
-      ],
-    );
-
-    const intersections = useMemo(
-      () =>
-        props.showIntersections === true
-          ? findGraphIntersections(
-              props.expressions,
-              viewport,
-              parameters,
-              240,
-              functionDefinitions,
-            )
-          : [],
-      [
-        props.showIntersections,
-        props.expressions,
-        viewport,
-        parameters,
-        functionDefinitions,
-        mathReady,
-      ],
+        intersections: props.showIntersections === true,
+      },
+      functionDefinitions,
+      mathReady,
     );
     const xLabelsBelow = clippedXAxis <= area.y + area.h - 18;
     const xLabelY = xLabelsBelow ? clippedXAxis + 13 : clippedXAxis - 7;
@@ -271,12 +224,57 @@ export const graphUtil: ShapeUtil<'graph'> = {
     };
     const intersectionLabelStyle = {
       fontSize: 13,
-      fontWeight: 600,
+      fontWeight: 600 as const,
       fill: 'var(--color-foreground)',
       stroke: 'var(--color-panel)',
       strokeWidth: 3.5,
       paintOrder: 'stroke' as const,
     };
+
+    // Tick labels paint over the plot, so point labels must steer clear of them.
+    const tickLabelBoxes: LabelBox[] = [];
+    if (showAxisLabels) {
+      const box = (text: string, x: number, y: number, anchor: string) => {
+        const w = measureTextWidth(text, axisLabelStyle.fontSize);
+        const left = anchor === 'middle' ? x - w / 2 : anchor === 'end' ? x - w : x;
+        return { x: left, y: y - 8, w, h: 10 };
+      };
+      for (const x of xTicks) {
+        if (x === 0) continue;
+        const screen = graphToScreen({ x, y: 0 }, viewport, area);
+        tickLabelBoxes.push(box(formatAxisLabel(x), screen.x, xLabelY, 'middle'));
+      }
+      for (const y of yTicks) {
+        if (y === 0) continue;
+        const screen = graphToScreen({ x: 0, y }, viewport, area);
+        tickLabelBoxes.push(box(formatAxisLabel(y), yLabelX, screen.y + 4, yLabelAnchor));
+      }
+      tickLabelBoxes.push(box('0', yLabelX, xLabelY, yLabelAnchor));
+    }
+    const intersectionMarks = intersections.map((point) => ({
+      screen: graphToScreen(point, viewport, area),
+      text: formatIntersectionLabel(point),
+    }));
+    // Crowded points keep their dot and drop the label to a hover tooltip.
+    const intersectionLabels = placePointLabels(
+      intersectionMarks.map(({ screen, text }) => ({
+        x: screen.x,
+        y: screen.y,
+        width: measureTextWidth(
+          text,
+          intersectionLabelStyle.fontSize,
+          'sans',
+          intersectionLabelStyle.fontWeight,
+        ),
+      })),
+      area,
+      {
+        fontSize: intersectionLabelStyle.fontSize,
+        dotRadius: 7,
+        offset: 8,
+        obstacles: tickLabelBoxes,
+      },
+    );
 
     return (
       <g
@@ -285,40 +283,35 @@ export const graphUtil: ShapeUtil<'graph'> = {
         transform={rotationTransform(shape.x, shape.y, props.w, props.h, shape.rotation)}
       >
         <defs>
-          {shadow && (
-            <filter
-              id={shadowId}
-              x={shape.x - 24}
-              y={shape.y - 20}
-              width={props.w + 48}
-              height={props.h + 52}
-              filterUnits="userSpaceOnUse"
-            >
-              <feDropShadow
-                dx={0}
-                dy={4}
-                stdDeviation={6}
-                floodColor="#000000"
-                floodOpacity={0.08}
-              />
-            </filter>
-          )}
           <clipPath id={clipId}>
             <rect x={area.x} y={area.y} width={area.w} height={area.h} rx={4} />
           </clipPath>
         </defs>
 
+        {shadow && (
+          <PaintedShadow
+            d={roundedRectPath(
+              shape.x,
+              shape.y,
+              props.w,
+              props.h,
+              GRAPH_CARD_RADIUS,
+            )}
+            dy={GRAPH_SHADOW_DY}
+            blur={GRAPH_SHADOW_BLUR}
+            opacity={GRAPH_SHADOW_OPACITY}
+          />
+        )}
         <rect
           x={shape.x}
           y={shape.y}
           width={props.w}
           height={props.h}
-          rx={8}
+          rx={GRAPH_CARD_RADIUS}
           fill="var(--color-card)"
           stroke="var(--color-border)"
           strokeWidth={1}
           vectorEffect="non-scaling-stroke"
-          filter={shadow ? `url(#${shadowId})` : undefined}
         />
 
         <rect
@@ -387,27 +380,25 @@ export const graphUtil: ShapeUtil<'graph'> = {
             const width = expression.width ?? DEFAULT_GRAPH_CURVE_WIDTH;
             return (
               <g key={expression.id}>
-                {result.segments.map((segment, index) => (
-                  <path
-                    key={`${expression.id}-${index}`}
-                    d={pathFromSegment(segment, viewport, area)}
-                    fill="none"
-                    stroke={expression.color}
-                    strokeWidth={width}
-                    strokeLinecap={strokeLineCap(expression.dash) ?? 'round'}
-                    strokeLinejoin="round"
-                    {...dashProps(
-                      expression.dash,
-                      width,
-                      polylineLength(
-                        segment.map((point) =>
-                          graphToScreen(point, viewport, area),
-                        ),
-                      ),
-                    )}
-                    vectorEffect="non-scaling-stroke"
-                  />
-                ))}
+                {result.segments.map((segment, index) => {
+                  // Mapped once: both the path and its dash length read it.
+                  const screen = segment.map((point) =>
+                    graphToScreen(point, viewport, area),
+                  );
+                  return (
+                    <path
+                      key={`${expression.id}-${index}`}
+                      d={pathFromPoints(screen)}
+                      fill="none"
+                      stroke={expression.color}
+                      strokeWidth={width}
+                      strokeLinecap={strokeLineCap(expression.dash) ?? 'round'}
+                      strokeLinejoin="round"
+                      {...dashProps(expression.dash, width, polylineLength(screen))}
+                      vectorEffect="non-scaling-stroke"
+                    />
+                  );
+                })}
                 {result.points?.map((point, index) => {
                   const screen = graphToScreen(point, viewport, area);
                   return (
@@ -441,10 +432,8 @@ export const graphUtil: ShapeUtil<'graph'> = {
               />
             );
           })}
-          {intersections.map((point, index) => {
-            const screen = graphToScreen(point, viewport, area);
-            const nearRight = screen.x > area.x + area.w - 64;
-            const nearTop = screen.y < area.y + 16;
+          {intersectionMarks.map(({ screen, text }, index) => {
+            const label = intersectionLabels[index];
             return (
               <g key={`ix-${index}`}>
                 <circle
@@ -454,15 +443,19 @@ export const graphUtil: ShapeUtil<'graph'> = {
                   fill="var(--color-foreground)"
                   stroke="var(--color-panel)"
                   strokeWidth={1.75}
-                />
-                <text
-                  x={nearRight ? screen.x - 8 : screen.x + 8}
-                  y={nearTop ? screen.y + 18 : screen.y - 8}
-                  textAnchor={nearRight ? 'end' : 'start'}
-                  {...intersectionLabelStyle}
                 >
-                  {formatIntersectionLabel(point)}
-                </text>
+                  {label ? null : <title>{text}</title>}
+                </circle>
+                {label ? (
+                  <text
+                    x={label.x}
+                    y={label.y}
+                    textAnchor={label.anchor}
+                    {...intersectionLabelStyle}
+                  >
+                    {text}
+                  </text>
+                ) : null}
               </g>
             );
           })}

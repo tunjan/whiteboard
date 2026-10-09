@@ -29,6 +29,14 @@ export const env = {
   /** Directory where board repository documents are stored (content-addressed). */
   docDir: process.env.DOC_DIR ?? 'data/docs',
   /**
+   * Total bytes the open upload endpoints may hold across `blobDir` and
+   * `docDir`. Uploads need no login, so this is what stops them filling the
+   * disk Postgres shares.
+   */
+  uploadQuotaBytes: Number(process.env.UPLOAD_QUOTA_GB ?? 20) * 1024 ** 3,
+  /** Request header carrying the real client IP behind a proxy (see rate-limit.ts). */
+  clientIpHeader: process.env.CLIENT_IP_HEADER?.toLowerCase() || undefined,
+  /**
    * OpenRouter credentials for the AI LaTeX endpoints. Unset is a supported
    * configuration rather than a broken one: the routes answer 503 and the
    * canvas hides the two buttons that would call them.
@@ -49,4 +57,7 @@ export const env = {
    */
   openRouterTextModel:
     process.env.OPENROUTER_TEXT_MODEL ?? 'deepseek/deepseek-v4-flash',
+  /** Speech-to-text for dictating a description. Accepts webm and mp4 as-is. */
+  openRouterSttModel:
+    process.env.OPENROUTER_STT_MODEL ?? 'openai/whisper-large-v3',
 } as const;

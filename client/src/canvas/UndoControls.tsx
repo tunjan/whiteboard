@@ -1,11 +1,7 @@
 import { Redo2, Undo2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Kbd } from '@/components/ui/kbd';
-import {
-  CHROME_KEY_ON_BOARD,
-  CHROME_ON_BOARD,
-  Surface,
-} from '@/components/ui/surface';
+import { INSTRUMENT, INSTRUMENT_KEY, Surface } from '@/components/ui/surface';
 import {
   Tooltip,
   TooltipContent,
@@ -33,9 +29,12 @@ export function UndoControls({
   const toolbar = useRovingToolbar<HTMLDivElement>();
 
   return (
+    /* The only undo on the board: the toolbar carries modes, not commands. */
     <div
       data-ui-layer
-      className="absolute left-[env(safe-area-inset-left)] bottom-[var(--wb-inset-bottom)] z-[var(--z-canvas-hud)] max-sm:bottom-[calc(4rem+var(--wb-inset-bottom))] [@media(pointer:coarse)]:bottom-[calc(7rem+var(--wb-inset-bottom))] select-none"
+      data-arrive="up"
+      style={{ '--arrive-i': 3 } as React.CSSProperties}
+      className="wb-undo-hud absolute left-[calc(0.75rem+env(safe-area-inset-left))] bottom-[calc(0.75rem+var(--wb-inset-bottom))] z-[var(--z-canvas-hud)] max-sm:bottom-[calc(4.75rem+var(--wb-inset-bottom))] [@media(pointer:coarse)]:bottom-[calc(7.75rem+var(--wb-inset-bottom))] select-none"
     >
       <TooltipProvider delay={300}>
         <Surface
@@ -47,16 +46,7 @@ export function UndoControls({
           chrome
           onFocusCapture={toolbar.onFocusCapture}
           onKeyDown={toolbar.onKeyDown}
-          className={cn(
-            // No card in the corner: no border and no shadow. The two keys
-            // stand on the board itself, blurred, with the corner turned in
-            // on whichever sides are not flush to a viewport edge — the top
-            // always, and the bottom too on the small and coarse-pointer
-            // layouts, where the HUD is lifted clear of the toolbar.
-            'relative flex items-center gap-0.5 rounded-none rounded-tr-xl p-1',
-            'wb-chrome-blur max-sm:rounded-br-xl [@media(pointer:coarse)]:rounded-br-xl',
-            CHROME_ON_BOARD,
-          )}
+          className={cn('relative', INSTRUMENT)}
         >
           <Tooltip>
             <TooltipTrigger
@@ -64,7 +54,7 @@ export function UndoControls({
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  className={CHROME_KEY_ON_BOARD}
+                  className={INSTRUMENT_KEY}
                   data-toolbar-item
                   tabIndex={0}
                   aria-label="Undo"
@@ -87,7 +77,7 @@ export function UndoControls({
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  className={CHROME_KEY_ON_BOARD}
+                  className={INSTRUMENT_KEY}
                   data-toolbar-item
                   tabIndex={-1}
                   aria-label="Redo"

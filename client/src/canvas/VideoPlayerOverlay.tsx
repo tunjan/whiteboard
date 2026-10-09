@@ -1,8 +1,8 @@
 import { useEffect } from 'react';
 import { X } from 'lucide-react';
 import type { VideoShape } from '@whiteboard/shared';
-import type { Camera } from './camera';
 import { worldToScreen } from './camera';
+import { useCameraFollow } from './use-camera-interaction';
 import { useVideoPlayingStore } from './use-video-playing-store';
 
 /**
@@ -13,11 +13,10 @@ import { useVideoPlayingStore } from './use-video-playing-store';
  */
 export function VideoPlayerOverlay({
   shape,
-  camera,
 }: {
   shape: VideoShape;
-  camera: Camera;
 }) {
+  const [camera, follow] = useCameraFollow<HTMLDivElement>();
   const stop = useVideoPlayingStore((s) => s.stop);
 
   useEffect(() => {
@@ -39,34 +38,37 @@ export function VideoPlayerOverlay({
     `?autoplay=1&rel=0&modestbranding=1`;
 
   return (
-    <div
-      className="absolute z-[var(--z-canvas-front)] overflow-hidden rounded-md bg-black shadow-floating"
-      style={{
-        left: screen.x,
-        top: screen.y,
-        width: w,
-        height: h,
-        transformOrigin: 'center',
-        transform: shape.rotation ? `rotate(${shape.rotation}rad)` : undefined,
-      }}
-      onPointerDown={(e) => e.stopPropagation()}
-    >
-      <iframe
-        title="YouTube video player"
-        src={src}
-        className="h-full w-full border-0"
-        allow="autoplay; encrypted-media; fullscreen; picture-in-picture"
-        allowFullScreen
-      />
-      <button
-        type="button"
-        aria-label="Stop video"
+    // The follower is a stacking context, so it carries the z-index.
+    <div ref={follow} className="absolute top-0 left-0 z-[var(--z-canvas-front)]">
+      <div
+        className="absolute overflow-hidden rounded-md bg-black shadow-floating"
+        style={{
+          left: screen.x,
+          top: screen.y,
+          width: w,
+          height: h,
+          transformOrigin: 'center',
+          transform: shape.rotation ? `rotate(${shape.rotation}rad)` : undefined,
+        }}
         onPointerDown={(e) => e.stopPropagation()}
-        onClick={stop}
-        className="absolute right-1.5 top-1.5 grid size-7 place-items-center rounded-full bg-black/60 text-white hover:bg-black/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2"
       >
-        <X className="size-4" />
-      </button>
+        <iframe
+          title="YouTube video player"
+          src={src}
+          className="h-full w-full border-0"
+          allow="autoplay; encrypted-media; fullscreen; picture-in-picture"
+          allowFullScreen
+        />
+        <button
+          type="button"
+          aria-label="Stop video"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={stop}
+          className="absolute right-1.5 top-1.5 grid size-7 place-items-center rounded-full bg-black/60 text-white hover:bg-black/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2"
+        >
+          <X className="size-4" />
+        </button>
+      </div>
     </div>
   );
 }

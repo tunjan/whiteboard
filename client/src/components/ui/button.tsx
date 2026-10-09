@@ -8,10 +8,10 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground hover:bg-primary/80",
-        primary: "bg-primary text-primary-foreground hover:bg-primary/80",
+        default: "border-action bg-action text-on-action hover:border-action-hover hover:bg-action-hover hover:ring-4 hover:ring-border",
+        primary: "border-action bg-action text-on-action hover:border-action-hover hover:bg-action-hover hover:ring-4 hover:ring-border",
         outline:
-          "border-border bg-surface text-fg hover:bg-surface-hover hover:border-border-strong shadow-e1",
+          "border-border bg-surface text-fg hover:bg-canvas aria-expanded:border-border-strong aria-expanded:ring-4 aria-expanded:ring-border",
         secondary:
           "bg-secondary text-secondary-foreground hover:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_5%)] aria-expanded:bg-secondary aria-expanded:text-secondary-foreground",
         subtle:
@@ -19,30 +19,30 @@ const buttonVariants = cva(
         ghost:
           "bg-transparent text-fg-secondary hover:bg-[var(--chrome-hover,var(--color-panel))] hover:text-fg disabled:bg-transparent",
         destructive:
-          "border-danger-border bg-surface text-danger-fg hover:bg-danger-bg shadow-e1",
+          "border-danger-border bg-surface text-danger-fg hover:bg-danger-bg hover:ring-4 hover:ring-danger-bg",
         link: "text-fg underline-offset-4 hover:underline disabled:bg-transparent",
       },
       size: {
         default:
-          "h-10 gap-2 px-4 text-base rounded-lg [&>svg:not([class*='size-']):not([data-native-size])]:size-4",
+          "h-8 gap-2 px-4 text-sm rounded-control [&>svg:not([class*='size-']):not([data-native-size])]:size-4",
         md:
-          "h-10 gap-2 px-4 text-base rounded-lg [&>svg:not([class*='size-']):not([data-native-size])]:size-4",
+          "h-8 gap-2 px-4 text-sm rounded-control [&>svg:not([class*='size-']):not([data-native-size])]:size-4",
         xs:
-          "h-6 gap-1 rounded-sm px-2 text-2xs [&>svg:not([class*='size-']):not([data-native-size])]:size-3",
+          "h-6 gap-1 rounded-md px-2 text-xs [&>svg:not([class*='size-']):not([data-native-size])]:size-3",
         sm:
-          "h-8 gap-1.5 rounded-md px-3 text-sm [&>svg:not([class*='size-']):not([data-native-size])]:size-3.5",
+          "h-8 gap-1.5 rounded-control px-3 text-sm [&>svg:not([class*='size-']):not([data-native-size])]:size-3.5",
         lg:
-          "h-12 gap-2 rounded-xl px-5 text-md [&>svg:not([class*='size-']):not([data-native-size])]:size-4.5",
+          "h-10 gap-2 rounded-control px-3 text-sm [&>svg:not([class*='size-']):not([data-native-size])]:size-4.5",
         icon:
-          "size-10 rounded-lg [&>svg:not([class*='size-']):not([data-native-size])]:size-4",
+          "size-8 rounded-control [&>svg:not([class*='size-']):not([data-native-size])]:size-4",
         "icon-xs":
-          "size-6 rounded-sm [&>svg:not([class*='size-']):not([data-native-size])]:size-3",
+          "size-6 rounded-md [&>svg:not([class*='size-']):not([data-native-size])]:size-3",
         "icon-sm":
-          "size-8 rounded-md [&>svg:not([class*='size-']):not([data-native-size])]:size-4",
+          "size-8 rounded-control [&>svg:not([class*='size-']):not([data-native-size])]:size-4",
         "icon-md":
-          "size-10 rounded-lg [&>svg:not([class*='size-']):not([data-native-size])]:size-4.5",
+          "size-10 rounded-control [&>svg:not([class*='size-']):not([data-native-size])]:size-4.5",
         "icon-lg":
-          "size-12 rounded-xl [&>svg:not([class*='size-']):not([data-native-size])]:size-5",
+          "size-10 rounded-control [&>svg:not([class*='size-']):not([data-native-size])]:size-5",
       },
     },
     defaultVariants: {

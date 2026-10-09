@@ -1,0 +1,861 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Calm UI — "More Tools" Alternative 1: Pure Calm Editorial List</title>
+  <!-- Tailwind CSS Play CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            canvas: '#EDECEA',
+            paper: '#FBFBF9',
+            ink: {
+              DEFAULT: '#141414',
+              soft: '#4A4A4F',
+              mute: '#A09D97',
+            },
+            wash: '#F1F1F2',
+            line: '#E5E3DD',
+            moss: {
+              DEFAULT: '#27604A',
+              wash: '#E0EFE5',
+            },
+            night: {
+              DEFAULT: '#17171A',
+              line: '#2A2A2F',
+              mute: '#97979E',
+              wash: '#242429',
+              paper: '#1F1F24',
+            },
+          },
+          borderRadius: {
+            ctrl: '10px',
+            bar: '14px',
+            panel: '18px',
+          },
+          boxShadow: {
+            float: '0 1px 2px rgb(0 0 0 / .05), 0 14px 34px rgb(0 0 0 / .10)',
+            card: '0 1px 2px rgb(0 0 0 / .04), 0 8px 22px rgb(0 0 0 / .07)',
+            press: 'inset 0 1px 2px rgb(0 0 0 / .12)',
+          },
+          transitionTimingFunction: {
+            calm: 'cubic-bezier(0.16, 1, 0.3, 1)',
+          },
+        },
+      },
+    };
+  </script>
+  <style>
+    /* Calm UI Root Tokens */
+    :root {
+      --color-canvas:     #EDECEA;
+      --color-paper:      #FBFBF9;
+      --color-ink:        #141414;
+      --color-ink-soft:   #4A4A4F;
+      --color-ink-mute:   #A09D97;
+      --color-wash:       #F1F1F2;
+      --color-line:       #E5E3DD;
+      --color-moss:       #27604A;
+      --color-moss-wash:  #E0EFE5;
+      --color-night:      #17171A;
+      --color-night-line: #2A2A2F;
+      --color-night-mute: #97979E;
+
+      --radius-ctrl:  10px;
+      --radius-bar:   14px;
+      --radius-panel: 18px;
+    }
+
+    body {
+      background-color: var(--color-canvas);
+      color: var(--color-ink);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Geist", "Segoe UI", Roboto, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    .dark body {
+      background-color: #121215;
+      color: #EDECEA;
+    }
+
+    /* Subtle subtle canvas dot pattern */
+    .canvas-dot-grid {
+      background-image: radial-gradient(rgba(20, 20, 20, 0.08) 1px, transparent 1px);
+      background-size: 24px 24px;
+    }
+    .dark .canvas-dot-grid {
+      background-image: radial-gradient(rgba(237, 236, 234, 0.09) 1px, transparent 1px);
+    }
+
+    /* Submenu animation */
+    .submenu-popover {
+      transform-origin: top left;
+      animation: calmPop 140ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    }
+
+    @keyframes calmPop {
+      0% {
+        opacity: 0;
+        transform: scale(0.96) translateX(-4px);
+      }
+      100% {
+        opacity: 1;
+        transform: scale(1) translateX(0);
+      }
+    }
+  </style>
+</head>
+<body class="canvas-dot-grid min-h-screen text-ink selection:bg-moss-wash selection:text-moss transition-colors duration-200">
+
+  <!-- TOP HEADER & CONTROLS BAR -->
+  <header class="max-w-7xl mx-auto px-6 pt-8 pb-6 flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-line dark:border-night-line">
+    <div>
+      <div class="flex items-center gap-2 mb-1">
+        <span class="inline-block size-2 rounded-full bg-moss"></span>
+        <span class="text-xs font-semibold tracking-wider uppercase text-ink-mute dark:text-night-mute">Calm UI Redesign Series · Option 1</span>
+      </div>
+      <h1 class="text-2xl font-semibold tracking-tight text-ink dark:text-paper">"More Tools" Dropdown: Pure Calm Editorial List</h1>
+      <p class="text-sm text-ink-soft dark:text-night-mute mt-0.5">Streamlined vertical surface (w: 240px) · 3 groups separated by 10px spacing (no lines) · Target >= 40px · 20px glyphs</p>
+    </div>
+
+    <!-- Live controls -->
+    <div class="flex items-center gap-3 flex-wrap">
+      <!-- Dark mode switch -->
+      <button id="theme-toggle" onclick="toggleTheme()" class="h-10 px-3.5 rounded-ctrl bg-paper dark:bg-night-paper border border-line dark:border-night-line text-ink-soft dark:text-paper hover:bg-wash dark:hover:bg-night-wash transition-colors flex items-center gap-2 text-xs font-medium shadow-card">
+        <svg id="theme-icon-sun" class="size-4 hidden dark:block" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+        <svg id="theme-icon-moon" class="size-4 block dark:hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+        <span id="theme-text">Dark Mode</span>
+      </button>
+
+      <!-- Reset / Active demo tool -->
+      <button onclick="setActiveTool('rectangle')" class="h-10 px-3.5 rounded-ctrl bg-paper dark:bg-night-paper border border-line dark:border-night-line text-ink-soft dark:text-paper hover:bg-wash dark:hover:bg-night-wash transition-colors text-xs font-medium shadow-card">
+        Select Rectangle
+      </button>
+      <button onclick="toggleLockState()" id="lock-toggle-btn" class="h-10 px-3.5 rounded-ctrl bg-paper dark:bg-night-paper border border-line dark:border-night-line text-ink-soft dark:text-paper hover:bg-wash dark:hover:bg-night-wash transition-colors text-xs font-medium shadow-card">
+        Toggle Tool Lock (Q)
+      </button>
+    </div>
+  </header>
+
+  <!-- MAIN DEMO VIEWPORT -->
+  <main class="max-w-7xl mx-auto px-6 py-10">
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-10 items-start">
+
+      <!-- LEFT / CENTER: INTERACTIVE DROPDOWN SHOWCASE (5 Cols) -->
+      <section class="lg:col-span-5 flex flex-col items-center">
+        <div class="w-full flex items-center justify-between mb-3 px-1">
+          <span class="text-xs font-semibold uppercase tracking-wider text-ink-mute dark:text-night-mute">Live Component Preview</span>
+          <span class="text-xs font-mono text-ink-mute dark:text-night-mute">width: 240px · 3 groups</span>
+        </div>
+
+        <!-- The Pure Calm Editorial List Dropdown Menu -->
+        <div class="relative inline-block text-left" id="dropdown-container">
+
+          <!-- DROPDOWN SURFACE -->
+          <div
+            id="more-tools-menu"
+            role="menu"
+            aria-orientation="vertical"
+            aria-label="More tools menu"
+            tabindex="-1"
+            class="w-60 p-1.5 rounded-panel bg-paper dark:bg-night-paper border border-line dark:border-night-line shadow-float transition-all select-none"
+          >
+            <!-- 3 GROUPS SEPARATED ONLY BY gap-2.5 (10px) — ZERO LINES -->
+            <div class="flex flex-col gap-2.5">
+
+              <!-- ── GROUP 1: SHAPE & CREATION TOOLS ── -->
+              <div class="flex flex-col gap-0.5" role="group" aria-label="Shape and creation tools">
+                
+                <!-- 1. Rectangle -->
+                <button
+                  type="button"
+                  role="menuitem"
+                  id="tool-rectangle"
+                  onclick="selectTool('rectangle')"
+                  class="calm-menu-item group h-10 px-2.5 rounded-ctrl flex items-center gap-3 w-full text-left text-[13px] font-medium transition-colors duration-100 ease-out active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink dark:focus-visible:ring-paper text-ink-soft dark:text-night-mute hover:bg-wash hover:text-ink dark:hover:bg-night-wash dark:hover:text-paper"
+                  data-tool="rectangle"
+                >
+                  <svg class="size-5 shrink-0 text-current" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <rect x="3.5" y="3.5" width="17" height="17" rx="2.5" />
+                  </svg>
+                  <span class="truncate">Rectangle</span>
+                  <kbd class="ml-auto font-mono text-xs text-ink-mute dark:text-night-mute group-hover:text-ink-soft dark:group-hover:text-paper">R</kbd>
+                </button>
+
+                <!-- 2. Ellipse -->
+                <button
+                  type="button"
+                  role="menuitem"
+                  id="tool-ellipse"
+                  onclick="selectTool('ellipse')"
+                  class="calm-menu-item group h-10 px-2.5 rounded-ctrl flex items-center gap-3 w-full text-left text-[13px] font-medium transition-colors duration-100 ease-out active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink dark:focus-visible:ring-paper text-ink-soft dark:text-night-mute hover:bg-wash hover:text-ink dark:hover:bg-night-wash dark:hover:text-paper"
+                  data-tool="ellipse"
+                >
+                  <svg class="size-5 shrink-0 text-current" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <circle cx="12" cy="12" r="8.5" />
+                  </svg>
+                  <span class="truncate">Ellipse</span>
+                  <kbd class="ml-auto font-mono text-xs text-ink-mute dark:text-night-mute group-hover:text-ink-soft dark:group-hover:text-paper">O</kbd>
+                </button>
+
+                <!-- 3. Arrow -->
+                <button
+                  type="button"
+                  role="menuitem"
+                  id="tool-arrow"
+                  onclick="selectTool('arrow')"
+                  class="calm-menu-item group h-10 px-2.5 rounded-ctrl flex items-center gap-3 w-full text-left text-[13px] font-medium transition-colors duration-100 ease-out active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink dark:focus-visible:ring-paper text-ink-soft dark:text-night-mute hover:bg-wash hover:text-ink dark:hover:bg-night-wash dark:hover:text-paper"
+                  data-tool="arrow"
+                >
+                  <svg class="size-5 shrink-0 text-current" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M7 17 17 7M7 7h10v10" />
+                  </svg>
+                  <span class="truncate">Arrow</span>
+                  <kbd class="ml-auto font-mono text-xs text-ink-mute dark:text-night-mute group-hover:text-ink-soft dark:group-hover:text-paper">A</kbd>
+                </button>
+
+                <!-- 4. Line -->
+                <button
+                  type="button"
+                  role="menuitem"
+                  id="tool-line"
+                  onclick="selectTool('line')"
+                  class="calm-menu-item group h-10 px-2.5 rounded-ctrl flex items-center gap-3 w-full text-left text-[13px] font-medium transition-colors duration-100 ease-out active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink dark:focus-visible:ring-paper text-ink-soft dark:text-night-mute hover:bg-wash hover:text-ink dark:hover:bg-night-wash dark:hover:text-paper"
+                  data-tool="line"
+                >
+                  <svg class="size-5 shrink-0 text-current" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <line x1="5" y1="19" x2="19" y2="5" />
+                  </svg>
+                  <span class="truncate">Line</span>
+                  <kbd class="ml-auto font-mono text-xs text-ink-mute dark:text-night-mute group-hover:text-ink-soft dark:group-hover:text-paper">L</kbd>
+                </button>
+
+                <!-- 5. Frame -->
+                <button
+                  type="button"
+                  role="menuitem"
+                  id="tool-frame"
+                  onclick="selectTool('frame')"
+                  class="calm-menu-item group h-10 px-2.5 rounded-ctrl flex items-center gap-3 w-full text-left text-[13px] font-medium transition-colors duration-100 ease-out active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink dark:focus-visible:ring-paper text-ink-soft dark:text-night-mute hover:bg-wash hover:text-ink dark:hover:bg-night-wash dark:hover:text-paper"
+                  data-tool="frame"
+                >
+                  <svg class="size-5 shrink-0 text-current" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <line x1="6.5" y1="3" x2="6.5" y2="21" />
+                    <line x1="17.5" y1="3" x2="17.5" y2="21" />
+                    <line x1="3" y1="6.5" x2="21" y2="6.5" />
+                    <line x1="3" y1="17.5" x2="21" y2="17.5" />
+                  </svg>
+                  <span class="truncate">Frame</span>
+                  <kbd class="ml-auto font-mono text-xs text-ink-mute dark:text-night-mute group-hover:text-ink-soft dark:group-hover:text-paper">F</kbd>
+                </button>
+
+                <!-- 6. Polygons (Submenu Trigger) -->
+                <div class="relative" onmouseenter="openSubmenu('polygons')" onmouseleave="closeSubmenu('polygons')">
+                  <button
+                    type="button"
+                    role="menuitem"
+                    id="tool-polygons-trigger"
+                    aria-haspopup="menu"
+                    aria-expanded="false"
+                    aria-controls="submenu-polygons"
+                    onclick="toggleSubmenu('polygons')"
+                    class="calm-menu-item group h-10 px-2.5 rounded-ctrl flex items-center gap-3 w-full text-left text-[13px] font-medium transition-colors duration-100 ease-out active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink dark:focus-visible:ring-paper text-ink-soft dark:text-night-mute hover:bg-wash hover:text-ink dark:hover:bg-night-wash dark:hover:text-paper"
+                  >
+                    <svg class="size-5 shrink-0 text-current" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <polygon points="12 2.5 20.5 7.4 20.5 16.6 12 21.5 3.5 16.6 3.5 7.4" />
+                    </svg>
+                    <span class="truncate">Polygons</span>
+                    <svg class="size-4 shrink-0 ml-auto text-ink-mute dark:text-night-mute group-hover:text-ink-soft dark:group-hover:text-paper transition-transform duration-150" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="m9 18 6-6-6-6" />
+                    </svg>
+                  </button>
+
+                  <!-- Polygons Submenu Flyout -->
+                  <div
+                    id="submenu-polygons"
+                    role="menu"
+                    aria-label="Polygons submenu"
+                    class="hidden submenu-popover absolute left-full top-0 ml-1.5 w-48 p-1.5 rounded-panel bg-paper dark:bg-night-paper border border-line dark:border-night-line shadow-float z-30 flex-col gap-0.5"
+                  >
+                    <button type="button" role="menuitem" onclick="selectPolygon('triangle')" class="group h-10 px-2.5 rounded-ctrl flex items-center gap-3 w-full text-left text-[13px] font-medium text-ink-soft dark:text-night-mute hover:bg-wash hover:text-ink dark:hover:bg-night-wash dark:hover:text-paper active:scale-[0.96] transition-colors">
+                      <svg class="size-5 shrink-0 text-current" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="12 4 20.5 19 3.5 19" /></svg>
+                      <span>Triangle</span>
+                    </button>
+                    <button type="button" role="menuitem" onclick="selectPolygon('diamond')" class="group h-10 px-2.5 rounded-ctrl flex items-center gap-3 w-full text-left text-[13px] font-medium text-ink-soft dark:text-night-mute hover:bg-wash hover:text-ink dark:hover:bg-night-wash dark:hover:text-paper active:scale-[0.96] transition-colors">
+                      <svg class="size-5 shrink-0 text-current" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="12 3 20.5 12 12 21 3.5 12" /></svg>
+                      <span>Diamond</span>
+                    </button>
+                    <button type="button" role="menuitem" onclick="selectPolygon('trapezoid')" class="group h-10 px-2.5 rounded-ctrl flex items-center gap-3 w-full text-left text-[13px] font-medium text-ink-soft dark:text-night-mute hover:bg-wash hover:text-ink dark:hover:bg-night-wash dark:hover:text-paper active:scale-[0.96] transition-colors">
+                      <svg class="size-5 shrink-0 text-current" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="7 5.5 17 5.5 21 18.5 3 18.5" /></svg>
+                      <span>Trapezoid</span>
+                    </button>
+                    <button type="button" role="menuitem" onclick="selectPolygon('pentagon')" class="group h-10 px-2.5 rounded-ctrl flex items-center gap-3 w-full text-left text-[13px] font-medium text-ink-soft dark:text-night-mute hover:bg-wash hover:text-ink dark:hover:bg-night-wash dark:hover:text-paper active:scale-[0.96] transition-colors">
+                      <svg class="size-5 shrink-0 text-current" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="12 3 20.5 9 17.5 19 6.5 19 3.5 9" /></svg>
+                      <span>Pentagon</span>
+                    </button>
+                    <button type="button" role="menuitem" onclick="selectPolygon('hexagon')" class="group h-10 px-2.5 rounded-ctrl flex items-center gap-3 w-full text-left text-[13px] font-medium text-ink-soft dark:text-night-mute hover:bg-wash hover:text-ink dark:hover:bg-night-wash dark:hover:text-paper active:scale-[0.96] transition-colors">
+                      <svg class="size-5 shrink-0 text-current" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="12 2.5 20.5 7.4 20.5 16.6 12 21.5 3.5 16.6 3.5 7.4" /></svg>
+                      <span>Hexagon</span>
+                    </button>
+                  </div>
+                </div>
+
+                <!-- 7. Function / Graph -->
+                <button
+                  type="button"
+                  role="menuitem"
+                  id="tool-graph"
+                  onclick="selectTool('graph')"
+                  class="calm-menu-item group h-10 px-2.5 rounded-ctrl flex items-center gap-3 w-full text-left text-[13px] font-medium transition-colors duration-100 ease-out active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink dark:focus-visible:ring-paper text-ink-soft dark:text-night-mute hover:bg-wash hover:text-ink dark:hover:bg-night-wash dark:hover:text-paper"
+                  data-tool="graph"
+                >
+                  <svg class="size-5 shrink-0 text-current" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M3.5 3.5v17h17" />
+                    <path d="M7 15c2.5-7 5.5-9 7.5-2s3.5 3 4.5-9" />
+                  </svg>
+                  <span class="truncate">Function</span>
+                  <kbd class="ml-auto font-mono text-xs text-ink-mute dark:text-night-mute group-hover:text-ink-soft dark:group-hover:text-paper">G</kbd>
+                </button>
+
+                <!-- 8. Equation -->
+                <button
+                  type="button"
+                  role="menuitem"
+                  id="tool-equation"
+                  onclick="selectTool('equation')"
+                  class="calm-menu-item group h-10 px-2.5 rounded-ctrl flex items-center gap-3 w-full text-left text-[13px] font-medium transition-colors duration-100 ease-out active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink dark:focus-visible:ring-paper text-ink-soft dark:text-night-mute hover:bg-wash hover:text-ink dark:hover:bg-night-wash dark:hover:text-paper"
+                  data-tool="equation"
+                >
+                  <svg class="size-5 shrink-0 text-current" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M18 4.5H6.5l6.5 7.5-6.5 7.5H18" />
+                  </svg>
+                  <span class="truncate">Equation</span>
+                  <kbd class="ml-auto font-mono text-xs text-ink-mute dark:text-night-mute group-hover:text-ink-soft dark:group-hover:text-paper">E</kbd>
+                </button>
+
+              </div>
+
+              <!-- ── GROUP 2: LIBRARY ITEMS (gap-2.5 separator above, zero lines) ── -->
+              <div class="flex flex-col gap-0.5" role="group" aria-label="Library tools">
+                
+                <!-- 9. Stickers (Submenu Trigger) -->
+                <div class="relative" onmouseenter="openSubmenu('stickers')" onmouseleave="closeSubmenu('stickers')">
+                  <button
+                    type="button"
+                    role="menuitem"
+                    id="tool-stickers-trigger"
+                    aria-haspopup="menu"
+                    aria-expanded="false"
+                    aria-controls="submenu-stickers"
+                    onclick="toggleSubmenu('stickers')"
+                    class="calm-menu-item group h-10 px-2.5 rounded-ctrl flex items-center gap-3 w-full text-left text-[13px] font-medium transition-colors duration-100 ease-out active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink dark:focus-visible:ring-paper text-ink-soft dark:text-night-mute hover:bg-wash hover:text-ink dark:hover:bg-night-wash dark:hover:text-paper"
+                  >
+                    <svg class="size-5 shrink-0 text-current" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="M15.5 3.5H6.5a3 3 0 0 0-3 3v11a3 3 0 0 0 3 3h7.5a6.5 6.5 0 0 0 6.5-6.5v-7.5a3 3 0 0 0-3-3z" />
+                      <path d="M14 14h6.5" />
+                      <path d="M14 14v6.5" />
+                    </svg>
+                    <span class="truncate">Stickers</span>
+                    <svg class="size-4 shrink-0 ml-auto text-ink-mute dark:text-night-mute group-hover:text-ink-soft dark:group-hover:text-paper transition-transform duration-150" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="m9 18 6-6-6-6" />
+                    </svg>
+                  </button>
+
+                  <!-- Stickers Submenu Flyout -->
+                  <div
+                    id="submenu-stickers"
+                    role="menu"
+                    aria-label="Stickers submenu"
+                    class="hidden submenu-popover absolute left-full top-0 ml-1.5 w-56 p-1.5 rounded-panel bg-paper dark:bg-night-paper border border-line dark:border-night-line shadow-float z-30 flex-col gap-2"
+                  >
+                    <!-- Quick sticker picker grid -->
+                    <div class="grid grid-cols-4 gap-1 p-1">
+                      <button type="button" title="Star" onclick="selectSticker('star')" class="size-10 rounded-ctrl flex items-center justify-center text-ink-soft dark:text-night-mute hover:bg-wash hover:text-ink dark:hover:bg-night-wash dark:hover:text-paper active:scale-95 transition-all">
+                        <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                      </button>
+                      <button type="button" title="Heart" onclick="selectSticker('heart')" class="size-10 rounded-ctrl flex items-center justify-center text-ink-soft dark:text-night-mute hover:bg-wash hover:text-ink dark:hover:bg-night-wash dark:hover:text-paper active:scale-95 transition-all">
+                        <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>
+                      </button>
+                      <button type="button" title="Flame" onclick="selectSticker('flame')" class="size-10 rounded-ctrl flex items-center justify-center text-ink-soft dark:text-night-mute hover:bg-wash hover:text-ink dark:hover:bg-night-wash dark:hover:text-paper active:scale-95 transition-all">
+                        <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg>
+                      </button>
+                      <button type="button" title="Sparkle" onclick="selectSticker('sparkle')" class="size-10 rounded-ctrl flex items-center justify-center text-ink-soft dark:text-night-mute hover:bg-wash hover:text-ink dark:hover:bg-night-wash dark:hover:text-paper active:scale-95 transition-all">
+                        <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/></svg>
+                      </button>
+                    </div>
+
+                    <!-- Spaced action (no line separator) -->
+                    <button type="button" role="menuitem" onclick="addCustomSticker()" class="h-10 px-2.5 rounded-ctrl flex items-center gap-3 w-full text-left text-[13px] font-medium text-ink-soft dark:text-night-mute hover:bg-wash hover:text-ink dark:hover:bg-night-wash dark:hover:text-paper active:scale-[0.96] transition-colors">
+                      <svg class="size-5 shrink-0 text-current" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <circle cx="12" cy="12" r="9" /><line x1="12" y1="8" x2="12" y2="16" /><line x1="8" y1="12" x2="16" y2="12" />
+                      </svg>
+                      <span>Add PNG sticker</span>
+                    </button>
+                  </div>
+                </div>
+
+                <!-- 10. Media (Submenu Trigger) -->
+                <div class="relative" onmouseenter="openSubmenu('media')" onmouseleave="closeSubmenu('media')">
+                  <button
+                    type="button"
+                    role="menuitem"
+                    id="tool-media-trigger"
+                    aria-haspopup="menu"
+                    aria-expanded="false"
+                    aria-controls="submenu-media"
+                    onclick="toggleSubmenu('media')"
+                    class="calm-menu-item group h-10 px-2.5 rounded-ctrl flex items-center gap-3 w-full text-left text-[13px] font-medium transition-colors duration-100 ease-out active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink dark:focus-visible:ring-paper text-ink-soft dark:text-night-mute hover:bg-wash hover:text-ink dark:hover:bg-night-wash dark:hover:text-paper"
+                  >
+                    <svg class="size-5 shrink-0 text-current" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <rect width="17" height="17" x="3.5" y="3.5" rx="2.5" />
+                      <circle cx="8.5" cy="8.5" r="1.5" />
+                      <path d="m20.5 15.5-5-5-10 10" />
+                    </svg>
+                    <span class="truncate">Media</span>
+                    <svg class="size-4 shrink-0 ml-auto text-ink-mute dark:text-night-mute group-hover:text-ink-soft dark:group-hover:text-paper transition-transform duration-150" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="m9 18 6-6-6-6" />
+                    </svg>
+                  </button>
+
+                  <!-- Media Submenu Flyout -->
+                  <div
+                    id="submenu-media"
+                    role="menu"
+                    aria-label="Media submenu"
+                    class="hidden submenu-popover absolute left-full top-0 ml-1.5 w-52 p-1.5 rounded-panel bg-paper dark:bg-night-paper border border-line dark:border-night-line shadow-float z-30 flex-col gap-0.5"
+                  >
+                    <button type="button" role="menuitem" onclick="triggerAddImage()" class="group h-10 px-2.5 rounded-ctrl flex items-center gap-3 w-full text-left text-[13px] font-medium text-ink-soft dark:text-night-mute hover:bg-wash hover:text-ink dark:hover:bg-night-wash dark:hover:text-paper active:scale-[0.96] transition-colors">
+                      <svg class="size-5 shrink-0 text-current" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <rect width="17" height="17" x="3.5" y="3.5" rx="2.5" />
+                        <circle cx="8.5" cy="8.5" r="1.5" />
+                        <path d="m20.5 15.5-5-5-10 10" />
+                      </svg>
+                      <span>Add image</span>
+                    </button>
+                    <button type="button" role="menuitem" onclick="triggerAddVideo()" class="group h-10 px-2.5 rounded-ctrl flex items-center gap-3 w-full text-left text-[13px] font-medium text-ink-soft dark:text-night-mute hover:bg-wash hover:text-ink dark:hover:bg-night-wash dark:hover:text-paper active:scale-[0.96] transition-colors">
+                      <svg class="size-5 shrink-0 text-current" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <rect x="2.5" y="5.5" width="19" height="13" rx="3.5" />
+                        <polygon points="10 9.5 15 12 10 14.5" fill="none" />
+                      </svg>
+                      <span>Add YouTube video</span>
+                    </button>
+                  </div>
+                </div>
+
+              </div>
+
+              <!-- ── GROUP 3: SESSION ITEMS (gap-2.5 separator above, zero lines) ── -->
+              <div class="flex flex-col gap-0.5" role="group" aria-label="Session actions">
+
+                <!-- 11. Tool lock (Toggle / Checkbox item) -->
+                <button
+                  type="button"
+                  role="menuitemcheckbox"
+                  id="tool-lock"
+                  aria-checked="false"
+                  onclick="toggleLockState()"
+                  class="calm-menu-item group h-10 px-2.5 rounded-ctrl flex items-center gap-3 w-full text-left text-[13px] font-medium transition-colors duration-100 ease-out active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink dark:focus-visible:ring-paper text-ink-soft dark:text-night-mute hover:bg-wash hover:text-ink dark:hover:bg-night-wash dark:hover:text-paper"
+                >
+                  <!-- Lock icon dynamically toggles state -->
+                  <span id="lock-icon-container" class="size-5 shrink-0 flex items-center justify-center text-current">
+                    <!-- Unlocked glyph (default) -->
+                    <svg id="lock-icon-open" class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <rect x="5" y="11" width="14" height="10" rx="2" />
+                      <path d="M8 11V7a4 4 0 0 1 7.5-2" />
+                    </svg>
+                    <!-- Locked glyph (active) -->
+                    <svg id="lock-icon-closed" class="size-5 hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <rect x="5" y="11" width="14" height="10" rx="2" />
+                      <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+                    </svg>
+                  </span>
+                  <span class="truncate">Tool lock</span>
+                  <!-- Check indicator & Shortcut -->
+                  <div class="ml-auto flex items-center gap-2">
+                    <span id="lock-status-dot" class="size-1.5 rounded-full bg-moss opacity-0 transition-opacity"></span>
+                    <kbd class="font-mono text-xs text-ink-mute dark:text-night-mute group-hover:text-ink-soft dark:group-hover:text-paper">Q</kbd>
+                  </div>
+                </button>
+
+                <!-- 12. Hide toolbar (Action) -->
+                <button
+                  type="button"
+                  role="menuitem"
+                  id="action-hide-toolbar"
+                  onclick="triggerHideToolbar()"
+                  class="calm-menu-item group h-10 px-2.5 rounded-ctrl flex items-center gap-3 w-full text-left text-[13px] font-medium transition-colors duration-100 ease-out active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink dark:focus-visible:ring-paper text-ink-soft dark:text-night-mute hover:bg-wash hover:text-ink dark:hover:bg-night-wash dark:hover:text-paper"
+                >
+                  <svg class="size-5 shrink-0 text-current" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="m6 9 6 6 6-6" />
+                  </svg>
+                  <span class="truncate">Hide toolbar</span>
+                </button>
+
+              </div>
+
+            </div>
+          </div>
+
+          <!-- Bottom trigger anchor simulation (demonstrates how it docks above the toolbar) -->
+          <div class="mt-4 pt-3 flex items-center justify-center">
+            <div class="flex items-center gap-1.5 p-1 rounded-bar bg-paper dark:bg-night-paper border border-line dark:border-night-line shadow-card text-xs text-ink-soft dark:text-night-mute">
+              <span class="size-2 rounded-full bg-moss"></span>
+              <span>Docks above bottom toolbar overflow</span>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- RIGHT: CALM DESIGN SYSTEM SPECIFICATION & ARCHITECTURE (7 Cols) -->
+      <section class="lg:col-span-7 flex flex-col gap-6">
+
+        <!-- CARD 1: DESIGN PRINCIPLES & ANATOMY AUDIT -->
+        <div class="p-6 rounded-panel bg-paper dark:bg-night-paper border border-line dark:border-night-line shadow-card">
+          <div class="flex items-center justify-between mb-4">
+            <h2 class="text-base font-semibold text-ink dark:text-paper tracking-tight">Alternative 1: Architectural Rationale</h2>
+            <span class="px-2.5 py-0.5 rounded-full text-xs font-mono font-medium bg-moss-wash text-moss">Calm Minimalist</span>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+            <div class="p-3.5 rounded-ctrl bg-wash dark:bg-night-wash border border-line dark:border-night-line flex flex-col gap-1.5">
+              <span class="font-semibold text-ink dark:text-paper">Zero Separator Lines</span>
+              <p class="text-ink-soft dark:text-night-mute leading-relaxed">
+                Replaces mechanical 1px dividers with calibrated whitespace rhythm. Peer items sit at <code class="font-mono text-[11px] bg-paper dark:bg-night-paper px-1 py-0.5 rounded">gap-0.5</code> (2px); semantic groups breathe at <code class="font-mono text-[11px] bg-paper dark:bg-night-paper px-1 py-0.5 rounded">gap-2.5</code> (10px).
+              </p>
+            </div>
+
+            <div class="p-3.5 rounded-ctrl bg-wash dark:bg-night-wash border border-line dark:border-night-line flex flex-col gap-1.5">
+              <span class="font-semibold text-ink dark:text-paper">No Overline Microcopy</span>
+              <p class="text-ink-soft dark:text-night-mute leading-relaxed">
+                Eliminated the uppercase <code class="font-mono text-[11px] bg-paper dark:bg-night-paper px-1 py-0.5 rounded">MORE TOOLS</code> label. The dropdown is opened intentionally by clicking the ellipsis button; repeating the obvious adds visual chatter.
+              </p>
+            </div>
+
+            <div class="p-3.5 rounded-ctrl bg-wash dark:bg-night-wash border border-line dark:border-night-line flex flex-col gap-1.5">
+              <span class="font-semibold text-ink dark:text-paper">Target Size Compliance</span>
+              <p class="text-ink-soft dark:text-night-mute leading-relaxed">
+                Every row is strictly <code class="font-mono text-[11px] bg-paper dark:bg-night-paper px-1 py-0.5 rounded">h-10</code> (40px) with <code class="font-mono text-[11px] bg-paper dark:bg-night-paper px-1 py-0.5 rounded">px-2.5</code>. Completely satisfies WCAG 2.5.5 / 2.5.8 touch target ergonomics while staying slim at 240px width.
+              </p>
+            </div>
+
+            <div class="p-3.5 rounded-ctrl bg-wash dark:bg-night-wash border border-line dark:border-night-line flex flex-col gap-1.5">
+              <span class="font-semibold text-ink dark:text-paper">Unified 20px Stroke 1.7 Glyphs</span>
+              <p class="text-ink-soft dark:text-night-mute leading-relaxed">
+                All iconography conforms to the Calm UI stroke geometry (<code class="font-mono text-[11px] bg-paper dark:bg-night-paper px-1 py-0.5 rounded">stroke: 1.7</code>, round caps, round joins). Eliminates mixed visual weights across shapes and tools.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- CARD 2: INTERACTIVE STATE MATRIX -->
+        <div class="p-6 rounded-panel bg-paper dark:bg-night-paper border border-line dark:border-night-line shadow-card">
+          <h2 class="text-base font-semibold text-ink dark:text-paper tracking-tight mb-3">Interactive State Matrix</h2>
+          <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs">
+              <thead>
+                <tr class="border-b border-line dark:border-night-line text-ink-mute dark:text-night-mute font-mono">
+                  <th class="pb-2 font-medium">State</th>
+                  <th class="pb-2 font-medium">Tailwind Utility</th>
+                  <th class="pb-2 font-medium">Rendered Appearance</th>
+                  <th class="pb-2 font-medium">Trigger</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-line dark:divide-night-line text-ink-soft dark:text-night-mute">
+                <tr>
+                  <td class="py-2.5 font-medium text-ink dark:text-paper">Resting</td>
+                  <td class="py-2.5 font-mono text-[11px]">text-ink-soft</td>
+                  <td class="py-2.5">
+                    <div class="h-7 px-2 rounded-ctrl flex items-center gap-2 text-ink-soft dark:text-night-mute bg-transparent text-[11px]">
+                      <span>Rest</span>
+                    </div>
+                  </td>
+                  <td class="py-2.5 text-[11px]">Default state</td>
+                </tr>
+                <tr>
+                  <td class="py-2.5 font-medium text-ink dark:text-paper">Hover</td>
+                  <td class="py-2.5 font-mono text-[11px]">bg-wash text-ink</td>
+                  <td class="py-2.5">
+                    <div class="h-7 px-2 rounded-ctrl flex items-center gap-2 bg-wash text-ink dark:bg-night-wash dark:text-paper text-[11px]">
+                      <span>Hovered</span>
+                    </div>
+                  </td>
+                  <td class="py-2.5 text-[11px]">Pointer hover</td>
+                </tr>
+                <tr>
+                  <td class="py-2.5 font-medium text-ink dark:text-paper">Active (Selected)</td>
+                  <td class="py-2.5 font-mono text-[11px]">bg-ink text-paper</td>
+                  <td class="py-2.5">
+                    <div class="h-7 px-2 rounded-ctrl flex items-center gap-2 bg-ink text-paper dark:bg-paper dark:text-night text-[11px]">
+                      <span>Selected</span>
+                    </div>
+                  </td>
+                  <td class="py-2.5 text-[11px]">Current active tool</td>
+                </tr>
+                <tr>
+                  <td class="py-2.5 font-medium text-ink dark:text-paper">Press</td>
+                  <td class="py-2.5 font-mono text-[11px]">active:scale-[0.96]</td>
+                  <td class="py-2.5">
+                    <div class="h-7 px-2 rounded-ctrl flex items-center gap-2 bg-wash text-ink dark:bg-night-wash dark:text-paper scale-[0.96] text-[11px]">
+                      <span>Pressed</span>
+                    </div>
+                  </td>
+                  <td class="py-2.5 text-[11px]">Pointer down</td>
+                </tr>
+                <tr>
+                  <td class="py-2.5 font-medium text-ink dark:text-paper">Focus Visible</td>
+                  <td class="py-2.5 font-mono text-[11px]">focus-visible:ring-2 ring-ink</td>
+                  <td class="py-2.5">
+                    <div class="h-7 px-2 rounded-ctrl flex items-center gap-2 ring-2 ring-ink dark:ring-paper text-ink dark:text-paper text-[11px]">
+                      <span>Focus ring</span>
+                    </div>
+                  </td>
+                  <td class="py-2.5 text-[11px]">Keyboard Tab / Arrows</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- CARD 3: TOKENS REFERENCE -->
+        <div class="p-6 rounded-panel bg-paper dark:bg-night-paper border border-line dark:border-night-line shadow-card">
+          <h2 class="text-base font-semibold text-ink dark:text-paper tracking-tight mb-3">Calm UI Design Tokens Utilized</h2>
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs font-mono">
+            <div class="p-2.5 rounded-ctrl bg-wash dark:bg-night-wash border border-line dark:border-night-line flex flex-col gap-1">
+              <span class="text-[10px] uppercase text-ink-mute dark:text-night-mute">Paper Surface</span>
+              <div class="flex items-center gap-2">
+                <span class="size-3.5 rounded-full bg-[#FBFBF9] border border-line"></span>
+                <span class="text-ink dark:text-paper font-semibold">#FBFBF9</span>
+              </div>
+            </div>
+            <div class="p-2.5 rounded-ctrl bg-wash dark:bg-night-wash border border-line dark:border-night-line flex flex-col gap-1">
+              <span class="text-[10px] uppercase text-ink-mute dark:text-night-mute">Ink Base</span>
+              <div class="flex items-center gap-2">
+                <span class="size-3.5 rounded-full bg-[#141414]"></span>
+                <span class="text-ink dark:text-paper font-semibold">#141414</span>
+              </div>
+            </div>
+            <div class="p-2.5 rounded-ctrl bg-wash dark:bg-night-wash border border-line dark:border-night-line flex flex-col gap-1">
+              <span class="text-[10px] uppercase text-ink-mute dark:text-night-mute">Ink Soft</span>
+              <div class="flex items-center gap-2">
+                <span class="size-3.5 rounded-full bg-[#4A4A4F]"></span>
+                <span class="text-ink dark:text-paper font-semibold">#4A4A4F</span>
+              </div>
+            </div>
+            <div class="p-2.5 rounded-ctrl bg-wash dark:bg-night-wash border border-line dark:border-night-line flex flex-col gap-1">
+              <span class="text-[10px] uppercase text-ink-mute dark:text-night-mute">Wash Hover</span>
+              <div class="flex items-center gap-2">
+                <span class="size-3.5 rounded-full bg-[#F1F1F2] border border-line"></span>
+                <span class="text-ink dark:text-paper font-semibold">#F1F1F2</span>
+              </div>
+            </div>
+            <div class="p-2.5 rounded-ctrl bg-wash dark:bg-night-wash border border-line dark:border-night-line flex flex-col gap-1">
+              <span class="text-[10px] uppercase text-ink-mute dark:text-night-mute">Border Line</span>
+              <div class="flex items-center gap-2">
+                <span class="size-3.5 rounded-full bg-[#E5E3DD]"></span>
+                <span class="text-ink dark:text-paper font-semibold">#E5E3DD</span>
+              </div>
+            </div>
+            <div class="p-2.5 rounded-ctrl bg-wash dark:bg-night-wash border border-line dark:border-night-line flex flex-col gap-1">
+              <span class="text-[10px] uppercase text-ink-mute dark:text-night-mute">Moss Accent</span>
+              <div class="flex items-center gap-2">
+                <span class="size-3.5 rounded-full bg-[#27604A]"></span>
+                <span class="text-ink dark:text-paper font-semibold">#27604A</span>
+              </div>
+            </div>
+            <div class="p-2.5 rounded-ctrl bg-wash dark:bg-night-wash border border-line dark:border-night-line flex flex-col gap-1">
+              <span class="text-[10px] uppercase text-ink-mute dark:text-night-mute">Night Surface</span>
+              <div class="flex items-center gap-2">
+                <span class="size-3.5 rounded-full bg-[#1F1F24] border border-night-line"></span>
+                <span class="text-ink dark:text-paper font-semibold">#1F1F24</span>
+              </div>
+            </div>
+            <div class="p-2.5 rounded-ctrl bg-wash dark:bg-night-wash border border-line dark:border-night-line flex flex-col gap-1">
+              <span class="text-[10px] uppercase text-ink-mute dark:text-night-mute">Panel Radius</span>
+              <div class="flex items-center gap-2">
+                <span class="text-ink dark:text-paper font-semibold">18px</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+    </div>
+  </main>
+
+  <!-- JAVASCRIPT FOR INTERACTIVITY & ACCESSIBILITY -->
+  <script>
+    let activeTool = 'rectangle';
+    let isToolLocked = false;
+    let openSubmenuId = null;
+
+    function applyActiveToolStyle() {
+      document.querySelectorAll('.calm-menu-item').forEach(el => {
+        const tool = el.getAttribute('data-tool');
+        if (tool && tool === activeTool) {
+          el.classList.add('bg-ink', 'text-paper', 'dark:bg-paper', 'dark:text-night');
+          el.classList.remove('text-ink-soft', 'dark:text-night-mute');
+          el.setAttribute('aria-current', 'true');
+          const kbd = el.querySelector('kbd');
+          if (kbd) {
+            kbd.classList.add('text-paper/70', 'dark:text-night/70');
+            kbd.classList.remove('text-ink-mute', 'dark:text-night-mute');
+          }
+        } else if (tool) {
+          el.classList.remove('bg-ink', 'text-paper', 'dark:bg-paper', 'dark:text-night');
+          el.classList.add('text-ink-soft', 'dark:text-night-mute');
+          el.removeAttribute('aria-current');
+          const kbd = el.querySelector('kbd');
+          if (kbd) {
+            kbd.classList.remove('text-paper/70', 'dark:text-night/70');
+            kbd.classList.add('text-ink-mute', 'dark:text-night-mute');
+          }
+        }
+      });
+    }
+
+    function selectTool(toolId) {
+      activeTool = toolId;
+      applyActiveToolStyle();
+      closeAllSubmenus();
+    }
+
+    function setActiveTool(toolId) {
+      selectTool(toolId);
+    }
+
+    function toggleLockState() {
+      isToolLocked = !isToolLocked;
+      const lockItem = document.getElementById('tool-lock');
+      const openIcon = document.getElementById('lock-icon-open');
+      const closedIcon = document.getElementById('lock-icon-closed');
+      const statusDot = document.getElementById('lock-status-dot');
+
+      lockItem.setAttribute('aria-checked', isToolLocked ? 'true' : 'false');
+
+      if (isToolLocked) {
+        openIcon.classList.add('hidden');
+        closedIcon.classList.remove('hidden');
+        statusDot.classList.remove('opacity-0');
+        statusDot.classList.add('opacity-100');
+        lockItem.classList.add('text-ink', 'dark:text-paper');
+      } else {
+        openIcon.classList.remove('hidden');
+        closedIcon.classList.add('hidden');
+        statusDot.classList.remove('opacity-100');
+        statusDot.classList.add('opacity-0');
+        lockItem.classList.remove('text-ink', 'dark:text-paper');
+      }
+    }
+
+    function openSubmenu(id) {
+      closeAllSubmenus();
+      const el = document.getElementById(`submenu-${id}`);
+      const trigger = document.getElementById(`tool-${id}-trigger`);
+      if (el) {
+        el.classList.remove('hidden');
+        el.classList.add('flex');
+        openSubmenuId = id;
+      }
+      if (trigger) {
+        trigger.setAttribute('aria-expanded', 'true');
+        trigger.classList.add('bg-wash', 'text-ink', 'dark:bg-night-wash', 'dark:text-paper');
+      }
+    }
+
+    function closeSubmenu(id) {
+      const el = document.getElementById(`submenu-${id}`);
+      const trigger = document.getElementById(`tool-${id}-trigger`);
+      if (el) {
+        el.classList.add('hidden');
+        el.classList.remove('flex');
+      }
+      if (trigger) {
+        trigger.setAttribute('aria-expanded', 'false');
+        trigger.classList.remove('bg-wash', 'text-ink', 'dark:bg-night-wash', 'dark:text-paper');
+      }
+      if (openSubmenuId === id) openSubmenuId = null;
+    }
+
+    function toggleSubmenu(id) {
+      if (openSubmenuId === id) {
+        closeSubmenu(id);
+      } else {
+        openSubmenu(id);
+      }
+    }
+
+    function closeAllSubmenus() {
+      ['polygons', 'stickers', 'media'].forEach(id => closeSubmenu(id));
+    }
+
+    function selectPolygon(kind) {
+      activeTool = 'polygon';
+      applyActiveToolStyle();
+      closeAllSubmenus();
+    }
+
+    function selectSticker(name) {
+      activeTool = 'sticker';
+      applyActiveToolStyle();
+      closeAllSubmenus();
+    }
+
+    function addCustomSticker() {
+      alert('Custom PNG Sticker picker triggered.');
+      closeAllSubmenus();
+    }
+
+    function triggerAddImage() {
+      alert('Image file picker triggered.');
+      closeAllSubmenus();
+    }
+
+    function triggerAddVideo() {
+      alert('YouTube Video Dialog triggered.');
+      closeAllSubmenus();
+    }
+
+    function triggerHideToolbar() {
+      alert('Toolbar hidden. (Press down arrow or restore button to show)');
+    }
+
+    function toggleTheme() {
+      const html = document.documentElement;
+      const themeText = document.getElementById('theme-text');
+      if (html.classList.contains('dark')) {
+        html.classList.remove('dark');
+        themeText.textContent = 'Dark Mode';
+      } else {
+        html.classList.add('dark');
+        themeText.textContent = 'Light Mode';
+      }
+    }
+
+    // Keyboard navigation (ARIA menu roving navigation)
+    document.addEventListener('keydown', (e) => {
+      // Hotkey triggers
+      const key = e.key.toLowerCase();
+      if (key === 'r' && !e.metaKey && !e.ctrlKey) { selectTool('rectangle'); }
+      if (key === 'o' && !e.metaKey && !e.ctrlKey) { selectTool('ellipse'); }
+      if (key === 'a' && !e.metaKey && !e.ctrlKey) { selectTool('arrow'); }
+      if (key === 'l' && !e.metaKey && !e.ctrlKey) { selectTool('line'); }
+      if (key === 'f' && !e.metaKey && !e.ctrlKey) { selectTool('frame'); }
+      if (key === 'g' && !e.metaKey && !e.ctrlKey) { selectTool('graph'); }
+      if (key === 'e' && !e.metaKey && !e.ctrlKey) { selectTool('equation'); }
+      if (key === 'q' && !e.metaKey && !e.ctrlKey) { toggleLockState(); }
+      if (key === 'escape') { closeAllSubmenus(); }
+    });
+
+    // Initialize default active tool
+    applyActiveToolStyle();
+  </script>
+</body>
+</html>

@@ -12,8 +12,11 @@ export function compareShapeOrder(a: Shape, b: Shape): number {
           : 0;
 }
 
-/** Logical pre-order defines painting and picking; DOM order remains id order. */
-export function paintOrder(shapes: ReadonlyMap<string, Shape>): Shape[] {
+/** Sorted sibling buckets keyed by resolved parent; null is the page root.
+ * Exposed so a caller that also needs the child lists builds them once. */
+export function groupByParent(
+  shapes: ReadonlyMap<string, Shape>,
+): Map<string | null, Shape[]> {
   const children = new Map<string | null, Shape[]>();
   for (const shape of shapes.values()) {
     const parent =
@@ -23,6 +26,14 @@ export function paintOrder(shapes: ReadonlyMap<string, Shape>): Shape[] {
     children.set(parent, bucket);
   }
   for (const bucket of children.values()) bucket.sort(compareShapeOrder);
+  return children;
+}
+
+/** Logical pre-order over buckets from {@link groupByParent}. */
+export function paintOrderOf(
+  shapes: ReadonlyMap<string, Shape>,
+  children: ReadonlyMap<string | null, Shape[]>,
+): Shape[] {
   const output: Shape[] = [],
     seen = new Set<string>();
   const visit = (roots: Shape[]) => {
@@ -42,4 +53,9 @@ export function paintOrder(shapes: ReadonlyMap<string, Shape>): Shape[] {
   if (seen.size < shapes.size)
     visit([...shapes.values()].sort(compareShapeOrder));
   return output;
+}
+
+/** Logical pre-order defines painting and picking; DOM order remains id order. */
+export function paintOrder(shapes: ReadonlyMap<string, Shape>): Shape[] {
+  return paintOrderOf(shapes, groupByParent(shapes));
 }

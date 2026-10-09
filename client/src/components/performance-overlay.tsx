@@ -1,4 +1,5 @@
-import { useDocumentStore } from '@/canvas/use-document-store';
+import { shapeStore } from '@/canvas/engine/shape-store';
+import { useStoreValue } from '@/canvas/use-shapes';
 import { useEffect, useState } from 'react';
 
 // Chrome-only heap stats; absent elsewhere, in which case we hide the row.
@@ -61,7 +62,7 @@ function StatRow({ label, value }: { label: string; value: string }) {
 
 export function PerformanceOverlay() {
   const { fps, frameMs } = useFrameStats();
-  const shapeCount = useDocumentStore((s) => s.shapes.length);
+  const shapeCount = useStoreValue(() => shapeStore.sorted.get().length, []);
   const memory = (performance as Performance & { memory?: PerformanceMemory })
     .memory;
 

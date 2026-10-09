@@ -7,7 +7,7 @@ import { boundsCenter, boundsContainsPoint, type Point } from './geometry';
 import { boundsSize } from './minimap-geometry';
 import { MinimapManager } from './minimap-manager';
 import { useCameraStore } from './use-camera-store';
-import { useDocumentStore } from './use-document-store';
+import { shapeStore } from './engine/shape-store';
 
 /**
  * Squared screen distance a press may wander before it counts as a drag.
@@ -58,7 +58,7 @@ export function Minimap() {
   const onDoubleClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const manager = managerRef.current;
     if (!manager) return;
-    if (!useDocumentStore.getState().shapes.length) return;
+    if (!shapeStore.sorted.get().length) return;
 
     const { clientX: x, clientY: y } = e;
     // Seed the drag anchors even though nothing is being dragged: a shift-drag
@@ -84,7 +84,7 @@ export function Minimap() {
 
       const elem = e.currentTarget;
       elem.setPointerCapture(e.pointerId);
-      if (!useDocumentStore.getState().shapes.length) return;
+      if (!shapeStore.sorted.get().length) return;
 
       noteActivity();
       const { clientX: x, clientY: y } = e;
@@ -176,12 +176,18 @@ export function Minimap() {
     <div
       data-ui-layer
       className={cn(
-        'absolute left-[max(0.5rem,env(safe-area-inset-left))] z-[var(--z-canvas-hud)] select-none',
-        // Directly above the history HUD, mirroring the ladder the video panel
-        // climbs on the other side.
-        'bottom-[calc(3.25rem+var(--wb-inset-bottom))]',
-        'max-sm:bottom-[calc(7.25rem+var(--wb-inset-bottom))]',
-        '[@media(pointer:coarse)]:bottom-[calc(11rem+var(--wb-inset-bottom))]',
+        'absolute right-[calc(0.75rem+env(safe-area-inset-right))] z-[var(--z-canvas-hud)] select-none',
+        // Docked directly above the view instrument, sharing its right edge.
+        //
+        // It used to sit in the opposite corner, which made it a fourth thing
+        // in a fourth place — and an overview of the board is not its own
+        // subject, it is the same question the zoom and the fit buttons answer:
+        // what am I looking at. Stacked on the instrument that answers that
+        // question, it needs no explaining, and the bottom-left corner of the
+        // board goes quiet.
+        'bottom-[calc(4rem+var(--wb-inset-bottom))]',
+        'max-sm:bottom-[calc(8rem+var(--wb-inset-bottom))]',
+        '[@media(pointer:coarse)]:bottom-[calc(11.5rem+var(--wb-inset-bottom))]',
       )}
     >
       <canvas
@@ -189,7 +195,7 @@ export function Minimap() {
         role="img"
         aria-label="Board overview"
         data-testid="minimap.canvas"
-        className="block h-28 w-40 touch-none rounded-panel border border-border/70"
+        className="wb-instrument block h-28 w-44 touch-none"
         onDoubleClick={onDoubleClick}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}

@@ -4,12 +4,12 @@ import type { Shape } from '@whiteboard/shared';
 import { PALETTE } from './use-style-store';
 
 // Zustand v5 serves `getInitialState()` to a server render, so the hook cannot
-// see a document or selection store mutated from the test. Both are read-only
-// here, so a fixed snapshot behind the same selector call is the whole of what
-// it needs — and the style store, read at its initial state, stands for the
-// style new shapes inherit before anyone touches a control.
+// see a selection store mutated from the test; a fixed snapshot behind the same
+// selector call stands in for it. Shapes are read from `shapeStore`, whose
+// atoms a server render reads directly, so the test publishes into it. The
+// style store, read at its initial state, stands for the style new shapes
+// inherit before anyone touches a control.
 const state = vi.hoisted(() => ({
-  shapes: [] as Shape[],
   selectedIds: [] as string[],
 }));
 
@@ -20,12 +20,9 @@ vi.mock('@/canvas/use-selection-store', () => ({
 
 vi.mock('@/canvas/use-document-store', () => ({
   editor: { getShape: () => undefined, updateShape: () => undefined },
-  useDocumentStore: (selector: (s: unknown) => unknown) =>
-    selector({
-      shapes: state.shapes,
-      shapesById: new Map(state.shapes.map((shape) => [shape.id, shape])),
-    }),
 }));
+
+const { shapeStore } = await import('./engine/shape-store');
 
 const { useStyleControls } = await import('./use-style-controls');
 
@@ -43,7 +40,7 @@ function rectangle(id: string, color: string, size: number): Shape {
 
 /** The controls as a surface would read them, for a given tool and selection. */
 function controls(activeToolId: string, shapes: Shape[] = []) {
-  state.shapes = shapes;
+  shapeStore.publish(new Map(shapes.map((shape) => [shape.id, shape])), null, shapes);
   state.selectedIds = shapes.map((shape) => shape.id);
   let read: ReturnType<typeof useStyleControls> | undefined;
   function Probe() {

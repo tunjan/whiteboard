@@ -5,6 +5,7 @@ export interface BoardMeta {
   createdAt: number;
   updatedAt: number;
   lastOpenedAt: number;
+  favorite?: boolean;
 }
 
 /**
@@ -19,4 +20,5 @@ export interface BoardRepository {
   rename(id: string, name: string): Promise<void>;
   delete(id: string): Promise<void>;
   markOpened(id: string): Promise<void>;
+  setFavorite(id: string, favorite: boolean): Promise<void>;
 }

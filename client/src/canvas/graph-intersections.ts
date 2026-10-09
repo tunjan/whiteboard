@@ -58,9 +58,12 @@ function tangentRoot(
  * bisection, plus local minima of |f| for roots that only touch zero.
  * A sign change across a pole (e.g. tan at pi/2) also brackets, so
  * candidates are only accepted when |f| actually vanishes at the limit.
+ * `ys` holds f already sampled on the scan grid (see `sampleCurve`); only the
+ * refinement calls `f` itself.
  */
 function findRoots(
   f: (x: number) => number,
+  ys: Float64Array,
   viewport: GraphViewport,
   samples: number,
 ): number[] {
@@ -68,12 +71,12 @@ function findRoots(
   const tolerance = Math.max(1e-9, (viewport.yMax - viewport.yMin) * 1e-6);
   const roots: number[] = [];
   let prevX = viewport.xMin;
-  let prevY = f(prevX);
+  let prevY = ys[0]!;
   let beforeX = prevX;
   let beforeY = Number.NaN;
   for (let i = 1; i <= samples; i += 1) {
     const x = viewport.xMin + i * step;
-    const y = f(x);
+    const y = ys[i]!;
     if (
       Number.isFinite(beforeY) &&
       Number.isFinite(prevY) &&
@@ -120,6 +123,18 @@ function findRoots(
   return roots;
 }
 
+/** f on the scan grid `findRoots` walks, xMin..xMax inclusive. */
+function sampleCurve(
+  f: (x: number) => number,
+  viewport: GraphViewport,
+  samples: number,
+): Float64Array {
+  const step = (viewport.xMax - viewport.xMin) / samples;
+  const ys = new Float64Array(samples + 1);
+  for (let i = 0; i <= samples; i += 1) ys[i] = f(viewport.xMin + i * step);
+  return ys;
+}
+
 const KIND_PRIORITY: Record<IntersectionKind, number> = {
   'curve-curve': 0,
   'x-axis': 1,
@@ -129,7 +144,7 @@ const KIND_PRIORITY: Record<IntersectionKind, number> = {
 /**
  * Intersections among the visible explicit curves and between each curve and
  * the x/y axes, within the viewport. Implicit relations are skipped. Results
- * are deduped on a sampling-resolution grid and capped at MAX_INTERSECTIONS.
+ * are deduped at sampling resolution and capped at MAX_INTERSECTIONS.
  */
 export function findGraphIntersections(
   expressions: GraphExpression[],
@@ -150,12 +165,19 @@ export function findGraphIntersections(
     curves.push(parsed.createEvaluator(parameters));
   }
 
+  // Each curve is sampled once and every pair scans the difference of the
+  // cached samples; sampling f − g afresh per pair cost C² curve passes.
+  const sampled = curves.map((f) => sampleCurve(f, viewport, samples));
+  const diff = new Float64Array(samples + 1);
   const candidates: IntersectionPoint[] = [];
   for (let i = 0; i < curves.length; i += 1) {
     const f = curves[i]!;
+    const fs = sampled[i]!;
     for (let j = i + 1; j < curves.length; j += 1) {
       const g = curves[j]!;
-      for (const root of findRoots((x) => f(x) - g(x), viewport, samples)) {
+      const gs = sampled[j]!;
+      for (let k = 0; k <= samples; k += 1) diff[k] = fs[k]! - gs[k]!;
+      for (const root of findRoots((x) => f(x) - g(x), diff, viewport, samples)) {
         const y = f(root);
         if (Number.isFinite(y)) {
           candidates.push({ x: root, y, kind: 'curve-curve' });
@@ -163,7 +185,7 @@ export function findGraphIntersections(
       }
     }
     if (viewport.yMin <= 0 && 0 <= viewport.yMax) {
-      for (const root of findRoots(f, viewport, samples)) {
+      for (const root of findRoots(f, fs, viewport, samples)) {
         candidates.push({ x: root, y: 0, kind: 'x-axis' });
       }
     }
@@ -184,12 +206,19 @@ export function findGraphIntersections(
     if (Math.abs(point.x) < epsX * 1e-3) point.x = 0;
     if (Math.abs(point.y) < epsY * 1e-3) point.y = 0;
   }
-  const seen = new Set<string>();
+  // Compare against what is kept rather than rounding to grid cells: two copies
+  // of one root found by different scans can straddle a cell edge.
   const result: IntersectionPoint[] = [];
   for (const point of candidates) {
-    const key = `${Math.round(point.x / epsX)}:${Math.round(point.y / epsY)}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
+    if (
+      result.some(
+        (kept) =>
+          Math.abs(kept.x - point.x) < epsX &&
+          Math.abs(kept.y - point.y) < epsY,
+      )
+    ) {
+      continue;
+    }
     result.push(point);
     if (result.length >= MAX_INTERSECTIONS) break;
   }

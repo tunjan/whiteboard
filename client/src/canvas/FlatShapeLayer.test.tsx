@@ -8,7 +8,6 @@ import { rectangleUtil } from './shapes/rectangle';
 import { shapeRegistry } from './shapes/shape-registry';
 import { FlatShapeLayer } from './FlatShapeLayer';
 import {
-  useDocumentStore,
   spatialIndex,
   loadBoard,
   editor,
@@ -23,6 +22,9 @@ import { beginLiveStroke, endLiveStroke } from './use-live-stroke-store';
 import { useEraserStore } from './use-eraser-store';
 import { renderTree } from './export-png';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { CanvasScene } from './engine/scene';
+import { shapeStore } from './engine/shape-store';
+import { ShapeRasterSource } from './shape-raster-source';
 
 const rect = (id: string, x = 0): RectangleShape => ({
   id,
@@ -78,6 +80,41 @@ const mount = async (shapes: Shape[]) => {
 };
 
 describe('flat DOM rendering', () => {
+  it('captures mounted SVG transforms, masks and highlight paint order for a tile', async () => {
+    shapeRegistry.register(rectangleUtil);
+    await mount([
+      { id: 'frame', type: 'frame', x: 0, y: 0, rotation: 0.2, index: 'a0', props: { w: 400, h: 300, name: 'Page' } },
+      { ...rect('clipped', 350), parentId: 'frame', rotation: 0.3, opacity: 0.7 },
+      { id: 'wash', type: 'draw', x: 20, y: 40, rotation: 0, index: 'a2',
+        props: { ...drawUtil.getDefaultProps(), inkAlgorithm: 'reference', inkKind: 'highlight', size: 20,
+          points: [{ x: 0, y: 0 }, { x: 200, y: 0 }] } },
+    ]);
+    const scene = new CanvasScene(spatialIndex);
+    scene.apply(shapeStore.snapshot(), null);
+    const containers = new Map([...host.querySelectorAll<HTMLDivElement>('[data-shape-id]')]
+      .map(container => [container.dataset.shapeId!, container]));
+    const source = new ShapeRasterSource(scene, host.querySelector('[data-shape-layer]')!, containers);
+    try {
+      const svg = await source.tile({ key: '0:0', x: 0, y: 0 }, 1, 516);
+      expect(svg).toContain('viewBox="-2 -2 516 516"');
+      expect(svg).toContain('clipPathUnits="userSpaceOnUse"');
+      expect(svg).toContain('opacity="0.7"');
+      expect(svg).toContain(element('clipped').style.transform);
+      expect(svg.indexOf('opacity="0.35"')).toBeGreaterThan(svg.indexOf('opacity="0.82"'));
+    } finally { source.dispose(); }
+  });
+
+  it('rejects embedded DOM so a tile cannot silently omit live content', async () => {
+    await mount([rect('embedded')]);
+    const scene = new CanvasScene(spatialIndex);
+    scene.apply(shapeStore.snapshot(), null);
+    const source = new ShapeRasterSource(scene, host.querySelector('[data-shape-layer]')!,
+      new Map([['embedded', element('embedded')]]));
+    try {
+      await expect(source.tile({ key: '0:0', x: 0, y: 0 }, 1, 516)).rejects.toThrow('Live embedded content');
+    } finally { source.dispose(); }
+  });
+
   it('keeps both highlight passes aligned, clipped, dimmed and culled', async () => {
     await mount([
       { id: 'frame', type: 'frame', x: 0, y: 0, rotation: 0, index: 'a0', props: { w: 400, h: 300, name: 'Page' } },
@@ -229,7 +266,7 @@ describe('flat DOM rendering', () => {
     await act(() => editor.updateShape('far', { x: 200 }));
     expect(container.style.transform).toBe(transform);
     expect(spatialIndex.has('far')).toBe(true);
-    expect(useDocumentStore.getState().shapesById.has('far')).toBe(true);
+    expect(shapeStore.peek('far')).toBeDefined();
     root = createRoot(host);
   });
 });

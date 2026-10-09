@@ -19,6 +19,30 @@ export function createGraphTool(): Tool {
   let start = { x: 0, y: 0 };
   let snapTargets: Bounds[] = [];
 
+  // Finish the in-flight graph, keeping it. Shared by pointer-up (normal
+  // finish) and commit (OS reclaimed the pointer mid-create — keep what was
+  // drawn rather than discarding via onCancel).
+  function finalize(ctx: ToolContext): void {
+    const id = creatingId;
+    creatingId = null;
+    snapTargets = [];
+    useSelectionStore.getState().setSnapGuides([]);
+    if (!id) return;
+    const shape = ctx.editor.getShape(id);
+    if (!shape || shape.type !== 'graph') return;
+
+    if (shape.props.w < CLICK_THRESHOLD && shape.props.h < CLICK_THRESHOLD) {
+      ctx.editor.updateShape(id, {
+        x: start.x - GRAPH_DEFAULT_SIZE.w / 2,
+        y: start.y - GRAPH_DEFAULT_SIZE.h / 2,
+        props: { w: GRAPH_DEFAULT_SIZE.w, h: GRAPH_DEFAULT_SIZE.h },
+      });
+    }
+
+    useSelectionStore.getState().setSelection([id]);
+    ctx.complete();
+  }
+
   return {
     id: 'graph',
     label: 'Function',
@@ -63,24 +87,13 @@ export function createGraphTool(): Tool {
     },
 
     onPointerUp(_info: ToolPointerInfo, ctx: ToolContext) {
-      const id = creatingId;
-      creatingId = null;
-      snapTargets = [];
-      useSelectionStore.getState().setSnapGuides([]);
-      if (!id) return;
-      const shape = ctx.editor.getShape(id);
-      if (!shape || shape.type !== 'graph') return;
+      finalize(ctx);
+    },
 
-      if (shape.props.w < CLICK_THRESHOLD && shape.props.h < CLICK_THRESHOLD) {
-        ctx.editor.updateShape(id, {
-          x: start.x - GRAPH_DEFAULT_SIZE.w / 2,
-          y: start.y - GRAPH_DEFAULT_SIZE.h / 2,
-          props: { w: GRAPH_DEFAULT_SIZE.w, h: GRAPH_DEFAULT_SIZE.h },
-        });
-      }
-
-      useSelectionStore.getState().setSelection([id]);
-      ctx.complete();
+    // The OS reclaimed the pointer mid-create (spurious pointercancel /
+    // lostpointercapture). Keep the graph drawn so far rather than discarding it.
+    onCommit(ctx: ToolContext) {
+      finalize(ctx);
     },
 
     // Pinch-to-zoom mid-create: drop the in-flight graph, stay in the tool.

@@ -1,542 +1,799 @@
 ---
 version: alpha
-name: Cal.com-design-analysis
-description: A clean, calendar-software-first interface anchored on white canvas with black primary CTAs and custom Cal Sans display typography. The system reads as friendly modern SaaS — generous whitespace, soft-rounded cards (~12px), product UI fragments shown directly inside cards, and a dark navy footer that visually closes long-scroll pages. Brand voltage comes from the Cal Sans display headline (a custom geometric face) and from product UI artifacts shown in-card rather than from accent colors.
+name: Dub
+description:
+  Design system for Dub (dub.co / app.dub.co), the link attribution platform.
+  Neutral, monochrome, Tailwind-based UI with black primary actions, hairline
+  borders, a blue accent for active/selected state, and generous 8–12px radii.
+  Token values are taken from the open-source repo (github.com/dubinc/dub):
+  packages/tailwind-config/tailwind.config.ts, themes.css and packages/ui.
 
 colors:
-  primary: "#111111"
-  primary-active: "#242424"
-  primary-disabled: "#e5e7eb"
-  ink: "#111111"
-  body: "#374151"
-  muted: "#6b7280"
-  muted-soft: "#898989"
-  hairline: "#e5e7eb"
-  hairline-soft: "#f3f4f6"
-  canvas: "#ffffff"
-  surface-soft: "#f8f9fa"
-  surface-card: "#f5f5f5"
-  surface-strong: "#e5e7eb"
-  surface-dark: "#101010"
-  surface-dark-elevated: "#1a1a1a"
-  on-primary: "#ffffff"
-  on-dark: "#ffffff"
-  on-dark-soft: "#a1a1aa"
-  brand-accent: "#3b82f6"
-  success: "#10b981"
-  warning: "#f59e0b"
-  error: "#ef4444"
-  badge-orange: "#fb923c"
-  badge-pink: "#ec4899"
-  badge-violet: "#8b5cf6"
-  badge-emerald: "#34d399"
+  # --- Core roles -------------------------------------------------------------
+  primary: "#000000"            # Primary buttons, badges, "Upgrade plan", filter count dots
+  on-primary: "#FFFFFF"
+  secondary: "#FFFFFF"          # Secondary (bordered white) buttons, inputs, cards
+  on-secondary: "#171717"
+  tertiary: "#2563EB"           # Accent (blue-600): active nav, selected tabs, info links
+  on-tertiary: "#FFFFFF"
+  tertiary-container: "#DBEAFE" # blue-100: active nav pill base (used at 50% alpha)
+  tertiary-strong: "#3B82F6"    # blue-500: switches, checkboxes, "success" button
+  neutral: "#F5F5F5"            # neutral-100: sidebar panel, hovers, skeletons
+
+  # --- Surfaces (semantic, light theme = default) ------------------------------
+  surface: "#FFFFFF"            # bg-default: main content canvas, cards, popovers
+  surface-muted: "#FAFAFA"      # bg-muted: row hover, secondary button hover
+  surface-subtle: "#F5F5F5"     # bg-subtle: sidebar area panel, disabled buttons
+  surface-emphasis: "#E5E5E5"   # bg-emphasis / neutral-200: app shell rail behind the content
+  surface-inverted: "#171717"   # bg-inverted: tooltips on dark, inverted chips
+  on-surface: "#404040"         # content-default: body text
+  on-surface-emphasis: "#171717" # content-emphasis: titles, primary labels
+  on-surface-subtle: "#737373"  # content-subtle: secondary text, descriptions, section labels
+  on-surface-muted: "#A3A3A3"   # content-muted: placeholders, disabled, tertiary meta
+
+  # --- Borders -----------------------------------------------------------------
+  border-muted: "#F5F5F5"
+  border-subtle: "#E5E5E5"      # default hairline on cards, buttons, inputs, toolbar
+  border-default: "#D4D4D4"     # stronger control borders (text inputs)
+  border-emphasis: "#A3A3A3"
+  border-focus: "#737373"       # neutral-500 focus border (paired with a 4px neutral-200 ring)
+
+  # --- Neutral ramp (Tailwind neutral) ----------------------------------------
+  neutral-50: "#FAFAFA"
+  neutral-100: "#F5F5F5"
+  neutral-200: "#E5E5E5"
+  neutral-300: "#D4D4D4"
+  neutral-400: "#A3A3A3"
+  neutral-500: "#737373"
+  neutral-600: "#525252"
+  neutral-700: "#404040"
+  neutral-800: "#262626"
+  neutral-900: "#171717"
+  neutral-950: "#0A0A0A"
+
+  # --- Feedback (bg / content pairs) -------------------------------------------
+  info: "#2563EB"
+  info-container: "#DBEAFE"
+  success: "#16A34A"
+  success-container: "#DCFCE7"
+  attention: "#EA580C"
+  attention-container: "#FFEDD5"
+  warning: "#CA8A04"
+  warning-container: "#FEF9C3"
+  error: "#DC2626"
+  error-container: "#FEE2E2"
+  danger: "#EF4444"             # red-500: danger buttons, input error border
+  danger-hover: "#DC2626"
+
+  # --- Analytics / data-viz --------------------------------------------------
+  metric-clicks: "#3B82F6"      # blue-500
+  metric-leads: "#A855F7"       # purple-500
+  metric-sales: "#14B8A6"       # teal-500
+  chart-axis: "#00000066"
+  chart-grid: "#00000026"
+
+  # --- Tag palette (bg-100 / border-300 / text-600) ---------------------------
+  tag-red: "#DC2626"
+  tag-yellow: "#CA8A04"
+  tag-green: "#16A34A"
+  tag-blue: "#2563EB"
+  tag-purple: "#9333EA"
+  tag-brown: "#A18072"
+
+  # --- Dark theme (applied under the `.dark` class) ---------------------------
+  dark-surface: "#000000"
+  dark-surface-muted: "#171717"
+  dark-surface-subtle: "#262626"
+  dark-surface-emphasis: "#404040"
+  dark-surface-inverted: "#FAFAFA"
+  dark-on-surface: "#D4D4D4"
+  dark-on-surface-emphasis: "#FAFAFA"
+  dark-on-surface-subtle: "#A3A3A3"
+  dark-on-surface-muted: "#525252"
+  dark-border-subtle: "#404040"
+  dark-border-default: "#525252"
 
 typography:
+  # Marketing / display — Satoshi (variable, 300–900), `font-display`
   display-xl:
-    fontFamily: "Cal Sans, Inter, sans-serif"
-    fontSize: 64px
-    fontWeight: 600
-    lineHeight: 1.05
-    letterSpacing: -2px
-  display-lg:
-    fontFamily: "Cal Sans, Inter, sans-serif"
-    fontSize: 48px
-    fontWeight: 600
+    fontFamily: Satoshi
+    fontSize: 50px
+    fontWeight: 500
     lineHeight: 1.1
-    letterSpacing: -1.5px
-  display-md:
-    fontFamily: "Cal Sans, Inter, sans-serif"
-    fontSize: 36px
-    fontWeight: 600
+    letterSpacing: -0.01em
+  display-lg:
+    fontFamily: Satoshi
+    fontSize: 40px
+    fontWeight: 500
     lineHeight: 1.15
-    letterSpacing: -1px
-  display-sm:
-    fontFamily: "Cal Sans, Inter, sans-serif"
-    fontSize: 28px
-    fontWeight: 600
+  display-md:
+    fontFamily: Satoshi
+    fontSize: 30px
+    fontWeight: 500
     lineHeight: 1.2
-    letterSpacing: -0.5px
-  title-lg:
-    fontFamily: "Inter, sans-serif"
-    fontSize: 22px
+  display-sm:
+    fontFamily: Satoshi
+    fontSize: 20px
     fontWeight: 600
-    lineHeight: 1.3
-    letterSpacing: -0.3px
-  title-md:
-    fontFamily: "Inter, sans-serif"
+    lineHeight: 1.4
+  # Product UI — Inter, `font-default`
+  headline-lg:
+    fontFamily: Inter
+    fontSize: 24px
+    fontWeight: 600
+    lineHeight: 32px
+  headline-md:
+    fontFamily: Inter
     fontSize: 18px
     fontWeight: 600
-    lineHeight: 1.4
-    letterSpacing: 0
-  title-sm:
-    fontFamily: "Inter, sans-serif"
+    lineHeight: 28px
+  title-md:
+    fontFamily: Inter
     fontSize: 16px
-    fontWeight: 600
-    lineHeight: 1.4
-    letterSpacing: 0
+    fontWeight: 500
+    lineHeight: 24px
+  body-lg:
+    fontFamily: Inter
+    fontSize: 16px
+    fontWeight: 400
+    lineHeight: 24px
   body-md:
-    fontFamily: "Inter, sans-serif"
-    fontSize: 16px
-    fontWeight: 400
-    lineHeight: 1.5
-    letterSpacing: 0
-  body-sm:
-    fontFamily: "Inter, sans-serif"
+    fontFamily: Inter
     fontSize: 14px
     fontWeight: 400
-    lineHeight: 1.5
-    letterSpacing: 0
-  caption:
-    fontFamily: "Inter, sans-serif"
-    fontSize: 13px
-    fontWeight: 500
-    lineHeight: 1.4
-    letterSpacing: 0
-  code:
-    fontFamily: "JetBrains Mono, ui-monospace, monospace"
-    fontSize: 14px
-    fontWeight: 400
-    lineHeight: 1.5
-    letterSpacing: 0
-  button:
-    fontFamily: "Inter, sans-serif"
+    lineHeight: 20px
+  body-md-strong:
+    fontFamily: Inter
     fontSize: 14px
     fontWeight: 600
-    lineHeight: 1
-    letterSpacing: 0
-  nav-link:
-    fontFamily: "Inter, sans-serif"
+    lineHeight: 24px
+  label-md:
+    fontFamily: Inter
     fontSize: 14px
     fontWeight: 500
-    lineHeight: 1.4
-    letterSpacing: 0
+    lineHeight: 20px
+  label-sm:
+    fontFamily: Inter
+    fontSize: 12px
+    fontWeight: 500
+    lineHeight: 16px
+  caption:
+    fontFamily: Inter
+    fontSize: 12px
+    fontWeight: 400
+    lineHeight: 16px
+  micro:
+    fontFamily: Inter
+    fontSize: 10px
+    fontWeight: 500
+    lineHeight: 14px
+  kbd:
+    fontFamily: Inter
+    fontSize: 12px
+    fontWeight: 300
+    lineHeight: 16px
+  mono-sm:
+    fontFamily: Geist Mono
+    fontSize: 13px
+    fontWeight: 400
+    lineHeight: 20px
 
 rounded:
-  xs: 4px
-  sm: 6px
-  md: 8px
-  lg: 12px
-  xl: 16px
-  pill: 9999px
-  full: 9999px
+  none: 0px
+  sm: 4px        # rounded      — kbd hints, tiny count chips, checkbox inner
+  md: 6px        # rounded-md   — inputs, menu items, tags, status badges, pagination buttons
+  lg: 8px        # rounded-lg   — buttons, sidebar items, filter/select triggers, search input
+  xl: 12px       # rounded-xl   — cards, card lists, tooltips, toolbar, content canvas, sidebar panel
+  2xl: 16px      # rounded-2xl  — modals, empty-state icon tiles
+  3xl: 20px      # marketing nav dropdown panels
+  full: 9999px   # avatars, badges, switches, progress bars
 
 spacing:
-  xxs: 4px
-  xs: 8px
-  sm: 12px
-  md: 16px
-  lg: 24px
-  xl: 32px
-  xxl: 48px
-  section: 96px
+  base: 4px
+  0-5: 2px
+  1: 4px
+  1-5: 6px
+  2: 8px
+  2-5: 10px
+  3: 12px
+  4: 16px
+  5: 20px
+  6: 24px
+  8: 32px
+  10: 40px
+  12: 48px
+  16: 64px
+  control-sm: 28px        # h-7  pagination/analytics buttons
+  control-md: 32px        # h-8  sidebar items, compact buttons, tooltip actions
+  control-lg: 36px        # h-9  menu items
+  control-xl: 40px        # h-10 default Button, inputs, filter triggers
+  page-header-height: 64px
+  page-header-height-mobile: 48px
+  page-max-width: 1280px
+  page-gutter: 12px
+  page-gutter-lg: 24px
+  marketing-gutter-lg: 40px
+  shell-inset: 8px
+  sidebar-rail-width: 64px
+  sidebar-width: 304px
+  sidebar-panel-width: 232px
+  breakpoint-xs: 420px
 
 components:
+  # ---------------------------------------------------------------- Buttons
   button-primary:
     backgroundColor: "{colors.primary}"
     textColor: "{colors.on-primary}"
-    typography: "{typography.button}"
-    rounded: "{rounded.md}"
-    padding: 12px 20px
+    typography: "{typography.body-md}"
+    rounded: "{rounded.lg}"
     height: 40px
-  button-primary-active:
-    backgroundColor: "{colors.primary-active}"
+    padding: 0 12px
+  button-primary-hover:
+    backgroundColor: "{colors.surface-inverted}"
     textColor: "{colors.on-primary}"
-    rounded: "{rounded.md}"
-  button-primary-disabled:
-    backgroundColor: "{colors.primary-disabled}"
-    textColor: "{colors.muted}"
-    rounded: "{rounded.md}"
   button-secondary:
-    backgroundColor: "{colors.canvas}"
-    textColor: "{colors.ink}"
-    typography: "{typography.button}"
-    rounded: "{rounded.md}"
-    padding: 12px 20px
-    height: 40px
-  button-icon-circular:
-    backgroundColor: "{colors.canvas}"
-    textColor: "{colors.ink}"
-    rounded: "{rounded.full}"
-    size: 36px
-  button-text-link:
-    backgroundColor: transparent
-    textColor: "{colors.ink}"
-    typography: "{typography.button}"
-  text-link:
-    backgroundColor: transparent
-    textColor: "{colors.ink}"
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.on-surface-emphasis}"
     typography: "{typography.body-md}"
-  top-nav:
-    backgroundColor: "{colors.canvas}"
-    textColor: "{colors.ink}"
-    typography: "{typography.nav-link}"
-    height: 64px
-  nav-pill-group:
-    backgroundColor: "{colors.surface-soft}"
-    textColor: "{colors.ink}"
-    typography: "{typography.nav-link}"
-    rounded: "{rounded.pill}"
-    padding: 6px
-  hero-band:
-    backgroundColor: "{colors.canvas}"
-    textColor: "{colors.ink}"
-    typography: "{typography.display-xl}"
-    padding: 96px
-  hero-app-mockup-card:
-    backgroundColor: "{colors.canvas}"
-    textColor: "{colors.ink}"
+    rounded: "{rounded.lg}"
+    height: 40px
+    padding: 0 12px
+  button-secondary-hover:
+    backgroundColor: "{colors.surface-muted}"
+  button-outline:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.on-surface}"
+    rounded: "{rounded.lg}"
+    height: 40px
+  button-outline-hover:
+    backgroundColor: "#1717170D"
+  button-success:
+    backgroundColor: "{colors.tertiary-strong}"
+    textColor: "{colors.on-tertiary}"
+    rounded: "{rounded.lg}"
+    height: 40px
+  button-danger:
+    backgroundColor: "{colors.danger}"
+    textColor: "#FFFFFF"
+    rounded: "{rounded.lg}"
+    height: 40px
+  button-danger-hover:
+    backgroundColor: "{colors.danger-hover}"
+  button-disabled:
+    backgroundColor: "{colors.surface-subtle}"
+    textColor: "{colors.on-surface-subtle}"
+    rounded: "{rounded.lg}"
+    height: 40px
+  button-sm:
+    typography: "{typography.body-md}"
+    rounded: "{rounded.lg}"
+    height: 32px
+    padding: 0 14px
+  kbd-on-primary:
+    backgroundColor: "{colors.neutral-700}"
+    textColor: "{colors.neutral-400}"
+    typography: "{typography.kbd}"
+    rounded: "{rounded.sm}"
+    padding: 2px 8px
+  kbd-on-secondary:
+    backgroundColor: "{colors.neutral-200}"
+    textColor: "{colors.neutral-400}"
+    typography: "{typography.kbd}"
+    rounded: "{rounded.sm}"
+    padding: 2px 8px
+  icon-button:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.neutral-500}"
+    rounded: "{rounded.md}"
+    size: 24px
+  icon-button-hover:
+    backgroundColor: "{colors.neutral-100}"
+
+  # ---------------------------------------------------------------- Inputs
+  input:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.neutral-900}"
+    typography: "{typography.body-md}"
+    rounded: "{rounded.md}"
+    height: 40px
+    padding: 8px 12px
+  input-focus:
+    backgroundColor: "{colors.surface}"
+  input-readonly:
+    backgroundColor: "{colors.neutral-100}"
+    textColor: "{colors.neutral-500}"
+  input-error:
+    textColor: "{colors.danger}"
+  search-input:
+    backgroundColor: "{colors.surface}"
+    textColor: "#000000"
+    typography: "{typography.body-md}"
+    rounded: "{rounded.lg}"
+    height: 40px
+    padding: 0 40px
+  filter-trigger:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.neutral-900}"
+    typography: "{typography.body-md}"
+    rounded: "{rounded.lg}"
+    height: 40px
+    padding: 0 12px
+  filter-count-dot:
+    backgroundColor: "{colors.primary}"
+    textColor: "{colors.on-primary}"
+    typography: "{typography.micro}"
+    rounded: "{rounded.full}"
+    size: 16px
+  checkbox:
+    backgroundColor: "{colors.surface}"
+    rounded: "{rounded.md}"
+    size: 20px
+  checkbox-checked:
+    backgroundColor: "{colors.tertiary-strong}"
+    textColor: "#FFFFFF"
+  switch-track-off:
+    backgroundColor: "{colors.neutral-200}"
+    rounded: "{rounded.full}"
+    height: 16px
+    width: 32px
+  switch-track-on:
+    backgroundColor: "{colors.tertiary-strong}"
+
+  # ---------------------------------------------------------------- App shell
+  app-shell:
+    backgroundColor: "{colors.surface-emphasis}"
+    padding: 8px 8px 8px 0
+  sidebar-rail:
+    backgroundColor: "{colors.surface-emphasis}"
+    width: 64px
+  sidebar-rail-item:
+    backgroundColor: "{colors.surface-emphasis}"
+    textColor: "{colors.on-surface}"
+    rounded: "{rounded.lg}"
+    size: 44px
+  sidebar-rail-item-active:
+    backgroundColor: "{colors.surface}"
+  sidebar-panel:
+    backgroundColor: "{colors.surface-subtle}"
     rounded: "{rounded.xl}"
-  feature-card:
-    backgroundColor: "{colors.surface-card}"
-    textColor: "{colors.ink}"
-    typography: "{typography.title-md}"
-    rounded: "{rounded.lg}"
-    padding: 32px
-  feature-icon-card:
-    backgroundColor: "{colors.canvas}"
-    textColor: "{colors.ink}"
-    typography: "{typography.title-sm}"
-    rounded: "{rounded.lg}"
-    padding: 24px
-  product-mockup-card:
-    backgroundColor: "{colors.canvas}"
-    textColor: "{colors.ink}"
-    rounded: "{rounded.lg}"
-    padding: 24px
-  testimonial-card:
-    backgroundColor: "{colors.surface-card}"
-    textColor: "{colors.ink}"
+    width: 232px
+    padding: 12px
+  sidebar-title:
+    textColor: "{colors.on-surface-emphasis}"
+    typography: "{typography.headline-md}"
+    padding: 8px 12px
+  sidebar-section-label:
+    textColor: "{colors.on-surface-subtle}"
+    typography: "{typography.body-md}"
+    padding: 0 0 0 12px
+  sidebar-item:
+    backgroundColor: "{colors.surface-subtle}"
+    textColor: "{colors.on-surface}"
     typography: "{typography.body-md}"
     rounded: "{rounded.lg}"
-    padding: 24px
-  pricing-tier-card:
-    backgroundColor: "{colors.canvas}"
-    textColor: "{colors.ink}"
-    typography: "{typography.title-lg}"
+    height: 32px
+    padding: 8px
+  sidebar-item-hover:
+    backgroundColor: "#1717170D"
+  sidebar-item-active:
+    backgroundColor: "#DBEAFE80"
+    textColor: "{colors.tertiary}"
+    typography: "{typography.label-md}"
+  sidebar-upgrade-button:
+    backgroundColor: "{colors.primary}"
+    textColor: "{colors.on-primary}"
+    typography: "{typography.label-md}"
     rounded: "{rounded.lg}"
-    padding: 32px
-  pricing-tier-card-featured:
-    backgroundColor: "{colors.surface-dark}"
-    textColor: "{colors.on-dark}"
-    typography: "{typography.title-lg}"
-    rounded: "{rounded.lg}"
-    padding: 32px
-  text-input:
-    backgroundColor: "{colors.canvas}"
-    textColor: "{colors.ink}"
-    typography: "{typography.body-md}"
-    rounded: "{rounded.md}"
-    padding: 10px 14px
-    height: 40px
-  text-input-focused:
-    backgroundColor: "{colors.canvas}"
-    textColor: "{colors.ink}"
-    rounded: "{rounded.md}"
-  category-tab:
-    backgroundColor: transparent
-    textColor: "{colors.muted}"
-    typography: "{typography.nav-link}"
-    padding: 8px 14px
-    rounded: "{rounded.md}"
-  category-tab-active:
-    backgroundColor: "{colors.canvas}"
-    textColor: "{colors.ink}"
-    typography: "{typography.nav-link}"
-    rounded: "{rounded.md}"
-  avatar-circle:
-    backgroundColor: "{colors.surface-card}"
-    textColor: "{colors.ink}"
+    height: 32px
+  usage-meter-track:
+    backgroundColor: "{colors.neutral-200}"
     rounded: "{rounded.full}"
-    size: 36px
-  badge-pill:
-    backgroundColor: "{colors.surface-card}"
-    textColor: "{colors.ink}"
+    height: 4px
+  usage-meter-fill:
+    backgroundColor: "{colors.tertiary-strong}"
+  content-canvas:
+    backgroundColor: "{colors.surface}"
+    rounded: "{rounded.xl}"
+  page-header:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.on-surface-emphasis}"
+    typography: "{typography.headline-md}"
+    height: 64px
+    padding: 0 24px
+  page-width-wrapper:
+    width: 1280px
+    padding: 0 24px
+
+  # ---------------------------------------------------------------- Data display
+  card:
+    backgroundColor: "{colors.surface}"
+    rounded: "{rounded.xl}"
+    padding: 16px
+  card-list-row:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.on-surface}"
+    padding: 12px 16px
+  card-list-row-hover:
+    backgroundColor: "{colors.surface-muted}"
+  link-card-title:
+    textColor: "{colors.neutral-800}"
+    typography: "{typography.body-md-strong}"
+  link-card-destination:
+    textColor: "{colors.neutral-500}"
+    typography: "{typography.body-md}"
+  link-favicon:
+    backgroundColor: "{colors.neutral-100}"
+    rounded: "{rounded.full}"
+    size: 32px
+  analytics-badge:
+    backgroundColor: "{colors.neutral-50}"
+    textColor: "{colors.neutral-800}"
+    typography: "{typography.body-md}"
+    rounded: "{rounded.md}"
+    padding: 2px 8px
+  tag-badge:
+    backgroundColor: "#DBEAFE"
+    textColor: "{colors.tag-blue}"
+    typography: "{typography.body-md}"
+    rounded: "{rounded.md}"
+    padding: 2px 8px
+  tag-badge-red:
+    backgroundColor: "#FEE2E2"
+    textColor: "{colors.tag-red}"
+  tag-badge-yellow:
+    backgroundColor: "#FEF9C3"
+    textColor: "{colors.tag-yellow}"
+  tag-badge-green:
+    backgroundColor: "#DCFCE7"
+    textColor: "{colors.tag-green}"
+  tag-badge-purple:
+    backgroundColor: "#F3E8FF"
+    textColor: "{colors.tag-purple}"
+  tag-badge-brown:
+    backgroundColor: "#F2E8E5"
+    textColor: "{colors.tag-brown}"
+  status-badge-info:
+    backgroundColor: "{colors.info-container}"
+    textColor: "{colors.info}"
+    typography: "{typography.label-sm}"
+    rounded: "{rounded.md}"
+    padding: 4px 8px
+  status-badge-attention:
+    backgroundColor: "{colors.attention-container}"
+    textColor: "{colors.attention}"
+    typography: "{typography.label-sm}"
+    rounded: "{rounded.md}"
+    padding: 4px 8px
+  metric-dot-clicks:
+    backgroundColor: "{colors.metric-clicks}"
+    rounded: "{rounded.sm}"
+    size: 8px
+  metric-dot-leads:
+    backgroundColor: "{colors.metric-leads}"
+    rounded: "{rounded.sm}"
+    size: 8px
+  metric-dot-sales:
+    backgroundColor: "{colors.metric-sales}"
+    rounded: "{rounded.sm}"
+    size: 8px
+  chart-axis-label:
+    textColor: "{colors.chart-axis}"
     typography: "{typography.caption}"
-    rounded: "{rounded.pill}"
+  chart-gridline:
+    backgroundColor: "{colors.chart-grid}"
+    height: 1px
+  badge-neutral:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.neutral-500}"
+    typography: "{typography.label-sm}"
+    rounded: "{rounded.full}"
+    padding: 1px 8px
+  badge-black:
+    backgroundColor: "{colors.primary}"
+    textColor: "{colors.on-primary}"
+    typography: "{typography.label-sm}"
+    rounded: "{rounded.full}"
+    padding: 1px 8px
+  status-badge-success:
+    backgroundColor: "{colors.success-container}"
+    textColor: "{colors.success}"
+    typography: "{typography.label-sm}"
+    rounded: "{rounded.md}"
+    padding: 4px 8px
+  status-badge-error:
+    backgroundColor: "{colors.error-container}"
+    textColor: "{colors.error}"
+    typography: "{typography.label-sm}"
+    rounded: "{rounded.md}"
+    padding: 4px 8px
+  status-badge-pending:
+    backgroundColor: "{colors.warning-container}"
+    textColor: "{colors.warning}"
+    typography: "{typography.label-sm}"
+    rounded: "{rounded.md}"
+    padding: 4px 8px
+  empty-state-container:
+    backgroundColor: "{colors.surface}"
+    rounded: "{rounded.xl}"
+    padding: 48px 16px
+  empty-state-icon:
+    backgroundColor: "{colors.neutral-50}"
+    textColor: "{colors.neutral-800}"
+    rounded: "{rounded.2xl}"
+    size: 64px
+  empty-state-title:
+    textColor: "{colors.neutral-950}"
+    typography: "{typography.title-md}"
+  empty-state-description:
+    textColor: "{colors.neutral-500}"
+    typography: "{typography.body-md}"
+    width: 384px
+  pagination-bar:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.neutral-600}"
+    typography: "{typography.body-md}"
+    rounded: "{rounded.xl}"
+    padding: 8px 16px
+  pagination-button:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.neutral-600}"
+    typography: "{typography.body-md}"
+    rounded: "{rounded.md}"
+    height: 28px
+    padding: 0 8px
+  pagination-button-disabled:
+    backgroundColor: "{colors.neutral-100}"
+    textColor: "{colors.neutral-400}"
+  skeleton:
+    backgroundColor: "{colors.neutral-200}"
+    rounded: "{rounded.md}"
+
+  # ---------------------------------------------------------------- Navigation
+  toggle-group:
+    backgroundColor: "{colors.surface}"
+    rounded: "{rounded.xl}"
+    padding: 4px
+  toggle-group-item:
+    textColor: "{colors.on-surface-emphasis}"
+    typography: "{typography.label-md}"
     padding: 4px 12px
-  rating-stars:
-    backgroundColor: transparent
-    textColor: "{colors.badge-orange}"
-    typography: "{typography.caption}"
-  cta-band-light:
-    backgroundColor: "{colors.surface-card}"
-    textColor: "{colors.ink}"
-    typography: "{typography.display-sm}"
+  toggle-group-item-selected:
+    backgroundColor: "{colors.surface-muted}"
     rounded: "{rounded.lg}"
-    padding: 48px
-  footer:
-    backgroundColor: "{colors.surface-dark}"
-    textColor: "{colors.on-dark-soft}"
-    typography: "{typography.body-sm}"
-    padding: 64px
+  tab-select-item:
+    textColor: "{colors.on-surface-subtle}"
+    typography: "{typography.body-md}"
+  tab-select-item-selected:
+    textColor: "{colors.tertiary}"
+    typography: "{typography.label-md}"
+  marketing-nav:
+    backgroundColor: "#FFFFFFBF"
+    height: 64px
+  marketing-nav-item:
+    textColor: "{colors.neutral-700}"
+    typography: "{typography.label-md}"
+    rounded: "{rounded.lg}"
+    height: 32px
+    padding: 0 12px
+
+  # ---------------------------------------------------------------- Overlays
+  tooltip:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.on-surface}"
+    typography: "{typography.body-md}"
+    rounded: "{rounded.xl}"
+    padding: 8px 16px
+  popover:
+    backgroundColor: "{colors.surface}"
+    rounded: "{rounded.lg}"
+    padding: 8px
+  menu-item:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.on-surface}"
+    typography: "{typography.label-md}"
+    rounded: "{rounded.md}"
+    height: 36px
+    padding: 0 8px
+  menu-item-hover:
+    backgroundColor: "{colors.surface-subtle}"
+  menu-item-danger:
+    textColor: "{colors.error}"
+  menu-section-label:
+    textColor: "{colors.neutral-500}"
+    typography: "{typography.label-sm}"
+    padding: 0 4px
+  modal:
+    backgroundColor: "{colors.surface}"
+    rounded: "{rounded.2xl}"
+    padding: 0px
+  onboarding-pill:
+    backgroundColor: "{colors.neutral-950}"
+    textColor: "#FFFFFF"
+    typography: "{typography.label-sm}"
+    rounded: "{rounded.full}"
+    height: 32px
+    padding: 0 12px
+  onboarding-pill-hover:
+    backgroundColor: "{colors.neutral-800}"
+  modal-overlay:
+    backgroundColor: "#F5F5F580"
+  sheet-mobile:
+    backgroundColor: "{colors.surface}"
+    rounded: 10px
+  toast:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.on-surface-emphasis}"
+    typography: "{typography.body-md}"
+    rounded: "{rounded.lg}"
+    padding: 12px 16px
 ---
+
+# Dub Design System
 
 ## Overview
 
-Cal.com's marketing surface is a clean, friendly modern-SaaS interface — white canvas (`{colors.canvas}` — #ffffff) with black primary CTAs (`{colors.primary}` — #111111), custom **Cal Sans** display typography, and `{colors.surface-card}` (#f5f5f5) light-gray cards holding product UI fragments. The system reads as confidently engineered without trying to impress — every band has clear hierarchy, generous whitespace, and a single primary action.
+Dub is a link attribution platform (short links, conversion analytics, affiliate programs). Its interface is **quiet, precise, and utilitarian** — a monochrome, Vercel/Linear‑school aesthetic where content and data carry the color, and chrome stays out of the way. The UI should feel like a fast developer tool that marketers also enjoy: dense but never cramped, calm, and trustworthy.
 
-Type voice splits cleanly into two roles: **Cal Sans** (the brand's custom geometric display face — used for h1, h2, h3, and hero headlines) and **Inter** (used for everything else — body, buttons, nav, captions). Cal Sans uses weight 600 with negative letter-spacing (-0.5px to -2px depending on size) — it feels modern, slightly condensed, distinctly Cal.com.
+Personality keywords: *neutral, crisp, engineered, friendly-minimal*.
 
-Component voltage comes from **product UI fragments shown directly inside cards** — calendar widgets, scheduling forms, automation diagrams, integration tiles. Cal.com doesn't paint marketing illustrations of the product; it shows the actual product chrome at small scale embedded in the marketing flow.
+Key traits an agent must reproduce:
 
-The footer flips to `{colors.surface-dark}` (#101010) — a deep near-black that visually closes every long-scroll page. The footer is the only dark surface in the system; everything above stays white-with-light-gray-cards.
+1. **Monochrome first.** Almost everything is white, neutral grays, and black. Black (`primary`) is reserved for the single most important action on a view ("Create link", "Upgrade plan", "Save changes").
+2. **One blue accent for "you are here."** Blue (`tertiary`, blue‑600) signals active navigation, selected tabs, toggles, checkboxes and info links — never decoration.
+3. **Hairline borders over shadows.** Surfaces are separated by 1px `border-subtle` (#E5E5E5) lines and subtle background shifts (white on neutral‑100 on neutral‑200), not heavy elevation.
+4. **Soft, consistent geometry.** 8px radius on controls, 12px on containers, 16px on modals.
+5. **Keyboard‑centric.** Primary actions show a keyboard shortcut chip (e.g. `C` inside "Create link").
+6. **Tailwind + Radix implementation.** The source is React/Next.js with Tailwind CSS v3, `class-variance-authority`, Radix primitives, Vaul drawers on mobile, and `@dub/ui` components. When coding, prefer Tailwind utility classes that map 1:1 to the tokens here (e.g. `rounded-lg`, `border-neutral-200`, `text-neutral-500`, `h-10`).
 
-**Key Characteristics:**
-- White canvas with black primary CTA (`{colors.primary}` — #111111). Buttons are `{rounded.md}` (8px) with confident weight-600 labels. Standard friendly-SaaS button.
-- Custom `Cal Sans` display typeface for headlines (substituted with Inter weight 600 here). Negative letter-spacing on display sizes — geometric, precise, slightly condensed.
-- Light-gray card surfaces (`{colors.surface-card}` — #f5f5f5) for feature cards, testimonials, and pricing tiers (non-featured). The featured pricing tier flips to `{colors.surface-dark}` (the only dark card on light pages).
-- Product UI fragments embedded directly in cards — Cal.com shows real schedule pickers, calendar widgets, integration grids inside its marketing cards. Brand voltage from real product chrome at small scale.
-- Nav-pill-group (`{component.nav-pill-group}`) — a small pill-radius wrapper around grouped nav segments (e.g., the sub-nav switcher between product views). The pill wrapper is one of the system's signature interactive components.
-- Avatars are circular (`{rounded.full}`), 36px diameter, used in testimonial rows and team-listing surfaces.
-- Footer is dark navy (`{colors.surface-dark}` — #101010) with light text (`{colors.on-dark-soft}` — #a1a1aa). The dark footer closes every page even though the body above is white.
-- Spacing rhythm is `{spacing.section}` (96px) between major bands — tight enough to feel modern-SaaS but generous enough to breathe.
-- Border radius is hierarchical: `{rounded.md}` (8px) for buttons + inputs, `{rounded.lg}` (12px) for content cards, `{rounded.xl}` (16px) for the hero app-mockup container, `{rounded.pill}` for nav-pill-group + badges, `{rounded.full}` for avatars + icon buttons.
+The marketing site (dub.co) shares the same palette and components but adds **Satoshi** display headlines (e.g. "Turn clicks into revenue"), a translucent blurred top nav, subtle grid/dot background patterns, and real product screenshots framed in bordered, rounded cards.
 
 ## Colors
 
-### Brand & Accent
-- **Primary** (`{colors.primary}` — #111111): The dominant action color. All primary CTAs, h1/h2 display type. Press state shifts to `{colors.primary-active}` (#242424).
-- **Brand Accent** (`{colors.brand-accent}` — #3b82f6): Used sparely on inline links and on a small badge / "Customer story" highlight. Cal.com is a near-monochrome brand — the blue appears rarely.
-- **Badge Pastels** — A small pastel set for category badges and avatar fills: `{colors.badge-orange}` (#fb923c), `{colors.badge-pink}` (#ec4899), `{colors.badge-violet}` (#8b5cf6), `{colors.badge-emerald}` (#34d399). These appear on tag pills and small accent moments inside product UI fragments — never on hero CTAs.
+The palette is **Tailwind's neutral scale plus a single blue accent**, with semantic tokens exposed as CSS variables (`--bg-*`, `--border-*`, `--content-*`) so light/dark themes swap cleanly.
 
-### Surface
-- **Canvas** (`{colors.canvas}` — #ffffff): The default page floor.
-- **Surface Soft** (`{colors.surface-soft}` — #f8f9fa): Nav-pill-group background, very-soft section dividers.
-- **Surface Card** (`{colors.surface-card}` — #f5f5f5): Feature cards, testimonial cards, badge pills, default avatar fills.
-- **Surface Strong** (`{colors.surface-strong}` — #e5e7eb): Hairline border alternative; disabled button background.
-- **Surface Dark** (`{colors.surface-dark}` — #101010): The footer background — the only dark surface on every page. Also used for the featured pricing tier card.
-- **Surface Dark Elevated** (`{colors.surface-dark-elevated}` — #1a1a1a): Used for nested cards inside the dark footer or featured pricing card.
-- **Hairline** (`{colors.hairline}` — #e5e7eb): The 1px border tone on light surfaces. Used on input borders, table dividers, content card outlines (sometimes).
-- **Hairline Soft** (`{colors.hairline-soft}` — #f3f4f6): A barely-visible divider used between sections that share the white canvas.
-
-### Text
-- **Ink** (`{colors.ink}` — #111111): All headlines and primary text.
-- **Body** (`{colors.body}` — #374151): Default running-text color.
-- **Muted** (`{colors.muted}` — #6b7280): Secondary text — sub-headings, breadcrumbs, footer body.
-- **Muted Soft** (`{colors.muted-soft}` — #898989): Tertiary text — captions, fine-print, copyright lines.
-- **On Primary / On Dark** (`{colors.on-primary}` / `{colors.on-dark}` — #ffffff): Text on primary buttons and dark footer.
-- **On Dark Soft** (`{colors.on-dark-soft}` — #a1a1aa): Footer body text — slightly muted white for the link rows.
-
-### Semantic
-- **Success** (`{colors.success}` — #10b981): Confirmation states, success badges in product UI.
-- **Warning** (`{colors.warning}` — #f59e0b): Warning callouts.
-- **Error** (`{colors.error}` — #ef4444): Validation errors.
+- **Primary — Ink Black (#000000):** Primary buttons, the sidebar "Upgrade plan" button, filter-count dots, black badges. On hover it lightens to `surface-inverted` (#171717) and gains a 4px `border-subtle` ring.
+- **Secondary — Paper White (#FFFFFF):** Secondary buttons, inputs, cards, popovers — always with a 1px `border-subtle` outline.
+- **Tertiary — Signal Blue (#2563EB / #3B82F6):** Active sidebar item (text blue‑600 on blue‑100 at 50% alpha), selected tab text and underline, checked checkboxes and switches (blue‑500), inline info links, unread count chips.
+- **Neutral surfaces:** A three‑step layered shell. The outer app frame is `surface-emphasis` (#E5E5E5, neutral‑200); the sidebar panel sits on `surface-subtle` (#F5F5F5); the main content canvas is `surface` (#FFFFFF). Row and button hovers use `surface-muted` (#FAFAFA).
+- **Text hierarchy:** `on-surface-emphasis` (#171717) for titles and key labels, `on-surface` (#404040) for body and nav items, `on-surface-subtle` (#737373) for descriptions and section labels ("Insights", "Library"), `on-surface-muted` (#A3A3A3) for placeholders and disabled text.
+- **Feedback pairs:** Always use the container + content pair together — info (#DBEAFE/#2563EB), success (#DCFCE7/#16A34A), attention (#FFEDD5/#EA580C), warning (#FEF9C3/#CA8A04), error (#FEE2E2/#DC2626). Destructive buttons use red‑500 (#EF4444).
+- **Analytics colors:** Clicks = blue‑500, Leads = purple‑500, Sales = teal‑500. Keep this mapping consistent across charts, badges and legends. Chart axes use black at 40% (#00000066) and gridlines black at 15% (#00000026).
+- **Tag colors:** Tags use a `100` background, `300` border and `600` text of one hue (red, yellow, green, blue, purple, brown).
+- **Borders & dark theme tokens:** `border-*` and `dark-*` tokens are applied through Tailwind utilities (`border-border-subtle`, the `.dark` class) rather than component properties, so they are intentionally not referenced from `components`.
+- **Dark mode:** Applied via the `.dark` class. Surfaces invert to pure black (#000000) → #171717 → #262626, text to #FAFAFA/#D4D4D4, borders to #404040/#525252. The dashboard ships light-first; build light first and use semantic tokens so dark mode follows automatically.
 
 ## Typography
 
-### Font Family
-The system runs **Cal Sans** for display + brand wordmark and **Inter** for everything else. Cal Sans is Cal.com's custom geometric display typeface — slightly condensed, weight 600, negative letter-spacing. Inter handles body, buttons, navigation, captions, and tabular code blocks. The fallback stack walks `-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif` for both families.
+Dub uses three families, loaded through `next/font`:
 
-The split is functional:
-- Cal Sans (display, 600 weight, -0.5 to -2px tracking) — h1, h2, h3
-- Inter (body + UI, 400-600 weight, 0 letter-spacing) — paragraphs, labels, buttons, nav
+- **Inter** (`font-default`, `--font-inter`) — all product UI. Almost everything is **14px (`text-sm`)**; this is the workhorse size for nav items, buttons, inputs, table rows and descriptions. 12px (`text-xs`) is used for meta, badges, kbd hints and usage stats; 10px (`text-2xs`, 14px line height) for tiny counters.
+- **Satoshi** (`font-display`, `--font-satoshi`, variable 300–900) — marketing headlines, onboarding and large modal/hero titles, set in **Medium (500)** with tight leading (1.1–1.15) and `text-balance`.
+- **Geist Mono** (`font-mono`) — API keys, code snippets, IDs, tokens.
 
-### Hierarchy
+Hierarchy rules:
 
-| Token | Size | Weight | Line Height | Letter Spacing | Use |
-|---|---|---|---|---|---|
-| `{typography.display-xl}` | 64px | 600 | 1.05 | -2px | Homepage h1 ("The better way to schedule your meetings") — Cal Sans |
-| `{typography.display-lg}` | 48px | 600 | 1.1 | -1.5px | Section heads ("Your all-purpose scheduling app") — Cal Sans |
-| `{typography.display-md}` | 36px | 600 | 1.15 | -1px | Sub-section heads, card titles — Cal Sans |
-| `{typography.display-sm}` | 28px | 600 | 1.2 | -0.5px | CTA-band heads, pricing tier prices — Cal Sans |
-| `{typography.title-lg}` | 22px | 600 | 1.3 | -0.3px | Pricing plan names — Inter |
-| `{typography.title-md}` | 18px | 600 | 1.4 | 0 | Feature card titles, intro paragraphs |
-| `{typography.title-sm}` | 16px | 600 | 1.4 | 0 | Small card titles, list labels |
-| `{typography.body-md}` | 16px | 400 | 1.5 | 0 | Default running-text |
-| `{typography.body-sm}` | 14px | 400 | 1.5 | 0 | Footer body, fine-print |
-| `{typography.caption}` | 13px | 500 | 1.4 | 0 | Badge labels, captions |
-| `{typography.code}` | 14px | 400 | 1.5 | 0 | Code snippets, API examples — JetBrains Mono |
-| `{typography.button}` | 14px | 600 | 1.0 | 0 | Standard button labels |
-| `{typography.nav-link}` | 14px | 500 | 1.4 | 0 | Top-nav menu items |
+- **Page title (`headline-md`):** 18px / 28px, semibold, `on-surface-emphasis` (e.g. "Links" in the page header, "Short Links" in the sidebar panel).
+- **Section / empty-state title (`title-md`):** 16px medium, near-black ("No links yet").
+- **Body (`body-md`):** 14px / 20px regular, `on-surface` or `on-surface-subtle` for supporting copy.
+- **Link card title (`body-md-strong`):** 14px semibold with 24px line height (`font-semibold leading-6`), neutral‑800.
+- **Labels (`label-md`/`label-sm`):** Medium weight (500) — used for button emphasis, active nav, badges.
+- **Keyboard hints (`kbd`):** 12px **light (300)** inside a small rounded chip.
 
-### Principles
-Cal Sans is the brand voice — every display headline uses it. Inter handles the supporting type. The boundary is strict: never put body copy in Cal Sans, never put a display headline in Inter. Cal Sans without negative letter-spacing reads as off-brand — the -0.5 to -2px tracking is part of the voice.
-
-Display weight stays at 600 across all sizes — never 700, never 500. The middle weight is what makes Cal Sans feel modern and confident without becoming bombastic.
-
-### Note on Font Substitutes
-If Cal Sans is unavailable, **Inter** at weight 600 with -0.04em letter-spacing is a usable approximation. The geometric character of Cal Sans differs from Inter's humanist forms, but the substitution preserves the weight + tracking signature. **Manrope** at weight 700 is another close alternative.
+Weights in practice: 400, 500, 600. Avoid 700+ in the app. Never use all-caps labels; Dub uses sentence case everywhere ("Create link", "Learn more", "Complete setup").
 
 ## Layout
 
-### Spacing System
-- **Base unit:** 4px.
-- **Tokens:** `{spacing.xxs}` 4px · `{spacing.xs}` 8px · `{spacing.sm}` 12px · `{spacing.md}` 16px · `{spacing.lg}` 24px · `{spacing.xl}` 32px · `{spacing.xxl}` 48px · `{spacing.section}` 96px.
-- **Section padding:** `{spacing.section}` (96px) — the universal vertical rhythm between editorial bands.
-- **Card internal padding:** `{spacing.xl}` (32px) for feature cards and pricing tier cards; `{spacing.lg}` (24px) for testimonial and product-mockup cards.
-- **Gutters:** `{spacing.lg}` (24px) between cards in 3-up grids; `{spacing.md}` (16px) inside footer columns.
+**App shell (app.dub.co)** — a two-column grid `[min-content, 1fr]`:
 
-### Grid & Container
-- **Max content width:** ~1200px centered on marketing pages.
-- **Editorial body:** Single 12-column grid; hero band often uses 7/5 split (h1 left, app mockup card right).
-- **Feature card grids:** 3-up at desktop, 2-up at tablet, 1-up at mobile.
-- **Pricing grid:** 4-up at desktop, 2-up at tablet, 1-up at mobile.
-- **Footer:** 4-column link list at desktop, wrapping to 2-up at tablet, 1-up at mobile.
+1. **Sidebar (304px total)** = a **64px icon rail** (workspace avatar at top, product-area icons as 44×44 `rounded-lg` buttons — the active one is a white tile — and gift/help/user avatar at the bottom) + a **232px panel** (`rounded-xl`, neutral‑100) with the area title ("Short Links"), grouped nav items with 2px (`gap-0.5`) spacing, groups separated by 32px (`gap-8`) with a 14px subtle section label ("Insights", "Library"), and a **usage block** pinned to the bottom (border‑top, "Usage ›" link, Events/Links meters "0 of 1K", reset date caption, black "Upgrade plan" button).
+2. **Content canvas:** a white `rounded-xl` panel inset 8px from the top, right and bottom of the neutral‑200 frame (`lg:pt-2 lg:pr-2 lg:pb-2`).
 
-### Whitespace Philosophy
-Cal.com uses generous but not excessive whitespace — section padding sits at 96px (modern-SaaS standard), and card internal padding stays at 32px. The rhythm is calibrated for fast scanning: every band has a single h1 + h2 + supporting cards, never densely packed lists. The result reads as confident-not-shouting.
+**Page anatomy** (inside the canvas):
+
+- **Page header:** 64px tall (48px mobile), bottom `border-subtle`, title left, primary control(s) right (e.g. black "Create link [C]").
+- **Page width wrapper:** `max-w-screen-xl` (1280px) centered, horizontal padding 12px → 24px at `lg`. Marketing uses the same max width with 40px `lg` gutters.
+- **Toolbar row:** 20px below the header; left: "Filter ▾" and "Display ▾" secondary triggers (h‑10, gap‑2); right: search input ("Search by short link or URL", ~w‑72) plus a kebab icon button.
+- **Content:** card lists / tables / empty states with 12–16px gap below the toolbar.
+- **Floating pagination bar:** sticky at the bottom center, a white `rounded-xl` bar with border and soft drop shadow — "Viewing N links" on the left, "Previous"/"Next" 28px buttons on the right.
+
+**Spacing:** Tailwind's 4px scale. Common gaps: 8px between controls, 12px card padding, 16px section padding, 32px between nav groups. Controls are 40px tall by default, 32px compact, 28px mini.
+
+**Responsive:** Breakpoints `xs` 420, `sm` 640, `md` 768, `lg` 1024, `xl` 1280. Below `lg` the sidebar becomes an off-canvas drawer over a `bg-black/20 backdrop-blur-sm` scrim, the shell loses its rounded inset, popovers/modals become Vaul bottom sheets (10px top radius, grab handle 48×4px), and kbd hints are hidden (`md:inline-block`). Use container queries (`@container/page`) for toolbar wrapping.
 
 ## Elevation & Depth
 
-| Level | Treatment | Use |
-|---|---|---|
-| Flat | No shadow, no border | Body sections, top nav, hero bands |
-| Soft hairline | 1px `{colors.hairline}` border | Inputs, table dividers, occasionally on cards |
-| Card surface | `{colors.surface-card}` background — no shadow | Feature cards, testimonials |
-| Subtle drop shadow | Faint shadow at low alpha | Pricing tier cards, hover-elevated states (the system uses `0 1px 2px rgba(0,0,0,0.05)` and `0 4px 12px rgba(0,0,0,0.08)`) |
-| Featured tier | `{colors.surface-dark}` background, no shadow needed | The featured pricing tier inverts to dark surface — color contrast does the elevation work |
+Depth comes from **tonal layering and 1px borders**, not shadows:
 
-The elevation philosophy is **soft and modern** — small drop shadows on elevated cards, color-block contrast for emphasis. No heavy shadows, no neumorphism, no glassmorphism.
+- Level 0 — app frame: neutral‑200.
+- Level 1 — sidebar panel: neutral‑100, no border.
+- Level 2 — content canvas, cards, inputs: white + `border-subtle` (#E5E5E5).
+- Level 3 — floating layers:
+  - Tooltips: `shadow-sm` + 1px border, `rounded-xl`.
+  - Popovers / dropdowns: `drop-shadow-lg` + 1px border, `rounded-lg`.
+  - Modals: `shadow-xl`, `rounded-2xl`, over a `bg-neutral-100/50 backdrop-blur-md` overlay.
+  - Floating toolbar/pagination: `drop-shadow(0 5px 8px #222A351D)`.
+  - Card hover: `drop-shadow(0 2px 4px #222A350D)` (`drop-shadow-card-hover`) or a `neutral-50` background.
 
-### Decorative Depth
-- Calendar widgets and product UI fragments embedded inside marketing cards carry their own internal shadows from the product UI itself — these are not system tokens, they're product chrome shown as content.
-- Avatar circles in testimonial sections sometimes carry pastel fill colors (`{colors.badge-orange}`, `{colors.badge-pink}`, etc.) — adds a small chromatic flourish without breaking the monochrome brand voice.
+**Focus & interaction rings** substitute for elevation: focused/open controls get `border-neutral-500` plus a **4px `ring-neutral-200`** halo; primary buttons get a 4px `ring-border-subtle` halo on hover; danger buttons a 4px `ring-red-100`. Keyboard focus on nav uses `ring-2 ring-black/50`.
 
 ## Shapes
 
-### Border Radius Scale
+The shape language is **softly engineered** — rounded enough to feel friendly, never pill-shaped for actions.
 
-| Token | Value | Use |
-|---|---|---|
-| `{rounded.xs}` | 4px | Almost no use — reserved for badge accents |
-| `{rounded.sm}` | 6px | Small inline buttons, dropdown items |
-| `{rounded.md}` | 8px | Standard CTA buttons, text inputs, category tabs |
-| `{rounded.lg}` | 12px | Content cards (feature cards, testimonial cards, pricing tier cards) |
-| `{rounded.xl}` | 16px | Hero app-mockup card (a slightly larger radius for the marquee component) |
-| `{rounded.pill}` | 9999px | Nav-pill-group, badge pills |
-| `{rounded.full}` | 9999px / 50% | Avatars, icon buttons |
+- `rounded-sm` 4px — kbd chips, tiny count chips.
+- `rounded-md` 6px — text inputs, menu items, tags, status badges, analytics badges, pagination buttons, checkboxes.
+- `rounded-lg` 8px — **all buttons**, sidebar nav items, rail icons, filter/select triggers, search input, popovers.
+- `rounded-xl` 12px — cards, card lists (first/last row only), tooltips, toggle groups, content canvas, sidebar panel, floating bars.
+- `rounded-2xl` 16px — modals, empty-state icon tiles (64×64).
+- `rounded-full` — avatars, favicons, generic badges, switches, meters, grab handles.
 
-### Photography Geometry
-Avatar photos use `{rounded.full}` (perfect circles) at 36px or 40px. Product UI fragments inside marketing cards retain their native chrome (which often has its own internal radii — e.g., calendar grid cells, button rows). Hero illustration zones use 16:9 or 4:3 ratios with `{rounded.xl}` corners.
+Nested radii step down one level (e.g. a `rounded-xl` toggle group contains `rounded-lg` selected pills with 4px padding). Borders are always 1px.
+
+Icons: 16px (`size-4`) inline with 14px text, 20px (`size-5`) in the rail/header. Dub uses a custom **Nucleo**-style outline icon set (`@dub/ui/icons`) with 1.5px strokes, supplemented by `lucide-react`. Favicons of destination sites appear in 32px circles on link cards.
 
 ## Components
 
-### Top Navigation
+**Buttons** — `@dub/ui` `Button`. Base: `h-10 w-full rounded-lg border px-3 text-sm gap-2`, leading icon optional, `text` truncates, optional `shortcut` renders a `kbd` chip on the right (hidden below `md`).
 
-**`top-nav`** — White nav bar pinned to the top of every page. 64px tall, `{colors.canvas}` background. Carries the Cal.com wordmark + logo at left (the lowercase "Cal.com" with the brand circle), primary horizontal menu (Product, Solutions, Resources, Pricing, Enterprise) center, right-side cluster with "Sign in" text-link, "Sign up free" `{component.button-primary}`, and a sometimes-visible language selector. Menu items in `{typography.nav-link}` (Inter 14px / 500).
+- *primary*: black bg + black border, white text; hover `bg-inverted` + `ring-4 ring-border-subtle`. Shortcut chip neutral‑700/neutral‑400.
+- *secondary*: white bg, `border-subtle`, emphasis text; hover `bg-muted`; open state `border-emphasis ring-4 ring-border-subtle`.
+- *outline*: transparent, no visible border; hover `bg-neutral-900/5`. Use for toolbar/ghost actions.
+- *success*: blue‑500; *danger*: red‑500 with `ring-red-100` hover; *danger-outline*: red text that fills red on hover.
+- *disabled/loading*: `bg-subtle`, `border-subtle`, `text-subtle`, `cursor-not-allowed`; loading replaces the icon with a spinner. Disabled buttons may carry a `disabledTooltip` explaining why.
+- Set explicit widths (`w-fit`) in toolbars; the default is `w-full`.
 
-**`nav-pill-group`** — A small pill-radius wrapper around 2-3 sub-nav segments (e.g., the product-mode switcher between "Personal" / "Teams" / "Enterprise"). Background `{colors.surface-soft}` with internal padding 6px, rounded `{rounded.pill}`. Active segment renders as a white-canvas pill with a subtle drop shadow inside the wrapper. The pill-in-pill treatment is one of Cal.com's signature interactive components.
+**Inputs** — 40px, `rounded-md`, `border-neutral-300`, placeholder neutral‑400, 14px. Focus: `border-neutral-500` + neutral ring. Error: `border-red-500`, red alert-circle icon inside the right edge, message below in `text-sm text-red-500`. Read-only: neutral‑100 bg, neutral‑500 text. Labels: 14px medium neutral‑800 above the field with 8px gap.
 
-### Buttons
+**Search input** — leading 16px magnifier at 12px inset, `px-10`, `rounded-lg`, `border-neutral-200`, focus `border-neutral-500 ring-4 ring-neutral-200`; a clear (×) button appears when filled.
 
-**`button-primary`** — The signature primary CTA. Background `{colors.primary}` (#111111), text `{colors.on-primary}`, type `{typography.button}` (Inter 14px / 600), padding 12px × 20px, height 40px, rounded `{rounded.md}` (8px). Active state `button-primary-active` shifts to `{colors.primary-active}` (#242424).
+**Filter / Display triggers** — secondary-style 40px `rounded-lg` buttons with leading icon, label, trailing chevron. Open state: `border-neutral-500 ring-4 ring-neutral-200`. Active filter count shows as a 16px black circular dot. The dropdown is a command-menu popover: search field on top separated by a border, options as `rounded-md px-3 py-2 text-sm` rows with `data-[selected]:bg-neutral-100`, grouped with `text-xs font-medium text-neutral-500` section labels.
 
-**`button-secondary`** — White button with hairline outline. Background `{colors.canvas}`, text `{colors.ink}`, 1px hairline border, same padding + height + radius as primary.
+**Sidebar nav item** — 32px, `rounded-lg p-2 text-sm`, 16px icon + label with 10px gap. Hover `bg-black/5`, pressed `bg-black/10`. Active: `bg-blue-100/50 text-blue-600 font-medium` (icon also blue). Optional count chip on the right (`text-xs font-semibold rounded px-1.5`, blue‑100/blue‑600, inverted when active). Expandable items show a nested list with a left `border-neutral-200` guide.
 
-**`button-icon-circular`** — 36 × 36px circular icon button. Background `{colors.canvas}`, hairline border, ink-color icon. Used for share, "view more", carousel arrows.
+**Usage meter** — label row (`text-xs font-medium text-neutral-700` + icon) with "used of limit" right-aligned, a 4px rounded track below, then a caption ("Usage will reset Sep 29, 2026", 12px neutral‑500).
 
-**`button-text-link`** — Inline text button, no background. Used for "Sign in" in the top nav and inline CTA links inside cards.
+**Card list / Link card** — rows share borders to form one `rounded-xl` block (compact mode) or float as separate `rounded-xl` bordered cards (loose mode). Row: 32px favicon circle, **short link** in 14px semibold neutral‑800 (hover black), destination URL below/next to it in neutral‑500 with a ↳ arrow; right side holds an **analytics badge** (`rounded-md border-neutral-200 bg-neutral-50 px-2 py-0.5 text-sm`, e.g. "⤷ 1.2K clicks"), tag badges, creator avatar, relative time, and a kebab menu. Hover: `bg-neutral-50`.
 
-**`text-link`** — Inline body links in `{colors.ink}` (the brand keeps inline links monochrome). Underlined on hover (not documented per the no-hover policy, but mentioned for context).
+**Badges** — *Badge*: `rounded-full border px-2 py-px text-xs font-medium` (neutral outline default; black, blue, violet, green, amber variants; gradient variants for "New"/plan labels). *StatusBadge*: `rounded-md px-2 py-1 text-xs font-medium` with a 12px leading icon, using feedback container/content pairs. *Tag*: `rounded-md border px-2 py-0.5 text-sm` in its tag hue.
 
-### Cards & Containers
+**Empty state** — centered in the bordered content area: an illustration stack of three ghost link-card skeletons (white cards with light-gray bars, link icon and click icon, faded at top), or a 64×64 `rounded-2xl` neutral‑50 icon tile; title "No links yet" (16px medium); description max‑w‑sm 14px neutral‑500 `text-balance`; actions: primary "Create link [C]" + secondary "Learn more", 8px apart.
 
-**`hero-band`** — White-canvas hero with a 7-5 grid: h1 + sub-headline + button row on the left, `{component.hero-app-mockup-card}` on the right. Vertical padding `{spacing.section}` (96px).
+**Toggle group** — segmented control: `rounded-xl border p-1 gap-1`; items `px-3 py-1 text-sm font-medium`; the selected pill is an animated (Framer Motion `layoutId`) `rounded-lg border bg-bg-muted` layer behind the label.
 
-**`hero-app-mockup-card`** — A larger product-UI mockup card showing the actual Cal.com booking widget with calendar grid, time slots, and a primary "Confirm" button inside. Background `{colors.canvas}`, 1px hairline border, rounded `{rounded.xl}` (16px), subtle drop shadow. Used as the hero's right-side artifact.
+**Tab select** — underline tabs, 14px; selected text blue‑600 medium with a 2px blue rounded-top underline; unselected neutral‑500 → neutral‑700 on hover.
 
-**`feature-card`** — Used in 3-up feature grids ("With us, appointment scheduling is easy"). Background `{colors.surface-card}` (#f5f5f5), rounded `{rounded.lg}` (12px), internal padding `{spacing.xl}` (32px). Carries a small icon at top, an `{typography.title-md}` headline, and a body description in `{typography.body-md}`.
+**Checkbox / Switch** — checkbox 20px `rounded-md border-neutral-200`, checked blue‑500 with white check; switch 16×32 track, neutral‑200 off / blue‑500 on, white thumb.
 
-**`feature-icon-card`** — A simpler card variant used in 4-up feature grids on lower-density bands. Background `{colors.canvas}` with hairline border, rounded `{rounded.lg}`, padding `{spacing.lg}` (24px). Carries a small icon, `{typography.title-sm}` title, short description.
+**Tooltip** — white, `rounded-xl border shadow-sm`, `px-4 py-2`, 14px centered prose, max‑w‑xs; supports inline markdown links and a small CTA button. Enter animation `slide-up-fade` 0.4s `cubic-bezier(0.16,1,0.3,1)`.
 
-**`product-mockup-card`** — A card showing actual Cal.com product UI fragments (workflow editor, calendar grid, integration grid, automation flow). Background `{colors.canvas}`, rounded `{rounded.lg}`, padding `{spacing.lg}` (24px). The product UI inside has its own internal chrome — these cards display the product, they don't decorate around it.
+**Popover / Dropdown menu** — white, `rounded-lg border drop-shadow-lg`, 8px inner padding; `MenuItem`s are 36px `rounded-md px-2 text-sm font-medium` with icon + label + optional kbd hint; hover `bg-subtle`; danger items red text with `hover:bg-red-50`. Section separators: `-mx-1 my-1 border-b`.
 
-**`testimonial-card`** — Used in customer-quote grids. Background `{colors.surface-card}`, rounded `{rounded.lg}`, padding `{spacing.lg}` (24px). Top row carries a `{component.avatar-circle}` + name + role; below sits the testimonial quote in `{typography.body-md}`.
+**Modal** — centered, `rounded-2xl border shadow-xl`, white, zero outer padding (content provides its own: header 16–24px with 18px semibold title and bottom border, footer with right-aligned secondary + primary buttons on neutral‑50 with top border). Overlay `bg-neutral-100/50 backdrop-blur-md`. Enter: `scale-in` 0.2s. On mobile, becomes a bottom sheet.
 
-**`pricing-tier-card`** — Standard tier card. Background `{colors.canvas}`, rounded `{rounded.lg}`, padding `{spacing.xl}` (32px). Carries the plan name in `{typography.title-lg}`, price in `{typography.display-sm}`, feature checklist in `{typography.body-md}`, and a `{component.button-primary}` at the bottom.
+**Pagination bar** — floating white `rounded-xl` bar with border and `drop-shadow(0 5px 8px #222A351d)`, "Viewing **0** links" 14px neutral‑600, Previous/Next 28px `rounded-md` bordered buttons (disabled: neutral‑100 bg, neutral‑400 text).
 
-**`pricing-tier-card-featured`** — The featured tier (typically "Teams"). Background flips to `{colors.surface-dark}` (#101010), text inverts to `{colors.on-dark}`. The dark surface IS the featured-tier signal — no accent border, no badge, no scale shift.
+**Complete setup pill** — bottom-right floating 32px `rounded-full` pill (`bg-neutral-950`, white `text-xs font-medium`, `shadow-md`, circular progress ring); hover `bg-neutral-800 ring-4 ring-neutral-200`. It opens a `rounded-xl` checklist popover with a black header block and a bordered, divided task list.
 
-### Inputs & Forms
+**Charts** — Visx-based area/bar/funnel charts; area fills are a vertical gradient of the metric color fading to transparent, lines 2px; axes and gridlines in black at 40% and 15% alpha; tooltips follow the tooltip spec.
 
-**`text-input`** — Standard text input. Background `{colors.canvas}`, text `{colors.ink}`, type `{typography.body-md}`, rounded `{rounded.md}` (8px), padding 10px × 14px, height 40px. 1px hairline border in `{colors.hairline}`.
-
-**`text-input-focused`** — Focus state. Border thickens or shifts to `{colors.ink}` for emphasis.
-
-### Tags / Badges
-
-**`badge-pill`** — Small pill label used for category tags ("Product", "Article", "New") and pastel-fill avatar substitutes. Background `{colors.surface-card}` or one of the badge pastels (`{colors.badge-orange}`, `{colors.badge-pink}`, etc.), text `{colors.ink}`, type `{typography.caption}` (13px / 500), rounded `{rounded.pill}`, padding 4px × 12px.
-
-**`avatar-circle`** — 36px diameter, rounded `{rounded.full}`. Either holds a photo or a pastel fill with initials in `{typography.caption}`.
-
-**`rating-stars`** — Inline star rating in `{colors.badge-orange}` (#fb923c). Used near testimonial avatars to display a 5-star satisfaction score.
-
-### Tab / Filter
-
-**`category-tab`** + **`category-tab-active`** — Used inside the nav-pill-group. Inactive: transparent background, `{colors.muted}` text. Active: `{colors.canvas}` background, `{colors.ink}` text, subtle drop shadow inside the pill-group wrapper. Padding 8px × 14px, rounded `{rounded.md}`.
-
-### CTA / Footer
-
-**`cta-band-light`** — A pre-footer "Smarter, simpler scheduling" CTA card. Background `{colors.surface-card}`, rounded `{rounded.lg}`, padding `{spacing.xxl}` (48px). Carries an h2 in `{typography.display-sm}`, a sub-line, and a `{component.button-primary}` centered.
-
-**`footer`** — Dark navy footer that closes every page. Background `{colors.surface-dark}` (#101010), text `{colors.on-dark-soft}`. 4-column link list at desktop covering Product / Solutions / Company / Resources. Vertical padding 64px. The Cal.com wordmark sits at the top-left in `{colors.on-dark}`. The footer is the only dark surface on every page — the deliberate inversion visually closes the page.
+**Motion** — short and springy: popovers/tooltips `slide-*-fade` 0.4s `cubic-bezier(0.16, 1, 0.3, 1)`; modals `scale-in` 0.2s same curve; sheets 0.2s ease; accordions 300ms `cubic-bezier(0.87,0,0.13,1)`; hover color transitions 75–150ms. Respect `motion-reduce`.
 
 ## Do's and Don'ts
 
-### Do
-- Reserve `{colors.primary}` (#111111) for primary CTAs and h1/h2 type. Cal.com's button is near-black, not blue.
-- Use Cal Sans for every display headline. Pair with Inter body. Never blur the boundary.
-- Apply negative letter-spacing on display sizes (-0.5 to -2px). Cal Sans without it reads as off-brand.
-- Use `{component.feature-card}` (light gray) and `{component.product-mockup-card}` (white with chrome) deliberately — the gray cards signal "abstract feature claim", white cards signal "look at the actual product".
-- Embed real product UI fragments inside marketing cards. Don't paint marketing illustrations of the product when you can show the product itself.
-- Keep avatar circles at 36px, perfect circles, sometimes with pastel fills. Avatars are the only place where badge pastels appear.
-- Use `{component.nav-pill-group}` for grouped sub-nav segments. The pill-in-pill treatment is signature.
-- End every page with the dark footer. The light-to-dark transition is part of the editorial rhythm.
-
-### Don't
-- Don't use accent colors (`{colors.brand-accent}`, badge pastels) on primary CTAs. The system is monochrome at the action layer.
-- Don't bold display weight beyond 600. Cal Sans at 700 reads as bombastic.
-- Don't use rounded radius beyond `{rounded.xl}` (16px) on cards. Larger radii read as consumer-app, not professional booking software.
-- Don't put dark surface cards anywhere except the footer and the featured pricing tier. The dark surface is a deliberate, scarce signal.
-- Don't repeat the same surface mode in two consecutive bands. Cal.com's pacing alternates white → light-gray → white → product-mockup-card → white → dark-footer.
-- Don't add hover state styling beyond what the system already encodes — primary darkens on press; nothing else changes.
-
-## Responsive Behavior
-
-### Breakpoints
-
-| Name | Width | Key Changes |
-|---|---|---|
-| Mobile | < 768px | Hamburger nav; hero h1 64→32px; hero-app-mockup-card stacks below content; feature grids 1-up; pricing 1-up; footer 4 cols → 1 |
-| Tablet | 768–1024px | Top nav stays horizontal but tightens; nav-pill-group wraps; feature cards 2-up; pricing 2-up |
-| Desktop | 1024–1440px | Full top-nav with all menu items; 3-up feature cards; 4-up pricing tiers |
-| Wide | > 1440px | Same as desktop with more outer breathing room; max content width caps at 1200px |
-
-### Touch Targets
-- `{component.button-primary}` at minimum 40 × 40px.
-- `{component.button-icon-circular}` at exactly 36 × 36 — slightly under WCAG's 44 × 44 but the centered icon and full-circle silhouette compensate.
-- `{component.text-input}` height is 40px.
-- `{component.category-tab}` rendered inside nav-pill-group has 8 × 14 padding; effective tap area meets 44px+ with the surrounding pill.
-
-### Collapsing Strategy
-- Top nav collapses to hamburger at < 768px; menu opens as a full-screen sheet.
-- Hero band's 7-5 grid collapses to single-column on mobile — h1 + sub-head + buttons first, then the app-mockup card below.
-- Feature grids reduce columns rather than scaling cards down.
-- Pricing tier cards collapse 4 → 2 → 1; featured-tier dark surface stays visually distinct at every breakpoint.
-- Nav-pill-group wraps to multi-row on tablet if the segments don't fit horizontally.
-- Avatar + testimonial card layouts stay grid-aligned at every breakpoint.
-
-### Image Behavior
-- Product UI fragments inside cards retain native aspect ratios; the cards themselves resize.
-- Avatar photos crop to circles at every breakpoint.
-- Hero app-mockup card scales proportionally on mobile — the calendar grid stays legible.
-
-## Iteration Guide
-
-1. Focus on ONE component at a time. Reference its YAML key directly (`{component.feature-card}`, `{component.pricing-tier-card-featured}`).
-2. Variants of an existing component (`-active`, `-disabled`, `-focused`) live as separate entries in `components:`.
-3. Use `{token.refs}` everywhere — never inline hex.
-4. Never document hover. Default and Active/Pressed states only.
-5. Display headlines stay Cal Sans 600 with negative letter-spacing. Body stays Inter 400. The trinity does not blur.
-6. The dark footer is the only dark surface on most pages. Don't add other dark cards casually.
-7. When in doubt about emphasis: bigger Cal Sans before bolder Cal Sans.
-
-## Known Gaps
-
-- The dembrandt frequency analyzer captured `Buttons: 0 variants` — Cal.com renders most CTAs as styled `<a>` link elements rather than `<button>` tags, which dembrandt's button selector doesn't capture. Button styles are documented from screenshot ground-truth + standard Cal Sans / Inter baselines.
-- Cal Sans is licensed to Cal.com and not available as a public web font; substitutes are documented in the typography section.
-- The badge pastel set (orange / pink / violet / emerald) is documented from observed avatar fill colors; exact hex values may shift seasonally.
-- Animation and transition timings (calendar slot picker, schedule confirmation, integration grid hover-reveal) are not in scope.
-- Form validation states beyond `{component.text-input-focused}` are not extracted — error / success states would need a sign-up or booking flow to confirm.
-- The actual booking widget surface (cal.com/{username}) is the product, not a marketing surface; its spec is out of scope.
-- Avatar photos in testimonial sections sometimes carry pastel circular fills with initials instead of photographs; both treatments coexist on the same page.
+- **Do** use black for the single primary action per view; everything else is secondary (white + border) or outline.
+- **Do** reserve blue for active/selected/checked state and informational links only.
+- **Do** separate surfaces with 1px #E5E5E5 borders and background steps (white / neutral‑50 / neutral‑100 / neutral‑200) instead of shadows.
+- **Do** keep product UI at 14px Inter; use 12px only for meta and badges. Use Satoshi only for marketing and hero-level headings.
+- **Do** show keyboard shortcut chips on primary actions and hide them below `md`.
+- **Do** use 40px as the default control height and align buttons, inputs, and filter triggers on the same row to it.
+- **Do** use semantic tokens (`bg-bg-default`, `text-content-emphasis`, `border-border-subtle`) in new components so dark mode works.
+- **Do** pair every status color with its container color (e.g. `bg-bg-success text-content-success`).
+- **Do** keep Dub's exact status/tag pairs (they are faithful to the source), but for long-form text on tinted backgrounds step the text one shade darker (e.g. `text-green-700` instead of 600) to meet WCAG AA 4.5:1.
+- **Do** write sentence-case, concise microcopy ("No links yet", "Create link", "Learn more").
+- **Don't** introduce new brand colors, gradients on buttons, or colored page backgrounds in the app.
+- **Don't** use pill-shaped (`rounded-full`) buttons for actions in the app — buttons are `rounded-lg`; only badges, avatars and the floating "Complete setup" pill are fully rounded.
+- **Don't** add heavy drop shadows to cards; hover states are a background tint or a barely visible drop shadow.
+- **Don't** use bold (700+) weights or all-caps labels in the dashboard.
+- **Don't** mix the analytics color mapping (clicks = blue, leads = purple, sales = teal).
+- **Don't** put borders on the sidebar panel or rail; they are defined purely by tone.
+- **Don't** exceed the 1280px content width or remove the 8px inset around the content canvas on desktop.

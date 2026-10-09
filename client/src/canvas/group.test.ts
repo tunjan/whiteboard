@@ -267,10 +267,10 @@ describe('duplicateShapes', () => {
 
   const bindingTarget = (editor: Editor, id: string): string | undefined =>
     (
-      editor.getShape(id)?.props as {
-        bindings?: { start?: { shapeId: string } | null };
-      }
-    ).bindings?.start?.shapeId;
+      editor.getShape(id)?.props as
+        | { bindings?: { start?: { shapeId: string } | null } }
+        | undefined
+    )?.bindings?.start?.shapeId;
 
   it('binds the cloned arrow to the cloned target, not the original', () => {
     const editor = boundArrow('rect');

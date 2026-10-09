@@ -2,7 +2,8 @@ import { useLayoutEffect, type RefObject } from 'react';
 import { worldToScreen } from '@/canvas/camera';
 import { shapeRotatedBounds } from '@/canvas/shape-bounds';
 import { useCameraStore } from '@/canvas/use-camera-store';
-import { useDocumentStore } from '@/canvas/use-document-store';
+import { react } from '@tldraw/state';
+import { shapeStore } from '@/canvas/engine/shape-store';
 
 /** Screen-px gap between the shape's edge and the panel docked to it. */
 const GAP = 12;
@@ -39,7 +40,7 @@ export function useShapeAnchor(
 
     const place = () => {
       frame = 0;
-      const shape = useDocumentStore.getState().shapesById.get(shapeId);
+      const shape = shapeStore.peek(shapeId);
       // `.wb-ui-layer`: the click-through plane the panel is positioned in,
       // which shares the canvas's origin, so world->screen px land in its
       // coordinate space unchanged.
@@ -95,7 +96,13 @@ export function useShapeAnchor(
     place();
 
     const unsubscribeCamera = useCameraStore.subscribe(schedule);
-    const unsubscribeDocument = useDocumentStore.subscribe(schedule);
+    // Follows this one shape: an edit anywhere else leaves the panel alone.
+    let first = true;
+    const unsubscribeDocument = react('shape anchor', () => {
+      shapeStore.record(shapeId).get();
+      if (!first) schedule();
+      first = false;
+    });
     // Covers the panel's own growth and the viewport resizing under it.
     const resize = new ResizeObserver(schedule);
     resize.observe(element);

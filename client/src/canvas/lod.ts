@@ -1,4 +1,5 @@
-import type { StrokeDash } from '@whiteboard/shared';
+import type { ImageProps, StrokeDash } from '@whiteboard/shared';
+import { useShallow } from 'zustand/react/shallow';
 import { patternCutoff, useLodStore } from './use-lod-store';
 
 export type LodDetail = 'high' | 'low';
@@ -96,4 +97,52 @@ export function useForceSolidInk(size: number): boolean {
  */
 export function useInkErrorLimit(): number {
   return useLodStore((s) => s.inkErrorLimit);
+}
+
+/** Every LOD answer a `draw` shape needs. See {@link useInkLod}. */
+export interface InkLod {
+  dotLength: number;
+  dash: StrokeDash;
+  forceSolid: boolean;
+  errorLimit: number;
+}
+
+/**
+ * {@link useDotLength}, {@link useLodDash}, {@link useForceSolidInk} and
+ * {@link useInkErrorLimit} as one subscription.
+ *
+ * Ink is most of any real board, and a publish costs one listener call per
+ * mounted LOD hook — four separate hooks made every draw shape pay four. The
+ * answers are the same rules as the individual hooks; only the subscription
+ * count changes. `useShallow` keeps the object stable until one field moves.
+ */
+export function useInkLod(dash: StrokeDash, size: number): InkLod {
+  return useLodStore(
+    useShallow((s) => ({
+      dotLength: s.dotLength,
+      dash: dash !== 'solid' && size < s.patternCutoff ? 'solid' : dash,
+      forceSolid: size < s.patternCutoff,
+      errorLimit: s.inkErrorLimit,
+    })),
+  );
+}
+
+/**
+ * Whether an image is small enough on screen to draw from its thumbnail, given
+ * the published `imageThumbCutoff`.
+ *
+ * Measured against the whole source as drawn, not the visible box: a crop
+ * scales the full image up so its sub-rectangle fills the box, and it is that
+ * scaled source the thumbnail's pixels are stretched across.
+ */
+export function usesImageThumb(props: ImageProps, cutoff: number): boolean {
+  if (!props.thumbBlobId || cutoff <= 0) return false;
+  const { w, h, crop } = props;
+  return Math.max(crop ? w / crop.w : w, crop ? h / crop.h : h) <= cutoff;
+}
+
+/** {@link usesImageThumb} at the current zoom. A discrete boolean, so an image
+ *  re-renders only when it crosses the threshold. */
+export function useImageThumb(props: ImageProps): boolean {
+  return useLodStore((s) => usesImageThumb(props, s.imageThumbCutoff));
 }

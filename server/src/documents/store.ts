@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { DOCUMENT_MIME } from '@whiteboard/shared';
 import { env } from '../env';
+import { reserveStorage } from '../storage-quota';
 
 const DOC_ROOT = resolve(env.docDir);
 
@@ -30,7 +31,10 @@ export async function saveDoc(bytes: Buffer, ext: string): Promise<string> {
   const id = `${hash}.${ext}`;
   await ensureDir();
   const path = join(DOC_ROOT, id);
-  if (!existsSync(path)) await writeFile(path, bytes);
+  if (!existsSync(path)) {
+    await reserveStorage(bytes.byteLength);
+    await writeFile(path, bytes);
+  }
   return id;
 }
 

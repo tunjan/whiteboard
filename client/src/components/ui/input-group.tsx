@@ -14,7 +14,7 @@ function InputGroup({ className, ...props }: React.ComponentProps<'div'>) {
       data-slot="input-group"
       role="group"
       className={cn(
-        'group/input-group relative flex h-10 w-full min-w-0 items-center rounded-control border border-control-border bg-surface transition-colors duration-instant in-data-[slot=combobox-content]:focus-within:border-inherit has-[[data-slot=input-group-control]:focus-visible]:border-action has-[[data-slot=input-group-control]:focus-visible]:outline-2 has-[[data-slot=input-group-control]:focus-visible]:outline-offset-2 has-[[data-slot=input-group-control]:focus-visible]:outline-focus has-[[data-slot][aria-invalid=true]]:border-danger-control-border has-[>[data-align=block-end]]:h-auto has-[>[data-align=block-end]]:flex-col has-[>[data-align=block-start]]:h-auto has-[>[data-align=block-start]]:flex-col has-[>textarea]:h-auto has-[>[data-align=block-end]]:[&>input]:pt-3 has-[>[data-align=block-start]]:[&>input]:pb-3 has-[>[data-align=inline-end]]:[&>input]:pr-1.5 has-[>[data-align=inline-start]]:[&>input]:pl-1.5',
+        'group/input-group relative flex h-10 w-full min-w-0 items-center rounded-md border border-control-border bg-surface transition-[border-color,box-shadow] duration-100 ease-out in-data-[slot=combobox-content]:focus-within:border-inherit has-[[data-slot=input-group-control]:focus-visible]:border-focus has-[[data-slot=input-group-control]:focus-visible]:shadow-focus has-[[data-slot][aria-invalid=true]]:border-danger-control-border has-[>[data-align=block-end]]:h-auto has-[>[data-align=block-end]]:flex-col has-[>[data-align=block-start]]:h-auto has-[>[data-align=block-start]]:flex-col has-[>textarea]:h-auto has-[>[data-align=block-end]]:[&>input]:pt-3 has-[>[data-align=block-start]]:[&>input]:pb-3 has-[>[data-align=inline-end]]:[&>input]:pr-1.5 has-[>[data-align=inline-start]]:[&>input]:pl-1.5',
         className,
       )}
       {...props}
@@ -125,7 +125,7 @@ function InputGroupInput({
     <Input
       data-slot="input-group-control"
       className={cn(
-        'flex-1 rounded-none border-0 bg-transparent shadow-none ring-0 outline-none aria-invalid:ring-0',
+        'flex-1 rounded-none border-0 bg-transparent shadow-none ring-0 outline-none focus:shadow-none aria-invalid:ring-0',
         className,
       )}
       {...props}
@@ -141,7 +141,7 @@ function InputGroupTextarea({
     <Textarea
       data-slot="input-group-control"
       className={cn(
-        'flex-1 resize-none rounded-none border-0 bg-transparent py-2 shadow-none ring-0 outline-none aria-invalid:ring-0',
+        'flex-1 resize-none rounded-none border-0 bg-transparent py-2 shadow-none ring-0 outline-none focus:shadow-none aria-invalid:ring-0',
         className,
       )}
       {...props}

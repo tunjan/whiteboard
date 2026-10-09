@@ -59,7 +59,7 @@ registry plus the page being looked at.
 - A page document is created and written to before it has synced — the shapes carry their own ids, so a cross-page move into a page nobody has opened merges when it arrives, with no round trip.
 - Deleting a page removes it from the registry (every client then drops its local copy) and `DELETE /api/pages/:boardId/:pageId` deletes the stored row, which the CRDT protocol has no way to express.
 
-**Undo** is per page — one `Y.UndoManager` per page document. A cross-page move writes to two documents, which no single manager can revert, so only the outgoing half is tracked and the incoming half is recorded in `crossPageMoves` (keyed by the stack item) and replayed by hand in `undo`/`redo`. History cannot outlive its document, so an edited page is pinned resident, capped at `MAX_HISTORY_PAGES`.
+**Undo** is per page — one `Y.UndoManager` per page document, owned by `page-history.ts`. A cross-page move writes to two documents, which no single manager can revert, so only the outgoing half is tracked and the incoming half is handed to `PageHistory.recordMove` as a replay (kept against the stack item) and run by hand in `undo`/`redo`. History cannot outlive its document, so an edited page is pinned resident, capped at `MAX_HISTORY_PAGES`. A cross-page move's target is pinned for as long as the source page's history lives (`movePins`), and released with it.
 
 ### C. Fractional Indexing (Z-Order)
 
@@ -106,6 +106,8 @@ registry plus the page being looked at.
 | `voice.ts`            | WebRTC signaling types (`VoiceSignalMessage`, `VoicePeerState`).                                                                                                                                                                                                                     |
 | `ai-latex.ts`         | AI LaTeX endpoint contract: request/response shapes, size caps, the `UNREADABLE` refusal sentinel.                                                                                                                                                                                   |
 | `latency.ts`          | Ping/pong latency measurement constants.                                                                                                                                                                                                                                             |
+| `analytics.ts`        | Attendance contracts (`AnalyticsSummary`, `AnalyticsBoard`, `AnalyticsJoiner`, `AnalyticsVisit`) and the day/week/month/year ranges.                                                                                                                                                                    |
+| `ink-codec.ts`        | Binary ink chunk format (`encodeInkChunk` / `decodeInkChunk`): 1/32-unit fixed-point, zigzag-varint deltas, pressure/tilt in 1/256. The only stored form of draw points; `sameStoredPoint` is the append path's equality. |
 | `board-repository.ts` | `BoardMeta`, `BoardRepository` interface for dashboard.                                                                                                                                                                                                                              |
 
 ---
@@ -116,9 +118,15 @@ registry plus the page being looked at.
 
 | File                                      | Responsibility                                                                                                                                                     |
 | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `Canvas.tsx`                              | Main canvas controller: orchestrates SVG layers, pointer events, wheel/pinch zoom, keyboard shortcuts, paste/drop handlers, context menu, and active tool routing. |
+| `Canvas.tsx`                              | Main canvas controller: orchestrates SVG layers, keyboard shortcuts, paste/drop handlers, context-menu selection and wheel zoom. Pointer routing lives in `gesture-arbiter.ts`. |
+| `gesture-arbiter.ts`                      | `GestureArbiter`: decides what each pointer on the canvas surface is — a stroke of the active tool, a pan (middle/right-drag/Space/finger), a pinch, one-finger or Quick Zoom, or a context menu — and owns all the state that decision rests on (live touches, palm rejection, stale-touch healing, long-press, spring-loaded tool return). `Canvas.tsx` binds its `onPointer*` handlers and calls `abandonAll()` on page switch. Tools keep their own state machines below it. Tested as event sequences in `gesture-arbiter.test.ts`. |
 | `editor.ts`                               | `Editor` interface contract (`getShape`, `getShapes`, `createShape`, `updateShape`, `deleteShapes`, `transact`).                                                   |
-| `use-document-store.ts`                   | Zustand store + Yjs providers + UndoManagers. Manages board lifecycle (`loadBoard`), shape CRUD, page navigation, spatial index synchronization, and document state. Leaving a page *parks* its derived state (shape cache, sorted array, spatial index, binding graph) so returning to it is a pointer swap; a peer's edit to a parked page marks it stale and the return re-derives instead. |
+| `use-document-store.ts`                   | Zustand store + Yjs providers + UndoManagers. Manages board lifecycle (`loadBoard`), shape CRUD, page navigation, spatial index synchronization, and document state. Leaving a page *parks* its derived state (shape cache, sorted array, spatial index, binding graph) so returning to it is a pointer swap; a peer's edit to a parked page records the touched shape ids, and the return patches just those (re-deriving the whole page only when more than a quarter of it changed). Shapes are **not** in the zustand store: each publish writes them once into `engine/shape-store.ts`, and only page/registry metadata stays in zustand. |
+| `page-derived.ts`                         | `PageDerivedState`: everything derived from one page's `shapes` map — decoded shapes, z-sorted order (incremental splice), spatial index, binding graph, hierarchy/equation flags — behind `rebuild` / `patch(ids)` / `adopt` / `clear`. The store holds one for the active page (built on the exported `spatialIndex` / `bindingGraph` singletons) and one per parked page; parking is an `adopt`. Also `yToShape` and `collectTouchedShapeIds` (deep-observer events → shape ids). Testable against a bare `Y.Doc`. |
+| `board-records.ts`                        | The board document's shared records — comment threads, document repository, custom sticker library, music playback. `bindBoardRecords(doc)` mirrors each map into its store and returns a disposer; the write API (`addComment`, `addBoardDocument`, `addCustomSticker`, `setMusicPlayback`, …) lives here, not in the document store. Needs only a `Y.Doc`. |
+| `page-history.ts`                         | `PageHistory` + `useUndoStore`: one `Y.UndoManager` per page, `open(pageId, shapes)` on page switch, `undo` / `redo` / `breakCapture`, history pinning (`MAX_HISTORY_PAGES`), and `recordMove` for the cross-page move a single manager cannot revert. Pin/unpin are injected. The store's `undo` / `redo` / `breakUndoCapture` delegate to it. |
+| `scene-ui.ts`                             | What the interaction stores mean for a scene, derived once for every renderer: `bindSceneUi(scene, getShape)` publishes suppressed / pinned / hidden / erasing and keeps them current; `deriveSceneUi` is the pure rule. `activeShapeInteraction` / `isShapeInteractionActive` / `subscribeShapeInteraction` read the text-editing, frame-editing, cropping, video-playing and live-stroke stores as one. Both renderers and the raster cache go through it. |
+| `engine/shape-store.ts`                  | `shapeStore`: the one reactive copy of the page's shapes — an atom per shape plus the z-sorted list, written once per publish. The renderers' `CanvasScene` nodes read these atoms (no mirror); React reads them through `use-shapes.ts` (`useShape`, `useShapes`, `useShapesById`, `useStoreValue`). `editor.getShape` still reads the synchronous cache, which runs ahead of the store for the local live stroke and paced peer edits. |
 | `ShapeView.tsx`                           | Polymorphic shape renderer invoking registered `ShapeUtil.Component`.                                                                                              |
 | `Background.tsx`                          | Dot grid, graph paper, line grid, or blank background renderer matching camera zoom/pan.                                                                           |
 | `SelectionLayer.tsx`                      | Selection bounding box, 8 resize handles, rotation handle, and custom shape handles. Shapes that expose `getIndicatorPath()` (connectors) are traced along their own outline instead of boxed. |
@@ -159,6 +167,7 @@ registry plus the page being looked at.
 | `equation-complete.ts` / `equation-shortcuts.ts`                      | LaTeX command catalog for the panel's autocomplete, plus pure typing edits (auto-brackets, Tab slots, environment rows). |
 | `ink-to-latex.ts`                                                     | Handwriting or pasted image → equation: rasterize the selection, transcribe it via `/api/ai/latex/ink`, swap the source for a typeset shape in one undo step. |
 | `link-url.ts` / `place-image.ts` / `place-link.ts` / `place-video.ts` | Asset drop and paste placement handlers.                                                                                |
+| `place-preset.ts`                                                     | More → Templates: unit circle (circle, axes, dashed special-angle spokes) and blank ruled tables (size chosen on an 8×8 hover grid), dropped at view centre as one selected group. |
 | `place-pdf.ts` / `pdf-render.ts`                                      | Pasted/dropped PDF → one `image` shape per page, stacked in a column. `pdf-render.ts` is the only module that touches pdf.js (lazily imported; its fonts/CMaps/wasm are copied into `public/pdfjs` by `client/scripts/copy-pdfjs-assets.mjs`). Pages are rasterized and uploaded *before* any document write, then created in one `transact` — one undo step, and peers never see a half-imported document. |
 
 #### Canvas Zustand Stores & Hooks
@@ -194,7 +203,7 @@ Every shape implements `ShapeUtil<T>` (registered in `register.ts`):
 | `line`      | `line.tsx`, `line-geometry.ts`                                  | Polyline with straight/smooth spline interpolation and center label.                                                       |
 | `arrow`     | `arrow.tsx`, `connector-routing.ts`, `connector-handles.ts`     | Straight, arc, or elbow connectors with terminal shape bindings.                                                           |
 | `text`      | `text.tsx`, `text-measure.ts`                                   | Auto-width or fixed-width text with font families (`sans`, `serif`, `mono`, `hand`).                                       |
-| `image`     | `image.tsx`                                                     | Server blob-backed image with non-destructive fractional cropping.                                                         |
+| `image`     | `image.tsx`                                                     | Server blob-backed image with non-destructive fractional cropping; drawn from a 512px `thumbBlobId` copy once zoomed out. |
 | `sticker`   | `sticker.tsx`, `sticker-catalog.tsx`, `sticker-icons.ts`        | Vector stamp catalog and user custom sticker images.                                                                       |
 | `video`     | `video.tsx`                                                     | YouTube embed player with aspect ratio preservation.                                                                       |
 | `bookmark`  | `bookmark.tsx`                                                  | Unfurled link card with preview image, favicon, domain name.                                                               |
@@ -213,7 +222,7 @@ All tools implement `Tool` (registered in `register.ts`):
 | ----------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `select`                | `select-tool.ts`                                          | Hotkey `v` / `s`. Pointer dragging, multi-selection marquee, 8 resize handles, rotation handle, handle dragging, double-click to edit text/open group. |
 | `hand`                  | `hand-tool.ts`                                            | Hotkey `h` / `Space`. Click-drag canvas panning.                                                                                                       |
-| `draw`                  | `draw-tool.ts`                                            | Hotkey `d` / `p` / `b`. Freehand ink drawing with hardware coalesced samples. `createDrawTool(config)` also backs the highlighter.                                                                          |
+| `draw`                  | `draw-tool.ts`                                            | Hotkey `d` / `p` / `b`. Freehand ink drawing with hardware coalesced samples. `createDrawTool(config)` also backs the highlighter. Shift draws straight segments; the live frame densifies them (`densifyStraight`) so the streamline filter reaches the cursor. Closed-stroke fills are painted in both `draw.tsx` (SVG) and `canvas-2d-renderer.tsx` (`CachedInk.fill`). Shift draws straight segments; the live frame densifies them (`densifyStraight`) so the streamline filter reaches the cursor. Closed-stroke fills are painted in both `draw.tsx` (SVG) and `canvas-2d-renderer.tsx` (`CachedInk.fill`).                                                                          |
 | `highlighter`           | `draw-tool.ts`                                            | Hotkey `i`. The same freehand state machine laying marker ink: constant width, translucent, stacked under the drawing.                                  |
 | `line` / `arrow`        | `line-tool.ts`                                            | Hotkey `l` / `a`. Drag to create line/arrow; snaps endpoints to shape anchor points.                                                                   |
 | `rectangle` / `ellipse` | `box-tool.ts`                                             | Hotkey `r` / `o`. Drag to create boxes/ellipses (Shift for 1:1 square/circle).                                                                         |
@@ -226,6 +235,7 @@ All tools implement `Tool` (registered in `register.ts`):
 | `sticker`               | `sticker-tool.ts`                                         | Stamp selected sticker onto board.                                                                                                                     |
 | `frame`                 | `frame-tool.ts`                                           | Hotkey `f`. Drag to create a frame container.                                                                                                          |
 | `comment`               | `comment-tool.ts`                                         | Hotkey `c`. Click to drop a discussion comment pin.                                                                                                    |
+| `straightedge` / `compass` | `line-tool.ts` (`construction`), `compass-tool.ts`, `../construction-snap.ts` | More menu. Ruler-and-compass constructions: segment / circle by centre and radius point. Both snap to shape points and outline crossings (exact for circles) regardless of the snapping preference; Alt bypasses. Sticky, like the pen. |
 
 ---
 
@@ -288,12 +298,18 @@ All tools implement `Tool` (registered in `register.ts`):
 | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
 | `index.ts`                                                    | HTTP server (Hono) on port 3001, static client file serving, WebSocket upgrade handler.                       |
 | `env.ts`                                                      | Validates environment variables (`TUTOR_PASSWORD`, `SESSION_SECRET`, `DATABASE_URL`, `PORT`).                 |
-| `db/schema.ts`                                                | Drizzle ORM schema: `boards` (metadata table) and `board_documents` (binary Yjs state table).                 |
+| `db/schema.ts`                                                | Drizzle ORM schema: `boards` (metadata), `board_documents` (binary Yjs state), `board_session_notes` (dated tutor notes) and `board_sessions` (attendance).                 |
 | `db/client.ts`                                                | Postgres connection pool using `postgres.js` and Drizzle.                                                     |
 | `collab/hocuspocus.ts`                                        | Hocuspocus collaboration server: loads and debounces saves of binary Yjs state to Postgres `board_documents`. |
+| `collab/session-tracking.ts`                                  | Attendance: opens a `board_sessions` row per connection to a board document and writes back time and edits on a slow tick. The app's only usage signal.       |
+| `collab/migrate-ink.ts` / `scripts/migrate-ink.ts`            | One-time rewrite of pre-chunk strokes (Base64 Float16, number triples, point objects, `props.points`) into `ink-codec` chunks. `npm run migrate:ink -w server [-- --apply]`, server stopped. |
+| `analytics/routes.ts` / `analytics/aggregate.ts`              | `GET /api/analytics` (tutor-only): the queries behind the register, and the pure fold that turns connection rows into per-board visits, people, drawings and time without the tutor.       |
 | `auth/routes.ts` / `auth/jwt.ts` / `auth/password.ts`         | Tutor authentication with constant-time password check and JWT cookies.                                       |
-| `boards/routes.ts`                                            | Board CRUD endpoints (`/api/boards`), tutor notes (`/api/boards/:id/notes`) and dated session notes (`/api/boards/:id/sessions`).                               |
+| `boards/routes.ts`                                            | Board CRUD endpoints (`/api/boards`), tutor notes (`/api/boards/:id/notes`), dated session notes (`/api/boards/:id/sessions`), and the share link (`/:id/access`, `/:id/access/reset`, `/:id/remove`).                               |
+| `boards/access.ts`                                            | Who may do what on a board: tutor cookie, or the board's `share_key` + `share_mode` (edit/view/off). `requireBoardEdit` gates uploads, AI, unfurl and page delete; Hocuspocus `onAuthenticate` uses `boardAccess`. |
+| `rate-limit.ts` / `storage-quota.ts` / `client-errors.ts`     | Per-client fixed-window limits (`CLIENT_IP_HEADER` behind a proxy), the upload disk quota (`UPLOAD_QUOTA_GB`), and `POST /api/client-errors` (browser crashes → server log). |
 | `blobs/routes.ts` / `blobs/store.ts`                          | Content-addressed binary storage (SHA256) for images and custom stickers.                                     |
+| `boards/board-file.ts`                                        | `.board` file: gzipped JSON of the board doc, every registry page doc (V2 updates) and every referenced image/file. `GET /api/boards/:id/export` (anyone the share link admits), `POST /api/boards/import` (tutor; new board, hashes checked before any write). |
 | `documents/routes.ts` / `documents/store.ts`                  | Board attachment storage with MIME validation (`/api/docs`).                                                  |
 | `links/routes.ts` / `links/fetch-remote.ts` / `links/meta.ts` | OpenGraph HTML scraper for link preview cards (downloads images to blob store).                               |
 | `ai/routes.ts` / `ai/openrouter.ts` / `ai/latex.ts` | OpenRouter proxy for the two AI LaTeX actions (`/api/ai`). Prompts and reply unwrapping live in `latex.ts`. |
@@ -301,61 +317,6 @@ All tools implement `Tool` (registered in `register.ts`):
 
 ---
 
-## 4. Developer Recipes for Common Changes
-
-### Recipe 1: Adding a New Shape Type
-
-1. **Define Contract in `shared/src/shapes/`:**
-   - In `shapes.ts`, add `MyShapeProps` interface, `MyShape = BaseShape<'myshape', MyShapeProps>`, add `MyShape` to `Shape` union and `ShapeMap`.
-2. **Create ShapeUtil in `client/src/canvas/shapes/myshape.tsx`:**
-   - Implement `ShapeUtil<'myshape'>` with `getBounds()`, `hitTest()`, `Component()`, and optional `getHandles()` / `onHandleDrag()` / `getIndicatorPath()`.
-3. **Register Shape:**
-   - In `client/src/canvas/shapes/register.ts`, import `myShapeUtil` and call `shapeRegistry.register(myShapeUtil)`.
-
-### Recipe 2: Adding a New Tool
-
-1. **Create Tool in `client/src/canvas/tools/my-tool.ts`:**
-   - Implement `Tool` interface (`id`, `label`, `hotkey`, `cursor`, `icon`, `onPointerDown`, `onPointerMove`, `onPointerUp`).
-2. **Register Tool:**
-   - In `client/src/canvas/tools/register.ts`, call `toolRegistry.register(createMyTool())`.
-3. **Add Toolbar Icon (if applicable):**
-   - Add button entry to `client/src/components/toolbar.tsx`.
-
-### Recipe 3: Mutating Canvas Content from a Component or Hook
-
-```typescript
-import { editor } from '@/canvas/use-document-store';
-
-// Single mutation
-editor.updateShape(shapeId, {
-  x: 100,
-  y: 200,
-  props: { color: '#ef4444' },
-});
-
-// Atomic multi-shape mutation (1 undo step, 1 re-render)
-editor.transact(() => {
-  for (const id of shapeIds) {
-    editor.updateShape(id, { opacity: 0.5 });
-  }
-});
-```
-
-### Recipe 4: Converting Coordinates
-
-```typescript
-import { screenToWorld, worldToScreen } from '@/canvas/camera';
-import { useCameraStore } from '@/canvas/use-camera-store';
-
-const camera = useCameraStore.getState();
-const worldPoint = screenToWorld(
-  { x: event.clientX, y: event.clientY },
-  camera,
-);
-const screenPoint = worldToScreen(worldPoint, camera);
-```
-
----
 
 ## 5. Verification & Test Commands
 

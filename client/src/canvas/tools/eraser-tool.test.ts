@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as Y from 'yjs';
 import { Awareness } from 'y-protocols/awareness';
-import type { Shape } from '@whiteboard/shared';
+import { decodeEphemeral, type Shape } from '@whiteboard/shared';
 import { setActiveAwareness } from '@/collab/presence';
 import '../shapes/register';
 import type { Editor, ShapePatch } from '../editor';
@@ -507,6 +507,11 @@ describe('precision eraser inside a group', () => {
 
 describe('eraser trail reaches collaborators', () => {
   let awareness: Awareness;
+  let sent: string[];
+  const lastScribbles = () => {
+    const message = decodeEphemeral(sent.at(-1) ?? '');
+    return message?.kind === 'scribbles' ? message.scribbles : undefined;
+  };
 
   beforeEach(() => {
     spatialIndex.clear();
@@ -514,7 +519,12 @@ describe('eraser trail reaches collaborators', () => {
     useCanvasUiStore.getState().setEraserMode('object');
     useCameraStore.setState({ camera: { x: 0, y: 0, z: 1 } });
     awareness = new Awareness(new Y.Doc());
-    setActiveAwareness(awareness);
+    sent = [];
+    setActiveAwareness(awareness, {
+      on: () => {},
+      off: () => {},
+      sendStateless: (payload) => sent.push(payload),
+    });
   });
 
   afterEach(() => {
@@ -525,27 +535,26 @@ describe('eraser trail reaches collaborators', () => {
     useEraserStore.getState().clear();
   });
 
-  it('publishes the gesture, not local target ids, and clears it after release', async () => {
+  it('publishes the gesture and pending target ids, and clears both after release', async () => {
     const { ctx } = context(rectangle());
     const tool = createEraserTool();
 
     tool.onPointerDown?.(pointer(20, 15), ctx);
     tool.onPointerMove?.(pointer(24, 15), ctx);
 
-    expect(awareness.getLocalState()?.scribbles).toEqual([
-      expect.objectContaining({
-        state: 'active',
-        points: [{ x: 20, y: 15, pressure: 0.5 }],
-      }),
+    expect(lastScribbles()).toEqual([
+      expect.objectContaining({ state: 'active', points: [20, 15, 0.5] }),
     ]);
-    expect(awareness.getLocalState()?.erasing ?? null).toBeNull();
+    expect(awareness.getLocalState()?.erasing).toEqual(['target']);
 
     tool.onPointerUp?.(pointer(20, 15), ctx);
+    // Peers keep the shape faded until release, then let go at once.
+    expect(awareness.getLocalState()?.erasing).toBeNull();
     useEraserTrailStore.getState().tick(false);
 
     // The clear rides the throttle's trailing flush.
     await new Promise((resolve) => setTimeout(resolve, 100));
-    expect(awareness.getLocalState()?.scribbles).toBeNull();
+    expect(lastScribbles()).toEqual([]);
   });
 
   it('stops the trail and preserves the document when a miss is cancelled', () => {

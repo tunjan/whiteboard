@@ -22,6 +22,7 @@ import {
   type PencilPressureCurve,
 } from '../shapes/ink';
 import { NOMINAL_SAMPLE_SPACING } from '../shapes/ink-engine';
+import { snapStroke } from '../shapes/shape-snap';
 import { shapeRegistry } from '../shapes/shape-registry';
 import { useCanvasUiStore } from '../use-canvas-ui-store';
 import {
@@ -91,6 +92,16 @@ const TAIL_STALE_MS = PREDICTION_HORIZON_MS * 2;
 const MAX_POINTS_PER_SHAPE = 600;
 
 /**
+ * Minimum time between the document writes of a live stroke, i.e. how often
+ * peers see it advance (5 per second).
+ *
+ * The local stroke is drawn by the active-stroke layer every frame and does not
+ * wait on these writes, so the interval only paces what goes to Yjs and the
+ * network. Lifting the pointer always writes the complete stroke at once.
+ */
+const LIVE_WRITE_INTERVAL_MS = 200;
+
+/**
  * Screen distance the pointer must travel after Shift is pressed or released
  * before the stroke actually changes mode, squared.
  *
@@ -108,6 +119,43 @@ const MODE_SWITCH_SCREEN_DISTANCE_SQUARED = 16;
  * rather than begin a new one, in screen pixels.
  */
 const EXTEND_SCREEN_RADIUS = 12;
+
+/**
+ * How long the pen must rest at the end of a stroke before it snaps to the
+ * shape it was aiming for (GoodNotes' hold-to-snap), and how far, in screen
+ * pixels, it may drift while resting.
+ */
+const HOLD_TO_SNAP_MS = 500;
+const HOLD_SCREEN_TOLERANCE = 4;
+
+/**
+ * Spacing a snapped outline is resampled at, in world units, and the most
+ * samples it may take. The ink engine reads sample spacing as hand speed, so
+ * a bare corner list renders as thinning edges and ballooned corners; evenly
+ * spaced samples render like a steady hand. The cap keeps a huge shape drawn
+ * zoomed out from carrying thousands of points.
+ */
+const SNAP_SAMPLE_SPACING = 2;
+const SNAP_MAX_SAMPLES = 500;
+
+function resample(points: Point[], pressure: number): DrawPoint[] {
+  let length = 0;
+  for (let i = 1; i < points.length; i++) {
+    length += Math.hypot(points[i]!.x - points[i - 1]!.x, points[i]!.y - points[i - 1]!.y);
+  }
+  const step = Math.max(SNAP_SAMPLE_SPACING, length / SNAP_MAX_SAMPLES);
+  const out: DrawPoint[] = [{ x: points[0]!.x, y: points[0]!.y, pressure }];
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1]!;
+    const b = points[i]!;
+    // Every corner is kept exactly; only the edges between them are filled.
+    const n = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / step));
+    for (let k = 1; k <= n; k++) {
+      out.push({ x: a.x + ((b.x - a.x) * k) / n, y: a.y + ((b.y - a.y) * k) / n, pressure });
+    }
+  }
+  return out;
+}
 
 /**
  * Zoom at which the camera term of the closure tolerance is half its maximum.
@@ -310,24 +358,89 @@ export function createDrawTool(config: DrawToolConfig = PENCIL_CONFIG): Tool {
   // discarded by deleting the shape it made — but an extension did not make
   // one, and deleting it would take the ink that was already there with it.
   let extendedFrom: DrawPoint[] | null = null;
-  // Pending rAF for the live stroke write. Pointer Events can deliver many
-  // coalesced samples per frame; without this each sample fired its own Yjs
-  // transaction → full document-snapshot rebuild → React commit. Coalescing the
-  // writes to one per frame keeps every accumulated point (so the curve is
-  // unchanged) while collapsing N pipeline runs per move into one per frame.
+  // Pending rAF for the live stroke frame. Pointer Events can deliver many
+  // coalesced samples per frame; coalescing them hands the active-stroke layer
+  // every accumulated point once per frame instead of once per sample.
   let rafId: number | null = null;
+  // Pending live-stroke document write. See `LIVE_WRITE_INTERVAL_MS`.
+  let writeTimer: ReturnType<typeof setTimeout> | null = null;
   // Pending deadline for dropping a stale tail. See `scheduleTailExpiry`.
   let tailExpiry: ReturnType<typeof setTimeout> | null = null;
+  // Pending hold-to-snap, and where the pen was when it was armed.
+  let holdTimer: ReturnType<typeof setTimeout> | null = null;
+  let holdAnchorScreen: Point | null = null;
+  // The stroke has been replaced by its clean shape; further motion until the
+  // lift is ignored so the snapped shape is what gets committed.
+  let snapped = false;
 
   const cancelPendingWork = (): void => {
     if (rafId !== null) {
       cancelAnimationFrame(rafId);
       rafId = null;
     }
+    if (writeTimer !== null) {
+      clearTimeout(writeTimer);
+      writeTimer = null;
+    }
     if (tailExpiry !== null) {
       clearTimeout(tailExpiry);
       tailExpiry = null;
     }
+    if (holdTimer !== null) {
+      clearTimeout(holdTimer);
+      holdTimer = null;
+    }
+  };
+
+  /**
+   * Replace the stroke with the shape it was aiming for, if it clearly is one.
+   *
+   * The clean outline is resampled evenly (see `resample`) and written with
+   * the stabilizer, simulated pressure and tapers off: each of those would
+   * round or pinch a corner the recognizer just made exact. Pressure is held
+   * at the stroke's median so the snapped line keeps the weight it was drawn
+   * with.
+   */
+  const trySnap = (ctx: ToolContext): void => {
+    if (!id || !strokeProps || chunked || extendedFrom || straightAnchor !== null) return;
+    const shape = snapStroke(points);
+    if (!shape) return;
+    const pressures = points
+      .map((p) => p.pressure ?? NEUTRAL_PRESSURE)
+      .sort((a, b) => a - b);
+    const pressure = pressures[pressures.length >> 1] ?? NEUTRAL_PRESSURE;
+    points = resample(shape, pressure);
+    predicted = [];
+    snapped = true;
+    strokeProps = {
+      ...strokeProps,
+      streamline: 0,
+      simulatePressure: false,
+      pressureWarmup: false,
+      startTaper: 0,
+      endTaper: false,
+    };
+    ctx.editor.updateShape(id, {
+      props: {
+        streamline: 0,
+        simulatePressure: false,
+        pressureWarmup: false,
+        startTaper: 0,
+        endTaper: false,
+        points: points.slice(),
+      },
+    });
+    publishFrame();
+  };
+
+  /** (Re)start the hold-to-snap countdown from where the pen is now. */
+  const armHold = (ctx: ToolContext, screen: Point): void => {
+    if (holdTimer !== null) clearTimeout(holdTimer);
+    holdAnchorScreen = { ...screen };
+    holdTimer = setTimeout(() => {
+      holdTimer = null;
+      trySnap(ctx);
+    }, HOLD_TO_SNAP_MS);
   };
 
   /**
@@ -344,21 +457,64 @@ export function createDrawTool(config: DrawToolConfig = PENCIL_CONFIG): Tool {
       origin,
       props: strokeProps,
       opacity: strokeOpacity,
-      points,
+      points: straightAnchor === null ? points : densifyStraight(points),
       predicted,
     });
   };
 
-  const scheduleFlush = (ctx: ToolContext): void => {
+  /**
+   * The stroke with its straight segment resampled every couple of screen
+   * pixels, for drawing only.
+   *
+   * The live stroke's streamline filter moves a fixed fraction of each step,
+   * so a lone endpoint one long jump from the anchor renders well short of the
+   * pointer until pointer-up pins the tip. Dense samples let it converge onto
+   * the pointer, as a freehand stroke's do. The stored segment stays two points.
+   */
+  const densifyStraight = (all: DrawPoint[]): DrawPoint[] => {
+    const anchor = all[straightAnchor!];
+    const end = all[straightAnchor! + 1];
+    if (!anchor || !end) return all;
+    const spacing = 2 / Math.max(zoomOnEnter, 1e-6);
+    const steps = Math.ceil(Math.hypot(end.x - anchor.x, end.y - anchor.y) / spacing);
+    const from = anchor.pressure ?? NEUTRAL_PRESSURE;
+    const to = end.pressure ?? NEUTRAL_PRESSURE;
+    const out = all.slice(0, straightAnchor! + 1);
+    for (let i = 1; i < steps; i++) {
+      const t = i / steps;
+      out.push({
+        ...end,
+        x: anchor.x + (end.x - anchor.x) * t,
+        y: anchor.y + (end.y - anchor.y) * t,
+        pressure: from + (to - from) * t,
+      });
+    }
+    out.push(end);
+    return out;
+  };
+
+  /**
+   * Write the stroke so far to the document once the current interval ends.
+   *
+   * Peers watch the stroke being drawn through these writes, in steps of
+   * {@link LIVE_WRITE_INTERVAL_MS}. A timer rather than a check inside the rAF,
+   * so the points drawn just before the hand pauses still reach them without
+   * waiting for the next move.
+   */
+  const scheduleWrite = (ctx: ToolContext): void => {
+    if (writeTimer !== null) return;
+    writeTimer = setTimeout(() => {
+      writeTimer = null;
+      if (!id) return;
+      ctx.editor.updateShape(id, { props: { points: points.slice(), isComplete: false } });
+    }, LIVE_WRITE_INTERVAL_MS);
+  };
+
+  const scheduleFlush = (): void => {
     if (rafId !== null) return;
     rafId = requestAnimationFrame(() => {
       rafId = null;
       if (!id) return;
-      // Peers still receive every frame of the stroke: the document write is
-      // unchanged, and is what makes them watch it being drawn.
-      ctx.editor.updateShape(id, { props: { points: points.slice(), isComplete: false } });
-      // Same frame as the document write, so the rendered stroke and its
-      // predicted tail always advance together.
       publishFrame();
     });
   };
@@ -431,7 +587,7 @@ export function createDrawTool(config: DrawToolConfig = PENCIL_CONFIG): Tool {
    */
   const liftTaper = (): { endTaper: number } | undefined => {
     const size = strokeProps?.size;
-    if (endTaperMode !== 'velocity' || !size) return undefined;
+    if (endTaperMode !== 'velocity' || !size || snapped) return undefined;
     return { endTaper: liftTaperFor(lastSpeed, size, pathLength(points)) };
   };
 
@@ -466,6 +622,8 @@ export function createDrawTool(config: DrawToolConfig = PENCIL_CONFIG): Tool {
     });
     points = [];
     if (!continuing) {
+      snapped = false;
+      holdAnchorScreen = null;
       committedChunks = [];
       extendedFrom = null;
       straightAnchor = null;
@@ -956,6 +1114,8 @@ export function createDrawTool(config: DrawToolConfig = PENCIL_CONFIG): Tool {
       bridgeFromStraight = false;
       pendingMode = null;
       pendingModeScreen = null;
+      snapped = false;
+      armHold(ctx, info.screenPoint);
       zoomOnEnter = info.zoom;
       // Shift-clicking an existing stroke's free end continues that stroke.
       // Checked before any style is read: the appended segment belongs to the
@@ -1059,7 +1219,16 @@ export function createDrawTool(config: DrawToolConfig = PENCIL_CONFIG): Tool {
     },
 
     onPointerMove(info: ToolPointerInfo, ctx: ToolContext) {
-      if (!id) return;
+      if (!id || snapped) return;
+      if (
+        holdAnchorScreen &&
+        Math.hypot(
+          info.screenPoint.x - holdAnchorScreen.x,
+          info.screenPoint.y - holdAnchorScreen.y,
+        ) > HOLD_SCREEN_TOLERANCE
+      ) {
+        armHold(ctx, info.screenPoint);
+      }
       updateMode(info);
       const appended = appendPoint(info);
       if (appended) splitIfFull(ctx);
@@ -1088,7 +1257,8 @@ export function createDrawTool(config: DrawToolConfig = PENCIL_CONFIG): Tool {
         predictionAnchorScreen = { ...info.screenPoint };
         scheduleTailExpiry();
       }
-      if (appended || tailChanged) scheduleFlush(ctx);
+      if (appended) scheduleWrite(ctx);
+      if (appended || tailChanged) scheduleFlush();
     },
 
     onPointerUp(info: ToolPointerInfo, ctx: ToolContext) {
@@ -1100,7 +1270,7 @@ export function createDrawTool(config: DrawToolConfig = PENCIL_CONFIG): Tool {
       const liftPressure = stylusInput
         ? points[points.length - 1]?.pressure
         : undefined;
-      appendPoint(info, liftPressure);
+      if (!snapped) appendPoint(info, liftPressure);
       finalize(ctx);
       // Stay in the draw tool; intentionally no selection of the new stroke.
     },
@@ -1131,6 +1301,8 @@ export function createDrawTool(config: DrawToolConfig = PENCIL_CONFIG): Tool {
       ];
       id = null;
       points = [];
+      snapped = false;
+      holdAnchorScreen = null;
       committedChunks = [];
       extendedFrom = null;
       straightAnchor = null;

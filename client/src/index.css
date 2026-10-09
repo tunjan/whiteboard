@@ -1,7 +1,6 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
 @import 'shadcn/tailwind.css';
-@import '@fontsource-variable/geist';
 
 /* ==========================================================================
  * Fonts
@@ -50,19 +49,23 @@
 :root {
   color-scheme: light;
 
-  /* Surfaces, back to front. Warm neutrals keep the canvas quiet without
-       making cards and controls look grey or muddy.
-       The canvas is a few steps down from white rather than a hair off it,
-       because it is now the only thing separating the toolbar from the board:
-       the bar casts no shadow, so the edge between #ffffff and this is the
-       entire boundary. */
-  --bg-canvas: #f9f8f5;
-  --bg-panel: #f3f2ef;
+  /* Surfaces, back to front.
+     Achromatic. The board's content is the user's ink, and that ink spans the
+     whole hue wheel — black, violet, blue, yellow, orange, green, red. Any
+     tint in the chrome is a tint the drawing has to be seen through: a warm
+     ground pushes blue ink cold, a cool ground pushes orange ink muddy. Both
+     have been tried here. A grey with no hue at all is the only ground that
+     leaves every swatch reading as itself. */
+  --bg-canvas: #fafafa;
+  --bg-panel: #f5f5f5;
   --bg-surface: #ffffff;
-  --bg-surface-hover: #faf9f7;
-  --bg-sunken: #efeeea;
-  --bg-inverse: #1c1917;
-  --bg-inverse-hover: #292524;
+  --bg-surface-hover: #f5f5f5;
+  /* The ground a menu, popup or tooltip stands on. Kept separate from
+     `--bg-surface` so dark mode can lift panels off dialogs. */
+  --bg-popup: #ffffff;
+  --bg-sunken: #e5e5e5;
+  --bg-inverse: #171717;
+  --bg-inverse-hover: #262626;
 
   /* Ink: the pen's slot-0 swatch, held as a token so a stroke stored in either
      theme's ink repaints for whoever is looking at it (canvas/ink-color.ts).
@@ -70,136 +73,156 @@
      canvas/use-style-store.ts. */
   --ink: #1d1d1d;
 
-  --fg: #0c0a09;
-  --fg-secondary: #44403c;
-  --fg-muted: #57534e;
-  --fg-subtle: #78716c;
-  --fg-inverse: #fafaf9;
+  /* Four steps, and every one of them clears 4.5:1 on both the panel and the
+     surface it can land on — including `subtle`, which carries placeholders and
+     the shortcut hints down the right edge of every menu. Those are read, so
+     "de-emphasised" has to stop at the contrast floor rather than at the point
+     where the grey stops being noticeable. */
+  --fg: #171717;
+  --fg-secondary: #404040;
+  --fg-muted: #525252;
+  --fg-subtle: #737373;
+  --fg-inverse: #fafafa;
 
-  --border: #e5e3de;
-  --border-strong: #d6d3d1;
-  --border-subtle: #efeeea;
-  --control-border: #8b8b86;
+  /* DESIGN.md: 1px neutral hairlines separate surfaces, not shadows. */
+  --border: #e5e5e5;
+  --border-strong: #d4d4d4;
+  --border-subtle: #f5f5f5;
+  /* The edge of an input or a checkbox. A real UI component boundary, so it is
+     held at 3:1 against the surface behind it rather than at whatever reads as
+     quiet. */
+  --control-border: #858585;
 
-  /* One accent, used only for primary actions, links and focus. */
-  --action-solid: #1d4ed8;
-  --action-hover: #1e40af;
-  --action-active: #1e3a8a;
-  --action-foreground: #fafaf9;
-  --ring: var(--action-solid);
+  /* DESIGN.md: black is the one primary action on a view. */
+  --action-solid: #000000;
+  --action-hover: #171717;
+  --action-active: #262626;
+  --action-foreground: #ffffff;
 
-  /* Modal scrim. Opacity is chosen per overlay (`bg-scrim/35`, `bg-scrim/25`). */
+  /* DESIGN.md's one accent, blue, is only ever "you are here": links, the
+     control that is on (`--tb-sel-*` below), and checked fills — checkboxes,
+     switches, slider ranges, meters (blue-500). Never a button. */
+  --link: #2563eb;
+  --check: #3b82f6;
+  --on-check: #ffffff;
+
+  /* Focus: a blue-600 edge; text fields add a flat blue halo around it. */
+  --ring: #2563eb;
+  --focus-halo: rgba(37, 99, 235, 0.12);
+
+  /* Scrims. Opacity is chosen per overlay. The drawer scrim is DESIGN.md's
+     `bg-black/20`; the modal scrim is its `bg-neutral-100/50` under a blur. */
   --c-scrim: #000000;
+  --c-scrim-modal: #f5f5f5;
 
+  /* Status: DESIGN.md's container + content pairs (100 tint, 300 edge), with
+     the text stepped one shade darker than Dub's 600 so it clears 4.5:1 on
+     its own tint, as DESIGN.md's Do's ask. */
   --status-success-fg: #15803d;
-  --status-success-bg: #f0fdf4;
-  --status-success-border: #bbf7d0;
-  --status-warning-fg: #b45309;
-  --status-warning-bg: #fffbeb;
-  --status-warning-border: #fde68a;
+  --status-success-bg: #dcfce7;
+  --status-success-border: #86efac;
+  --status-warning-fg: #a16207;
+  --status-warning-bg: #fef9c3;
+  --status-warning-border: #fde047;
   --status-danger-fg: #b91c1c;
-  --status-danger-bg: #fef2f2;
-  --status-danger-border: #fecaca;
-  --status-danger-control-border: #b91c1c;
+  --status-danger-bg: #fee2e2;
+  --status-danger-border: #fca5a5;
+  --status-danger-control-border: #ef4444;
   --status-info-fg: #1d4ed8;
-  --status-info-bg: #eff6ff;
-  --status-info-border: #bfdbfe;
-  --status-inactive-fg: #57534e;
-  --status-inactive-bg: #f3f2ef;
-  --status-inactive-border: #d6d3d1;
-  --status-neutral-fg: #57534e;
-  --status-neutral-bg: #f5f5f4;
-  --status-neutral-border: #e7e5e4;
+  --status-info-bg: #dbeafe;
+  --status-info-border: #93c5fd;
+  --status-inactive-fg: #525252;
+  --status-inactive-bg: #f5f5f5;
+  --status-inactive-border: #e5e5e5;
+  --status-neutral-fg: #525252;
+  --status-neutral-bg: #f5f5f5;
+  --status-neutral-border: #e5e5e5;
 
   /* `--status-danger-fg` is tuned for light surfaces; this is for danger text
-       sitting directly on a `bg-inverse` surface instead (e.g. a dark pill). */
-  --status-danger-fg-on-inverse: #f87171;
+     sitting directly on a `bg-inverse` surface instead (e.g. a dark pill).
+     The light end of the same red ramp. */
+  --status-danger-fg-on-inverse: #fca5a5;
 
-  --s-control: 0 1px 2px rgba(12, 10, 9, 0.04);
-  --s-panel:
-    0 4px 14px -8px rgba(12, 10, 9, 0.14), 0 1px 3px rgba(12, 10, 9, 0.05);
+  /* Elevation, DESIGN.md's level 3 only — everything below it is tone and a
+     hairline. control = `shadow-sm` (tooltips), panel = the floating bar's
+     drop, overlay = a popover's `drop-shadow-lg`, modal = `shadow-xl`. */
+  --s-control: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --s-panel: 0 5px 8px rgba(34, 42, 53, 0.11);
   --s-overlay:
-    0 16px 40px -16px rgba(12, 10, 9, 0.22),
-    0 4px 12px -6px rgba(12, 10, 9, 0.1);
-  /* Wide and low. The bar is a card lying above the board rather than a
-       control stuck to it, so the shadow is mostly a large soft pool with a
-       hairline contact shade under the edge to keep it from drifting. */
-  --s-toolbar:
-    0 18px 40px -16px rgba(12, 10, 9, 0.18),
-    0 4px 10px -6px rgba(12, 10, 9, 0.08), 0 1px 2px rgba(12, 10, 9, 0.04);
+    0 4px 3px rgba(0, 0, 0, 0.07),
+    0 10px 8px rgba(0, 0, 0, 0.04);
+  --s-modal:
+    0 20px 25px -5px rgba(0, 0, 0, 0.1),
+    0 8px 10px -6px rgba(0, 0, 0, 0.1);
+  /* The floating bar: DESIGN.md's one soft drop under a hairline-edged
+     plate. The border does the separating; the shadow only lifts it. */
+  --s-toolbar: 0 5px 8px rgba(34, 42, 53, 0.11);
 
-  /* The wash under a key: the instrument well, a hover chip, the track of a
-       segmented switch. Translucent rather than a flat tone, because the bar
-       it used to be cut into is gone — the controls sit straight on the board
-       now, so every fill in the family has to composite over whatever has
-       been drawn under it rather than over a known white slab. */
-  --tb-track: rgba(12, 10, 9, 0.07);
-  /* Selection, one step past the hover track. A fill and nothing else: it is
-     painted as a layer *under* glyphs and swatches that set their own colour,
-     so it can never be an inversion. */
-  --tb-chip: rgba(12, 10, 9, 0.16);
+  /* The wash under a key: mixed from `currentColor` so one rule carries
+     neutral, accented and destructive keys alike. */
+  --tb-track: color-mix(in srgb, currentColor 8%, transparent);
+  /* Press, one step past the hover track. */
+  --tb-chip: color-mix(in srgb, currentColor 14%, transparent);
 
-  /* The selected key, and every other "this is the chosen one" mark in the
-       toolbar family. It is the track's inverse — the recess filled back in
-       to white — so selection is a change of plane, not of relief and not of
-       hue: nothing on this bar is raised, and the blue stays spoken for by
-       primary actions, links and focus. */
-  --tb-accent: #ffffff;
-  --tb-accent-hover: #ffffff;
-  --tb-accent-fg: #0c0a09;
-  --tb-accent-ring: #78716c;
-  --tb-divider: #eceae5;
+  /* The recess a segmented switch's travelling chip sits in.
+     Selection is marked at two levels on this bar and they are not the same
+     claim. Inversion (below) marks a *mode* — the tool in your hand, the
+     overview being open — and it is loud because a mode changes what the next
+     click does. A segment marks a *value* inside a group where the position
+     already says which one is chosen, and where the keys carry colour of their
+     own; inverting one of those would repaint the very swatch being chosen. So
+     a value gets a recess and a mode gets the ink. */
+  --tb-seg-chip: rgba(28, 28, 28, 0.04);
 
-  /* What separates a glyph from the drawing behind it, now that no slab does.
-       A light halo on the light board and a dark one on the dark board: the
-       same trick as a caption burned into video, which is the only thing that
-       keeps a control legible over content it cannot control. */
-  --tb-glyph-halo: rgba(255, 255, 255, 0.92);
+  /* The control that is *on*: DESIGN.md's active nav item — blue-100 at
+     half alpha under a blue-600 glyph. The state is also written as
+     `aria-current` / `aria-pressed`, which carries it where colour cannot. */
+  --tb-sel-bg: rgba(219, 234, 254, 0.5);
+  --tb-sel-bg-hover: #dbeafe;
+  --tb-sel-fg: var(--link);
 
-  /* The wash the board chrome floats on: the toolbar and the four corner HUDs
-       sit over live ink, and a halo per glyph carries a single control but not
-       a row of them over a dense drawing.
+  --tb-divider: rgba(28, 28, 28, 0.1);
 
-       The blur does all of the separating and the tint does none of it. It is
-       barely there on purpose — enough to keep the frosted patch from reading
-       as clear glass, and not one step further, because anything heavier turns
-       the chrome into the white slab this bar spent its design getting rid of.
-       Whatever is drawn under it stays visible as itself, softened. The radius
-       is kept short for the same reason the tint is kept light: past a certain
-       point the board under the chrome stops being a board at all and becomes
-       an anonymous smear, which is a slab again by another route.
+  /* The wash under board chrome: translucent neutral ground. */
+  --chrome-wash-solid: rgba(250, 250, 250, 0.72);
 
-       `-solid` is what is left when there is no compositor pass to spend — low
-       graphics, or an engine with no `backdrop-filter`. It has to carry the
-       separation alone, so it is heavier than the tint above; still short of
-       opaque, so the board reads through it. */
-  --chrome-blur: 8px;
-  --chrome-wash: rgba(255, 255, 255, 0.16);
-  --chrome-wash-solid: rgba(255, 255, 255, 0.6);
+  /* The snap guide. The one line on the canvas that is neither the user's ink
+     nor the accent, so it has to be a colour neither can be confused with. */
+  --canvas-snap: #c2410c;
 
-  /* The press flex on a toolbar key: it dips a hair past the pressed size and
-     comes back past its own edge before it lands. Overshoot is small — this is
-     a control, not a toy. See `.tb-key` in section 8. */
-  --tb-press-spring: cubic-bezier(0.32, 1.44, 0.58, 1);
+  --grid-minor: rgba(28, 28, 28, 0.045);
+  --grid-major: rgba(28, 28, 28, 0.09);
+  /* Dots are painted in opaque ink and the alpha applied once to the whole
+     grid, so overlapping lattices never darken their shared dots. */
+  --grid-dot-ink: rgb(28, 28, 28);
+  --grid-dot-alpha: 0.4;
+  --grid-dot: color-mix(
+    in srgb,
+    var(--grid-dot-ink) calc(var(--grid-dot-alpha) * 100%),
+    transparent
+  );
+  --grid-axis: rgba(28, 28, 28, 0.36);
 
-  --grid-minor: rgba(12, 10, 9, 0.05);
-  --grid-major: rgba(12, 10, 9, 0.1);
-  --grid-dot: rgba(12, 10, 9, 0.25);
-  --grid-axis: rgba(12, 10, 9, 0.4);
+  /* Minimap.
+     The ground is the board's own ground, because the minimap is a picture of
+     the board — a panel-coloured plate with the board drawn on it reads as a
+     third surface rather than as an overview.
 
-  /* Minimap. Its own tokens rather than the board's: the overview is a plate
-     with an opaque ground of its own, and every mark on it is a flat fill read
-     straight into a 2D canvas — so these have to resolve to real colors, not
-     to `var(...)` chains a `getPropertyValue` would hand back unevaluated. */
-  --minimap-ground: #f3f2ef;
-  --minimap-shape: rgba(12, 10, 9, 0.38);
-  --minimap-selected: #1d4ed8;
-  --minimap-viewport: rgba(12, 10, 9, 0.12);
+     Shapes are fainter than they were and the viewport rectangle is now drawn
+     rather than tinted. Shape extents are filled as one path, so a page with
+     work spread across it fills to a single flat slab at any alpha; making
+     that slab louder does not make it more informative. The rectangle is the
+     part you actually take hold of, so that is what carries the contrast. */
+  --minimap-ground: #fafafa;
+  --minimap-shape: rgba(28, 28, 28, 0.22);
+  --minimap-selected: #2563eb;
+  --minimap-viewport: rgba(28, 28, 28, 0.06);
+  --minimap-viewport-border: rgba(28, 28, 28, 0.45);
   --background: var(--bg-canvas);
   --foreground: var(--fg);
   --card: var(--bg-surface);
   --card-foreground: var(--fg);
-  --popover: var(--bg-surface);
+  --popover: var(--bg-popup);
   --popover-foreground: var(--fg);
   --primary: var(--action-solid);
   --primary-foreground: var(--action-foreground);
@@ -213,7 +236,7 @@
   --input: var(--control-border);
   --radius: 0.5rem;
 
-  --color-focus: var(--action-solid);
+  --color-focus: var(--ring);
   --color-accent-brand: var(--action-solid);
   --color-background: var(--bg-canvas);
   --color-foreground: var(--fg);
@@ -228,41 +251,53 @@
 .dark {
   color-scheme: dark;
 
-  --bg-canvas: #0c0a09;
-  --bg-panel: #1c1917;
-  --bg-surface: #292524;
-  --bg-surface-hover: #322d2a;
-  --bg-sunken: #0c0a09;
-  --bg-inverse: #fafaf9;
-  --bg-inverse-hover: #e7e5e4;
+  /* DESIGN.md's dark ramp: near-black ground, #171717 plates, #262626 fills. */
+  --bg-canvas: #0a0a0a;
+  --bg-panel: #262626;
+  --bg-surface: #171717;
+  --bg-surface-hover: #262626;
+  --bg-popup: #171717;
+  --bg-sunken: #000000;
+  --bg-inverse: #fafafa;
+  --bg-inverse-hover: #e5e5e5;
 
   --ink: #f3f3f3;
 
-  --fg: #fafaf9;
-  --fg-secondary: #d6d3d1;
-  --fg-muted: #a8a29e;
-  --fg-subtle: #a8a29e;
-  --fg-inverse: #1c1917;
+  --fg: #fafafa;
+  --fg-secondary: #d4d4d4;
+  --fg-muted: #a3a3a3;
+  --fg-subtle: #a3a3a3;
+  --fg-inverse: #171717;
 
-  --border: #44403c;
-  --border-strong: #57534e;
-  --border-subtle: #292524;
-  --control-border: #78716c;
+  --border: #404040;
+  --border-strong: #525252;
+  --border-subtle: #262626;
+  --control-border: #8a8a8a;
 
-  --action-solid: #60a5fa;
-  --action-hover: #93c5fd;
-  --action-active: #3b82f6;
-  --action-foreground: #0c0a09;
-  --ring: var(--action-solid);
+  /* Primary inverts: white on the dark ground. */
+  --action-solid: #fafafa;
+  --action-hover: #e5e5e5;
+  --action-active: #d4d4d4;
+  --action-foreground: #0a0a0a;
+
+  --link: #60a5fa;
+  --check: #3b82f6;
+  --on-check: #ffffff;
+
+  --ring: #60a5fa;
+  --focus-halo: rgba(96, 165, 250, 0.2);
 
   --c-scrim: #000000;
+  --c-scrim-modal: #000000;
 
+  /* The same ramps, read from the other end: the light step carries the text
+     and the dark step the tint. */
   --status-success-fg: #4ade80;
   --status-success-bg: #052e16;
   --status-success-border: #166534;
-  --status-warning-fg: #fbbf24;
-  --status-warning-bg: #451a03;
-  --status-warning-border: #92400e;
+  --status-warning-fg: #facc15;
+  --status-warning-bg: #422006;
+  --status-warning-border: #854d0e;
   --status-danger-fg: #f87171;
   --status-danger-bg: #450a0a;
   --status-danger-border: #991b1b;
@@ -270,52 +305,64 @@
   --status-info-fg: #60a5fa;
   --status-info-bg: #172554;
   --status-info-border: #1e40af;
-  --status-inactive-fg: #a8a29e;
-  --status-inactive-bg: #292524;
-  --status-inactive-border: #57534e;
-  --status-neutral-fg: #a8a29e;
-  --status-neutral-bg: #292524;
-  --status-neutral-border: #78716c;
+  --status-inactive-fg: #a3a3a3;
+  --status-inactive-bg: #262626;
+  --status-inactive-border: #404040;
+  --status-neutral-fg: #a3a3a3;
+  --status-neutral-bg: #262626;
+  --status-neutral-border: #404040;
 
-  /* See light theme: `bg-inverse` flips to a light surface here, so this
-       needs to be a dark red instead. */
-  --status-danger-fg-on-inverse: #dc2626;
+  /* See light theme: `bg-inverse` flips to a light surface here, so this needs
+     the dark end of the red ramp instead. */
+  --status-danger-fg-on-inverse: #b91c1c;
 
-  --s-control: 0 1px 2px rgba(0, 0, 0, 0.24);
-  --s-panel: 0 4px 16px -8px rgba(0, 0, 0, 0.4), 0 1px 3px rgba(0, 0, 0, 0.28);
+  --s-control: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --s-panel: 0 5px 8px rgba(0, 0, 0, 0.5);
   --s-overlay:
-    0 18px 44px -14px rgba(0, 0, 0, 0.58), 0 6px 16px -8px rgba(0, 0, 0, 0.36);
-  --s-toolbar:
-    0 20px 44px -16px rgba(0, 0, 0, 0.62), 0 4px 12px -6px rgba(0, 0, 0, 0.4),
-    0 1px 2px rgba(0, 0, 0, 0.3);
+    0 4px 3px rgba(0, 0, 0, 0.4),
+    0 10px 8px rgba(0, 0, 0, 0.3);
+  --s-modal:
+    0 20px 25px -5px rgba(0, 0, 0, 0.6),
+    0 8px 10px -6px rgba(0, 0, 0, 0.6);
+  --s-toolbar: 0 5px 8px rgba(0, 0, 0, 0.5);
 
-  /* Same relationship as the light theme, run the other way: the wash lifts
-       off the dark board rather than sinking into a pale one. */
-  --tb-track: rgba(250, 250, 249, 0.12);
-  --tb-chip: rgba(250, 250, 249, 0.22);
-  --tb-accent: #57534e;
-  --tb-accent-hover: #57534e;
-  --tb-accent-fg: #fafaf9;
-  --tb-accent-ring: #a8a29e;
-  --tb-divider: #3b3733;
-  --tb-glyph-halo: rgba(12, 10, 9, 0.85);
-  --chrome-wash: rgba(28, 25, 23, 0.2);
-  --chrome-wash-solid: rgba(28, 25, 23, 0.62);
+  --tb-track: color-mix(in srgb, currentColor 10%, transparent);
+  --tb-chip: color-mix(in srgb, currentColor 18%, transparent);
 
-  --grid-minor: rgba(250, 250, 249, 0.06);
-  --grid-major: rgba(250, 250, 249, 0.12);
-  --grid-dot: rgba(250, 250, 249, 0.28);
-  --grid-axis: rgba(250, 250, 249, 0.45);
+  --tb-seg-chip: rgba(245, 245, 245, 0.08);
 
-  --minimap-ground: #1c1917;
-  --minimap-shape: rgba(250, 250, 249, 0.38);
+  --tb-sel-bg: rgba(59, 130, 246, 0.18);
+  --tb-sel-bg-hover: rgba(59, 130, 246, 0.26);
+  --tb-sel-fg: var(--link);
+
+  --tb-divider: rgba(255, 255, 255, 0.12);
+  --chrome-wash-solid: rgba(10, 10, 10, 0.72);
+
+  --canvas-snap: #fb923c;
+
+  --grid-minor: rgba(245, 245, 245, 0.055);
+  --grid-major: rgba(245, 245, 245, 0.11);
+  /* Dots are painted in opaque ink and the alpha applied once to the whole
+     grid, so overlapping lattices never darken their shared dots. */
+  --grid-dot-ink: rgb(245, 245, 245);
+  --grid-dot-alpha: 0.36;
+  --grid-dot: color-mix(
+    in srgb,
+    var(--grid-dot-ink) calc(var(--grid-dot-alpha) * 100%),
+    transparent
+  );
+  --grid-axis: rgba(245, 245, 245, 0.42);
+
+  --minimap-ground: #0a0a0a;
+  --minimap-shape: rgba(245, 245, 245, 0.22);
   --minimap-selected: #60a5fa;
-  --minimap-viewport: rgba(250, 250, 249, 0.14);
+  --minimap-viewport: rgba(245, 245, 245, 0.07);
+  --minimap-viewport-border: rgba(245, 245, 245, 0.5);
   --background: var(--bg-canvas);
   --foreground: var(--fg);
   --card: var(--bg-surface);
   --card-foreground: var(--fg);
-  --popover: var(--bg-surface);
+  --popover: var(--bg-popup);
   --popover-foreground: var(--fg);
   --primary: var(--action-solid);
   --primary-foreground: var(--action-foreground);
@@ -328,7 +375,7 @@
   --destructive: var(--status-danger-fg);
   --input: var(--control-border);
 
-  --color-focus: var(--action-solid);
+  --color-focus: var(--ring);
   --color-accent-brand: var(--action-solid);
   --color-background: var(--bg-canvas);
   --color-foreground: var(--fg);
@@ -341,78 +388,111 @@
 }
 
 @theme {
-  /* ---------- primitives ---------- */
+  /* ---------- primitives — one achromatic ramp ----------
+       No hue. See the note on `--bg-canvas`: the board's content is the user's
+       ink, and a tinted chrome is a tint that ink has to be seen through. The
+       `stone-*` names are kept because the whole app already refers to them. */
   --color-stone-0: #ffffff;
-  --color-stone-50: #fafaf9;
-  --color-stone-100: #f5f5f4;
-  --color-stone-200: #e7e5e4;
-  --color-stone-300: #d6d3d1;
-  --color-stone-400: #a8a29e;
-  --color-stone-500: #78716c;
-  --color-stone-600: #57534e;
-  --color-stone-700: #44403c;
-  --color-stone-800: #292524;
-  --color-stone-900: #1c1917;
-  --color-stone-950: #0c0a09;
+  --color-stone-50: #fafafa;
+  --color-stone-100: #f5f5f5;
+  --color-stone-200: #e5e5e5;
+  --color-stone-300: #d4d4d4;
+  --color-stone-400: #a3a3a3;
+  --color-stone-500: #737373;
+  --color-stone-600: #525252;
+  --color-stone-700: #404040;
+  --color-stone-800: #262626;
+  --color-stone-900: #171717;
+  --color-stone-950: #0a0a0a;
 
   /* ---------- geometry ----------
-       Layout spacing uses Tailwind's 4px base grid. The named radii keep
-       controls, overlays and panels concentric instead of drifting by file. */
-  --radius-compact: 4px;
+       DESIGN.md's radius ladder, named by what a thing is:
+
+         compact  6px   rounded-md  — inputs, menu rows, tags, status badges
+         control  8px   rounded-lg  — every button, triggers
+         overlay  8px   rounded-lg  — popovers, menus, context menus, toasts
+         panel   12px   rounded-xl  — cards, tooltips, floating panels
+         toolbar 12px   rounded-xl  — the floating bar
+         modal   16px   rounded-2xl — dialogs
+
+       Tailwind's own names are pinned to the same values, so `rounded-lg`
+       in a component means exactly what DESIGN.md means by it. */
+  --radius-compact: 6px;
   --radius-control: 8px;
-  --radius-overlay: 12px;
-  --radius-panel: 16px;
-  /* The bar's own corner. Rounder than a panel because it is a free-floating
-     slab over the canvas rather than a rectangle docked to an edge, and set
-     so the bar's boxes nest concentrically at its 4px padding:
-     bar 20 - 4 = group track 16 - 4 = key 12. */
-  --radius-toolbar: 20px;
+  --radius-overlay: 8px;
+  --radius-panel: 12px;
+  --radius-toolbar: 12px;
+  --radius-modal: 16px;
   --radius-full: 9999px;
 
-  /* Compatibility aliases while component call sites move to role names. */
-  --radius-xs: var(--radius-compact);
-  --radius-sm: var(--radius-compact);
-  --radius-md: var(--radius-control);
-  --radius-lg: var(--radius-control);
-  --radius-xl: var(--radius-overlay);
-  --radius-2xl: var(--radius-panel);
-  --radius-3xl: var(--radius-panel);
-  --radius-4xl: var(--radius-panel);
+  --radius-xs: 4px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
+  --radius-3xl: 20px;
+  --radius-4xl: 20px;
   --radius: var(--radius-control);
 
   /* ---------- type ---------- */
-  --font-sans:
-    'Geist Variable', ui-sans-serif, system-ui, -apple-system,
-    BlinkMacSystemFont, sans-serif;
-  --font-canvas:
-    'Inter Variable', 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
+  /* One face for the whole product, chrome and canvas alike.
+
+     The chrome used to be set in `system-ui` on the argument that an app's
+     menus should read as browser chrome. This is not a browser — it is a board
+     two people look at together, often on different machines, and `system-ui`
+     means the tutor and the student are looking at different typography. Inter
+     is already shipped for canvas text and for the PNG export, so this costs
+     no download, and its variable weight axis gives the chrome a 450/500/600
+     hierarchy that the system faces cannot be relied on to have. */
+  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-canvas: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
   --font-mono:
     'Geist Mono Variable', 'JetBrains Mono', ui-monospace, SFMono-Regular,
     monospace;
 
+  /* The ladder is unchanged above 14px. Below it, the old scale ran 11/12/13
+       and put real labels on the 11px step, which is below what a dense board
+       over a drawing can carry. 11px is now reserved for numerals that sit
+       beside a glyph — a zoom percentage, a latency reading — and every step
+       that carries words starts at 12px. */
   --text-2xs: 11px;
   --text-2xs--line-height: 16px;
   --text-xs: 12px;
   --text-xs--line-height: 16px;
-  --text-sm: 13px;
+  /* DESIGN.md: 14px is the product UI's workhorse (`text-sm` and `text-base`
+       both land on it), 16 for section titles, 18 for page titles, 24 for the
+       largest in-app headline. */
+  --text-sm: 14px;
   --text-sm--line-height: 20px;
   --text-base: 14px;
   --text-base--line-height: 20px;
   --text-md: 16px;
   --text-md--line-height: 24px;
   --text-lg: 18px;
-  --text-lg--line-height: 24px;
-  --text-xl: 22px;
+  --text-lg--line-height: 28px;
+  --text-xl: 20px;
   --text-xl--line-height: 28px;
-  --text-2xl: 28px;
-  --text-2xl--line-height: 34px;
-  --text-3xl: 34px;
-  --text-3xl--line-height: 40px;
+  --text-2xl: 24px;
+  --text-2xl--line-height: 32px;
+  --text-3xl: 30px;
+  --text-3xl--line-height: 36px;
+
+  /* Large text set at default tracking reads loose; small text set tight reads
+       cramped. Both are stated so a heading and a label cannot drift. */
+  --tracking-display: -0.02em;
+  --tracking-heading: -0.011em;
+  --tracking-body: 0em;
+  --tracking-label: 0.006em;
 
   /* ---------- elevation ---------- */
   --shadow-control: var(--s-control);
   --shadow-panel: var(--s-panel);
   --shadow-overlay: var(--s-overlay);
+  --shadow-modal: var(--s-modal);
+  --shadow-toolbar: var(--s-toolbar);
+  /* A text field's focus: 1px of ring outside its 1px border, then the halo. */
+  --shadow-focus: 0 0 0 1px var(--ring), 0 0 0 4px var(--focus-halo);
 
   /* Compatibility aliases collapse the old five-step ladder to three
        deliberate tiers and remain theme-aware. */
@@ -426,6 +506,7 @@
   --shadow-sm: var(--s-control);
   --shadow-md: var(--s-panel);
   --shadow-lg: var(--s-overlay);
+  --shadow-xl: var(--s-modal);
   --shadow-hover: var(--s-panel);
   --shadow-floating: var(--s-overlay);
 
@@ -454,21 +535,42 @@
   --color-panel: var(--bg-panel);
   --color-surface: var(--bg-surface);
   --color-surface-hover: var(--bg-surface-hover);
+  --color-popup-surface: var(--bg-popup);
   --color-subtle: var(--bg-panel);
   --color-muted: var(--bg-panel);
   --color-sunken: var(--bg-sunken);
   --color-inverse: var(--bg-inverse);
   --color-inverse-hover: var(--bg-inverse-hover);
   --color-scrim: var(--c-scrim);
+  --color-scrim-modal: var(--c-scrim-modal);
+
+  /* ---------- Compact-menu names ----------
+       Kept as names (toolbar-compact-menu.tsx uses them), aliased onto the
+       semantic ramp so that menu follows the same palette and theme as the
+       rest of the app. */
+  --color-paper: var(--bg-popup);
+  --color-night-paper: var(--bg-popup);
+  --color-ink: var(--fg);
+  --color-ink-soft: var(--fg-secondary);
+  --color-ink-mute: var(--fg-subtle);
+  --color-wash: var(--bg-surface-hover);
+  --color-night-wash: var(--bg-surface-hover);
+  --color-line: var(--border);
+  --color-night-line: var(--border);
+  --color-night-mute: var(--fg-subtle);
+
+  --shadow-float: var(--s-overlay);
 
   /* ---------- Toolbar ---------- */
+  --color-canvas-snap: var(--canvas-snap);
+
   --color-tb-track: var(--tb-track);
   --color-tb-chip: var(--tb-chip);
-  --color-tb-accent: var(--tb-accent);
-  --color-tb-accent-hover: var(--tb-accent-hover);
-  --color-tb-accent-fg: var(--tb-accent-fg);
-  --color-tb-accent-ring: var(--tb-accent-ring);
   --color-tb-divider: var(--tb-divider);
+  --color-tb-sel-bg: var(--tb-sel-bg);
+  --color-tb-sel-bg-hover: var(--tb-sel-bg-hover);
+  --color-tb-sel-fg: var(--tb-sel-fg);
+  --color-tb-seg-chip: var(--tb-seg-chip);
 
   /* ---------- Foregrounds / Ink ---------- */
   --color-fg: var(--fg);
@@ -478,6 +580,9 @@
   --color-fg-inverse: var(--fg-inverse);
 
   --color-primary: var(--action-solid);
+  --color-check: var(--check);
+  --color-on-check: var(--on-check);
+  --color-halo: var(--focus-halo);
   --color-secondary: var(--bg-panel);
   --color-tertiary: var(--fg-muted);
   --color-placeholder: var(--fg-subtle);
@@ -498,7 +603,8 @@
   --color-on-action: var(--action-foreground);
 
   /* ---------- Purposeful accent ---------- */
-  --color-link: var(--action-solid);
+  --color-link: var(--link);
+  --color-selected: var(--tb-sel-fg);
   --color-accent-brand: var(--action-solid);
   --color-accent-brand-foreground: var(--action-foreground);
 
@@ -538,7 +644,7 @@
   --color-foreground: var(--fg);
   --color-card: var(--bg-surface);
   --color-card-foreground: var(--fg);
-  --color-popover: var(--bg-surface);
+  --color-popover: var(--bg-popup);
   --color-popover-foreground: var(--fg);
   --color-primary-foreground: var(--action-foreground);
   --color-secondary-foreground: var(--fg);
@@ -661,15 +767,13 @@
     font-size: var(--text-2xl);
     line-height: var(--text-2xl--line-height);
     font-weight: 600;
-    letter-spacing: -0.025em;
     text-wrap: balance;
   }
 
   .type-section-title {
-    font-size: var(--text-xl);
-    line-height: var(--text-xl--line-height);
+    font-size: var(--text-lg);
+    line-height: var(--text-lg--line-height);
     font-weight: 600;
-    letter-spacing: -0.025em;
     text-wrap: balance;
   }
 
@@ -679,12 +783,12 @@
     font-weight: 600;
   }
 
+  /* A group label inside a menu or panel. DESIGN.md's menu section label:
+     12px medium, sentence case — never all-caps. */
   .type-overline {
-    font-size: var(--text-2xs);
-    line-height: var(--text-2xs--line-height);
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+    font-size: var(--text-xs);
+    line-height: var(--text-xs--line-height);
+    font-weight: 500;
   }
 
   .scrollbar-none {
@@ -698,9 +802,12 @@
   @media (pointer: coarse) {
     /* iOS zooms the viewport when a focused editable surface computes
            below 16px. Keep dense desktop controls, but enforce the touch
-           floor without asking every call site to remember it. */
-    input:not([type='checkbox']):not([type='radio']):not([type='range']),
-    textarea,
+           floor without asking every call site to remember it.
+           `data-exact-size` opts out the on-canvas editors, whose size *is*
+           the shape's (font size x zoom) — 16px there breaks WYSIWYG, and the
+           viewport's maximum-scale=1 already stops the focus zoom. */
+    input:not([type='checkbox']):not([type='radio']):not([type='range']):not([data-exact-size]),
+    textarea:not([data-exact-size]),
     [contenteditable='true'] {
       font-size: 16px !important;
     }
@@ -710,6 +817,13 @@
            group-hover. */
     .touch-reveal {
       opacity: 1 !important;
+    }
+
+    /* Menu rows are tapped, never hovered, on a tablet: give every one the
+           44px target rather than opting each menu in. Menus already cap at
+           the available height and scroll. */
+    [role^='menuitem'] {
+      min-height: 2.75rem;
     }
 
     /* Opt-in container: keep mouse layouts compact while giving coarse
@@ -963,6 +1077,77 @@
   animation: shape-vanish 180ms cubic-bezier(0.4, 0, 1, 1) both;
 }
 
+/* The live dot in the follow tab: a slow breath with one ripple leaving it, so
+   "this is live" reads without the flicker of an on/off blink. Transform and
+   opacity only — both compositor properties, so it costs no paint or layout
+   while the camera mirrors the tutor underneath. The ripple is a pseudo-element
+   so the core never changes size. Reduced motion holds it still and solid. */
+@keyframes follow-dot-breathe {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 0.55;
+    transform: scale(0.82);
+  }
+}
+
+@keyframes follow-dot-ripple {
+  0% {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+
+  70%,
+  100% {
+    opacity: 0;
+    transform: scale(2.8);
+  }
+}
+
+/* Size comes from the call site (a utility), since this rule is unlayered and
+   would otherwise outrank it. `--dot-delay` staggers a row of dots into a
+   travelling wave instead of blinking them in lockstep. */
+.follow-live-dot {
+  position: relative;
+  display: inline-block;
+  border-radius: 9999px;
+  background: currentColor;
+  animation: follow-dot-breathe 2.4s var(--ease-in-out-quart) infinite;
+  animation-delay: var(--dot-delay, 0s);
+}
+
+.follow-live-dot::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: currentColor;
+  animation: follow-dot-ripple 2.4s var(--ease-out-expo) infinite;
+  animation-delay: var(--dot-delay, 0s);
+}
+
+/* Hidden tab (the frame goes `inert`): stop ticking instead of animating an
+   invisible layer forever. */
+[inert] .follow-live-dot,
+[inert] .follow-live-dot::after {
+  animation-play-state: paused;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .follow-live-dot,
+  .follow-live-dot::after {
+    animation: none;
+  }
+
+  .follow-live-dot::after {
+    opacity: 0;
+  }
+}
+
 /* The tip of the laser tool glows like an energized optical diode. */
 @keyframes laser-tip-pulse {
   0%,
@@ -982,49 +1167,168 @@
   animation: laser-tip-pulse 2s ease-in-out infinite;
 }
 
-/* The board loading veil's mark: one stroked square turning a quarter turn as
-   its corners round all the way to a circle and back. Two properties on one
-   element, one continuous loop — the point is a figure that is clearly still
-   working without the tick-tick of a spinner. `rx` is animated rather than
-   `border-radius` because this is an SVG rect, and both properties are
-   compositor-cheap enough to keep moving while the main thread decodes CRDT
-   updates. Cycle length is mirrored by nothing in JS: it is decoration. */
-@keyframes veil-mark-turn {
-  0% {
-    transform: rotate(0deg);
-  }
+/* The "sounding now" mark (components/ui/level-meter.tsx): music playing, or
+   the person who is currently talking.
 
-  100% {
-    transform: rotate(90deg);
-  }
-}
+   Three bars scaling about their feet. It is the one perpetual animation in
+   the chrome, and it earns that because what it reports — audio happening
+   right now — is itself perpetual: the moment it stops moving, the claim it makes
+   has stopped being true. The three periods are deliberately coprime-ish so
+   the group never settles into a visible beat, and it is transform-only, so
+   the whole thing is one compositor layer over on the session rail.
 
-@keyframes veil-mark-round {
+   Sized to the 14px glyph slot the panels' rows use, and it takes
+   `currentColor`, so a row states audibility in whatever ink that row is
+   already drawn in. */
+@keyframes level-meter-bar {
   0%,
   100% {
-    rx: 0;
+    transform: scaleY(0.3);
   }
 
   50% {
-    rx: 14;
+    transform: scaleY(1);
   }
 }
 
-.veil-mark {
-  transform-box: fill-box;
-  transform-origin: center;
-  animation:
-    veil-mark-turn 2.4s var(--ease-in-out-quart) infinite,
-    veil-mark-round 2.4s var(--ease-in-out-quart) infinite;
+.wb-level-meter {
+  display: inline-flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 1.5px;
+  width: 0.875rem;
+  height: 0.875rem;
+}
+
+.wb-level-meter > span {
+  display: block;
+  width: 2px;
+  height: 100%;
+  border-radius: 1px;
+  background: currentColor;
+  transform-origin: bottom;
+  animation: level-meter-bar 1s ease-in-out infinite;
+}
+
+.wb-level-meter > span:nth-child(1) {
+  animation-duration: 900ms;
+  animation-delay: -300ms;
+}
+
+.wb-level-meter > span:nth-child(2) {
+  animation-duration: 1250ms;
+}
+
+.wb-level-meter > span:nth-child(3) {
+  animation-duration: 750ms;
+  animation-delay: -600ms;
+}
+
+/* The board loading veil.
+
+   The sheet is paper before it is a loading screen, so the board's own dot grid
+   arrives first and settles: a hair of scale coming off, not a zoom. Purely a
+   fade-in with a settle, `both`, so it holds its landed state rather than
+   looping — the sheet is already an interruption and a perpetual background
+   animation under someone's board would be one more.
+
+   The brush strokes are painted by inline transitions in
+   board-loading-veil.tsx; the only rule here is the reduced-motion one. */
+@keyframes veil-ground-settle {
+  from {
+    opacity: 0;
+    transform: scale(1.03);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.veil-ground {
+  animation: veil-ground-settle 900ms var(--ease-out-expo) both;
+}
+
+/* The board's arrival, as the veil lifts.
+
+   Each chrome cluster glides in from the edge it docks to — the top band
+   drops, the bottom instruments rise — staggered in reading order
+   (`--arrive-i`) so the eye is walked round the board once instead of being
+   handed five objects at the same instant. Keyed on `.wb-board[data-arrived]`
+   because the chrome mounts long before the board is ready, and an entrance
+   played behind an opaque sheet is an entrance nobody saw.
+
+   Translate and opacity only. `backwards`, not `both`: the animation
+   must hand opacity and transform back when it ends, or it would outrank every
+   later rule that hides or moves these clusters. `transform` composes with
+   the toolbar's own `translate: -50%`, which is a separate property. */
+@keyframes wb-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(var(--arrive-from, 0));
+  }
+}
+
+[data-arrive='down'] {
+  --arrive-from: -28px;
+}
+
+[data-arrive='up'] {
+  --arrive-from: 28px;
+}
+
+.wb-board[data-arrived] [data-arrive] {
+  /* A soft overshoot: each cluster lands a couple of pixels past its dock and
+     settles back, which is what makes the entrance read as motion rather than
+     as a fade. */
+  animation: wb-arrive 900ms cubic-bezier(0.34, 1.35, 0.64, 1) backwards;
+  /* Starts as the veil's sheet begins to dissolve (SHEET_DELAY_MS in
+     board-loading-veil.tsx), so the chrome arrives through it, not after. */
+  animation-delay: calc(350ms + var(--arrive-i, 0) * 110ms);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .veil-mark {
+  .veil-ground {
     animation: none;
+  }
+
+  .wb-board[data-arrived] [data-arrive] {
+    animation: none;
+  }
+
+  /* `!important` because the transitions and offsets are inline. Without the
+     creep, the stroke in flight parks at half its length instead of most of
+     it, so a stalled wait does not read as nearly done. */
+  .veil-brush-pass {
+    transition: none !important;
+  }
+
+  .veil-brush-pass[data-painting] {
+    stroke-dashoffset: 0.5 !important;
   }
 
   .laser-tip-glow {
     animation: none;
+  }
+
+  /* Frozen at three different heights rather than flattened: a level that
+     happens not to be moving still reads as a level, whereas three equal bars
+     read as a dead icon. */
+  .wb-level-meter > span {
+    animation: none;
+  }
+
+  .wb-level-meter > span:nth-child(1) {
+    transform: scaleY(0.45);
+  }
+
+  .wb-level-meter > span:nth-child(2) {
+    transform: scaleY(0.9);
+  }
+
+  .wb-level-meter > span:nth-child(3) {
+    transform: scaleY(0.6);
   }
 
   .t-panel-slide {
@@ -1161,18 +1465,20 @@
 
 .equation-output-preview {
   flex: none;
-  min-width: max-content;
 }
 
-/* Left free to take its natural height up to a ceiling. Pinning every formula
-   to one line height crushed exactly the equations worth previewing — a
-   \frac, a \sum with limits, a pmatrix — down to the size of `x = 1`. */
+/* The box is sized by the panel from the measurements the renderer returns
+   with the markup, and the formula fills it. It cannot size itself: the
+   renderer strips MathJax's `ex` width and height so that canvas geometry does
+   not depend on the font around it (see `equation-convert.ts`), which leaves
+   an SVG with a viewBox and no intrinsic size — `width: auto` on one of those
+   resolves to nothing at all, and the preview drew a 0x0 box. */
 .equation-output-preview > svg {
   display: block;
-  width: auto;
+  width: 100%;
   max-width: none;
-  height: auto;
-  max-height: 6rem;
+  height: 100%;
+  max-height: none;
 }
 
 /* ==========================================================================
@@ -1248,715 +1554,1159 @@
 }
 
 /* ==========================================================================
- * 8. Toolbar surface
+ * 8. Board chrome laid straight on the canvas
  *
- * The floating toolbar is a flat sheet — no rim along the top edge, no
- * groove along the bottom, no gradient down the face, no key pressed into or
- * standing proud of the surface. The one bit of relief it does carry is a
- * soft ambient shadow (`--s-toolbar`) lifting the whole bar off the board,
- * kept low and diffuse so it reads as "floating slab" rather than moulded.
- *
- * The instruments are the only objects in the scene with any modelling on
- * them: no rim, groove, or per-key relief competes with them, and no key is
- * raised or sunk. The keys carry state by swapping flat planes — a group is a
- * recess (`--tb-track`) and the chosen key in it is that recess filled back
- * to white (`--tb-accent`) — so the only shadow anywhere is the one under the
- * card itself. Values live in section 1.
- *
- * This rule is deliberately unlayered, so it beats the `shadow-panel` that
- * `Surface mode="floating"` and the `shadow-e1` that `Button variant=
- * "outline"` bring with them. One class governs the whole toolbar family —
- * the bar, the properties pill, the eraser's mode switch, the show-toolbar
- * pill — rather than four call sites each fighting a utility.
+ * The two rules below dress the corner HUDs, which sit on the board with no
+ * plate under them. They predate the toolbar and are unrelated to it; the
+ * toolbar's own surface starts in section 9.
  * ========================================================================== */
 
-.tb-shell {
+/**
+ * The ground under a piece of board chrome: the four corner HUDs. Not a card —
+ * no border, no shadow, and nothing that follows the chrome around — just a
+ * wash over the board, so a row of controls reads as one region over a dense
+ * drawing rather than as glyphs scattered across it.
+ *
+ * It used to be the board blurred, and that is gone: a `backdrop-filter` is a
+ * compositor pass per element that re-reads and re-filters what is behind it
+ * on every frame its backdrop changes, which is every frame of a pan or a
+ * zoom, and this rule dresses four HUDs at once. Measured on the machine that
+ * asked, the chrome's blurs together were about twenty points of GPU while the
+ * camera moved. The wash carries the separation on opacity instead.
+ *
+ * It has no edge. The wash is a rectangle, and its border box would be a hard
+ * line: board on one side of it, wash on the other. So it is masked to
+ * strongest under the middle of the row and gone by the rim. Percentages
+ * rather than pixels because the same rule dresses a wide HUD and a two-key
+ * one, and a fixed inset would swallow the short one whole.
+ *
+ * On `::before` rather than on the row itself, because a mask applies to an
+ * element's whole subtree — masking the row would fade its own buttons out at
+ * the ends.
+ */
+/* Removed: the masked, feathered ::before wash. Corners are now bare at rest. */
+
+/**
+ * An instrument: a cluster of controls that floats over the board.
+ *
+ * The board carries two kinds of chrome and they are not the same kind of
+ * thing. The top band tells you where you are and who is here — you read it,
+ * and it stays washed and flat so it never looks like something to press. The
+ * bottom clusters are things you aim a pointer at, and those get a plate.
+ *
+ * That is the whole rule, and it is the rule on purpose: if it has an edge,
+ * you can press it. It also means every instrument is made of the same
+ * material as the toolbar, so the board reads as a canvas with a few
+ * instruments on it rather than as a canvas with chrome in each corner.
+ *
+ * Opaque here. A blur is a compositor pass that re-reads what is behind it on
+ * every frame its backdrop changes, which is every frame of a pan or a zoom;
+ * measured on the machine that asked, the chrome's blurs together were about
+ * twenty points of GPU while the camera moved. The corner instruments are
+ * glass anyway, but only while the camera is still — see `.wb-chrome-quiet`.
+ */
+.wb-instrument {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-toolbar);
   box-shadow: var(--s-toolbar);
 }
 
 /**
- * A control with nothing under it. The toolbar family has no card left — the
- * keys, the tray and the properties pill sit directly on the board — so each
- * glyph carries its own separation: a tight halo in the board's own colour,
- * and a soft ambient shadow under it.
+ * A corner instrument at rest, and what it does when you reach for it.
  *
- * The drop-shadow is on the glyph rather than on the button, so a key that
- * *is* filled (the selected one) reads as a flat chip and not as a lit one.
- * Nothing here is raised; the shadow is doing legibility, not relief. The
- * text-shadow rides on the element itself and inherits, which is what covers
- * a label with no glyph in it — the zoom percentage, the "Tools" pill.
+ * The board had five plates on it at once — four corners and the toolbar —
+ * and every one of them was opaque, edged and lifted the whole time. Five
+ * objects of equal weight is no hierarchy at all: the drawing became the
+ * sixth thing on the screen instead of the only one.
+ *
+ * So the plate stops being where a control *lives* and becomes what appears
+ * when you reach for it. At rest a corner is a wash — the same masked, edgeless
+ * fill the top band has always used, enough ground to keep a glyph legible over
+ * dense ink and nothing more. Under the pointer, under focus, or while the
+ * cluster holds something that is actually running, it promotes to the full
+ * plate. The board's material rule is unchanged and now literally true: an edge
+ * means you can press it, and the edge arrives at the moment you can.
+ *
+ * The toolbar never quiets. It is the one thing you act with rather than
+ * consult, so it stays the single anchor on an otherwise empty board — and
+ * because a quiet corner wakes on hover, drawing anywhere on the canvas leaves
+ * all four of them down without a single frame of extra state.
+ *
+ * `:has()` rather than `:focus-within` alone: a menu opened from a corner
+ * portals its panel to the body, so focus leaves the cluster and the plate
+ * would collapse out from under the menu that is still standing on it.
+ *
+ * No `pointer: coarse` escape hatch, unlike `touch-reveal`. That one exists
+ * because a hover-revealed control is *unreachable* without a hover; here
+ * nothing is hidden — the glyphs are the affordance and the wash keeps them
+ * legible, and only the plate waits. A tablet is the device most likely to be
+ * pointed at a board all lesson, so it is the last one that should carry four
+ * permanent plates. Tapping into a corner focuses it and plates it anyway.
  */
-.tb-glyph {
-  text-shadow: 0 0 2px var(--tb-glyph-halo);
+.wb-chrome-quiet {
+  background-color: transparent;
+  border: 1px solid transparent;
+  box-shadow: none;
+  transition:
+    background-color var(--duration-base) var(--ease-out-quart),
+    border-color var(--duration-base) var(--ease-out-quart),
+    box-shadow var(--duration-base) var(--ease-out-quart);
 }
 
 /**
- * A drawn object standing in a hued well — the tray's instruments.
+ * The four corner instruments are frosted glass: a tinted fill over a blurred
+ * backdrop, with the plate states below changing only the tint and its alpha.
  *
- * `.tb-glyph`'s white halo is for a glyph with *nothing* under it, and these
- * now have something: a pastel well the halo was bleaching a ring out of,
- * right where the well is supposed to be reading against the barrel. What is
- * left is the contact shadow, which is what separates an object from what it
- * is lying on in the first place.
+ * What made the old chrome blur expensive was not the blur, it was re-running
+ * it: a backdrop filter re-reads and re-filters what is behind it on every
+ * frame that backdrop changes, and during a pan or a zoom that is every frame.
+ * At rest the board under a corner is still, so the compositor keeps the
+ * filtered result and the glass costs nothing. So the blur is dropped for
+ * exactly the frames it would cost — `html[data-camera-moving]`, published
+ * from `useCameraInteraction` — and the tint goes near-opaque in the same
+ * frame, with no transition, so the drop never shows sharp ink through thin
+ * glass. Coming back to rest does fade in, with the blur already on.
+ *
+ * `backdrop-filter` itself is never transitioned: animating it re-filters on
+ * every frame of the animation. The toolbar and the minimap stay opaque; the
+ * minimap's own canvas covers its plate, so glass under it would be a pass
+ * that paints nothing.
  */
-.tb-object svg {
-  filter: drop-shadow(0 1px 2px rgb(0 0 0 / 0.14))
-    drop-shadow(0 3px 6px rgb(0 0 0 / 0.09));
+.wb-instrument.wb-chrome-quiet {
+  --glass-tint: var(--bg-panel);
+  --glass-alpha: 58%;
+  background-color: color-mix(
+    in srgb,
+    var(--glass-tint) var(--glass-alpha),
+    transparent
+  );
+  -webkit-backdrop-filter: blur(6px) saturate(1.4);
+  backdrop-filter: blur(6px) saturate(1.4);
 }
 
-.tb-glyph svg {
-  filter: drop-shadow(0 0 2px var(--tb-glyph-halo))
-    drop-shadow(0 1px 2px rgb(0 0 0 / 0.16));
+.wb-chrome-quiet:hover,
+.wb-chrome-quiet:focus-within,
+.wb-chrome-quiet[data-awake],
+.wb-chrome-quiet:has([aria-expanded='true']),
+.wb-chrome-quiet:has([data-popup-open]) {
+  --glass-tint: var(--bg-surface);
+  --glass-alpha: 74%;
+  border-color: var(--border);
+  box-shadow: var(--s-toolbar);
 }
 
-/**
- * The frosted ground under a piece of board chrome: the toolbar and the four
- * corner HUDs. Still not a card — no border, no shadow, and nothing that
- * follows the chrome around — just the board itself, blurred, so a row of
- * controls reads as one region over a dense drawing rather than as glyphs
- * scattered across it.
- *
- * It has no edge. A `backdrop-filter` is clipped to its own border box, and
- * that clip is a hard line: sharp board on one side of it, frost on the other,
- * with a corner where two of those lines meet. So the frost is masked to
- * strongest under the middle of the row and gone by the rim, and the mask
- * takes the tint with it — what you get is the blur giving out gradually
- * rather than a shape sitting on the board. Percentages rather than pixels
- * because the same rule dresses a 600px toolbar and a two-key corner HUD, and
- * a fixed inset would swallow the short one whole.
- *
- * On `::before` rather than on the row itself, because a mask applies to an
- * element's whole subtree — masking the row would fade its own buttons out at
- * the ends. `z-index: -1` puts the layer behind that content without
- * `isolation: isolate`, which would make the row a backdrop root and leave the
- * filter with nothing behind it to sample. The call site supplies the
- * containing block (`relative`) and the shape, which the layer inherits.
- *
- * Low-graphics mode and engines with no `backdrop-filter` fall back to the
- * heavier wash, still masked: the tint alone is clear glass, but a rim that
- * fades is what keeps it from being the slab this chrome does not have.
- */
-.wb-chrome-blur::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  border-radius: inherit;
-  background-color: var(--chrome-wash);
-  /* Unprefixed only. Lightning CSS adds `-webkit-` for the Safari versions
-     that still need it; writing the prefixed form here by hand made it drop
-     the unprefixed one instead, which left Firefox with no blur at all. */
-  backdrop-filter: blur(var(--chrome-blur));
-  mask-image:
-    linear-gradient(to right, transparent, #000 14%, #000 86%, transparent),
-    linear-gradient(to bottom, transparent, #000 22%, #000 78%, transparent);
-  mask-composite: intersect;
-}
-
-:root[data-low-graphics] .wb-chrome-blur::before {
-  background-color: var(--chrome-wash-solid);
+:root[data-camera-moving] .wb-instrument.wb-chrome-quiet {
+  --glass-alpha: 94%;
+  -webkit-backdrop-filter: none;
   backdrop-filter: none;
+  transition: none;
 }
 
-@supports not (backdrop-filter: blur(1px)) {
-  .wb-chrome-blur::before {
-    background-color: var(--chrome-wash-solid);
+@media (prefers-reduced-transparency: reduce) {
+  :root .wb-instrument.wb-chrome-quiet {
+    --glass-alpha: 100%;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wb-chrome-quiet {
+    transition: none;
   }
 }
 
 /**
- * A key, anywhere in the floating layer. The property list is the same as it
- * was; what is new is that `transform` gets its own timing function.
- *
- * Pressing a key is the one place the layer is allowed to behave like a
- * material rather than a picture of one: press, flex, settle. A quart ease
- * gives press and release the same dead stop, which reads as a state swap; the
- * spring lets the key dip a hair past the pressed size and come back past its
- * own edge before it lands, which is the flex. Everything else on the list
- * keeps the quart — colour that overshoots is a flicker, not a flex.
- *
- * Stated here rather than as a utility because a per-property timing list is a
- * rule, not a class, and because this file is unlayered and so wins over the
- * `ease-*` utility the call sites would otherwise have to remember to drop.
+ * A session tool folding into and out of the rail. Width animates through a
+ * one-column grid (0fr ↔ 1fr), so the slot opens to exactly its content with
+ * no measured width. The rail is anchored right, so it grows leftward into the
+ * board. Opening, the fade trails the width a beat so a key never appears
+ * before there is room for it; closing, it fades first and the gap follows.
  */
-.tb-key {
-  transition-property:
-    color, background-color, border-color, box-shadow, transform;
-  transition-timing-function:
-    var(--ease-out-quart), var(--ease-out-quart), var(--ease-out-quart),
-    var(--ease-out-quart), var(--tb-press-spring);
+.wb-rail-slot {
+  display: grid;
+  grid-template-columns: 1fr;
+  opacity: 1;
+  transition:
+    grid-template-columns var(--duration-slower) var(--ease-out-expo),
+    margin-left var(--duration-slower) var(--ease-out-expo),
+    opacity var(--duration-slow) var(--ease-out-quart) 60ms;
+}
+
+.wb-rail-slot > * {
+  display: flex;
+  min-width: 0;
+  overflow: clip;
+  /* Room for a key's focus ring while the slot is open. */
+  overflow-clip-margin: 4px;
+}
+
+.wb-rail-slot[data-folded] {
+  grid-template-columns: 0fr;
+  /* Cancels the rail's `gap-0.5`, so folded slots leave no trace. */
+  margin-left: -0.125rem;
+  opacity: 0;
+  transition:
+    grid-template-columns var(--duration-slow) var(--ease-out-quart),
+    margin-left var(--duration-slow) var(--ease-out-quart),
+    opacity var(--duration-fast) var(--ease-out-quart);
+}
+
+/* A tool that renders nothing for this person takes no gap either. */
+.wb-rail-slot:has(> :empty) {
+  display: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .tb-key {
+  .wb-rail-slot,
+  .wb-rail-slot[data-folded] {
     transition: none;
   }
 }
 
 /* ==========================================================================
- * 9. The floating control layer
+ * 9. The toolbar
  *
- * The toolbar, the style pill above it, and the flyouts they open. One plain
- * material: a solid ground, a hairline edge, and the ambient shadow that lifts
- * it off the board. Nothing samples what is behind it, so there are no
- * fallbacks here for low-graphics mode, Reduce Transparency, or engines
- * without `backdrop-filter` — the resting state already is the fallback.
+ * The main bar itself is `components/ui/toolbar.tsx` (Tailwind on the same
+ * tokens). What follows is the plate family it shares with the style bar and
+ * the flyouts: a white `rounded-xl` plate with a hairline edge and one soft
+ * drop, and keys whose every state is a change of fill. Nothing is lifted.
  *
- * State is carried by flat fills only, from section 1's toolbar tokens: a key
- * under the pointer takes `--tb-track`, the chosen one the heavier `--tb-chip`.
- * Nothing in this layer is raised or sunk.
+ * Geometry is concentric: a key's corner is the plate's corner minus the
+ * plate's padding, so the chip nests in the plate's curve at either end.
+ *
+ *   --bg-surface    the bar's ground, one step off the board
+ *   --tb-track      a control under the pointer
+ *   --tb-chip       a control being pressed
+ *   --tb-sel-bg/fg  the control that is on
+ *   --tb-divider    the rule between two groups
+ *
+ * Unlayered, so it beats the Tailwind utilities the base-ui wrappers bring.
  * ========================================================================== */
 
-/**
- * A plate. Callers supply the geometry (a capsule, or the flyout card) and
- * their own padding.
- */
-.lg {
-  position: relative;
-  background-color: var(--bg-surface);
-  border: 1px solid var(--border);
-  box-shadow: var(--s-toolbar);
-}
-
-/**
- * Rounded, continuous geometry, stated rather than picked per call site: every
- * capsule in the set is the same pill and every flyout the same corner, so the
- * pieces read as related shapes rather than as separately rounded boxes. These
- * are unlayered, which is also what lets them beat the `rounded-overlay` a
- * popover brings with it without a second radius utility fighting it.
- */
-.lg-pill {
-  border-radius: 9999px;
-}
-
-.lg-card {
-  border-radius: 1.375rem;
-}
-
-/** The chosen option. */
-.lg-chip {
-  background-color: var(--tb-chip);
-}
-
-/**
- * A key's fill, as a layer inside the key rather than the key's own
- * background, so it stays inset from the plate's edge. `:not(.lg-chip)` keeps
- * a hover off the chosen key, which already carries the inverted fill.
- */
-.lg-wash {
-  transition: background-color var(--duration-fast) var(--ease-out-quart);
-}
-
-.lg-key:hover > .lg-wash:not(.lg-chip),
-.lg-key:focus-visible > .lg-wash:not(.lg-chip) {
-  background-color: var(--tb-track);
-}
-
-/** The selection chip sliding between the segments of a switch. */
-.lg-travel {
-  transition:
-    transform var(--duration-base) var(--ease-out-quart),
-    background-color var(--duration-base) var(--ease-out-quart);
-}
-
-/**
- * An option inside a flyout. Unlayered, so it beats the `aria-pressed:bg-panel`
- * that `toggleVariants` brings with it rather than fighting it at each call
- * site. Same fill as the bar's, so a chosen fill and a chosen stroke weight are
- * marked the same way.
- */
-.lg-option[aria-pressed='true'],
-.lg-option[data-pressed] {
-  background-color: var(--tb-chip);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .lg-travel,
-  .lg-wash {
-    transition: none;
-  }
-}
-
-/* The toolbar bar and the show-toolbar pill: one plain plate. A solid ground,
-   a hairline, and the same ambient shadow the rest of the floating chrome
-   uses. Unlayered so it beats the `shadow-panel` `Surface mode="floating"`
-   brings and the `shadow-e1` on `Button variant="outline"`. */
-.toolbar-bar {
-  border: 1px solid var(--border);
-  background-color: var(--bg-surface);
-  box-shadow: var(--s-toolbar);
-}
-
-.toolbar-bar .tb-key {
-  width: 40px;
-  height: 40px;
-  min-width: 40px;
-}
-
-/* Switch before the full instrument row would overflow a narrow tablet. */
-.toolbar-desktop {
-  display: none;
-}
-.toolbar-compact {
-  display: flex;
-}
-@media (min-width: 760px) {
-  .toolbar-desktop {
-    display: flex;
-  }
-  .toolbar-compact {
-    display: none;
-  }
-}
-@media (pointer: coarse) {
-  .toolbar-bar .tb-key {
-    width: 44px;
-    height: 44px;
-    min-width: 44px;
-  }
-}
-
-/* Soft toolbar silhouette, rendered behind the controls. */
-.tb-plate {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  filter: var(--tb-plate-shadow);
-}
-
 :root {
-  --tb-plate-shadow: drop-shadow(0 14px 26px rgba(12, 10, 9, 0.14))
-    drop-shadow(0 3px 7px rgba(12, 10, 9, 0.07))
-    drop-shadow(0 1px 1px rgba(12, 10, 9, 0.05));
+  /* The height and width of a key. One number, so the bar, the style groups
+     and the segmented switches cannot drift apart. DESIGN.md's default
+     control height. */
+  --tb-item: 40px;
+  /* The bar's padding: DESIGN.md's `p-1` inside a `rounded-xl` container. */
+  --tb-pad: 4px;
+  /* A key's corner: the plate's 12px minus its 4px padding, `rounded-lg`. */
+  --tb-key-radius: 8px;
+  /* The air between two groups of keys. */
+  --tb-gap: 10px;
 }
 
-:root[data-theme='dark'] {
-  --tb-plate-shadow: drop-shadow(0 16px 30px rgba(0, 0, 0, 0.55))
-    drop-shadow(0 4px 10px rgba(0, 0, 0, 0.38))
-    drop-shadow(0 1px 1px rgba(0, 0, 0, 0.3));
+@media (pointer: coarse) {
+  :root {
+    --tb-item: 44px;
+  }
 }
 
 /* --------------------------------------------------------------------------
- * A hued key.
+ * The bar, and every surface in its family.
  *
- * Every key on this bar owns a colour, and the colour is a property of the
- * tool rather than of its state — the eraser's well is pink whether or not the
- * eraser is held. That is what turns a row of twelve glyphs into twelve
- * findable things: you reach for the yellow one, and confirming that it says
- * "highlighter" is the second look rather than the first.
- *
- * So selection cannot be carried by *having* a well, the way it was when the
- * wells were all one neutral grey. It is carried by the well getting heavier
- * and the glyph stepping up into its own hue at the same time, which is the
- * same two-channel move the neutral bar made — fill and ink together — just
- * run in colour.
- *
- * The well is inset from the key's edge rather than filling it, so the plate
- * still shows around it, and it is rounded off-square: a blob-shaped mark on a
- * blob-shaped bar, which is the one radius on this bar that must not be a
- * circle — a circle among these lumps reads as a hole punched in them.
+ * `.tbar-surface` is the material: a menu, a flyout, the bar itself and the
+ * show-toolbar pill are all the same plate, so a control and the thing it
+ * opens are made of the same stuff.
  * -------------------------------------------------------------------------- */
-
-.tb-hue::before {
-  content: '';
-  position: absolute;
-  inset: 1px;
-  /* Behind the button's own content but still inside its stacking context
-     (`.tb-key` is `relative z-10`), so the well never covers its glyph and
-     never reaches back through to the plate. A pseudo-element rather than a
-     span, because the well has to exist on five different call sites' buttons
-     and a rule beats five remembered spans. */
-  z-index: -1;
-  pointer-events: none;
-  border-radius: 46% 54% 52% 48% / 50% 46% 54% 50%;
-  background-color: color-mix(in oklab, var(--key-hue) 15%, transparent);
-  transform: scale(0.9);
-  transition:
-    background-color var(--duration-base) var(--ease-out-quart),
-    transform var(--duration-base) var(--tb-press-spring);
+.tbar-surface {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-toolbar);
+  box-shadow: var(--s-toolbar);
 }
 
-.tb-hue:hover::before {
-  background-color: color-mix(in oklab, var(--key-hue) 24%, transparent);
+.tbar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: var(--tb-pad);
+}
+
+/* A run of related keys. Keys within a group sit 4px apart (`gap-1`);
+   groups sit `--tb-gap` (10px) apart. */
+.tbar-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tbar-group + .tbar-group {
+  margin-inline-start: var(--tb-gap);
+}
+
+/* The rule between two groups: short and centred rather than full height, so
+   it divides the row without cutting the plate in two. */
+.tbar-sep {
+  flex: none;
+  width: 1px;
+  height: calc(var(--tb-item) * 0.5);
+  margin-inline: calc((var(--tb-gap) - 1px) / 2 - 2px);
+  border-radius: 1px;
+  background-color: var(--tb-divider);
+}
+
+/* --------------------------------------------------------------------------
+ * A key.
+ *
+ * Default, hover, pressed, selected, focus-visible and disabled are each
+ * stated here rather than left to a utility or to the browser.
+ * -------------------------------------------------------------------------- */
+.tbar-item {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--tb-item);
+  height: var(--tb-item);
+  padding: 0;
+  border: 0;
+  border-radius: var(--tb-key-radius);
+  background-color: transparent;
+  color: var(--fg-secondary);
+  cursor: pointer;
+  transition:
+    background-color 0.16s ease,
+    color 0.16s ease,
+    box-shadow 0.16s ease,
+    transform 0.16s ease;
+}
+
+.tbar-item > svg:not(.tbar-caret) {
+  width: 20px;
+  height: 20px;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.tbar-item:hover:not(:disabled):not([aria-disabled='true']) {
+  background-color: var(--tb-track);
+  color: var(--fg);
+}
+
+.tbar-item:active:not(:disabled):not([aria-disabled='true']) {
+  background-color: var(--tb-chip);
   transform: scale(0.96);
 }
 
-.tb-hue[aria-current='true']::before,
-.tb-hue[aria-pressed='true']::before,
-.tb-hue[data-pressed]::before {
-  background-color: color-mix(in oklab, var(--key-hue) 38%, transparent);
-  transform: scale(1);
+/* The control that is on: blue tint, blue glyph. The state is also on the element
+   as `aria-current` / `aria-pressed` / `aria-checked`, which is what carries it
+   where colour cannot. */
+.tbar-item[aria-current='true'],
+.tbar-item[aria-pressed='true'],
+.tbar-item[aria-checked='true'],
+.tbar-item[data-pressed] {
+  background-color: var(--tb-sel-bg);
+  color: var(--tb-sel-fg);
 }
 
-/* The glyph takes the hue too, but mixed into the foreground rather than used
-   neat: neat, a pastel-anchored hue on a pale well is a legibility problem,
-   and the point of the colour up here is to agree with the well, not to shout
-   over it. Held, it steps most of the way into the hue. */
-.tb-hue {
-  color: color-mix(in oklab, var(--key-hue) 42%, var(--fg));
+/* Written to outrank the plain hover rule, whose ink would otherwise land on
+   the inverted ground. */
+.tbar-item[aria-current='true']:hover:not(:disabled):not([aria-disabled='true']),
+.tbar-item[aria-pressed='true']:hover:not(:disabled):not([aria-disabled='true']),
+.tbar-item[aria-checked='true']:hover:not(:disabled):not([aria-disabled='true']),
+.tbar-item[data-pressed]:hover:not(:disabled):not([aria-disabled='true']) {
+  background-color: var(--tb-sel-bg-hover);
+  color: var(--tb-sel-fg);
 }
 
-.tb-hue[aria-current='true'],
-.tb-hue[aria-pressed='true'],
-.tb-hue[data-pressed] {
-  color: color-mix(in oklab, var(--key-hue) 74%, var(--fg));
+/* An open flyout's trigger is not selected — it is merely showing its menu —
+   so it takes the pointer fill rather than the accent. */
+.tbar-item[aria-expanded='true']:not([aria-current='true']),
+.tbar-item[aria-expanded='true']:not([aria-current='true']):hover:not(:disabled):not([aria-disabled='true']) {
+  background-color: var(--tb-chip);
+  color: var(--fg);
 }
 
-:root[data-theme='dark'] .tb-hue::before {
-  background-color: color-mix(in oklab, var(--key-hue) 24%, transparent);
-}
-
-:root[data-theme='dark'] .tb-hue:hover::before {
-  background-color: color-mix(in oklab, var(--key-hue) 34%, transparent);
-}
-
-:root[data-theme='dark'] .tb-hue[aria-current='true']::before,
-:root[data-theme='dark'] .tb-hue[aria-pressed='true']::before,
-:root[data-theme='dark'] .tb-hue[data-pressed]::before {
-  background-color: color-mix(in oklab, var(--key-hue) 52%, transparent);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .tb-hue::before {
-    transition: none;
-  }
-}
-
-/* The well an instrument stands in. Same fill and the same growth as a key's,
-   but it cannot be the key's own inset layer: the instrument's button is a
-   tall clipping window that starts above the bar, and a well inset into *that*
-   would be a stripe running up over the canvas. It is placed against the slot
-   instead, which is exactly a key tall. */
-.tb-slot::before {
-  content: '';
-  position: absolute;
-  inset: 1px;
-  z-index: 0;
-  pointer-events: none;
-  border-radius: 48% 52% 46% 54% / 52% 48% 52% 48%;
-  /* Heavier than a key's. A key's well only has to separate a dark glyph from
-     a white plate; this one has to separate a *white* barrel from it, and the
-     only thing doing that is the tone the well puts behind it. */
-  background-color: color-mix(in oklab, var(--key-hue) 24%, transparent);
-  transform: scale(0.95);
-  transition:
-    background-color var(--duration-base) var(--ease-out-quart),
-    transform var(--duration-base) var(--tb-press-spring);
-}
-
-.tb-slot:hover::before {
-  background-color: color-mix(in oklab, var(--key-hue) 34%, transparent);
-  transform: scale(1);
-}
-
-.tb-slot[data-held='true']::before {
-  background-color: color-mix(in oklab, var(--key-hue) 48%, transparent);
-  transform: scale(1.04);
-}
-
-:root[data-theme='dark'] .tb-slot::before {
-  background-color: color-mix(in oklab, var(--key-hue) 24%, transparent);
-}
-
-:root[data-theme='dark'] .tb-slot:hover::before {
-  background-color: color-mix(in oklab, var(--key-hue) 34%, transparent);
-}
-
-:root[data-theme='dark'] .tb-slot[data-held='true']::before {
-  background-color: color-mix(in oklab, var(--key-hue) 54%, transparent);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .tb-slot::before {
-    transition: none;
-  }
-}
-
-/**
- * The chosen segment of a switch on the properties bar.
- *
- * The same blue the select tool's well is, because it is the same statement —
- * "this is the one that is on" — and the bar under it now makes that statement
- * in colour. A grey chip here would be the only neutral mark left in the set,
- * which reads as a control nobody finished rather than as a quieter one.
- */
-.tb-mark {
-  background-color: color-mix(in oklab, #4f8bf5 26%, transparent);
-}
-
-:root[data-theme='dark'] .tb-mark {
-  background-color: color-mix(in oklab, #4f8bf5 42%, transparent);
-}
-
-/* Reference toolbar: full drawing objects on a soft, white painter's palette. */
-.toolbar-reference .toolbar-desktop {
-  height: 56px;
-}
-.toolbar-reference .tb-key {
-  width: 40px;
-  height: 44px;
-  min-width: 40px;
-}
-.toolbar-reference .tb-key > svg,
-.toolbar-reference .tb-key > span.relative.block {
-  width: 23px;
-  height: 23px;
-  stroke-width: 1.9;
-}
-.toolbar-reference .tb-hue {
-  color: color-mix(in oklab, var(--key-hue) 22%, #434653);
-}
-.toolbar-reference .tb-hue::before {
-  inset: 4px 1px;
-  background: color-mix(in oklab, var(--key-hue) 12%, var(--bg-surface));
-  transform: rotate(-5deg) scale(0.94);
-}
-.toolbar-reference .tb-hue:hover::before {
-  background: color-mix(in oklab, var(--key-hue) 21%, var(--bg-surface));
-  transform: rotate(-3deg);
-}
-.toolbar-reference .tb-hue[aria-current='true']::before,
-.toolbar-reference .tb-hue[aria-pressed='true']::before {
-  background: linear-gradient(135deg, #dceeff, #b8d8fc);
-  transform: rotate(-7deg) scale(1.05, 1.15);
-}
-.toolbar-reference .tb-hue[aria-current='true'],
-.toolbar-reference .tb-hue[aria-pressed='true'] {
-  color: #173d78;
-}
-.toolbar-reference .tb-slot::before {
-  inset: 6px 1px;
-  background: color-mix(in oklab, var(--key-hue) 11%, var(--bg-surface));
-  transform: rotate(16deg) scale(0.92);
-  border-radius: 55% 45% 44% 56% / 55% 35% 65% 45%;
-}
-.toolbar-reference .tb-slot[data-held='true']::before {
-  background: color-mix(in oklab, var(--key-hue) 29%, var(--bg-surface));
-  transform: rotate(12deg) scale(1.02);
-}
-.toolbar-reference .tb-shapes-slot::before {
-  inset: 1px;
-  background: #ffebc9;
-  transform: rotate(5deg);
-  border-radius: 48% 52% 40% 60% / 40% 36% 64% 60%;
-}
-.toolbar-reference .tb-object svg {
-  filter: drop-shadow(2px 4px 3px rgb(64 59 85 / 13%));
-}
-.toolbar-reference .tb-shapes-slot svg {
-  filter: none;
-}
-.tb-plate-art {
-  width: 100%;
-  height: 100%;
-  overflow: visible;
-}
-.tb-plate-top {
-  stop-color: #fff;
-}
-.tb-plate-bottom {
-  stop-color: #f7f8fb;
-}
-:root {
-  --tb-plate-shadow: drop-shadow(0 9px 12px rgb(76 75 120 / 13%))
-    drop-shadow(0 2px 3px rgb(76 75 120 / 4%));
-}
-.style-group-plate {
-  position: absolute;
-  inset: 0;
-  border-radius: 999px;
-  background: linear-gradient(var(--style-well-top), var(--style-well-bottom));
-  box-shadow:
-    0 4px 8px rgb(65 65 90 / 9%),
-    0 1px 2px rgb(65 65 90 / 3%),
-    inset 0 1px 2px var(--style-rim);
-}
-.style-reference {
-  --style-well-top: #fff;
-  --style-well-bottom: #fdfdfe;
-  --style-rim: rgb(255 255 255 / 95%);
-  --style-ink: #292d3b;
-  gap: 18px;
-  padding: 6px 14px;
-  max-width: calc(100vw - 1rem);
-}
-.style-plate {
-  position: absolute;
-  inset: 0 auto auto 0;
-  pointer-events: none;
-  overflow: visible;
-  filter: drop-shadow(0 7px 10px rgb(88 81 142 / 15%))
-    drop-shadow(0 2px 3px rgb(75 71 105 / 4%));
-}
-.style-color-section {
-  gap: 14px;
-}
-.style-control-group {
-  padding: 0 4px;
-}
-.style-reference .style-control-group:has(.tb-mark) {
-  padding: 0;
-}
-.style-reference .lg-key {
-  width: 30px;
-  height: 34px;
-  min-width: 30px;
-}
-.style-reference .style-swatch {
-  width: 22px;
-  height: 22px;
-  background-image: linear-gradient(rgb(255 255 255 / 9%), rgb(0 0 0 / 3%));
-  box-shadow: inset 0 1px 2px rgb(0 0 0 / 12%);
-}
-.style-reference [aria-checked='true'] .style-swatch {
-  box-shadow:
-    0 0 0 2px var(--style-well-top),
-    0 0 0 3px rgb(85 87 95 / 13%),
-    0 2px 4px 3px rgb(42 43 53 / 19%),
-    inset 0 1px 2px rgb(0 0 0 / 15%) !important;
-}
-.style-reference .style-wheel-key {
-  width: 34px;
-  min-width: 34px;
-  border: 0;
-  background: linear-gradient(var(--style-well-top), var(--style-well-bottom));
-  box-shadow:
-    0 4px 8px rgb(65 65 90 / 12%),
-    inset 0 1px 2px var(--style-rim);
-}
-.style-reference .style-color-wheel {
-  width: 26px;
-  height: 26px;
-  background-blend-mode: normal;
-  box-shadow: inset 0 0 1px rgb(255 255 255 / 65%);
-}
-.style-reference .style-detail-group .lg-key {
-  width: 34px;
-  min-width: 34px;
-  color: var(--style-ink);
-}
-.style-reference .style-detail-group svg {
-  filter: drop-shadow(0 1px 1px rgb(0 0 0 / 12%));
-}
-.style-no-fill {
-  width: 12px;
-  height: 3px;
-  border-radius: 999px;
-  background: currentColor;
-  box-shadow: 0 1px 1px rgb(0 0 0 / 12%);
-}
-.style-reference .style-detail-group [aria-label='Opacity'] svg {
-  width: 22px;
-  height: 22px;
-}
-.style-reference .tb-mark {
-  background: linear-gradient(145deg, #d9e9ff, #b6d4fd);
-  box-shadow: inset 0 1px 2px rgb(255 255 255 / 50%);
-}
-.style-reference .lg-key[aria-checked='true'] > .lg-wash {
-  background: transparent;
-}
-.style-reference .lg-key:focus-visible {
+.tbar-item:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
 }
-:root[data-theme='dark'] .tb-plate-top {
-  stop-color: #36363e;
+
+.tbar-item:disabled,
+.tbar-item[aria-disabled='true'] {
+  opacity: 0.4;
+  pointer-events: none;
 }
-:root[data-theme='dark'] .tb-plate-bottom {
-  stop-color: #29292f;
+
+/* A key that opens something says so, quietly: a small wedge in the trailing
+   bottom corner, which is the desktop convention and costs no width. Sized
+   here rather than by the glyph rule above, which it is explicitly excluded
+   from — a caret is a mark on a key, not the key's symbol. */
+.tbar-caret {
+  position: absolute;
+  inset-block-end: 3px;
+  inset-inline-end: 3px;
+  width: 4px;
+  height: 4px;
+  color: var(--fg-subtle);
+  pointer-events: none;
 }
-:root[data-theme='dark'] .toolbar-reference .tb-hue {
-  color: #d7d9e9;
+
+/* Mirrored in RTL, so the wedge still points out of the trailing corner. */
+[dir='rtl'] .tbar-caret {
+  transform: scaleX(-1);
 }
-:root[data-theme='dark'] .toolbar-reference .tb-hue[aria-current='true'],
-:root[data-theme='dark'] .toolbar-reference .tb-hue[aria-pressed='true'] {
-  color: #173d78;
+
+.tbar-item:hover .tbar-caret {
+  color: var(--fg-secondary);
 }
-:root[data-theme='dark'] .toolbar-reference .tb-shapes-slot::before {
-  background: #6d5737;
+
+.tbar-item[aria-current='true'] .tbar-caret {
+  color: currentColor;
 }
-:root[data-theme='dark'] .toolbar-reference .tb-shapes-slot svg {
-  color: #f1d8b5;
+
+/* --------------------------------------------------------------------------
+ * A menu or flyout opened from the bar.
+ *
+ * Compact rows, one hover fill, one selected fill, and the same corner as the
+ * bar. Nothing here is a second material.
+ * -------------------------------------------------------------------------- */
+.tbar-menu {
+  padding: 4px;
 }
-:root:is(.dark, [data-theme='dark']) .style-group-plate {
-  box-shadow: 0 3px 8px rgb(0 0 0 / 15%);
+
+.tbar-menu [role^='menuitem'] {
+  min-height: 32px;
+  border-radius: var(--tb-key-radius);
 }
-:root:is(.dark, [data-theme='dark']) .style-reference {
-  --style-well-top: #41414a;
-  --style-well-bottom: #383840;
-  --style-rim: rgb(255 255 255 / 10%);
-  --style-ink: #e1e3ed;
+
+/* --------------------------------------------------------------------------
+ * The style bar.
+ *
+ * The tool's properties on the bar's own plate: a colour ramp, a weight row
+ * and one key opening the options panel. A value is marked by a neutral pill
+ * that slides (`.tbar-chip`), a colour by a ring; blue stays the toolbar's.
+ * -------------------------------------------------------------------------- */
+.tbar-style {
+  --tb-item: 32px;
+  --tb-pad: 4px;
+  display: flex;
+  align-items: center;
+  gap: var(--tb-gap);
+  padding: var(--tb-pad);
+  background-color: var(--bg-surface);
+  max-width: calc(100vw - 1rem);
 }
-:root:is(.dark, [data-theme='dark']) .style-reference .tb-mark {
-  background: #3e608e;
+
+.tbar-style > .tbar-group + .tbar-group {
+  margin-inline-start: 0;
 }
-:root.dark .style-plate .tb-plate-top {
-  stop-color: #36363e;
+
+@media (pointer: coarse) {
+  .tbar-style {
+    --tb-item: 40px;
+  }
 }
-:root.dark .style-plate .tb-plate-bottom {
-  stop-color: #29292f;
+
+/* A segmented switch: stroke weight, eraser mode. The chosen segment is marked
+   by one chip that travels rather than by a fill lit and unlit per key, so the
+   control reads as one choice with a position instead of four independent
+   buttons. */
+.tbar-seg {
+  position: relative;
+  display: grid;
+  grid-auto-flow: column;
+  align-items: center;
 }
-@media (max-width: 899px) {
-  .style-reference {
+
+.tbar-chip {
+  position: absolute;
+  z-index: 0;
+  inset-block: 0;
+  inset-inline-start: 0;
+  width: calc(100% / var(--seg-count));
+  border: 1px solid var(--border);
+  border-radius: var(--tb-key-radius);
+  background-color: var(--tb-seg-chip);
+  pointer-events: none;
+  transform: translateX(calc(var(--seg-index) * 100%));
+  transition:
+    transform var(--duration-base) var(--ease-out-quart),
+    opacity var(--duration-fast) var(--ease-out-quart);
+}
+
+/* RTL: the chip's cells run the other way, so its step does too. */
+[dir='rtl'] .tbar-chip {
+  transform: translateX(calc(var(--seg-index) * -100%));
+}
+
+/* A key inside a segmented switch sits over the travelling chip, so it must
+   not paint a selected fill of its own — two marks for one choice, and the
+   second one cross-fades where the first travels. */
+.tbar-seg .tbar-item {
+  z-index: 1;
+  background-color: transparent;
+}
+
+/* The chip under it is a neutral pill, not the blue mark, so the key's own ink stays
+   the bar's ink — and a key whose content is a colour keeps that colour. */
+.tbar-seg .tbar-item[aria-checked='true'],
+.tbar-seg .tbar-item[aria-checked='true']:hover:not(:disabled):not([aria-disabled='true']) {
+  background-color: transparent;
+  color: var(--fg);
+}
+
+.tbar-seg .tbar-item:hover:not([aria-checked='true']) {
+  background-color: var(--tb-track);
+}
+
+/* A segmented row stretched across the options panel. */
+.tbar-seg-fill {
+  grid-auto-columns: 1fr;
+  width: 100%;
+}
+
+.tbar-seg-fill .tbar-item {
+  width: 100%;
+}
+
+/* A stroke-weight sample: a short bar in the key's own ink, so weight never
+   reads as a colour. Height is the weight, set per key. */
+.tbar-weight {
+  width: 18px;
+  border-radius: var(--radius-full);
+  background-color: currentColor;
+}
+
+/* The sticker palette: two rows of stamps that grow sideways as the board
+   uploads more, scrolling rather than widening the plate past its cap. The
+   chosen stamp sits on the same neutral pill as a segmented choice — blue
+   marks the tool, not which artwork it lays down — and keeps its own colours. */
+.tbar-stickers {
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(2, var(--tb-item));
+  gap: 2px;
+  max-width: min(26rem, calc(100vw - 6rem));
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.tbar-stickers .tbar-item[aria-checked='true'],
+.tbar-stickers .tbar-item[aria-checked='true']:hover:not(:disabled):not([aria-disabled='true']) {
+  background-color: var(--tb-seg-chip);
+  box-shadow: inset 0 0 0 1px var(--border);
+  color: var(--fg);
+}
+
+.tbar-stickers .tbar-item:hover:not([aria-checked='true']) {
+  background-color: var(--tb-track);
+}
+
+.tbar-stickers .tbar-item > :is(svg, img) {
+  transition: transform var(--duration-fast) var(--ease-out-quart);
+}
+
+.tbar-stickers .tbar-item:hover > :is(svg, img) {
+  transform: scale(1.12);
+}
+
+/* The colour ramp runs as one strip, dot to dot, with no air between keys. */
+.tbar-ramp {
+  gap: 0;
+}
+
+/* The options panel: labelled rows of segmented controls. */
+.tbar-panel {
+  --tb-item: 32px;
+  gap: 12px;
+  padding: 8px;
+  font-size: 14px;
+}
+
+.tbar-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tbar-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding-inline: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+  color: var(--fg-muted);
+}
+
+/* Glyphs in the panel keep their own drawn size (16px), not the bar's 20px. */
+.tbar-panel .tbar-item > svg:not(.tbar-caret) {
+  width: auto;
+  height: auto;
+}
+
+@media (pointer: coarse) {
+  .tbar-panel {
+    --tb-item: 40px;
+  }
+}
+
+/* A colour swatch. The chosen one wears a ring rather than a ground: a ground
+   behind a swatch is a second colour sitting next to the colour being chosen,
+   which shifts how every swatch beside it reads. Drawn in `box-shadow` so the
+   dot never changes size and pushes the ramp along. */
+.tbar-swatch {
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-full);
+  border: 1px solid;
+}
+
+/* The ring is the bar's own ink with a cut of the plate between it and the
+   swatch, so the mark is legible against every swatch in the ramp — including
+   the one that *is* the ink colour. */
+.tbar-item[aria-checked='true'] > .tbar-swatch,
+.tbar-swatch[data-selected] {
+  box-shadow:
+    0 0 0 2px var(--bg-surface),
+    0 0 0 3.5px var(--fg);
+}
+
+.tbar-item[aria-checked='true']:has(> .tbar-swatch),
+.tbar-item[aria-checked='true']:has(> .tbar-swatch):hover:not(:disabled):not([aria-disabled='true']) {
+  background-color: transparent;
+}
+
+/* Narrow viewports: the floating style strip can outrun the screen, and the
+   fix has to stay on one axis — a vertical scroller would open for the pixel
+   the focus rings bleed into the padding. */
+@media (max-width: 640px) {
+  .tbar-style {
     overflow-x: auto;
     overflow-y: hidden;
     scrollbar-width: none;
   }
-  .style-reference::-webkit-scrollbar {
-    display: none;
-  }
-}
-@media (max-width: 699px) {
-  .toolbar-reference .toolbar-desktop {
-    display: none;
-  }
-  .toolbar-reference .toolbar-compact {
-    display: flex;
-  }
-  .toolbar-reference .tb-key {
-    width: 40px;
-    height: 44px;
-    min-width: 40px;
-  }
-  .toolbar-reference {
-    padding: 4px 8px;
-  }
-}
 
-.toolbar-reference [data-tool='select'] svg path {
-  fill: currentColor;
-}
-
-@media (max-width: 699px) {
-  .toolbar-reference > .tb-plate {
-    border-radius: 999px;
-    background: var(--bg-surface);
-  }
-  .toolbar-reference > .tb-plate > svg {
+  .tbar-style::-webkit-scrollbar {
     display: none;
   }
 }
 
-@media (min-width: 700px) {
-  .toolbar-reference .toolbar-desktop {
-    display: flex;
+/* --------------------------------------------------------------------------
+ * Motion, contrast and forced colours.
+ * -------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  .tbar-item,
+  .tbar-chip,
+  .tbar-stickers .tbar-item > :is(svg, img) {
+    transition: none;
   }
-  .toolbar-reference .toolbar-compact {
-    display: none;
+
+  .tbar-item:active {
+    transform: none;
   }
 }
+
+/* The selected fill is a tint, and a tint is the first thing to go when
+   someone has asked for more contrast. Here it becomes a solid accent with its
+   own foreground. */
+@media (prefers-contrast: more) {
+  .tbar-item[aria-current='true'],
+  .tbar-item[aria-pressed='true'],
+  .tbar-item[aria-checked='true']:not(:has(> .tbar-swatch)),
+  .tbar-item[data-pressed],
+  .tbar-chip {
+    background-color: var(--action-solid);
+    color: var(--action-foreground);
+  }
+
+  .tbar-seg .tbar-item[aria-checked='true'] {
+    color: var(--action-foreground);
+  }
+
+  .tbar-surface {
+    border-color: var(--fg-secondary);
+  }
+}
+
+@media (forced-colors: active) {
+  .tbar-surface {
+    background: Canvas;
+    border-color: CanvasText;
+  }
+
+  .tbar-item {
+    color: ButtonText;
+    forced-color-adjust: none;
+    background-color: Canvas;
+  }
+
+  .tbar-item:hover:not(:disabled) {
+    background-color: Canvas;
+    outline: 1px solid Highlight;
+    outline-offset: -1px;
+  }
+
+  .tbar-item[aria-current='true'],
+  .tbar-item[aria-pressed='true'],
+  .tbar-item[aria-checked='true'],
+  .tbar-chip {
+    background-color: Highlight;
+    color: HighlightText;
+  }
+
+  .tbar-item:disabled {
+    color: GrayText;
+    opacity: 1;
+  }
+
+  .tbar-sep {
+    background-color: CanvasText;
+  }
+}
+
+/* ==========================================================================
+ * 10. The selection popup
+ *
+ * The bar that appears over a selected shape, and the panel its overflow key
+ * opens. Both are built in Firefox's chrome idiom rather than the board's, on
+ * purpose: this is the one surface that appears *on top of the user's own
+ * drawing*, and the browser's own popup language is the one vocabulary every
+ * user of this app has already learned to read as "chrome, not content".
+ *
+ * What makes it Firefox rather than merely flat:
+ *
+ *   - Its palette is now the board's. When this surface was built the board was
+ *     still warm, so it carried a private copy of the Firefox greys; section 1
+ *     is that palette now, so these are aliases and a retheme happens once.
+ *     They stay named `--fxp-*` and scoped to the panel so a caller inside it
+ *     can still bend one step without reaching the rest of the app.
+ *   - Hover and press are mixed from `currentColor`, not from a fixed grey.
+ *     That is literally how Firefox derives `--button-hover-bgcolor`, and it
+ *     is why one rule serves the neutral keys, the accented one and the
+ *     destructive one without a variant per state.
+ *   - Geometry: 8px panel, 4px item, 32px key, 16px glyph, 4px padding — the
+ *     Proton scale. Keys butt against each other and runs are grouped by air, as on
+ *     the main toolbar.
+ *   - Glyphs rest at 80% opacity and come up to full under the pointer. That
+ *     is Firefox's `fill-opacity: .8`, and it is what keeps a row of sixteen
+ *     icons from reading as louder than the page beneath it.
+ *   - The overflow menu is a Firefox context menu: a flat list of rows, the
+ *     accelerator set against the trailing edge in the muted ink, full-bleed
+ *     rules between runs, and alignment as an inline strip of keys.
+ *
+ * Unlayered, like section 9, so it beats the Tailwind utilities the base-ui
+ * wrappers bring without a `!` at any call site.
+ * ========================================================================== */
+
+.fxp-panel,
+.fxp-tip {
+  --fxp-bg: var(--bg-popup);
+  --fxp-fg: var(--fg);
+  --fxp-fg-muted: var(--fg-muted);
+  --fxp-border: var(--border);
+  --fxp-shadow: var(--s-panel);
+  --fxp-accent: var(--tb-sel-fg);
+
+  /* The same selection tint the toolbar wears. One "this control is on" in the
+     app, whether the control is on the bar or over the drawing. */
+  --fxp-accent-bg: var(--tb-sel-bg);
+  --fxp-accent-bg-hover: var(--tb-sel-bg-hover);
+
+  --fxp-danger: var(--status-danger-fg);
+  --fxp-danger-bg: color-mix(in srgb, var(--fxp-danger) 11%, transparent);
+
+  /* Mixed from the glyph's own colour, so the same two declarations carry the
+     neutral key, the accented key and the destructive one. A menu row lights
+     at the same strength as a toolbar key — Firefox does not grade the two. */
+  --fxp-hover: var(--tb-track);
+  --fxp-press: var(--tb-chip);
+  --fxp-row-hover: var(--tb-track);
+
+  --fxp-radius: var(--radius-panel);
+  --fxp-radius-item: var(--radius-control);
+  --fxp-key: 32px;
+  /* Firefox's own panel easing token. Very fast out of the gate, long settle. */
+  --fxp-ease: cubic-bezier(0.07, 0.95, 0, 1);
+}
+
 @media (pointer: coarse) {
-  .toolbar-reference .tb-key,
-  .style-reference .lg-key,
-  .style-reference .style-detail-group .lg-key {
-    width: 44px;
-    min-width: 44px;
+  .fxp-panel {
+    --fxp-key: 44px;
+  }
+
+  /* A row is a target too, and a blunt pointer does not get a second try at
+     "Send backward" when "Bring forward" sits 32px above it. */
+  .fxp-row {
+    min-height: 44px;
+  }
+}
+
+/* --------------------------------------------------------------------------
+ * The material. One plate for the bar, the overflow panel and the tooltip.
+ * -------------------------------------------------------------------------- */
+.fxp-panel {
+  border: 1px solid var(--fxp-border);
+  border-radius: var(--fxp-radius);
+  background-color: var(--fxp-bg);
+  color: var(--fxp-fg);
+  box-shadow: var(--fxp-shadow);
+  font-size: 13px;
+  line-height: 16px;
+  font-weight: 400;
+}
+
+/* --------------------------------------------------------------------------
+ * The bar.
+ * -------------------------------------------------------------------------- */
+.fxp-bar {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 4px;
+  /* The main toolbar's plate, so the two floating bars read as one family. */
+  border-radius: var(--radius-toolbar);
+  box-shadow: var(--s-toolbar);
+}
+
+/* Runs of keys are grouped by air, the way the main toolbar's groups are —
+   a hairline this short is a mark nobody reads. */
+.fxp-bar-sep {
+  flex: none;
+  width: 0;
+  margin-inline: 4px;
+}
+
+.fxp-key {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--fxp-key);
+  height: var(--fxp-key);
+  padding: 0;
+  border: 0;
+  border-radius: var(--fxp-radius-item);
+  background-color: transparent;
+  color: var(--fxp-fg);
+  /* Chrome, not content: a browser toolbar keeps the arrow. */
+  cursor: default;
+  transition:
+    background-color 100ms var(--fxp-ease),
+    opacity 100ms var(--fxp-ease);
+}
+
+.fxp-key > svg {
+  width: 16px;
+  height: 16px;
+  stroke-width: 1.5;
+  /* Firefox's `fill-opacity: .8` on toolbar glyphs, transposed to a stroke
+     icon set: at rest the row sits back from the drawing under it. */
+  opacity: 0.8;
+}
+
+.fxp-key:hover:not(:disabled) {
+  background-color: var(--fxp-hover);
+}
+
+.fxp-key:hover:not(:disabled) > svg,
+.fxp-key[aria-expanded='true'] > svg,
+.fxp-key[aria-pressed='true'] > svg {
+  opacity: 1;
+}
+
+.fxp-key:active:not(:disabled),
+.fxp-key[aria-expanded='true'] {
+  background-color: var(--fxp-press);
+}
+
+/* The key that is on — lock. The same blue tint the toolbar's held tool
+   wears, so "on" means one thing on the bar and over the drawing. */
+.fxp-key[aria-pressed='true'] {
+  background-color: var(--fxp-accent-bg);
+  color: var(--tb-sel-fg);
+}
+
+.fxp-key[aria-pressed='true'] > svg {
+  opacity: 1;
+}
+
+.fxp-key[aria-pressed='true']:hover:not(:disabled) {
+  background-color: var(--fxp-accent-bg-hover);
+}
+
+.fxp-key--danger:hover:not(:disabled) {
+  background-color: var(--fxp-danger-bg);
+  color: var(--fxp-danger);
+}
+
+.fxp-key:disabled {
+  color: var(--fxp-fg-muted);
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.fxp-key:focus-visible {
+  outline: 2px solid var(--fxp-accent);
+  outline-offset: -2px;
+}
+
+/* --------------------------------------------------------------------------
+ * The overflow panel: rows, rules, and the subview it walks into.
+ * -------------------------------------------------------------------------- */
+.fxp-menu {
+  width: 232px;
+  padding-block: 4px;
+}
+
+.fxp-opacity {
+  width: 200px;
+  padding: 8px;
+}
+
+.fxp-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  margin-inline: 4px;
+  padding-inline: 8px;
+  border-radius: var(--fxp-radius-item);
+  color: var(--fxp-fg);
+  cursor: default;
+  outline: none;
+  user-select: none;
+}
+
+.fxp-row > svg:first-child {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  stroke-width: 1.5;
+  opacity: 0.8;
+}
+
+/* base-ui drives the pointer and the keyboard through one `highlighted` state,
+   which is what keeps arrowing and hovering from looking like two things. */
+.fxp-row[data-highlighted],
+.fxp-row:hover:not([data-disabled]) {
+  background-color: var(--fxp-row-hover);
+}
+
+.fxp-row[data-highlighted] > svg:first-child,
+.fxp-row:hover > svg:first-child {
+  opacity: 1;
+}
+
+/* While its flyout is showing, the row stays lit — the menu has to say where
+   the second panel came from. */
+.fxp-row[data-popup-open] {
+  background-color: var(--fxp-row-hover);
+}
+
+.fxp-row[data-disabled] {
+  color: var(--fxp-fg-muted);
+  opacity: 0.55;
+}
+
+.fxp-row--danger {
+  color: var(--fxp-danger);
+}
+
+.fxp-row--danger[data-highlighted],
+.fxp-row--danger:hover:not([data-disabled]) {
+  background-color: var(--fxp-danger-bg);
+}
+
+/* The trailing half of a row: a shortcut, or the wedge that says this row
+   leads somewhere. */
+.fxp-row-aux {
+  margin-inline-start: auto;
+  padding-inline-start: 12px;
+  color: var(--fxp-fg-muted);
+  font: inherit;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Alignment as a strip of keys inside the menu: the glyphs say which edge,
+   so the run needs no words and no flyout. */
+.fxp-strip {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin: 4px 4px 0;
+}
+
+.fxp-strip-key {
+  display: inline-flex;
+  flex: 1 1 0;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  height: 32px;
+  border-radius: var(--fxp-radius-item);
+  color: var(--fxp-fg);
+  cursor: default;
+  outline: none;
+}
+
+.fxp-strip-key > svg {
+  width: 16px;
+  height: 16px;
+  stroke-width: 1.5;
+  opacity: 0.8;
+}
+
+.fxp-strip-key[data-highlighted],
+.fxp-strip-key:hover {
+  background-color: var(--fxp-row-hover);
+}
+
+.fxp-strip-key[data-highlighted] > svg,
+.fxp-strip-key:hover > svg {
+  opacity: 1;
+}
+
+.fxp-strip-key:active {
+  background-color: var(--fxp-press);
+}
+
+.fxp-strip-gap {
+  flex: none;
+  width: 6px;
+}
+
+@media (pointer: coarse) {
+  .fxp-strip-key {
     height: 44px;
   }
-  .toolbar-reference .tb-slot {
-    width: 44px;
+}
+
+.fxp-row-chevron {
+  margin-inline-start: auto;
+  width: 12px;
+  height: 12px;
+  stroke-width: 1.5;
+  color: var(--fxp-fg-muted);
+}
+
+[dir='rtl'] .fxp-row-chevron {
+  transform: scaleX(-1);
+}
+
+/* Full-bleed, the way a panel separator is in Firefox — the rows are inset,
+   the rule is not. */
+.fxp-rule {
+  height: 1px;
+  margin-block: 4px;
+  background-color: var(--fxp-border);
+}
+
+/* --------------------------------------------------------------------------
+ * Motion. One drop, shared by the bar and by every menu it opens.
+ * -------------------------------------------------------------------------- */
+@keyframes fxp-drop {
+  from {
+    opacity: 0;
+    transform: translateY(var(--fxp-from, -6px));
+  }
+}
+
+.fxp-panel[data-open] {
+  animation: fxp-drop 150ms var(--fxp-ease);
+}
+
+/* Flipped below the selection: it still arrives from the selection's side. */
+.fxp-panel[data-below] {
+  --fxp-from: 6px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fxp-panel[data-open] {
+    animation: none;
+  }
+}
+
+/* --------------------------------------------------------------------------
+ * The tooltip. Firefox's is a small plate of the same material, and it names
+ * the shortcut in parentheses after the label.
+ * -------------------------------------------------------------------------- */
+.fxp-tip {
+  padding: 3px 8px;
+  border: 1px solid var(--fxp-border);
+  border-radius: var(--fxp-radius-item);
+  background-color: var(--fxp-bg);
+  color: var(--fxp-fg);
+  box-shadow: var(--fxp-shadow);
+  font-size: 12px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.fxp-tip-key {
+  margin-inline-start: 8px;
+  color: var(--fxp-fg-muted);
+  font: inherit;
+}
+
+/* --------------------------------------------------------------------------
+ * Accessibility fallbacks. The tints above are the whole state model, and a
+ * tint is the first thing lost in either mode.
+ * -------------------------------------------------------------------------- */
+@media (prefers-contrast: more) {
+  .fxp-key[aria-pressed='true'] {
+    background-color: var(--fxp-accent);
+    color: #ffffff;
+  }
+
+  :is(.dark) .fxp-key[aria-pressed='true'] {
+    color: #1c1c1c;
+  }
+
+  .fxp-panel {
+    border-color: var(--fxp-fg-muted);
+  }
+}
+
+@media (forced-colors: active) {
+  .fxp-panel,
+  .fxp-tip {
+    background: Canvas;
+    border-color: CanvasText;
+    color: CanvasText;
+    forced-color-adjust: none;
+  }
+
+  .fxp-key,
+  .fxp-row {
+    color: ButtonText;
+  }
+
+  .fxp-key:hover:not(:disabled),
+  .fxp-row[data-highlighted] {
+    background-color: Highlight;
+    color: HighlightText;
+  }
+
+  .fxp-key[aria-pressed='true'] {
+    background-color: Highlight;
+    color: HighlightText;
+  }
+
+  .fxp-key:disabled,
+  /* While its flyout is showing, the row stays lit — the menu has to say where
+   the second panel came from. */
+.fxp-row[data-popup-open] {
+  background-color: var(--fxp-row-hover);
+}
+
+.fxp-row[data-disabled] {
+    color: GrayText;
+    opacity: 1;
+  }
+
+  .fxp-bar-sep,
+  .fxp-rule {
+    background-color: CanvasText;
   }
 }

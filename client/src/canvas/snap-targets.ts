@@ -51,8 +51,10 @@ export function snapTargetShapes(
   movingIds: Set<string>,
   ancestor: string | null,
   region: Bounds,
+  /** Snap even with the board's snapping preference off (construction tools). */
+  force = false,
 ): Shape[] {
-  if (!useCanvasUiStore.getState().snappingEnabled) return [];
+  if (!force && !useCanvasUiStore.getState().snappingEnabled) return [];
   const targets: Shape[] = [];
   const seen = new Set<string>();
   const add = (id: string) => {

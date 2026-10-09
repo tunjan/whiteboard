@@ -5,7 +5,7 @@ import {
 } from './equation-render';
 
 describe('equation SVG rendering', () => {
-  it('caches a self-contained path render with measured dimensions', async () => {
+  it('caches a self-contained glyph render with measured dimensions', async () => {
     const latex = String.raw`\frac{a}{b}+\sqrt{x^2}`;
     const render = await typesetEquation(latex);
 
@@ -14,7 +14,9 @@ describe('equation SVG rendering', () => {
     expect(render.width).toBeGreaterThan(0);
     expect(render.height).toBeGreaterThan(0);
     expect(render.svg).toContain('<path');
-    expect(render.svg).not.toContain('<use');
+    // `fontCache: 'local'`: glyphs are defined inside this SVG and reused.
+    expect(render.svg).toContain('<defs>');
+    expect(render.svg).toContain('<use');
     const rootTag = render.svg.slice(0, render.svg.indexOf('>'));
     expect(rootTag).not.toMatch(/\swidth=/);
     expect(rootTag).not.toMatch(/\sheight=/);
@@ -101,12 +103,15 @@ describe('equation SVG rendering', () => {
 
       expect('error' in render).toBe(false);
       if ('error' in render) return;
-      // `id` and `style` are unused by a self-contained path render, so
-      // removing them costs nothing and closes DOM clobbering and CSS
-      // injection along with the `javascript:` link.
-      expect(render.svg).not.toMatch(/\s(?:xlink:)?href=/i);
+      // The only ids and links left are MathJax's own glyph cache, pointing
+      // inside the formula. `style` is unused, so removing it costs nothing.
+      const ids = [...render.svg.matchAll(/\sid="([^"]*)"/gi)];
+      const links = [...render.svg.matchAll(/\s(?:xlink:)?href="([^"]*)"/gi)];
+      expect(ids.length).toBeGreaterThan(0);
+      expect(links.length).toBeGreaterThan(0);
+      for (const [, id] of ids) expect(id).toMatch(/^MJX-[\w-]+$/);
+      for (const [, href] of links) expect(href).toMatch(/^#MJX-[\w-]+$/);
       expect(render.svg).not.toMatch(/\sstyle=/i);
-      expect(render.svg).not.toMatch(/\sid=/i);
       expect(render.svg).not.toMatch(/\son[a-z]+=/i);
     });
 

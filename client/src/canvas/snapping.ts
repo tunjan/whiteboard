@@ -244,6 +244,38 @@ function gapChainIntervals(
   return intervals;
 }
 
+/** Ascending order of `others` by one coordinate, with that coordinate. */
+function sortedBy(
+  others: Bounds[],
+  key: (b: Bounds) => number,
+): { at: Int32Array; keys: Float64Array } {
+  const byIndex = Float64Array.from(others, key);
+  const at = Int32Array.from(others.keys()).sort(
+    (p, q) => byIndex[p]! - byIndex[q]!,
+  );
+  return { at, keys: Float64Array.from(at, (i) => byIndex[i]!) };
+}
+
+/** First index whose key is >= value. */
+function lowerBound(keys: Float64Array, value: number): number {
+  let lo = 0;
+  let hi = keys.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (keys[mid]! < value) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
+/** One placement a static pair offers: 0 centre, 1 extend left, 2 extend right. */
+interface GapHit {
+  /** Index of the lower-starting box of the pair, and of the other one. */
+  ia: number;
+  ib: number;
+  kind: 0 | 1 | 2;
+}
+
 /**
  * Find a centered-gap or repeated-gap placement along one axis. Static pairs
  * must overlap on the cross axis, which prevents unrelated rows/columns from
@@ -305,44 +337,105 @@ function bestGapAlong(
     };
   };
 
+  // Every pair's three placements are a fixed coordinate the moving box must
+  // meet, so rather than visit all n² pairs, each box looks up only the partners
+  // that would put a placement within reach — a range search over the boxes
+  // sorted along the axis. `reach` is a hair wider than the threshold because
+  // `register` compares rounded values; it re-checks exactly.
+  const reach = threshold + 1e-6;
+  const byStart = sortedBy(others, start);
+  const byEnd = sortedBy(others, end);
+  const hits: GapHit[] = [];
+  const touchesMoving = (b: Bounds) =>
+    overlaps(crossStart(moving), crossEnd(moving), crossStart(b), crossEnd(b));
+  // The scan's orientation: the lower start leads, and a tie keeps the order
+  // the two boxes arrived in.
+  const leads = (ia: number, ib: number) =>
+    start(others[ia]!) < start(others[ib]!) ||
+    (start(others[ia]!) === start(others[ib]!) && ia < ib);
+  const partners = (
+    sorted: { at: Int32Array; keys: Float64Array },
+    lo: number,
+    hi: number,
+    visit: (i: number) => void,
+  ) => {
+    for (
+      let k = lowerBound(sorted.keys, lo);
+      k < sorted.keys.length && sorted.keys[k]! <= hi;
+      k++
+    ) {
+      visit(sorted.at[k]!);
+    }
+  };
+
   for (let i = 0; i < others.length; i++) {
-    for (let j = i + 1; j < others.length; j++) {
-      let a = others[i]!;
-      let b = others[j]!;
-      if (start(a) > start(b)) [a, b] = [b, a];
-      if (end(a) >= start(b)) continue;
-      const pairCross0 = Math.max(crossStart(a), crossStart(b));
-      const pairCross1 = Math.min(crossEnd(a), crossEnd(b));
-      if (!overlaps(crossStart(a), crossEnd(a), crossStart(b), crossEnd(b))) {
-        continue;
-      }
-      if (
-        !overlaps(crossStart(moving), crossEnd(moving), pairCross0, pairCross1)
-      ) {
-        continue;
-      }
+    const box = others[i]!;
+    // The pair's shared band lies inside each box, so a box clear of the moving
+    // box's band cannot be in any pair that snaps it.
+    if (!touchesMoving(box)) continue;
+    // As the leading box: centring needs start(b) ≈ 2·centre − end(a), and
+    // extending left needs start(b) ≈ start(a) + end(a) − end(moving).
+    const centreAt = 2 * movingCenter - end(box);
+    partners(byStart, centreAt - 2 * reach, centreAt + 2 * reach, (j) => {
+      if (j !== i && leads(i, j)) hits.push({ ia: i, ib: j, kind: 0 });
+    });
+    const leftAt = start(box) + end(box) - end(moving);
+    partners(byStart, leftAt - reach, leftAt + reach, (j) => {
+      if (j !== i && leads(i, j)) hits.push({ ia: i, ib: j, kind: 1 });
+    });
+    // As the trailing box: extending right needs end(a) ≈ end(b) + start(b) −
+    // start(moving).
+    const rightAt = end(box) + start(box) - start(moving);
+    partners(byEnd, rightAt - reach, rightAt + reach, (j) => {
+      if (j !== i && leads(j, i)) hits.push({ ia: j, ib: i, kind: 2 });
+    });
+  }
+  // Equal-distance ties keep the first candidate registered, so replay the hits
+  // in the order a scan over every pair (i < j), then every placement, visits.
+  hits.sort(
+    (p, q) =>
+      Math.min(p.ia, p.ib) - Math.min(q.ia, q.ib) ||
+      Math.max(p.ia, p.ib) - Math.max(q.ia, q.ib) ||
+      p.kind - q.kind,
+  );
 
-      const gap = start(b) - end(a);
-      const pair: readonly [Bounds, Bounds] = [a, b];
+  for (const { ia, ib, kind } of hits) {
+    const a = others[ia]!;
+    const b = others[ib]!;
+    if (end(a) >= start(b)) continue;
+    const pairCross0 = Math.max(crossStart(a), crossStart(b));
+    const pairCross1 = Math.min(crossEnd(a), crossEnd(b));
+    if (!overlaps(crossStart(a), crossEnd(a), crossStart(b), crossEnd(b))) {
+      continue;
+    }
+    if (
+      !overlaps(crossStart(moving), crossEnd(moving), pairCross0, pairCross1)
+    ) {
+      continue;
+    }
 
+    const gap = start(b) - end(a);
+    const pair: readonly [Bounds, Bounds] = [a, b];
+
+    if (kind === 0) {
       // Center the moving box in the static gap.
-      if (!snapLess(gap, movingSize)) {
-        const desiredCenter = (end(a) + start(b)) / 2;
-        const offset = desiredCenter - movingCenter;
-        const movedStart = start(moving) + offset;
-        const movedEnd = end(moving) + offset;
-        register(offset, pair, (gap - movingSize) / 2, [
-          [end(a), movedStart],
-          [movedEnd, start(b)],
-        ]);
-      }
-
+      if (snapLess(gap, movingSize)) continue;
+      const desiredCenter = (end(a) + start(b)) / 2;
+      const offset = desiredCenter - movingCenter;
+      const movedStart = start(moving) + offset;
+      const movedEnd = end(moving) + offset;
+      register(offset, pair, (gap - movingSize) / 2, [
+        [end(a), movedStart],
+        [movedEnd, start(b)],
+      ]);
+    } else if (kind === 1) {
       // Extend the pair on either side using its existing gap length.
       const leftOffset = start(a) - gap - end(moving);
       register(leftOffset, pair, gap, [
         [end(moving) + leftOffset, start(a)],
         [end(a), start(b)],
       ]);
+    } else {
       const rightOffset = end(b) + gap - start(moving);
       register(rightOffset, pair, gap, [
         [end(a), start(b)],

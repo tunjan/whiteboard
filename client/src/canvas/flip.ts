@@ -137,6 +137,34 @@ function localMirror(
   }
 }
 
+/** A local mirror reverses no bindings when nothing else is being flipped. */
+const NOTHING_FLIPPED: ReadonlySet<string> = new Set();
+
+/**
+ * `shape` with its own geometry mirrored about one of its *local* axes, keeping
+ * the page rotation it has.
+ *
+ * This is the mirror a resize handle dragged past its anchor asks for: the box
+ * turns inside out along an axis of the shape's own frame, which is the frame
+ * the handle runs in. `flipShapes` mirrors about a *page* axis instead, and has
+ * to negate the rotation to say the same thing.
+ *
+ * Content that is read rather than drawn carries no local mirror, so its box
+ * turns over and the content does not — the rule a flip command already
+ * follows, and the reason a reversed photograph never falls out of a resize.
+ */
+export function mirrorShapeLocally(shape: Shape, horizontal: boolean): Shape {
+  const { props, turn } = localMirror(shape, horizontal, NOTHING_FLIPPED);
+  if (!props && !turn) return shape;
+  return {
+    ...shape,
+    ...(props ? { props: { ...shape.props, ...props } } : null),
+    // A polygon is symmetric about its own vertical axis, so its local mirror
+    // in y is the half turn that mirror is equivalent to.
+    ...(turn ? { rotation: shape.rotation + Math.PI } : null),
+  } as Shape;
+}
+
 /**
  * Mirror the selection across the centre of its own bounding box, in one undo
  * step. Locked roots are left alone; a locked child still follows its unlocked

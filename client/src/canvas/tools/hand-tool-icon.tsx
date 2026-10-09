@@ -10,7 +10,7 @@ export function HandToolIcon({ className }: { className?: string }) {
     <span
       aria-hidden="true"
       className={cn(
-        'relative block size-[18px] transition-transform duration-150 ease-out group-active/button:scale-[0.94] motion-reduce:transition-none',
+        'relative block size-5 transition-transform duration-150 ease-out motion-reduce:transition-none',
         isDragging && 'scale-[0.92]',
         className,
       )}

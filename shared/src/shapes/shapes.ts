@@ -209,6 +209,13 @@ export interface ImageProps {
   naturalWidth: number;
   naturalHeight: number;
   /**
+   * Blob id of a small copy (`IMAGE_THUMB_PX` on the long side) drawn in place
+   * of `blobId` once the image is small on screen. Optional: images uploaded
+   * before thumbnails existed, and ones already small, have none and always
+   * draw the original. Old clients ignore it.
+   */
+  thumbBlobId?: string;
+  /**
    * Visible sub-rectangle of the source image, as fractions in [0..1]. Omitted
    * means the full image is shown. Scale-invariant, so it survives resizing.
    */

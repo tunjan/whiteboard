@@ -137,7 +137,7 @@ export function cameraToTransform(camera: Camera, snap = true): string {
  * under a tenth of a pixel) freezes several frames before it comes to rest.
  * Crispness is something you look at while still; stepping is something you see
  * while moving. So callers pass `snap: false` for the duration of a camera
- * gesture and `true` once it settles — `useCameraTransform` in
+ * gesture and `true` once it settles — `useCameraFollow` in
  * `use-camera-interaction.ts` is the single place that decides which.
  *
  * Every consumer of the world transform must agree on the answer within a

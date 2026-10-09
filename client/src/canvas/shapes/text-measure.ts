@@ -559,17 +559,6 @@ export function textInkMargin(fontSize: number): number {
 }
 
 /**
- * Horizontal offset from a click point to the box's left edge, so that the
- * point the user aimed at is the edge their alignment implies: the start of the
- * text, its centre, or its end.
- */
-export function textAlignOffset(width: number, align: TextAlign): number {
-  if (align === 'middle') return -width / 2;
-  if (align === 'end') return -width;
-  return 0;
-}
-
-/**
  * Position that holds an auto-sized text still while its box resizes.
  *
  * `x`/`y` address the top-left corner, so a growing box always expands right

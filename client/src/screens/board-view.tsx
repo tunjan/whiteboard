@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import { setBoardAccess, useBoardAccessStore } from '@/board/board-access';
 import { startDocumentNotifications } from '@/board/document-notifications';
 import { useBoardLoadingStore } from '@/board/use-board-loading-store';
 import { boardRepository } from '@/board/server-board-repository';
@@ -16,6 +17,7 @@ import {
   setStoredName,
 } from '@/collab/identity';
 import { setLocalUser } from '@/collab/presence';
+import { useArrivalToasts } from '@/collab/use-arrival-toasts';
 import { VoiceAudioSinks } from '@/collab/voice/VoiceAudioSinks';
 import { BoardChrome } from '@/components/board-chrome';
 import { BoardLoadingVeil } from '@/components/board-loading-veil';
@@ -30,6 +32,8 @@ import { PdfRangeDialog } from '@/components/pdf-range-dialog';
 import { Toolbar } from '@/components/toolbar';
 import { Toaster } from '@/components/ui/toast';
 import { VideoPanel } from '@/components/video-panel';
+import { Button } from '@/components/ui/button';
+import { useToolStore } from '@/canvas/use-tool-store';
 import { navigate } from '@/router';
 
 // These panels pull in MathLive and its KaTeX assets. Keep them outside the
@@ -68,21 +72,40 @@ export function BoardView({ boardId }: { boardId: string }) {
   // on: watching someone else work is the common case here.
   useWakeLock(boardReady);
 
+  // The tutor shared the link; they are the one waiting to see it land.
+  useArrivalToasts(identity?.isTutor ?? false);
+
+  const access = useBoardAccessStore((s) => s.access);
+  // The link was reset or switched off, or the tutor removed this student:
+  // the board is torn down rather than left reconnecting in the background.
+  const accessEnded = access === 'denied' || access === 'removed';
+
+  // Each board answers for itself; nothing carries over to the next one.
+  useEffect(() => () => setBoardAccess('pending'), [boardId]);
+
+  // A view-only link keeps only the tools that change nothing.
+  useEffect(() => {
+    if (access === 'view') useToolStore.getState().setTool('hand');
+  }, [access]);
+
   // Load board content + collaboration.
   useEffect(() => {
+    if (accessEnded) return;
     pendingPage.current = new URLSearchParams(window.location.search).get('p');
     const dispose = loadBoard(boardId, { persist: true, collab: true });
     // After loadBoard — it resets the documents store, which would otherwise
     // land on the watcher as a repository that emptied itself.
     const stopDocumentNotifications = startDocumentNotifications(boardId);
+    let cancelled = false;
     void boardRepository.get(boardId).then((b) => {
-      if (b) setName(b.name);
+      if (b && !cancelled) setName(b.name);
     });
     return () => {
+      cancelled = true;
       stopDocumentNotifications();
       dispose();
     };
-  }, [boardId]);
+  }, [boardId, accessEnded]);
 
   // Deep link: jump to the shared page once it exists in the synced doc.
   useEffect(() => {
@@ -116,6 +139,21 @@ export function BoardView({ boardId }: { boardId: string }) {
     return () => {
       cancelled = true;
     };
+  }, [boardId]);
+
+  // iOS ignores the viewport's `user-scalable=no`, so a pinch that starts on
+  // the toolbar or a panel — anywhere outside the canvas's `touch-action:
+  // none` — zooms the whole app instead of the board. Safari's proprietary
+  // gesture events are the one hook that stops it; the board's own pinch runs
+  // on pointer events and is unaffected.
+  useEffect(() => {
+    const block = (e: Event) => e.preventDefault();
+    document.addEventListener('gesturestart', block);
+    document.addEventListener('gesturechange', block);
+    return () => {
+      document.removeEventListener('gesturestart', block);
+      document.removeEventListener('gesturechange', block);
+    };
   }, []);
 
   // Publish our identity to awareness whenever it changes.
@@ -123,8 +161,28 @@ export function BoardView({ boardId }: { boardId: string }) {
     if (identity) setLocalUser(identity);
   }, [identity]);
 
+  if (accessEnded) {
+    return (
+      <div className="flex h-dvh flex-col items-center justify-center gap-4 bg-panel p-6 text-center text-fg">
+        <p className="max-w-xs text-sm text-pretty text-fg-secondary">
+          {access === 'removed'
+            ? 'You were removed from this board.'
+            : 'This link no longer works. Ask your tutor for a new one.'}
+        </p>
+        <Button variant="secondary" onClick={() => navigate('/')}>
+          Go home
+        </Button>
+      </div>
+    );
+  }
+
   return (
-    <div className="wb-board relative h-dvh w-screen overflow-hidden overscroll-none bg-panel text-fg">
+    <div
+      // Flips once per load; the chrome's entrance keys off it (see
+      // `[data-arrive]` in index.css) so it plays as the veil lifts, not unseen
+      // behind it.
+      data-arrived={boardReady ? '' : undefined}
+      className="wb-board relative h-dvh w-screen overflow-hidden overscroll-none bg-panel text-fg">
       <CanvasContextMenu>
         <Canvas />
       </CanvasContextMenu>
@@ -140,7 +198,7 @@ export function BoardView({ boardId }: { boardId: string }) {
           identity={identity}
         />
         <VoiceAudioSinks />
-        <Toolbar />
+        {access === 'view' ? null : <Toolbar />}
         <Suspense fallback={null}>
           <GraphPanel />
           <EquationPanel />
@@ -166,6 +224,7 @@ export function BoardView({ boardId }: { boardId: string }) {
         initialName={identity?.name ?? ''}
         initialColor={identity?.color ?? assignedColor}
         colorEditable={!identity?.isTutor}
+        boardTitle={name}
         onSubmit={(n, c) => {
           setStoredName(n);
           const isTutor = identity?.isTutor ?? false;

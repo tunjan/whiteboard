@@ -6,6 +6,7 @@ import {
   type Point,
   type Shape,
 } from '@whiteboard/shared';
+import { boardHeaders } from '@/board/board-access';
 import { isValidHttpUrl } from './link-url';
 import { getTopIndex } from './order';
 import { createYoutubeShape, parseYoutubeId } from './place-video';
@@ -42,6 +43,7 @@ const inFlight = new Map<string, Promise<LinkUnfurl>>();
 export async function unfurlLink(url: string): Promise<LinkUnfurl> {
   const res = await fetch(`/api/links/unfurl?url=${encodeURIComponent(url)}`, {
     credentials: 'include',
+    headers: boardHeaders(),
   });
   if (!res.ok) throw new Error(`Unfurl failed (${res.status})`);
   return (await res.json()) as LinkUnfurl;

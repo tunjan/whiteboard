@@ -6,6 +6,7 @@ import {
   HighlighterGlyph,
   LineGlyph,
   RectGlyph,
+  StraightedgeGlyph,
 } from '@/components/ui/glyphs';
 import { toolRegistry } from './tool-registry';
 import { createSelectTool } from './select-tool';
@@ -22,6 +23,7 @@ import { createFrameTool } from './frame-tool';
 import { createGraphTool } from './graph-tool';
 import { createEquationTool } from './equation-tool';
 import { createCommentTool } from './comment-tool';
+import { createCompassTool } from './compass-tool';
 
 toolRegistry.register(createSelectTool());
 toolRegistry.register(createHandTool());
@@ -79,5 +81,15 @@ toolRegistry.register(
     icon: ArrowGlyph,
   }),
 );
+toolRegistry.register(
+  createLineTool({
+    id: 'straightedge',
+    type: 'line',
+    label: 'Straightedge',
+    icon: StraightedgeGlyph,
+    construction: true,
+  }),
+);
+toolRegistry.register(createCompassTool());
 toolRegistry.register(createEraserTool());
 toolRegistry.register(createLaserTool());

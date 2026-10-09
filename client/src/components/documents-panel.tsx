@@ -24,7 +24,7 @@ import {
   documentUrl,
   retryUpload,
 } from '@/board/documents';
-import { removeBoardDocument } from '@/canvas/use-document-store';
+import { removeBoardDocument } from '@/canvas/board-records';
 import { useDocumentsStore } from '@/canvas/use-documents-store';
 import type { Identity } from '@/collab/identity';
 import { Button, buttonVariants } from '@/components/ui/button';

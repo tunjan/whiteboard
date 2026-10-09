@@ -1,11 +1,9 @@
 import { useState } from 'react';
 import {
-  CloseGlyph,
   ImageGlyph,
   PlusGlyph,
   VideoGlyph,
 } from '@/components/ui/glyphs';
-import type { CustomStickerMeta } from '@whiteboard/shared';
 import { blobUrl } from '@/board/blobs';
 import { pickAndAddStickers } from '@/board/custom-stickers';
 import { pickAndPlaceImages } from '@/canvas/place-image';
@@ -18,7 +16,6 @@ import {
   sortedCustomStickers,
   useCustomStickersStore,
 } from '@/canvas/use-custom-stickers-store';
-import { removeCustomSticker } from '@/canvas/use-document-store';
 import { useStyleStore } from '@/canvas/use-style-store';
 import { useToolStore } from '@/canvas/use-tool-store';
 import { YouTubeDialog } from '@/components/youtube-dialog';
@@ -31,75 +28,10 @@ import {
   PopoverTitle,
   PopoverTrigger,
 } from '@/components/ui/popover';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
-import {
-  FlyoutCaret,
-  menuItemClass,
-  TOOL_FLYOUT,
-  TOOL_ICON,
-  hueVars,
-  toolKeyClass,
-} from './toolbar-constants';
-
-function CustomStickerItem({
-  meta,
-  selected,
-  onPick,
-}: {
-  meta: CustomStickerMeta;
-  selected: boolean;
-  onPick: () => void;
-}) {
-  return (
-    <div className="group relative">
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon-sm"
-        aria-label={meta.label}
-        aria-current={selected ? 'true' : undefined}
-        onClick={onPick}
-        className={cn('w-full', menuItemClass(selected))}
-      >
-        <img
-          src={blobUrl(meta.blobId)}
-          alt=""
-          className="size-6 object-contain"
-          draggable={false}
-        />
-      </Button>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              aria-label={`Remove ${meta.label} from this board`}
-              onClick={(e) => {
-                e.stopPropagation();
-                removeCustomSticker(meta.id);
-              }}
-              className={cn(
-                'absolute -top-1 -right-1 size-4 rounded-md border border-border bg-surface p-0',
-                'opacity-0 transition-opacity group-hover:opacity-100',
-                'focus-visible:opacity-100 motion-reduce:transition-none',
-              )}
-            />
-          }
-        >
-          <CloseGlyph className="size-3 text-fg-muted hover:text-fg" />
-        </TooltipTrigger>
-        <TooltipContent side="top">Remove for everyone</TooltipContent>
-      </Tooltip>
-    </div>
-  );
-}
+import { TOOL_FLYOUT } from './toolbar-constants';
+import { CustomStickerItem } from './toolbar-sticker-strip';
+import { ToolbarItem } from './toolbar-primitives';
 
 interface InsertMenuProps {
   active: boolean;
@@ -126,43 +58,32 @@ export function InsertMenu({ active }: InsertMenuProps) {
   return (
     <>
       <Popover open={open} onOpenChange={setOpen}>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <PopoverTrigger
-                data-toolbar-item
-                tabIndex={active ? 0 : -1}
-                aria-label={label}
-                aria-current={active ? 'true' : undefined}
-                style={hueVars('sticker')}
-                className={toolKeyClass()}
-              />
-            }
-          >
-            {active && custom ? (
-              <img
-                src={blobUrl(custom.blobId)}
-                alt=""
-                className="size-4.5 object-contain"
-                draggable={false}
-              />
-            ) : active ? (
-              <SelectedIcon className={TOOL_ICON} />
-            ) : (
-              <ImageGlyph className={TOOL_ICON} />
-            )}
-            <FlyoutCaret active={active} />
-          </TooltipTrigger>
-          <TooltipContent side="top">
-            <span>{label}</span>
-          </TooltipContent>
-        </Tooltip>
+        <ToolbarItem
+          label={label}
+          selected={active}
+          caret
+          tabIndex={active ? 0 : -1}
+          render={<PopoverTrigger />}
+        >
+          {active && custom ? (
+            <img
+              src={blobUrl(custom.blobId)}
+              alt=""
+              className="size-5 object-contain"
+              draggable={false}
+            />
+          ) : active ? (
+            <SelectedIcon />
+          ) : (
+            <ImageGlyph />
+          )}
+        </ToolbarItem>
 
         <PopoverContent
           side="top"
           align="center"
-          sideOffset={8}
-          className={cn(TOOL_FLYOUT, 'w-64 gap-2 p-2')}
+          sideOffset={6}
+          className={cn(TOOL_FLYOUT, 'w-64 gap-2')}
         >
           <PopoverHeader>
             <PopoverTitle>Insert</PopoverTitle>
@@ -173,7 +94,7 @@ export function InsertMenu({ active }: InsertMenuProps) {
 
           {/* Preset Stickers */}
           <div
-            className="grid grid-cols-4 gap-1"
+            className="grid grid-cols-4 gap-0.5"
             role="group"
             aria-label="Preset Stickers"
           >
@@ -192,7 +113,7 @@ export function InsertMenu({ active }: InsertMenuProps) {
                     setTool('sticker');
                     setOpen(false);
                   }}
-                  className={menuItemClass(isSelected)}
+                  className="tbar-item"
                 >
                   <StickerPreview def={definition} size={22} />
                 </Button>
@@ -207,7 +128,7 @@ export function InsertMenu({ active }: InsertMenuProps) {
                 Board stickers
               </div>
               <div
-                className="grid grid-cols-4 gap-1"
+                className="grid grid-cols-4 gap-0.5"
                 role="group"
                 aria-label="Board stickers"
               >
@@ -233,12 +154,12 @@ export function InsertMenu({ active }: InsertMenuProps) {
               type="button"
               variant="ghost"
               size="sm"
-              className="w-full justify-start rounded-[0.875rem] text-sm text-fg-secondary hover:bg-tb-track hover:text-fg"
+              className="w-full justify-start rounded-control text-sm text-fg-secondary hover:bg-tb-track hover:text-fg"
               disabled={pending > 0}
               onClick={() => void pickAndAddStickers()}
             >
               <PlusGlyph className="mr-1 size-4 text-fg-muted" aria-hidden="true" />
-              {pending > 0 ? 'Removing background…' : 'Add PNG sticker'}
+              {pending > 0 ? 'Removing background…' : 'Add sticker'}
             </Button>
             {uploadError && (
               <p role="alert" className="px-2 text-2xs text-danger">
@@ -249,7 +170,7 @@ export function InsertMenu({ active }: InsertMenuProps) {
               type="button"
               variant="ghost"
               size="sm"
-              className="w-full justify-start rounded-[0.875rem] text-sm text-fg-secondary hover:bg-tb-track hover:text-fg"
+              className="w-full justify-start rounded-control text-sm text-fg-secondary hover:bg-tb-track hover:text-fg"
               onClick={() => {
                 setOpen(false);
                 void pickAndPlaceImages();
@@ -265,7 +186,7 @@ export function InsertMenu({ active }: InsertMenuProps) {
               type="button"
               variant="ghost"
               size="sm"
-              className="w-full justify-start rounded-[0.875rem] text-sm text-fg-secondary hover:bg-tb-track hover:text-fg"
+              className="w-full justify-start rounded-control text-sm text-fg-secondary hover:bg-tb-track hover:text-fg"
               onClick={() => {
                 setOpen(false);
                 setVideoOpen(true);

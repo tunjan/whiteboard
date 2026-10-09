@@ -2,7 +2,9 @@
 //
 // Mounts the real Canvas on a board with no persistence and no collab, so the
 // only thing being timed is the render path. Add `?counts=1000,50000` to change
-// the sweep; `?auto=0` to seed nothing and drive the board by hand.
+// the sweep; `?reps=1` to run each table once instead of three times (faster,
+// and with no way to tell a real difference from a machine that drifted);
+// `?auto=0` to seed nothing and drive the board by hand.
 import { createRoot } from 'react-dom/client';
 import './index.css';
 import { Canvas } from './canvas/Canvas';
@@ -13,9 +15,12 @@ import {
   runAttribution,
   runScaleBench,
   runStaticBench,
+  runSubsystemAb,
+  runRasterSweep,
   runProfile,
   runHookAb,
   runPanZoom,
+  runRepaintBench,
 } from './canvas/scale-bench';
 import { useBenchFlags } from './canvas/bench-flags';
 import { editor } from './canvas/use-document-store';
@@ -72,10 +77,13 @@ createRoot(document.getElementById('root')!).render(<Canvas />);
 Object.assign(globalThis, {
   runScaleBench,
   runStaticBench,
+  runSubsystemAb,
+  runRasterSweep,
   runAttribution,
   runProfile,
   runHookAb,
   runPanZoom,
+  runRepaintBench,
   useCameraStore,
   useBenchFlags,
   editor,
@@ -87,8 +95,9 @@ if (params.get('auto') !== '0') {
     .split(',')
     .map(Number)
     .filter((n) => n > 0);
+  const reps = Math.max(1, Number(params.get('reps')) || 3);
   setTimeout(() => {
-    void runScaleBench(counts).then((text) => {
+    void runScaleBench(counts, reps).then((text) => {
       (globalThis as unknown as { __done?: boolean }).__done = true;
       console.log(text);
     });

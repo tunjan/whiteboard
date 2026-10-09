@@ -66,7 +66,7 @@ function Slider({
           <SliderPrimitive.Indicator
             data-slot="slider-range"
             className={cn(
-              'box-content rounded-full bg-fg select-none',
+              'box-content rounded-full bg-check select-none',
               'data-horizontal:h-full data-horizontal:pe-[calc(var(--wb-slider-thumb)/2+var(--wb-slider-pad))]',
               'data-vertical:w-full data-vertical:pb-[calc(var(--wb-slider-thumb)/2+var(--wb-slider-pad))]',
             )}

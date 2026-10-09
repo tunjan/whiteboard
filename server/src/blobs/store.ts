@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { env } from '../env';
+import { reserveStorage } from '../storage-quota';
 
 // Raster types only — SVG is excluded so a stored blob can never execute
 // script when opened same-origin.
@@ -47,7 +48,10 @@ export async function saveBlob(bytes: Buffer, mime: string): Promise<string> {
   const id = `${hash}.${ext}`;
   await ensureDir();
   const path = join(BLOB_ROOT, id);
-  if (!existsSync(path)) await writeFile(path, bytes);
+  if (!existsSync(path)) {
+    await reserveStorage(bytes.byteLength);
+    await writeFile(path, bytes);
+  }
   return id;
 }
 

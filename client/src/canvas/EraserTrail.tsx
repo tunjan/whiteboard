@@ -1,7 +1,7 @@
 import { memo, useEffect, useMemo, useRef } from 'react';
 import { usePresenceStore } from '@/collab/use-presence-store';
-import { type Camera } from './camera';
-import { useCameraTransform } from './use-camera-interaction';
+import { cameraToTransform } from './camera';
+import { useCameraFollow } from './use-camera-interaction';
 import { getInkPathData } from './shapes/ink';
 import { useDocumentStore } from './use-document-store';
 import {
@@ -63,14 +63,17 @@ export const EraserScribblePath = memo(function EraserScribblePath({
 });
 
 /**
- * Local eraser feedback plus collaborators' awareness-only scribbles.
+ * Local eraser feedback plus collaborators' relayed scribbles.
  *
  * The local trail is the stronger muted ribbon. Peers use the same geometry in
  * their identity color at low alpha, making intent visible without pretending
  * the remote client's local pending-delete set is shared document state.
  */
-export function EraserTrail({ camera }: { camera: Camera }) {
-  const transform = useCameraTransform(camera);
+export function EraserTrail() {
+  // One follower per `<svg>`: the two sit at different z-indices.
+  const [camera, followLocal] = useCameraFollow<SVGGElement>();
+  const [, followRemote] = useCameraFollow<SVGGElement>();
+  const transform = cameraToTransform(camera);
   const localScribbles = useEraserTrailStore((s) => s.scribbles);
   const seq = useEraserTrailStore((s) => s.seq);
   const peers = usePresenceStore((s) => s.peers);
@@ -109,16 +112,18 @@ export function EraserTrail({ camera }: { camera: Camera }) {
           aria-hidden="true"
           className="pointer-events-none absolute inset-0 z-[var(--z-canvas-indicator)] h-full w-full"
         >
-          <g transform={transform}>
-            {localScribbles.map((scribble) => (
-              <EraserScribblePath
-                key={scribble.id}
-                scribble={scribble}
-                zoom={camera.z}
-                color="var(--color-muted-foreground)"
-                opacity={scribble.opacity}
-              />
-            ))}
+          <g ref={followLocal}>
+            <g transform={transform}>
+              {localScribbles.map((scribble) => (
+                <EraserScribblePath
+                  key={scribble.id}
+                  scribble={scribble}
+                  zoom={camera.z}
+                  color="var(--color-muted-foreground)"
+                  opacity={scribble.opacity}
+                />
+              ))}
+            </g>
           </g>
         </svg>
       )}
@@ -127,16 +132,18 @@ export function EraserTrail({ camera }: { camera: Camera }) {
           aria-hidden="true"
           className="pointer-events-none absolute inset-0 z-[var(--z-canvas-collaborator)] h-full w-full"
         >
-          <g transform={transform}>
-            {remote.map(({ key, color, scribble }) => (
-              <EraserScribblePath
-                key={key}
-                scribble={scribble}
-                zoom={camera.z}
-                color={color}
-                opacity={0.1}
-              />
-            ))}
+          <g ref={followRemote}>
+            <g transform={transform}>
+              {remote.map(({ key, color, scribble }) => (
+                <EraserScribblePath
+                  key={key}
+                  scribble={scribble}
+                  zoom={camera.z}
+                  color={color}
+                  opacity={0.1}
+                />
+              ))}
+            </g>
           </g>
         </svg>
       )}

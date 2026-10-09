@@ -1,4 +1,4 @@
-import { CursorGlyph } from '@/components/ui/glyphs';
+import { LassoGlyph } from '@/components/ui/glyphs';
 import {
   type Bounds,
   type Point,
@@ -17,11 +17,9 @@ import {
   shapeRotatedBounds,
   type MarqueeMode,
   type ResizeHandleId,
-  type RotationHandleId,
   type SelectionInfo,
 } from '../selection-geometry';
 import { resizeCursor } from '../resize-cursor';
-import { rotationCursor } from '../rotation-cursor';
 import { isCoarsePointer } from '../platform';
 import {
   descendantsOf,
@@ -38,6 +36,7 @@ import {
   topFrameOverlappingShape,
 } from '../frame-operations';
 import { requestEquationFocus } from '../equation-focus';
+import { mirrorShapeLocally } from '../flip';
 import { getSnapGridStep } from '../grid';
 import { safeLinkUrl } from '../link-url';
 import { isSelectable } from '../selectable';
@@ -186,12 +185,16 @@ type SelectState =
        */
       grabOffset: Point;
       items: GroupItem[];
+      /**
+       * Whether the selection can take a per-axis scale at all: false once any
+       * member sits off the selection's axes or carries an intrinsic aspect
+       * ratio, which pins the whole gesture to a uniform scale.
+       */
+      canDeform: boolean;
       targets: BoundsSnapTarget[];
     }
   | {
       type: 'rotate';
-      /** Which control started the gesture; `mobile` is the touch knob. */
-      handle: RotationHandleId | 'mobile';
       items: RotationItem[];
       center: Point;
       startAngle: number;
@@ -215,8 +218,6 @@ type SelectState =
       start: Point;
       current: Point;
       selectionBefore: string[];
-      mode: MarqueeMode;
-      additive: boolean;
     };
 
 /**
@@ -233,37 +234,6 @@ export function topmostHit(shapes: Shape[], p: Point, tol: number): string | nul
       isHidden: useHiddenStore.getState().isHidden,
     })?.id ?? null
   );
-}
-
-/**
- * Resize an axis-aligned box by dragging `handle` to `pointer`. With
- * `lockAspect` and a corner handle, the box keeps its original aspect ratio
- * (anchored at the opposite corner).
- */
-function axisAlignedResize(
-  b0: Bounds,
-  handle: ResizeHandleId,
-  pointer: Point,
-  lockAspect: boolean,
-): Bounds {
-  let { minX, minY, maxX, maxY } = b0;
-  if (handle.includes('w')) minX = Math.min(pointer.x, maxX - MIN_RESIZE);
-  if (handle.includes('e')) maxX = Math.max(pointer.x, minX + MIN_RESIZE);
-  if (handle.includes('n')) minY = Math.min(pointer.y, maxY - MIN_RESIZE);
-  if (handle.includes('s')) maxY = Math.max(pointer.y, minY + MIN_RESIZE);
-
-  if (lockAspect && handle.length === 2) {
-    const w0 = b0.maxX - b0.minX || 1;
-    const h0 = b0.maxY - b0.minY || 1;
-    const scale = Math.max((maxX - minX) / w0, (maxY - minY) / h0);
-    const width = w0 * scale;
-    const height = h0 * scale;
-    if (handle.includes('w')) minX = maxX - width;
-    else maxX = minX + width;
-    if (handle.includes('n')) minY = maxY - height;
-    else maxY = minY + height;
-  }
-  return { minX, minY, maxX, maxY };
 }
 
 const OPPOSITE_HANDLE: Record<ResizeHandleId, ResizeHandleId> = {
@@ -308,39 +278,152 @@ function handlePoint(bounds: Bounds, handle: ResizeHandleId): Point {
 }
 
 /**
+ * Where a resize pivots: the opposite handle, so the far edge stays put, or the
+ * box's centre while Alt is held, so both edges travel and the middle holds.
+ */
+function resizeAnchor(
+  b0: Bounds,
+  handle: ResizeHandleId,
+  fromCenter: boolean,
+): Point {
+  return fromCenter
+    ? boundsCenter(b0)
+    : handlePoint(b0, OPPOSITE_HANDLE[handle]);
+}
+
+/**
  * Scale factors for dragging `handle` to `pointer`, both given in the box's own
- * frame. The opposite handle anchors the gesture, so the far edge stays put. An
- * edge handle has no extent along its other axis, which falls out of the
- * division as leaving that axis alone; locking the aspect ratio lets whichever
- * axis moved further drive both.
+ * frame, about `anchor`. An edge handle has no extent along its other axis,
+ * which falls out of the division as leaving that axis alone; locking the
+ * aspect ratio lets whichever axis moved further drive both, keeping each one's
+ * sign.
+ *
+ * A factor is free to go negative. A handle dragged past its anchor turns the
+ * box inside out, which is a mirror rather than a collapse — the caller
+ * straightens the box and mirrors the shape's own geometry to match.
  */
 function resizeScale(
   b0: Bounds,
   handle: ResizeHandleId,
   pointer: Point,
   lockAspect: boolean,
+  anchor: Point,
 ): { sx: number; sy: number } {
-  const anchor = handlePoint(b0, OPPOSITE_HANDLE[handle]);
   const start = handlePoint(b0, handle);
   const dx0 = start.x - anchor.x;
   const dy0 = start.y - anchor.y;
-  const w0 = b0.maxX - b0.minX || 1;
-  const h0 = b0.maxY - b0.minY || 1;
   let sx = dx0 === 0 ? 1 : (pointer.x - anchor.x) / dx0;
   let sy = dy0 === 0 ? 1 : (pointer.y - anchor.y) / dy0;
-  // Shapes have no way to express a mirrored result, so a handle dragged past
-  // its anchor collapses the box to a sliver instead of turning it inside out.
-  // Only the axes the handle actually drives are floored; an edge handle leaves
-  // its other axis at 1, which a floor above 1 would silently grow.
-  if (dx0 !== 0) sx = Math.max(sx, MIN_RESIZE / w0);
-  if (dy0 !== 0) sy = Math.max(sy, MIN_RESIZE / h0);
+  const xLocked = handle === 'n' || handle === 's';
+  const yLocked = handle === 'e' || handle === 'w';
   if (lockAspect) {
-    if (dx0 === 0) sx = sy;
-    else if (dy0 === 0) sy = sx;
-    else if (sx > sy) sy = sx;
-    else sx = sy;
+    if (yLocked) sy = Math.abs(sx);
+    else if (xLocked) sx = Math.abs(sy);
+    else if (Math.abs(sx) > Math.abs(sy)) sy = Math.abs(sx) * (sy < 0 ? -1 : 1);
+    else sx = Math.abs(sy) * (sx < 0 ? -1 : 1);
+  } else {
+    // An edge handle drives one axis only, whatever the pointer did on the
+    // other — the division above already says so, except when the anchor is
+    // the centre and both offsets are nonzero.
+    if (xLocked) sx = 1;
+    if (yLocked) sy = 1;
   }
   return { sx, sy };
+}
+
+/**
+ * `bounds` with its sides in order and no thinner than `MIN_RESIZE` on either
+ * axis. A negative scale puts the sides the wrong way round; a shape has no way
+ * to hold an inverted box, so the mirror is carried by its own geometry and the
+ * box itself is straightened here.
+ */
+function normalizedBounds(bounds: Bounds): Bounds {
+  const minX = Math.min(bounds.minX, bounds.maxX);
+  const minY = Math.min(bounds.minY, bounds.maxY);
+  return {
+    minX,
+    minY,
+    maxX: Math.max(bounds.minX, bounds.maxX, minX + MIN_RESIZE),
+    maxY: Math.max(bounds.minY, bounds.maxY, minY + MIN_RESIZE),
+  };
+}
+
+/** The handle each of the eight becomes under a mirror in x, and in y. */
+const MIRROR_X_HANDLE: Record<ResizeHandleId, ResizeHandleId> = {
+  nw: 'ne',
+  n: 'n',
+  ne: 'nw',
+  e: 'w',
+  se: 'sw',
+  s: 's',
+  sw: 'se',
+  w: 'e',
+};
+const MIRROR_Y_HANDLE: Record<ResizeHandleId, ResizeHandleId> = {
+  nw: 'sw',
+  n: 's',
+  ne: 'se',
+  e: 'e',
+  se: 'ne',
+  s: 'n',
+  sw: 'nw',
+  w: 'w',
+};
+
+/**
+ * The handle a drag is now holding, once it has turned the box inside out on
+ * the axes given. The name is what the cursor and the bounds snapper read: an
+ * `se` grip pushed past its anchor in x is dragging the box's `sw` corner, and
+ * both of them have to follow it there.
+ */
+function flippedHandle(
+  handle: ResizeHandleId,
+  flipX: boolean,
+  flipY: boolean,
+): ResizeHandleId {
+  const afterX = flipX ? MIRROR_X_HANDLE[handle] : handle;
+  return flipY ? MIRROR_Y_HANDLE[afterX] : afterX;
+}
+
+/**
+ * Shapes carrying an intrinsic aspect ratio, which scaling their axes apart
+ * would distort: typeset content and artwork read rather than drawn. Their
+ * resize is uniform whether or not Shift is held, and one of them anywhere in a
+ * multi-selection makes that whole gesture uniform too.
+ */
+function isAspectRatioLocked(shape: Shape): boolean {
+  return (
+    shape.type === 'text' ||
+    shape.type === 'equation' ||
+    shape.type === 'sticker'
+  );
+}
+
+/**
+ * Whether a resize of `handle` keeps the aspect ratio. Text is the exception to
+ * every other rule: its left and right handles set a wrap width and are never
+ * uniform, not even under Shift, and every other handle on it always is.
+ */
+function resizeLocksAspect(
+  shape: Shape,
+  handle: ResizeHandleId,
+  shiftKey: boolean,
+): boolean {
+  if (shape.type === 'text') return !(handle === 'e' || handle === 'w');
+  return shiftKey || isAspectRatioLocked(shape);
+}
+
+/** The shape a flipped resize fits into its new box: `initial`, mirrored once
+ *  per axis the drag turned inside out. */
+function mirroredInitial(
+  initial: Shape,
+  flipX: boolean,
+  flipY: boolean,
+): Shape {
+  let shape = initial;
+  if (flipX) shape = mirrorShapeLocally(shape, true);
+  if (flipY) shape = mirrorShapeLocally(shape, false);
+  return shape;
 }
 
 function scaleBounds(
@@ -369,45 +452,87 @@ function quarterTurnsFrom(rotation: number, axis: number): number | null {
   return ((nearest % 4) + 4) % 4;
 }
 
-/** New unrotated world bounds for a resize, corrected for the shape's rotation. */
-function computeResizeBounds(
+/**
+ * `bounds` moved so the gesture's anchor holds the place it is drawn in. The
+ * anchor is a fixed point of the scale, so it keeps its coordinates in the
+ * box's own frame — but the box turns about its centre, and that centre has
+ * moved, so on a rotated shape the anchor's page position has to be put back.
+ */
+function anchoredBounds(
+  bounds: Bounds,
+  anchor: Point,
+  center0: Point,
+  rotation0: number,
+  rotation1: number,
+): Bounds {
+  if (!rotation0 && !rotation1) return bounds;
+  const before = rotatePoint(anchor, center0, rotation0);
+  const after = rotatePoint(anchor, boundsCenter(bounds), rotation1);
+  const dx = before.x - after.x;
+  const dy = before.y - after.y;
+  return {
+    minX: bounds.minX + dx,
+    minY: bounds.minY + dy,
+    maxX: bounds.maxX + dx,
+    maxY: bounds.maxY + dy,
+  };
+}
+
+interface ResizeResult {
+  /** `initial`, mirrored on whichever axes the drag turned inside out. Its
+   *  rotation can differ from `initial`'s — see `mirrorShapeLocally`. */
+  shape: Shape;
+  /** New unrotated world bounds, corrected for the shape's rotation. */
+  bounds: Bounds;
+  /** The anchor, in the box's own frame: where a re-centre has to put it. */
+  anchor: Point;
+  flipX: boolean;
+  flipY: boolean;
+}
+
+/** Resolve one pointer sample of a single-shape resize. */
+function computeResize(
   initial: Shape,
   util: ShapeUtil,
   handle: ResizeHandleId,
   pointer: Point,
   lockAspect: boolean,
-): Bounds {
+  fromCenter: boolean,
+): ResizeResult {
   const b0 = util.getBounds(initial as never);
   const c0 = boundsCenter(b0);
   const localPointer = initial.rotation
     ? rotatePoint(pointer, c0, -initial.rotation)
     : pointer;
-  const b1 = axisAlignedResize(b0, handle, localPointer, lockAspect);
-  if (!initial.rotation) return b1;
-
-  // Keep the displayed anchor (opposite corner) fixed as the pivot shifts.
-  const anchor = {
-    x: handle.includes('e')
-      ? b1.minX
-      : handle.includes('w')
-        ? b1.maxX
-        : b1.minX,
-    y: handle.includes('s')
-      ? b1.minY
-      : handle.includes('n')
-        ? b1.maxY
-        : b1.minY,
-  };
-  const c1 = boundsCenter(b1);
-  const o0 = rotatePoint(anchor, c0, initial.rotation);
-  const o1 = rotatePoint(anchor, c1, initial.rotation);
-  const ox = o0.x - o1.x;
-  const oy = o0.y - o1.y;
+  const anchor = resizeAnchor(b0, handle, fromCenter);
+  const { sx, sy } = resizeScale(b0, handle, localPointer, lockAspect, anchor);
+  const shape = mirroredInitial(initial, sx < 0, sy < 0);
   return {
-    minX: b1.minX + ox,
-    minY: b1.minY + oy,
-    maxX: b1.maxX + ox,
-    maxY: b1.maxY + oy,
+    shape,
+    bounds: anchoredBounds(
+      normalizedBounds(scaleBounds(b0, anchor, sx, sy)),
+      anchor,
+      c0,
+      initial.rotation,
+      shape.rotation,
+    ),
+    anchor,
+    flipX: sx < 0,
+    flipY: sy < 0,
+  };
+}
+
+/** `bounds` re-centred on `center`, keeping the larger half-extent it grew to.
+ *  A centre-anchored resize is snapped by its dragged edge like any other, and
+ *  this puts the box back around the point it was told to hold. */
+function recenteredBounds(bounds: Bounds, center: Point): Bounds {
+  const hw = Math.max(bounds.maxX - center.x, center.x - bounds.minX);
+  const hh = Math.max(bounds.maxY - center.y, center.y - bounds.minY);
+  return {
+    minX: center.x - hw,
+    maxX: center.x + hw,
+    minY: center.y - hh,
+    maxY: center.y + hh,
   };
 }
 
@@ -424,8 +549,22 @@ function marqueeBounds(start: Point, point: Point): Bounds {
   };
 }
 
+/** The modifiers a marquee reads; pointer samples and key events both carry them. */
+type MarqueeKeys = Pick<ToolPointerInfo, 'shiftKey' | 'ctrlKey' | 'metaKey'>;
+
 function marqueeMode(ctrlKey: boolean, metaKey: boolean): MarqueeMode {
   return ctrlKey || metaKey ? 'wrap' : 'intersect';
+}
+
+/**
+ * Whether this pointer sample of a resize snaps. Command/Ctrl inverts the
+ * board's own setting rather than only turning snapping off, so the modifier
+ * reaches snapping from either side — and Alt is left to mean one thing,
+ * resizing about the centre.
+ */
+function shouldSnapResize(info: ToolPointerInfo): boolean {
+  const enabled = useCanvasUiStore.getState().snappingEnabled;
+  return info.metaKey || info.ctrlKey ? !enabled : enabled;
 }
 
 function normalizeRotation(angle: number): number {
@@ -516,11 +655,9 @@ function rotateState(
   selectionInfo: SelectionInfo,
   info: ToolPointerInfo,
   items: RotationItem[],
-  handle: RotationHandleId | 'mobile',
 ): Extract<SelectState, { type: 'rotate' }> {
   return {
     type: 'rotate',
-    handle,
     items,
     center: selectionInfo.center,
     startAngle: Math.atan2(
@@ -537,6 +674,13 @@ function rotateState(
 
 export function createSelectTool(): Tool {
   let state: SelectState = { type: 'idle' };
+  /**
+   * The last pointer sample of the gesture in progress. Shift, Alt and
+   * Command all change what a resize means, so pressing or releasing one has
+   * to re-resolve the drag from where the pointer already is rather than
+   * waiting for it to move again.
+   */
+  let lastMove: ToolPointerInfo | null = null;
 
   function applyRotation(
     rotate: Extract<SelectState, { type: 'rotate' }>,
@@ -571,12 +715,6 @@ export function createSelectTool(): Tool {
         });
       }
     });
-    // Touch started this from the knob, which has no cursor to keep pointed.
-    if (rotate.handle !== 'mobile') {
-      useSelectionStore
-        .getState()
-        .setGestureCursor(rotationCursor(rotate.handle, target));
-    }
   }
 
   function createMoveState(
@@ -732,7 +870,6 @@ export function createSelectTool(): Tool {
   function intersectsAncestorMasks(
     shape: Shape,
     bounds: Bounds,
-    pointer: Point,
     editor: Editor,
   ): boolean {
     if (shape.type === 'arrow') return true;
@@ -744,7 +881,7 @@ export function createSelectTool(): Tool {
       if (!parent) break;
       if (
         parent.type === 'frame' &&
-        !marqueeIntersectsMask(parent, bounds, pointer)
+        !marqueeIntersectsMask(parent, bounds)
       ) {
         return false;
       }
@@ -758,7 +895,6 @@ export function createSelectTool(): Tool {
     mode: MarqueeMode,
     additive: boolean,
     selectionBefore: string[],
-    pointer: Point,
     editor: Editor,
   ): void {
     const entered = useEnteredGroupStore.getState().enteredGroupId;
@@ -771,7 +907,7 @@ export function createSelectTool(): Tool {
       const shape = editor.getShape(id);
       if (!shape || !isSelectable(shape)) continue;
       if (!matchesMarquee(shape, bounds, mode)) continue;
-      if (!intersectsAncestorMasks(shape, bounds, pointer, editor)) continue;
+      if (!intersectsAncestorMasks(shape, bounds, editor)) continue;
       const target = selectionTargetId(editor.getShape, shape.id, entered);
       if (editor.getShape(target)?.type === 'group' && mode === 'wrap') {
         containingGroups.add(target);
@@ -789,7 +925,7 @@ export function createSelectTool(): Tool {
           leaves.every(
             (shape) =>
               matchesMarquee(shape, bounds, mode) &&
-              intersectsAncestorMasks(shape, bounds, pointer, editor),
+              intersectsAncestorMasks(shape, bounds, editor),
           )
         ) {
           found.add(groupId);
@@ -804,27 +940,42 @@ export function createSelectTool(): Tool {
       );
   }
 
+  /**
+   * Re-select from the marquee's rectangle and the modifiers held right now:
+   * Shift adds to the prior selection, Ctrl/Command switches to wrap.
+   */
   function updateMarquee(
     marquee: Extract<SelectState, { type: 'marquee' }>,
     point: Point,
-    shiftKey: boolean,
-    ctrlKey: boolean,
-    metaKey: boolean,
+    keys: MarqueeKeys,
     editor: Editor,
   ): void {
     const bounds = marqueeBounds(marquee.start, point);
+    const mode = marqueeMode(keys.ctrlKey, keys.metaKey);
     marquee.current = point;
-    marquee.mode = marqueeMode(ctrlKey, metaKey);
-    marquee.additive = shiftKey;
-    useSelectionStore.getState().setMarquee({ bounds, mode: marquee.mode });
+    useSelectionStore.getState().setMarquee({ bounds, mode });
     selectMarquee(
       bounds,
-      marquee.mode,
-      marquee.additive,
+      mode,
+      keys.shiftKey,
       marquee.selectionBefore,
-      point,
       editor,
     );
+  }
+
+  /** Re-test a live marquee when a selection modifier is pressed or released. */
+  function reapplyMarqueeModifiers(
+    event: KeyboardEvent,
+    ctx: ToolContext,
+  ): boolean {
+    if (
+      state.type !== 'marquee' ||
+      (event.key !== 'Shift' && event.key !== 'Control' && event.key !== 'Meta')
+    ) {
+      return false;
+    }
+    updateMarquee(state, state.current, event, ctx.editor);
+    return true;
   }
 
   function reparentMovedRoots(
@@ -911,12 +1062,33 @@ export function createSelectTool(): Tool {
     state = { type: 'idle' };
   }
 
-  return {
+  /**
+   * Re-run the drag from the pointer where it already is, because a modifier
+   * key changed what it means. Only the resize states need it: rotation reads
+   * Shift through `applyRotation` below, and a marquee re-selects directly.
+   */
+  function reapplyModifiers(event: KeyboardEvent, ctx: ToolContext): boolean {
+    if (state.type !== 'resize' && state.type !== 'group-resize') return false;
+    if (!lastMove) return false;
+    tool.onPointerMove?.(
+      {
+        ...lastMove,
+        shiftKey: event.shiftKey,
+        altKey: event.altKey,
+        ctrlKey: event.ctrlKey,
+        metaKey: event.metaKey,
+      },
+      ctx,
+    );
+    return true;
+  }
+
+  const tool: Tool = {
     id: 'select',
     label: 'Select',
     hotkey: 'v',
     cursor: 'default',
-    icon: CursorGlyph,
+    icon: LassoGlyph,
 
     onPointerDown(info: ToolPointerInfo, ctx: ToolContext) {
       if (info.button !== 0) return;
@@ -1057,6 +1229,11 @@ export function createSelectTool(): Tool {
                 rotation: selectionInfo.rotation,
                 grabOffset: { x: grabbed.x - on.x, y: grabbed.y - on.y },
                 items,
+                canDeform: items.every(
+                  (item) =>
+                    item.quarterTurns !== null &&
+                    !isAspectRatioLocked(item.initial),
+                ),
                 targets: snapTargetBounds(
                   ctx.editor,
                   movingIds,
@@ -1077,40 +1254,14 @@ export function createSelectTool(): Tool {
           return;
         }
 
-        // Rotation lives in four invisible zones just outside the corners,
-        // leaving the top-center lane free for the contextual toolbar. Touch
-        // gets one visible knob in their place, tested first because it can
-        // sit over the box rather than outside it.
-        const knob = selectionInfo.mobileRotateHandle;
+        // Rotation is a single knob off an edge, tested after the resize
+        // handles so a corner or edge always resizes.
+        const knob = selectionInfo.rotateHandle;
         if (knob && distance(info.point, knob.point) <= knob.radius) {
           const items = rotationItems(shapes, selectionInfo, ctx.editor);
           if (items.length) {
-            state = rotateState(selectionInfo, info, items, 'mobile');
-          }
-          return;
-        }
-        for (const handle of selectionInfo.rotationHandles) {
-          // The zone is a square that turns with the box, so it is tested in
-          // the box's own frame rather than by distance.
-          const local = rotatePoint(
-            info.point,
-            handle.point,
-            -selectionInfo.rotation,
-          );
-          if (
-            Math.abs(local.x - handle.point.x) > handle.extent ||
-            Math.abs(local.y - handle.point.y) > handle.extent
-          ) {
-            continue;
-          }
-          const items = rotationItems(shapes, selectionInfo, ctx.editor);
-          if (items.length) {
-            state = rotateState(selectionInfo, info, items, handle.id);
-            useSelectionStore
-              .getState()
-              .setGestureCursor(
-                rotationCursor(handle.id, selectionInfo.rotation),
-              );
+            state = rotateState(selectionInfo, info, items);
+            useSelectionStore.getState().setGestureCursor('grabbing');
           }
           return;
         }
@@ -1178,6 +1329,7 @@ export function createSelectTool(): Tool {
     },
 
     onPointerMove(info: ToolPointerInfo, ctx: ToolContext) {
+      lastMove = info;
       switch (state.type) {
         case 'idle':
           return;
@@ -1212,37 +1364,27 @@ export function createSelectTool(): Tool {
         }
         case 'pending-empty': {
           if (!hasCrossedDragSlop(state.screenStart, info.screenPoint)) return;
-          const start = state.start;
           state = {
             type: 'marquee',
-            start,
+            start: state.start,
             current: info.point,
             selectionBefore: state.selectionBefore,
-            mode: marqueeMode(info.ctrlKey, info.metaKey),
-            additive: info.shiftKey,
           };
           // Evaluate on the first drag sample rather than waiting for another move.
-          updateMarquee(
-            state,
-            info.point,
-            info.shiftKey,
-            info.ctrlKey,
-            info.metaKey,
-            ctx.editor,
-          );
+          updateMarquee(state, info.point, info, ctx.editor);
           return;
         }
         case 'move':
           applyMove(state, info, ctx);
           return;
         case 'resize': {
-          const lockAspect =
-            info.shiftKey ||
-            ((state.initial.type === 'text' ||
-              state.initial.type === 'equation' ||
-              state.initial.type === 'sticker') &&
-              state.handle.length === 2);
-          let bounds = computeResizeBounds(
+          const lockAspect = resizeLocksAspect(
+            state.initial,
+            state.handle,
+            info.shiftKey,
+          );
+          const fromCenter = info.altKey;
+          const resolved = computeResize(
             state.initial,
             state.util,
             state.handle,
@@ -1251,18 +1393,28 @@ export function createSelectTool(): Tool {
               y: info.point.y - state.grabOffset.y,
             },
             lockAspect,
+            fromCenter,
           );
-          if (useCanvasUiStore.getState().snappingEnabled && !info.altKey) {
+          let bounds = resolved.bounds;
+          // The cursor names the handle the drag is holding *now*, which a flip
+          // has moved to the other side of the box.
+          useSelectionStore
+            .getState()
+            .setGestureCursor(
+              resizeCursor(
+                flippedHandle(state.handle, resolved.flipX, resolved.flipY),
+                state.initial.rotation,
+              ),
+            );
+          if (shouldSnapResize(info)) {
             const camera = useCameraStore.getState().camera;
             const background = useCanvasUiStore.getState().background;
             const initialBounds = state.util.getBounds(state.initial as never);
             const snapped = snapResizeBounds(
               bounds,
-              state.handle,
+              flippedHandle(state.handle, resolved.flipX, resolved.flipY),
               state.targets,
-              info.metaKey || info.ctrlKey
-                ? null
-                : getSnapGridStep(background, camera),
+              getSnapGridStep(background, camera),
               SNAP_SCREEN / camera.z,
               lockAspect,
               (initialBounds.maxX - initialBounds.minX) /
@@ -1273,6 +1425,9 @@ export function createSelectTool(): Tool {
           } else {
             useSelectionStore.getState().setSnapGuides([]);
           }
+          // The snapper moves the dragged edge alone, which would walk a
+          // centre-anchored box off the point it was told to hold.
+          if (fromCenter) bounds = recenteredBounds(bounds, resolved.anchor);
           if (
             state.initial.type === 'text' &&
             (state.handle === 'e' || state.handle === 'w')
@@ -1294,7 +1449,13 @@ export function createSelectTool(): Tool {
             });
             return;
           }
-          const resized = state.util.resize(state.initial as never, bounds);
+          const resized = state.util.resize(resolved.shape as never, bounds);
+          // Only a shape whose local mirror *is* a half turn carries one, so
+          // this is absent from almost every resize (see `mirrorShapeLocally`).
+          const turned =
+            resolved.shape.rotation === state.initial.rotation
+              ? null
+              : { rotation: resolved.shape.rotation };
           if (state.initial.type === 'frame' && state.frameChildren) {
             const initialFrame = state.initial;
             const frameChildren = state.frameChildren;
@@ -1305,6 +1466,7 @@ export function createSelectTool(): Tool {
               ctx.editor.updateShape(initialFrame.id, {
                 x: resized.x,
                 y: resized.y,
+                ...turned,
                 props: resized.props as unknown as Record<string, unknown>,
               });
               // Normal resize keeps child coordinates relative to the frame's
@@ -1322,6 +1484,7 @@ export function createSelectTool(): Tool {
             ctx.editor.updateShape(state.initial.id, {
               x: resized.x,
               y: resized.y,
+              ...turned,
               props: resized.props as unknown as Record<string, unknown>,
             });
           }
@@ -1335,40 +1498,56 @@ export function createSelectTool(): Tool {
             x: aligned.x - state.grabOffset.x,
             y: aligned.y - state.grabOffset.y,
           };
-          const anchor = handlePoint(
-            state.aligned0,
-            OPPOSITE_HANDLE[state.handle],
-          );
+          // A shape sitting off the selection's axes cannot take a per-axis
+          // scale without shearing, and neither can one carrying an intrinsic
+          // aspect ratio — so one of either makes the whole gesture uniform,
+          // rather than letting the rest of the selection deform around it.
+          const lockAspect = info.shiftKey || !state.canDeform;
+          const fromCenter = info.altKey;
+          const anchor = resizeAnchor(state.aligned0, state.handle, fromCenter);
           const w0 = state.aligned0.maxX - state.aligned0.minX;
           const h0 = state.aligned0.maxY - state.aligned0.minY;
           let { sx, sy } = resizeScale(
             state.aligned0,
             state.handle,
             pointer,
-            info.shiftKey,
+            lockAspect,
+            anchor,
           );
+          const flipX = sx < 0;
+          const flipY = sy < 0;
+          useSelectionStore
+            .getState()
+            .setGestureCursor(
+              resizeCursor(
+                flippedHandle(state.handle, flipX, flipY),
+                state.rotation,
+              ),
+            );
           // Alignment guides are page-axis features, so they only mean
           // something while the box still shares those axes.
-          if (
-            state.rotation === 0 &&
-            useCanvasUiStore.getState().snappingEnabled &&
-            !info.altKey
-          ) {
+          if (state.rotation === 0 && shouldSnapResize(info)) {
             const camera = useCameraStore.getState().camera;
             const background = useCanvasUiStore.getState().background;
-            const snapped = snapResizeBounds(
+            let box = normalizedBounds(
               scaleBounds(state.aligned0, anchor, sx, sy),
-              state.handle,
+            );
+            const snapped = snapResizeBounds(
+              box,
+              flippedHandle(state.handle, flipX, flipY),
               state.targets,
-              info.metaKey || info.ctrlKey
-                ? null
-                : getSnapGridStep(background, camera),
+              getSnapGridStep(background, camera),
               SNAP_SCREEN / camera.z,
-              info.shiftKey,
+              lockAspect,
               w0 / (h0 || 1),
             );
-            sx = (snapped.bounds.maxX - snapped.bounds.minX) / (w0 || 1);
-            sy = (snapped.bounds.maxY - snapped.bounds.minY) / (h0 || 1);
+            box = fromCenter
+              ? recenteredBounds(snapped.bounds, anchor)
+              : snapped.bounds;
+            // Back to signed factors: the snap moved an edge, and the sign is
+            // the flip the drag had already reached.
+            sx = ((box.maxX - box.minX) / (w0 || 1)) * (flipX ? -1 : 1);
+            sy = ((box.maxY - box.minY) / (h0 || 1)) * (flipY ? -1 : 1);
             useSelectionStore.getState().setSnapGuides(snapped.guides);
           } else {
             useSelectionStore.getState().setSnapGuides([]);
@@ -1392,24 +1571,36 @@ export function createSelectTool(): Tool {
               );
               const swapped =
                 item.quarterTurns === 1 || item.quarterTurns === 3;
-              // Off-axis shapes take the smaller factor on both axes: scaling
-              // their two axes apart would shear them, and the shape model has
-              // no way to hold a shear.
-              const uniform = Math.min(sx, sy);
-              const w =
-                item.quarterTurns === null ? uniform : swapped ? sy : sx;
-              const h =
-                item.quarterTurns === null ? uniform : swapped ? sx : sy;
+              // Off-axis shapes take the magnitude on both axes. The gesture is
+              // already uniform whenever one of them is in the selection, so
+              // this only picks which of two equal factors to read — and they
+              // keep their orientation through a flip, because a mirror about
+              // an axis that is not their own is not one they can hold.
+              const off = item.quarterTurns === null;
+              const w = off ? Math.abs(sx) : swapped ? sy : sx;
+              const h = off ? Math.abs(sx) : swapped ? sx : sy;
               const scaled: Bounds = {
-                minX: moved.x - (iw * w) / 2,
-                maxX: moved.x + (iw * w) / 2,
-                minY: moved.y - (ih * h) / 2,
-                maxY: moved.y + (ih * h) / 2,
+                minX: moved.x - (iw * Math.abs(w)) / 2,
+                maxX: moved.x + (iw * Math.abs(w)) / 2,
+                minY: moved.y - (ih * Math.abs(h)) / 2,
+                maxY: moved.y + (ih * Math.abs(h)) / 2,
               };
-              const resized = item.util.resize(item.initial as never, scaled);
+              // A quarter turn swaps which of the selection's axes the shape's
+              // own x runs along, so the mirror it takes swaps with it.
+              const shape = off
+                ? item.initial
+                : mirroredInitial(
+                    item.initial,
+                    swapped ? flipY : flipX,
+                    swapped ? flipX : flipY,
+                  );
+              const resized = item.util.resize(shape as never, scaled);
               ctx.editor.updateShape(item.initial.id, {
                 x: resized.x,
                 y: resized.y,
+                ...(shape.rotation === item.initial.rotation
+                  ? null
+                  : { rotation: shape.rotation }),
                 props: resized.props as unknown as Record<string, unknown>,
               });
             }
@@ -1485,17 +1676,9 @@ export function createSelectTool(): Tool {
           );
           return;
         }
-        case 'marquee': {
-          updateMarquee(
-            state,
-            info.point,
-            info.shiftKey,
-            info.ctrlKey,
-            info.metaKey,
-            ctx.editor,
-          );
+        case 'marquee':
+          updateMarquee(state, info.point, info, ctx.editor);
           return;
-        }
       }
     },
 
@@ -1510,14 +1693,7 @@ export function createSelectTool(): Tool {
           ctx,
         );
       } else if (state.type === 'marquee') {
-        updateMarquee(
-          state,
-          info.point,
-          info.shiftKey,
-          info.ctrlKey,
-          info.metaKey,
-          ctx.editor,
-        );
+        updateMarquee(state, info.point, info, ctx.editor);
       }
       commit(ctx);
     },
@@ -1534,23 +1710,8 @@ export function createSelectTool(): Tool {
         );
         return true;
       }
-      if (
-        state.type !== 'marquee' ||
-        (event.key !== 'Shift' &&
-          event.key !== 'Control' &&
-          event.key !== 'Meta')
-      ) {
-        return;
-      }
-      updateMarquee(
-        state,
-        state.current,
-        event.shiftKey,
-        event.ctrlKey,
-        event.metaKey,
-        ctx.editor,
-      );
-      return true;
+      if (reapplyModifiers(event, ctx)) return true;
+      if (reapplyMarqueeModifiers(event, ctx)) return true;
     },
 
     onKeyUp(event: KeyboardEvent, ctx: ToolContext) {
@@ -1565,23 +1726,8 @@ export function createSelectTool(): Tool {
         );
         return true;
       }
-      if (
-        state.type !== 'marquee' ||
-        (event.key !== 'Shift' &&
-          event.key !== 'Control' &&
-          event.key !== 'Meta')
-      ) {
-        return;
-      }
-      updateMarquee(
-        state,
-        state.current,
-        event.shiftKey,
-        event.ctrlKey,
-        event.metaKey,
-        ctx.editor,
-      );
-      return true;
+      if (reapplyModifiers(event, ctx)) return true;
+      if (reapplyMarqueeModifiers(event, ctx)) return true;
     },
 
     // The OS reclaimed the pointer mid-gesture (spurious pointercancel /
@@ -1759,4 +1905,6 @@ export function createSelectTool(): Tool {
       }
     },
   };
+
+  return tool;
 }

@@ -90,9 +90,17 @@ async function uploadPlacedImage(id: string, file: File): Promise<void> {
     withoutUndo(() => editor.deleteShapes([id]));
     return;
   }
-  // Rekey the preview rather than dropping it, so the switch to a blob id
-  // doesn't make this client re-download the bytes it already has.
-  setLocalImageUrl(up.blobId, localUrl);
+  // Swap the preview over to the bytes that were actually uploaded, so the
+  // switch to a blob id costs no re-download *and* this client stops painting
+  // the original file — a phone photo or retina screenshot is several times
+  // the pixels of the compressed copy every peer gets, and the shape is drawn
+  // into a box at most MAX_PLACE across either way.
+  const uploadedUrl = URL.createObjectURL(up.blob);
+  setLocalImageUrl(id, uploadedUrl);
+  setLocalImageUrl(up.blobId, uploadedUrl);
+  // Safe once both keys point at the replacement: an <image> that already
+  // painted keeps its decoded bitmap, and a remount re-reads `imageHref`.
+  URL.revokeObjectURL(localUrl);
   const shape = editor.getShape(id);
   if (shape?.type === 'image' && !shape.props.blobId) {
     withoutUndo(() => {
@@ -101,6 +109,7 @@ async function uploadPlacedImage(id: string, file: File): Promise<void> {
           blobId: up.blobId,
           naturalWidth: up.naturalWidth,
           naturalHeight: up.naturalHeight,
+          ...(up.thumbBlobId ? { thumbBlobId: up.thumbBlobId } : {}),
         },
       });
     });

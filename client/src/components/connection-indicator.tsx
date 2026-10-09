@@ -101,6 +101,14 @@ export function ConnectionIndicator() {
   const status = useConnectionStore((state) => state.status);
   const latencyMs = useConnectionStore((state) => state.latencyMs);
   const quality = connectionQuality(status, latencyMs);
+  // With no link there are no bars to draw, and zero bars is a glyph too faint
+  // to find. Those two states say what they are in words instead.
+  const word =
+    status === 'disconnected'
+      ? 'Offline'
+      : status === 'connecting'
+        ? 'Connecting…'
+        : null;
   const tooltipLabel =
     latencyMs !== null
       ? `${latencyMs} ms`
@@ -121,18 +129,25 @@ export function ConnectionIndicator() {
               aria-label={accessibleLabel}
               data-toolbar-item
               className={cn(
-                'flex size-8 items-center justify-center rounded-md select-none hover:bg-[var(--chrome-hover,var(--color-panel))]',
+                'flex h-8 min-w-8 items-center justify-center rounded-md select-none hover:bg-[var(--chrome-hover,var(--color-panel))]',
+                word && 'px-2',
               )}
               role="status"
               tabIndex={-1}
             />
           }
         >
-          <SignalBars
-            activeBars={quality.activeBars}
-            className={quality.colorClass}
-            pending={quality.pending}
-          />
+          {word ? (
+            <span className={cn('text-xs font-medium', quality.colorClass)}>
+              {word}
+            </span>
+          ) : (
+            <SignalBars
+              activeBars={quality.activeBars}
+              className={quality.colorClass}
+              pending={quality.pending}
+            />
+          )}
         </TooltipTrigger>
         <TooltipContent side="bottom" className="tabular-nums">
           {tooltipLabel}

@@ -19,12 +19,7 @@ import { buildInkCenterline, type InkCenterline } from './ink-engine';
 import { resizePolyline } from './line-geometry';
 import type { DashProps } from './perfect-dash';
 import { dashProps, fillFor } from './render-style';
-import {
-  useDotLength,
-  useForceSolidInk,
-  useInkErrorLimit,
-  useLodDash,
-} from '../lod';
+import { useInkLod } from '../lod';
 import type { ShapeUtil } from './types';
 import { highlightPaint, HIGHLIGHT_UNDERLAY_OPACITY, HIGHLIGHT_OVERLAY_OPACITY } from './highlight';
 
@@ -265,12 +260,13 @@ export const drawUtil: ShapeUtil<'draw'> = {
     const color = highlight ? highlightPaint(shape.props.color) : shape.props.color;
     // A dot is a zero-length dash, which browsers drop once the stroke is
     // sub-pixel wide — the dotted pencil vanished entirely when zoomed out.
-    const dotLength = useDotLength();
-    const dash = useLodDash(shape.props.dash ?? 'solid', size);
-    const forceSolid = useForceSolidInk(size);
-    // Zoomed out, most of a stroke's path commands land inside a pixel. This
-    // is the deviation the engine may take to drop them; 0 at and above 1:1.
-    const errorLimit = useInkErrorLimit();
+    // Zoomed out, most of a stroke's path commands land inside a pixel;
+    // `errorLimit` is the deviation the engine may take to drop them, 0 at and
+    // above 1:1. One subscription for all four answers — see `useInkLod`.
+    const { dotLength, dash, forceSolid, errorLimit } = useInkLod(
+      shape.props.dash ?? 'solid',
+      size,
+    );
     if (points.length === 0) return null;
     // Always a settled stroke: while the local pointer is drawing one, the
     // canvas filters that shape out of this tree and the active-stroke layer

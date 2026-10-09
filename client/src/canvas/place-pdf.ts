@@ -1,5 +1,5 @@
 import { genId, type Point, type Shape } from '@whiteboard/shared';
-import { uploadImageBlob } from '../board/blobs';
+import { uploadImageBlob, uploadImageThumb } from '../board/blobs';
 import { toast } from '@/components/ui/toast';
 import { getTopIndex, jitterKeyBetween } from './order';
 import { openPdf, type PdfPageRaster } from './pdf-render';
@@ -16,6 +16,7 @@ const PDF_PAGE_GAP = 24;
 /** A page, sized and positioned, ready to become a shape. */
 interface PlacedPage extends PdfPageRaster {
   blobId: string;
+  thumbBlobId?: string;
   x: number;
   y: number;
 }
@@ -82,7 +83,9 @@ async function importOnePdf(file: File, at: Point): Promise<string[]> {
     // Every page is rendered and uploaded before anything is written to the
     // document. Creating the shapes first would flash a column of empty frames
     // onto every collaborator's canvas while the rasterizing caught up.
-    const rasters: Array<PdfPageRaster & { blobId: string }> = [];
+    const rasters: Array<
+      PdfPageRaster & { blobId: string; thumbBlobId?: string }
+    > = [];
     try {
       for (let page = range.from; page <= range.to; page++) {
         toast.update(progress, {
@@ -90,8 +93,11 @@ async function importOnePdf(file: File, at: Point): Promise<string[]> {
         });
         try {
           const raster = await pdf.renderPage(page);
-          const blobId = await uploadImageBlob(raster.blob, 'image/png');
-          rasters.push({ ...raster, blobId });
+          const [blobId, thumbBlobId] = await Promise.all([
+            uploadImageBlob(raster.blob, 'image/png'),
+            uploadImageThumb(raster.blob, raster.rasterW, raster.rasterH),
+          ]);
+          rasters.push({ ...raster, blobId, thumbBlobId });
         } catch (err) {
           // One bad page should not cost the reader the other nineteen.
           console.error('[pdf] page %d failed', page, err);
@@ -164,6 +170,7 @@ function createPageShapes(pages: PlacedPage[]): string[] {
         h: page.worldH,
         naturalWidth: page.rasterW,
         naturalHeight: page.rasterH,
+        ...(page.thumbBlobId ? { thumbBlobId: page.thumbBlobId } : {}),
       },
     } as Shape;
     index = jitterKeyBetween(index, null);

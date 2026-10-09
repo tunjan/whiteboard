@@ -6,7 +6,6 @@ import {
   layoutTextProps,
   resolveLineHeightPx,
   stabilizeTextPosition,
-  textAlignOffset,
   textIndexAtPoint,
   textSelectionRects,
 } from './text-measure';
@@ -176,14 +175,6 @@ describe('auto-size width', () => {
     expect(layoutText({ text: '', fontSize: 10, sizingMode: 'auto' }).width).toBe(
       MIN_TEXT_WIDTH,
     );
-  });
-});
-
-describe('alignment offset', () => {
-  it('places the click point on the edge the alignment anchors to', () => {
-    expect(textAlignOffset(100, 'start')).toBe(0);
-    expect(textAlignOffset(100, 'middle')).toBe(-50);
-    expect(textAlignOffset(100, 'end')).toBe(-100);
   });
 });
 

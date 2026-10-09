@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { Point } from '@whiteboard/shared';
 import { usePresenceStore } from '@/collab/use-presence-store';
 import { worldToScreen, type Camera } from './camera';
+import { useCameraFollow } from './use-camera-interaction';
 import { LaserMark } from './LaserMark';
 import { useDocumentStore } from './use-document-store';
 import {
@@ -34,10 +35,11 @@ function pathFor(worldPoints: Point[], camera: Camera): string {
 
 /**
  * Ephemeral laser-pointer strokes: the local user's from the laser store plus
- * peers' from awareness. Each side times the fade from when it first sees a
+ * peers' from the presence store. Each side times the fade from when it first sees a
  * stroke marked done, so sender and peers animate it without a shared clock.
  */
-export function LaserLayer({ camera }: { camera: Camera }) {
+export function LaserLayer() {
+  const [camera, follow] = useCameraFollow<SVGGElement>();
   const localStrokes = useLaserStore((s) => s.strokes);
   const peers = usePresenceStore((s) => s.peers);
   const currentPageId = useDocumentStore((s) => s.currentPageId);
@@ -91,23 +93,26 @@ export function LaserLayer({ camera }: { camera: Camera }) {
       aria-hidden="true"
       className="pointer-events-none absolute inset-0 z-[var(--z-canvas-indicator)] h-full w-full"
     >
-      {strokes.map((stroke) => {
-        let opacity = 1;
-        if (stroke.done) {
-          // The hold happens upstream — the store only marks a stroke done
-          // once drawing has been idle for LASER_HOLD_MS — so a done stroke
-          // fades from the moment it is first seen here. Not yet stamped =
-          // first render since it finished: full opacity, as if stamped now.
-          const start = fadeStart.current.get(stroke.id);
-          opacity = start === undefined ? 1 : 1 - (now - start) / LASER_FADE_MS;
-          if (opacity <= 0) return null;
-        }
-        return (
-          <g key={stroke.id} opacity={Math.min(1, opacity)}>
-            <LaserMark d={pathFor(stroke.points, camera)} />
-          </g>
-        );
-      })}
+      <g ref={follow}>
+        {strokes.map((stroke) => {
+          let opacity = 1;
+          if (stroke.done) {
+            // The hold happens upstream — the store only marks a stroke done
+            // once drawing has been idle for LASER_HOLD_MS — so a done stroke
+            // fades from the moment it is first seen here. Not yet stamped =
+            // first render since it finished: full opacity, as if stamped now.
+            const start = fadeStart.current.get(stroke.id);
+            opacity =
+              start === undefined ? 1 : 1 - (now - start) / LASER_FADE_MS;
+            if (opacity <= 0) return null;
+          }
+          return (
+            <g key={stroke.id} opacity={Math.min(1, opacity)}>
+              <LaserMark d={pathFor(stroke.points, camera)} />
+            </g>
+          );
+        })}
+      </g>
     </svg>
   );
 }

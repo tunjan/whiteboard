@@ -15,7 +15,7 @@ function Checkbox({
       data-slot="checkbox"
       indeterminate={indeterminate}
       className={cn(
-        "peer flex size-4 shrink-0 items-center justify-center rounded-xs border border-control-border bg-surface text-fg-inverse transition-colors duration-instant hover:border-fg-muted data-checked:border-inverse data-checked:bg-inverse data-indeterminate:border-inverse data-indeterminate:bg-inverse data-disabled:pointer-events-none data-disabled:opacity-50",
+        "peer flex size-4 shrink-0 items-center justify-center rounded-xs border border-control-border bg-surface text-on-check transition-colors duration-instant hover:border-fg-muted data-checked:border-check data-checked:bg-check data-indeterminate:border-check data-indeterminate:bg-check data-disabled:pointer-events-none data-disabled:opacity-50",
         className
       )}
       {...props}

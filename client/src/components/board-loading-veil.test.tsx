@@ -40,7 +40,13 @@ describe('BoardLoadingVeil', () => {
     expect(html).toContain('opacity-0');
   });
 
-  it('fills the rule completely when ready', () => {
-    expect(render({ ready: true, stage: 'ready' })).toContain('scaleX(1)');
+  it('paints all three passes when ready', () => {
+    const html = render({ ready: true, stage: 'ready' });
+    expect(html.match(/stroke-dashoffset:0;/g)).toHaveLength(3);
+  });
+
+  it('holds every pass empty until the figure is shown', () => {
+    const html = render({ ready: false, stage: 'page' });
+    expect(html.match(/stroke-dashoffset:1;/g)).toHaveLength(3);
   });
 });

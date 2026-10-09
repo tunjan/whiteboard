@@ -468,24 +468,31 @@ export function syncBoundArrows(
    *  50k — paid on every frame of a drag that moves a bound shape, which is
    *  exactly when candidates exist. Callers without an index (tests) fall back
    *  to building one. */
-  byIdIndex?: ReadonlyMap<string, Shape>,
+  byIdIndex?: Pick<ReadonlyMap<string, Shape>, 'get'>,
 ): void {
   if (dirty?.size === 0) return;
 
-  // Gather the arrows that could need re-resolving before building any lookup.
-  // The `byId` Map costs an N-entry allocation every frame of every stroke and
-  // drag, so it must not be built on the frames that turn out to have no work —
-  // which, with a dirty set, is most of them.
+  // Gather the arrows that could need re-resolving. With a dirty set and the
+  // store's index, look its ids up instead of scanning the page: that is O(k)
+  // in the expanded set rather than O(N) in shapes, every frame of a drag.
+  // Without an index (tests), build the Map lazily so the frames that turn out
+  // to have no work don't pay its N-entry allocation.
   // Carries the narrowed `bindings` so the resolve loop below keeps the
   // non-undefined type the guard here established.
   const candidates: Array<{
     shape: ArrowShape;
     bindings: NonNullable<ArrowShape['props']['bindings']>;
   }> = [];
-  for (const shape of shapes) {
-    if (shape.type !== 'arrow' || !shape.props.bindings) continue;
-    if (dirty && !dirty.has(shape.id)) continue;
+  const consider = (shape: Shape | undefined) => {
+    if (shape?.type !== 'arrow' || !shape.props.bindings) return;
     candidates.push({ shape, bindings: shape.props.bindings });
+  };
+  if (dirty && byIdIndex) {
+    for (const id of dirty) consider(byIdIndex.get(id));
+  } else {
+    for (const shape of shapes) {
+      if (!dirty || dirty.has(shape.id)) consider(shape);
+    }
   }
   if (candidates.length === 0) return;
 

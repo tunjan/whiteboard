@@ -13,6 +13,7 @@ import {
 } from './graph-math';
 import type { GraphExpression, GraphParameter } from '@whiteboard/shared';
 import { DEFAULT_GRAPH_PARAMETER, PARAMETRIC_VARIABLE } from './graph-defaults';
+import { graphWasmProgram } from './graph-wasm';
 
 const FUNCTION_ALIASES = new Map([
   ['sin', 'sin'],
@@ -1095,29 +1096,6 @@ function addDefinitionVariables(
   visiting.delete(name);
 }
 
-function evaluateGraphFunction(
-  name: string,
-  input: unknown,
-  parameters: Record<string, GraphParameter>,
-  definitions: GraphFunctionDefinitions,
-  active: ReadonlySet<string>,
-): number {
-  if (typeof input !== 'number' || active.has(name)) return Number.NaN;
-  const definition = definitions.get(name);
-  if (!definition?.evaluateRaw || definition.error) return Number.NaN;
-  const nextActive = new Set(active);
-  nextActive.add(name);
-  const scope = createEvaluationScope(
-    { [definition.argument]: input },
-    parameters,
-    definition.directVariables,
-    definitions,
-    nextActive,
-  );
-  installAggregates(scope, definition.aggregates ?? []);
-  return definition.evaluateRaw(scope);
-}
-
 type SymbolVisitor = (node: MathNode, parent: MathNode | null) => void;
 
 /** Parse, validate and compile one normalized expression. */
@@ -1320,6 +1298,70 @@ function installAggregates(
   }
 }
 
+type BoundGraphFunctions = ReadonlyMap<string, (input: unknown) => number>;
+
+/** Set each slider variable and each user function into `scope`. */
+function fillScope(
+  scope: EvaluationScope,
+  parameters: Record<string, GraphParameter>,
+  variables: Iterable<string>,
+  functions: BoundGraphFunctions,
+): void {
+  for (const variable of variables) {
+    scope.set(
+      variable,
+      parameters[variable]?.value ?? DEFAULT_GRAPH_PARAMETER.value,
+    );
+  }
+  for (const [name, fn] of functions) scope.set(name, fn);
+}
+
+/**
+ * Bind every user function to one set of slider values.
+ *
+ * Each function builds its scope once, on first call, and a call after that
+ * only rewrites its argument. Built per call instead, a curve through `f(x)`
+ * paid for a fresh scope, a closure per definition and a recursion set at
+ * every sample — about double the cost of the same expression written inline.
+ *
+ * `busy` stands in for the old per-call recursion set. Parsing already rejects
+ * circular definitions, so re-entering a function mid-call is the one case it
+ * has to catch, and it answers NaN as before.
+ */
+function bindGraphFunctions(
+  parameters: Record<string, GraphParameter>,
+  definitions: GraphFunctionDefinitions,
+): BoundGraphFunctions {
+  const bound = new Map<string, (input: unknown) => number>();
+  for (const definition of definitions.values()) {
+    const { evaluateRaw } = definition;
+    if (!evaluateRaw || definition.error) {
+      bound.set(definition.name, () => Number.NaN);
+      continue;
+    }
+    // Lazy: the scope holds every bound function, so it can't be built until
+    // this loop has finished filling `bound`.
+    let scope: EvaluationScope | null = null;
+    let busy = false;
+    bound.set(definition.name, (input) => {
+      if (typeof input !== 'number' || busy) return Number.NaN;
+      if (!scope) {
+        scope = new Map();
+        fillScope(scope, parameters, definition.directVariables, bound);
+        installAggregates(scope, definition.aggregates ?? []);
+      }
+      scope.set(definition.argument, input);
+      busy = true;
+      try {
+        return evaluateRaw(scope);
+      } finally {
+        busy = false;
+      }
+    });
+  }
+  return bound;
+}
+
 /**
  * Build the scope a compiled expression evaluates against.
  *
@@ -1332,20 +1374,14 @@ function createEvaluationScope(
   parameters: Record<string, GraphParameter>,
   variables: Iterable<string>,
   definitions: GraphFunctionDefinitions,
-  active: ReadonlySet<string> = new Set(),
 ): EvaluationScope {
   const scope: EvaluationScope = new Map(Object.entries(values));
-  for (const variable of variables) {
-    scope.set(
-      variable,
-      parameters[variable]?.value ?? DEFAULT_GRAPH_PARAMETER.value,
-    );
-  }
-  for (const name of definitions.keys()) {
-    scope.set(name, (input: unknown) =>
-      evaluateGraphFunction(name, input, parameters, definitions, active),
-    );
-  }
+  fillScope(
+    scope,
+    parameters,
+    variables,
+    bindGraphFunctions(parameters, definitions),
+  );
   return scope;
 }
 
@@ -1450,17 +1486,8 @@ function parseFunctionDefinitionExpression(
   const variables = new Set<string>();
   addDefinitionVariables(definition.name, localDefinitions, variables);
 
-  // A named definition keeps building its scope per call: the recursion guard
-  // (`active`) is part of that scope, so it cannot be hoisted out of the loop
-  // the way a plain expression's can.
-  const evaluate = (x: number, parameters: Record<string, GraphParameter>) =>
-    evaluateGraphFunction(
-      definition.name,
-      x,
-      parameters,
-      localDefinitions,
-      new Set(),
-    );
+  const createEvaluator = (parameters: Record<string, GraphParameter>) =>
+    bindGraphFunctions(parameters, localDefinitions).get(definition.name)!;
 
   return {
     ok: true,
@@ -1468,8 +1495,8 @@ function parseFunctionDefinitionExpression(
     normalized: `${definition.name}(${definition.argument})=${definition.normalizedBody}`,
     kind: 'explicit',
     variables: [...variables].sort((a, b) => a.localeCompare(b)),
-    evaluate,
-    createEvaluator: (parameters) => (x) => evaluate(x, parameters),
+    evaluate: (x, parameters) => createEvaluator(parameters)(x),
+    createEvaluator,
   };
 }
 
@@ -1575,7 +1602,20 @@ function parseGraphExpressionUncached(
     for (const dependency of dependencies) {
       addDefinitionVariables(dependency, definitions, variables);
     }
+    // Sums, integrals and user functions live in the mathjs scope; only a
+    // self-contained expression can go to Rust.
+    const rust =
+      compiledAggregates.length === 0 && dependencies.size === 0
+        ? graphWasmProgram(evaluationSource, [...variables])
+        : null;
     const createEvaluator = (parameters: Record<string, GraphParameter>) => {
+      const fast = rust?.bind(parameters);
+      if (fast) {
+        return kind === 'implicit'
+          ? (x: number, y?: number) =>
+              y === undefined ? Number.NaN : fast(x, y)
+          : (x: number) => fast(x, 0);
+      }
       const scope = createEvaluationScope(
         kind === 'implicit' ? { x: 0, y: 0 } : { x: 0 },
         parameters,

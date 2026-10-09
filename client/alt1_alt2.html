@@ -1,0 +1,1459 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Calm UI — Toolbar Satellite Bar: Alt 1 &amp; Alt 2 Systems Design</title>
+  <!-- Tailwind CSS Play CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            canvas: '#EDECEA',
+            paper: '#FBFBF9',
+            ink: {
+              DEFAULT: '#141414',
+              soft: '#4A4A4F',
+              mute: '#A09D97',
+            },
+            wash: '#F1F1F2',
+            line: '#E5E3DD',
+            moss: {
+              DEFAULT: '#27604A',
+              wash: '#E0EFE5',
+              dark: '#52B788',
+            },
+            night: {
+              DEFAULT: '#17171A',
+              line: '#2A2A2F',
+              mute: '#97979E',
+              wash: '#242429',
+              paper: '#1F1F24',
+            },
+          },
+          borderRadius: {
+            ctrl: '10px',
+            bar: '14px',
+            panel: '18px',
+          },
+          boxShadow: {
+            float: '0 1px 2px rgb(0 0 0 / .05), 0 14px 34px rgb(0 0 0 / .10)',
+            card: '0 1px 2px rgb(0 0 0 / .04), 0 8px 22px rgb(0 0 0 / .07)',
+            press: 'inset 0 1px 2px rgb(0 0 0 / .12)',
+          },
+          transitionTimingFunction: {
+            calm: 'cubic-bezier(0.16, 1, 0.3, 1)',
+          }
+        }
+      }
+    };
+  </script>
+  <style>
+    /* CSS Tokens — CALM UI */
+    :root {
+      --color-canvas:     #EDECEA;  /* page background */
+      --color-paper:      #FBFBF9;  /* light surface */
+      --color-ink:        #141414;  /* primary ink / active fill */
+      --color-ink-soft:   #4A4A4F;  /* resting glyphs */
+      --color-ink-mute:   #A09D97;  /* tags, metadata */
+      --color-wash:       #F1F1F2;  /* hover wash on paper */
+      --color-line:       #E5E3DD;  /* hairline, surface edges only */
+      --color-moss:       #27604A;  /* the single accent (ink-grade) */
+      --color-moss-wash:  #E0EFE5;  /* accent tint */
+      --color-night:      #17171A;  /* dark surface */
+      --color-night-line: #2A2A2F;
+      --color-night-mute: #97979E;
+
+      --radius-ctrl:  10px;
+      --radius-bar:   14px;
+      --radius-panel: 18px;
+
+      --shadow-float: 0 1px 2px rgb(0 0 0 / .05), 0 14px 34px rgb(0 0 0 / .10);
+      --shadow-card:  0 1px 2px rgb(0 0 0 / .04), 0 8px 22px rgb(0 0 0 / .07);
+      --shadow-press: inset 0 1px 2px rgb(0 0 0 / .12);
+    }
+
+    body {
+      background-color: var(--color-canvas);
+      color: var(--color-ink);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Geist", "Segoe UI", Roboto, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    .dark body {
+      background-color: #121215;
+      color: #EDECEA;
+    }
+
+    /* Tactile button micro-press */
+    .btn-tactile:active {
+      transform: scale(0.96);
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .btn-tactile:active { transform: none; }
+    }
+
+    /* Whiteboard subtle dot grid */
+    .canvas-dots {
+      background-image: radial-gradient(rgba(20, 20, 20, 0.08) 1.2px, transparent 1.2px);
+      background-size: 24px 24px;
+    }
+    .dark .canvas-dots {
+      background-image: radial-gradient(rgba(255, 255, 255, 0.08) 1.2px, transparent 1.2px);
+    }
+
+    /* Spacing guide overlay markers */
+    .show-guides [role="group"],
+    .show-guides [role="radiogroup"] {
+      outline: 1px dashed rgba(39, 96, 74, 0.45);
+      position: relative;
+    }
+    .show-guides [role="group"]::before,
+    .show-guides [role="radiogroup"]::before {
+      content: attr(aria-label);
+      position: absolute;
+      top: -12px;
+      left: 4px;
+      font-size: 8px;
+      font-family: monospace;
+      color: #27604A;
+      background: #E0EFE5;
+      padding: 0 4px;
+      border-radius: 4px;
+      pointer-events: none;
+      z-index: 40;
+      line-height: 12px;
+    }
+    .show-guides .gap-2\.5 {
+      background-color: rgba(39, 96, 74, 0.06);
+    }
+
+    /* Popover entrance animation */
+    .popover-anim {
+      animation: popoverFade 150ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    }
+    @keyframes popoverFade {
+      0% { opacity: 0; transform: translateY(6px) scale(0.97); }
+      100% { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    /* Slider track custom styling */
+    input[type=range] {
+      -webkit-appearance: none;
+      background: transparent;
+    }
+    input[type=range]:focus {
+      outline: none;
+    }
+    input[type=range]::-webkit-slider-runnable-track {
+      width: 100%;
+      height: 6px;
+      cursor: pointer;
+      background: #E5E3DD;
+      border-radius: 9999px;
+    }
+    .dark input[type=range]::-webkit-slider-runnable-track {
+      background: #2A2A2F;
+    }
+    input[type=range]::-webkit-slider-thumb {
+      height: 16px;
+      width: 16px;
+      border-radius: 9999px;
+      background: #141414;
+      cursor: pointer;
+      -webkit-appearance: none;
+      margin-top: -5px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+      transition: transform 0.1s ease;
+    }
+    .dark input[type=range]::-webkit-slider-thumb {
+      background: #FBFBF9;
+    }
+    input[type=range]:active::-webkit-slider-thumb {
+      transform: scale(1.15);
+    }
+
+    /* Swatch ring utility */
+    .swatch-selected {
+      box-shadow: 0 0 0 2px var(--color-paper), 0 0 0 4px var(--color-ink);
+    }
+    .dark .swatch-selected {
+      box-shadow: 0 0 0 2px var(--color-night), 0 0 0 4px #FBFBF9;
+    }
+  </style>
+</head>
+<body class="canvas-dots min-h-screen text-[#141414] dark:text-[#EDECEA] selection:bg-[#E0EFE5] selection:text-[#27604A] transition-colors duration-200 flex flex-col">
+
+  <!-- ========================================================================= -->
+  <!-- HEADER & DESIGN SYSTEM CONTROL CENTER                                     -->
+  <!-- ========================================================================= -->
+  <header class="sticky top-0 z-50 bg-[#FBFBF9]/95 dark:bg-[#17171A]/95 backdrop-blur-md border-b border-[#E5E3DD] dark:border-[#2A2A2F] px-4 sm:px-6 py-3 transition-colors">
+    <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
+      
+      <!-- Brand & Systems Title -->
+      <div class="flex items-center gap-3">
+        <span class="size-3 rounded-full bg-[#27604A] shrink-0" aria-hidden="true"></span>
+        <div>
+          <div class="flex items-center gap-2">
+            <h1 class="text-sm font-semibold tracking-tight text-[#141414] dark:text-[#FBFBF9]">Calm UI · Toolbar Satellite Bar</h1>
+            <span class="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded-[6px] bg-[#E0EFE5] text-[#27604A] font-semibold">Systems Spec</span>
+          </div>
+          <p class="text-xs text-[#A09D97] dark:text-[#97979E]">Zero peer dividers · Spacing is the only separator · 2px / 10px / 6px rhythm · &ge;40px targets</p>
+        </div>
+      </div>
+
+      <!-- Live Controls: Switch View, Active Tool Simulator, Spacing Guides, Theme Toggle -->
+      <div class="flex flex-wrap items-center gap-2">
+        
+        <!-- View Mode Tabs -->
+        <div role="tablist" aria-label="Alternative views" class="flex p-0.5 rounded-[10px] bg-[#EDECEA] dark:bg-[#2A2A2F] text-xs font-medium text-[#4A4A4F] dark:text-[#97979E]">
+          <button type="button" role="tab" id="view-tab-both" onclick="setViewMode('both')" class="px-2.5 py-1.5 rounded-[8px] transition-all bg-[#FBFBF9] dark:bg-[#17171A] text-[#141414] dark:text-[#FBFBF9] shadow-sm font-semibold">
+            Side-by-Side
+          </button>
+          <button type="button" role="tab" id="view-tab-alt1" onclick="setViewMode('alt1')" class="px-2.5 py-1.5 rounded-[8px] transition-all hover:text-[#141414] dark:hover:text-[#FBFBF9]">
+            Alt 1: Floating Horizon
+          </button>
+          <button type="button" role="tab" id="view-tab-alt2" onclick="setViewMode('alt2')" class="px-2.5 py-1.5 rounded-[8px] transition-all hover:text-[#141414] dark:hover:text-[#FBFBF9]">
+            Alt 2: Tonal Moss Tray
+          </button>
+          <button type="button" role="tab" id="view-tab-spec" onclick="setViewMode('spec')" class="px-2.5 py-1.5 rounded-[8px] transition-all hover:text-[#141414] dark:hover:text-[#FBFBF9]">
+            Design Spec &amp; Tokens
+          </button>
+        </div>
+
+        <!-- Active Tool Context Simulator -->
+        <div class="flex items-center gap-1 bg-[#EDECEA] dark:bg-[#2A2A2F] p-0.5 rounded-[10px]">
+          <span class="text-[10px] font-mono uppercase text-[#A09D97] dark:text-[#97979E] px-2">Tool:</span>
+          <select id="active-tool-select" onchange="setActiveTool(this.value)" class="text-xs font-medium bg-[#FBFBF9] dark:bg-[#17171A] text-[#141414] dark:text-[#FBFBF9] px-2 py-1 rounded-[8px] border-0 cursor-pointer focus:ring-1 focus:ring-[#27604A] outline-none">
+            <option value="rectangle">Rectangle (Shape)</option>
+            <option value="draw">Pen (Freehand)</option>
+            <option value="arrow">Arrow (Connector)</option>
+            <option value="text">Text (Typography)</option>
+          </select>
+        </div>
+
+        <!-- Spacing Guides Inspector Toggle -->
+        <button type="button" onclick="toggleGuides()" id="guides-btn" class="h-8 px-2.5 rounded-[8px] bg-[#EDECEA] dark:bg-[#2A2A2F] hover:bg-[#F1F1F2] dark:hover:bg-[#242429] text-xs font-medium text-[#4A4A4F] dark:text-[#97979E] transition-colors" title="Highlight Calm UI spacing rhythm (2px / 10px / 6px) and prove zero peer dividers">
+          <span class="font-mono text-[11px]">Guides: <span id="guides-state" class="text-[#A09D97]">OFF</span></span>
+        </button>
+
+        <!-- Dark / Light Theme Toggle -->
+        <button type="button" onclick="toggleTheme()" aria-label="Toggle Theme" class="size-8 rounded-[8px] flex items-center justify-center text-[#4A4A4F] dark:text-[#97979E] hover:bg-[#EDECEA] dark:hover:bg-[#2A2A2F] hover:text-[#141414] dark:hover:text-[#FBFBF9] transition-colors" title="Toggle Light / Dark Surface">
+          <svg class="size-4 block dark:hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>
+          </svg>
+          <svg class="size-4 hidden dark:block" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/>
+          </svg>
+        </button>
+
+      </div>
+    </div>
+  </header>
+
+  <!-- ========================================================================= -->
+  <!-- SUBTRACTION & CALM PRINCIPLES BANNER                                      -->
+  <!-- ========================================================================= -->
+  <aside aria-label="System Rules" class="max-w-7xl w-full mx-auto px-4 sm:px-6 pt-4">
+    <div class="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 rounded-[14px] bg-[#FBFBF9] dark:bg-[#17171A] border border-[#E5E3DD] dark:border-[#2A2A2F] text-xs text-[#4A4A4F] dark:text-[#97979E] shadow-sm">
+      <div class="flex items-center gap-2">
+        <span class="size-2 rounded-full bg-[#27604A]"></span>
+        <span class="font-semibold text-[#141414] dark:text-[#FBFBF9]">Calm Subtraction Test Passed:</span>
+        <span>Zero hairline dividers between peer buttons. Grouping relies solely on <code class="px-1.5 py-0.5 rounded bg-[#EDECEA] dark:bg-[#2A2A2F] text-[#141414] dark:text-[#FBFBF9] font-mono text-[11px]">gap-2.5 (10px)</code>, inner rhythm on <code class="px-1.5 py-0.5 rounded bg-[#EDECEA] dark:bg-[#2A2A2F] text-[#141414] dark:text-[#FBFBF9] font-mono text-[11px]">gap-0.5 (2px)</code>.</span>
+      </div>
+      <div class="flex items-center gap-4 text-[11px] font-mono">
+        <span>Touch: &ge;40px (size-10)</span>
+        <span>Icon: 20px (stroke 1.7)</span>
+        <span>Surface: border-line only</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ========================================================================= -->
+  <!-- MAIN WORKSPACE / INTERACTIVE STAGE                                        -->
+  <!-- ========================================================================= -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 flex flex-col gap-8">
+
+    <!-- LIVE ARTBOARD PREVIEW (Reacts to style controls) -->
+    <section aria-labelledby="live-preview-title" class="relative w-full rounded-[18px] bg-[#FBFBF9] dark:bg-[#1F1F24] border border-[#E5E3DD] dark:border-[#2A2A2F] shadow-card overflow-hidden p-6 min-h-[170px] flex flex-col justify-between">
+      <div class="flex items-center justify-between border-b border-[#E5E3DD]/60 dark:border-[#2A2A2F]/60 pb-3">
+        <div class="flex items-center gap-2">
+          <span class="size-2 rounded-full bg-[#27604A]"></span>
+          <h2 id="live-preview-title" class="text-xs font-semibold uppercase tracking-wider text-[#A09D97] dark:text-[#97979E]">Live Canvas Stage · Active Selection Feedback</h2>
+        </div>
+        <div class="text-xs font-mono text-[#4A4A4F] dark:text-[#97979E] flex items-center gap-3">
+          <span>Stroke: <strong id="preview-weight-txt" class="text-[#141414] dark:text-[#FBFBF9]">4px</strong></span>
+          <span>Color: <strong id="preview-color-txt" class="text-[#141414] dark:text-[#FBFBF9]">#141414</strong></span>
+          <span>Fill: <strong id="preview-fill-txt" class="text-[#141414] dark:text-[#FBFBF9]">Solid (20%)</strong></span>
+          <span>Dash: <strong id="preview-dash-txt" class="text-[#141414] dark:text-[#FBFBF9]">Solid</strong></span>
+          <span>Opacity: <strong id="preview-opacity-txt" class="text-[#141414] dark:text-[#FBFBF9]">100%</strong></span>
+        </div>
+      </div>
+
+      <!-- Live Interactive Visual Sample -->
+      <div class="py-6 flex items-center justify-center">
+        <svg id="live-canvas-svg" class="w-72 h-28 transition-all duration-200" viewBox="0 0 280 110">
+          <defs>
+            <pattern id="canvas-hatch-pattern" width="10" height="10" patternTransform="rotate(45 0 0)" patternUnits="userSpaceOnUse">
+              <line x1="0" y1="0" x2="0" y2="10" stroke="#141414" stroke-width="2" id="canvas-hatch-stroke" />
+            </pattern>
+          </defs>
+          <!-- The drawn object -->
+          <g id="live-shape-container">
+            <rect id="live-shape-rect" x="30" y="15" width="220" height="80" rx="14" 
+                  fill="#141414" fill-opacity="0.15" stroke="#141414" stroke-width="4" />
+            <text id="live-shape-text" x="140" y="60" text-anchor="middle" font-size="14" font-weight="500" fill="#141414" class="select-none font-sans">
+              Interactive Drawing Object
+            </text>
+          </g>
+        </svg>
+      </div>
+
+      <div class="text-[11px] text-center text-[#A09D97] dark:text-[#97979E]">
+        Manipulate any property in either Alternative below to see instantaneous, seamless style synchronization.
+      </div>
+    </section>
+
+    <!-- ======================================================================= -->
+    <!-- COMPARISON STAGES WRAPPER                                               -->
+    <!-- ======================================================================= -->
+    <div id="comparison-container" class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+
+      <!-- ##################################################################### -->
+      <!-- ALTERNATIVE 1: FLOATING HORIZON DOCK                                   -->
+      <!-- ##################################################################### -->
+      <section id="alt1-card" class="flex flex-col bg-[#FBFBF9] dark:bg-[#17171A] rounded-[18px] border border-[#E5E3DD] dark:border-[#2A2A2F] shadow-card overflow-visible">
+        
+        <!-- Alt 1 Header Bar -->
+        <div class="p-5 border-b border-[#E5E3DD] dark:border-[#2A2A2F]">
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <div class="flex items-center gap-2">
+                <span class="px-2 py-0.5 rounded-[6px] bg-[#EDECEA] dark:bg-[#2A2A2F] font-mono text-[11px] font-semibold text-[#141414] dark:text-[#FBFBF9]">Alternative 1</span>
+                <h3 class="text-base font-semibold text-[#141414] dark:text-[#FBFBF9]">Floating Horizon Dock</h3>
+              </div>
+              <p class="text-xs text-[#4A4A4F] dark:text-[#97979E] mt-1">Modular Anchored Dock · Dedicated contextual popovers for secondary keys · Pure whitespace separation</p>
+            </div>
+            <span class="text-[10px] uppercase font-mono px-2 py-1 rounded-[6px] bg-[#EDECEA] dark:bg-[#2A2A2F] text-[#4A4A4F] dark:text-[#97979E]">Modular Model</span>
+          </div>
+
+          <!-- Rationale Bullets -->
+          <div class="mt-4 grid grid-cols-3 gap-2 text-[11px] text-[#4A4A4F] dark:text-[#97979E]">
+            <div class="p-2 rounded-[10px] bg-[#F1F1F2] dark:bg-[#1F1F24]">
+              <strong class="block text-[#141414] dark:text-[#FBFBF9] font-medium">1. Direct Weight Bar</strong>
+              4 visual stroke widths directly tappable without modal overhead.
+            </div>
+            <div class="p-2 rounded-[10px] bg-[#F1F1F2] dark:bg-[#1F1F24]">
+              <strong class="block text-[#141414] dark:text-[#FBFBF9] font-medium">2. 5+1 Swatch Ramp</strong>
+              5 instant quick colors + dedicated full-spectrum wheel trigger.
+            </div>
+            <div class="p-2 rounded-[10px] bg-[#F1F1F2] dark:bg-[#1F1F24]">
+              <strong class="block text-[#141414] dark:text-[#FBFBF9] font-medium">3. Discrete Popovers</strong>
+              Independent, targeted popovers anchored to Fill, Dash, Opacity keys.
+            </div>
+          </div>
+        </div>
+
+        <!-- Alt 1 Live Interactive Stage -->
+        <div class="p-6 bg-[#EDECEA]/60 dark:bg-[#121215]/60 flex flex-col items-center justify-end min-h-[360px] relative rounded-b-[18px]">
+          
+          <!-- ANCHORED CONTAINER: SATELLITE BAR STACKED DIRECTLY ABOVE MAIN TOOLBAR -->
+          <div class="w-full flex flex-col items-center relative">
+
+            <!-- =============================================================== -->
+            <!-- ALT 1 SATELLITE BAR                                             -->
+            <!-- =============================================================== -->
+            <div id="alt1-satellite-bar" 
+                 role="toolbar" 
+                 aria-label="Object Style Properties (Alternative 1)"
+                 class="relative mb-3 z-30 flex items-center p-1.5 rounded-[14px] bg-[#FBFBF9] dark:bg-[#1F1F24] border border-[#E5E3DD] dark:border-[#2A2A2F] shadow-card gap-2.5 transition-all">
+              
+              <!-- ------------------------------------------------------------- -->
+              <!-- GROUP 1: STROKE WEIGHTS (4 steps: 2px, 4px, 7px, 11px)        -->
+              <!-- ------------------------------------------------------------- -->
+              <div role="radiogroup" aria-label="Stroke weight" class="flex items-center gap-0.5">
+                
+                <!-- Weight 1 (2px) -->
+                <button type="button" role="radio" aria-checked="false" aria-label="Fine stroke, 2 pixels"
+                        onclick="setStrokeWeight(2, 'alt1')" id="alt1-weight-2"
+                        class="btn-tactile size-10 rounded-[10px] text-[#4A4A4F] dark:text-[#97979E] flex items-center justify-center hover:bg-[#F1F1F2] dark:hover:bg-[#242429] hover:text-[#141414] dark:hover:text-[#FBFBF9] focus-visible:ring-2 focus-visible:ring-[#27604A] focus-visible:outline-none transition">
+                  <span class="w-[18px] h-[2px] rounded-full bg-current transition-all" id="alt1-weight-glyph-2"></span>
+                </button>
+
+                <!-- Weight 2 (4px - Active Default) -->
+                <button type="button" role="radio" aria-checked="true" aria-label="Medium stroke, 4 pixels"
+                        onclick="setStrokeWeight(4, 'alt1')" id="alt1-weight-4"
+                        class="btn-tactile size-10 rounded-[10px] bg-[#141414] text-[#FBFBF9] dark:bg-[#FBFBF9] dark:text-[#141414] flex items-center justify-center shadow-press focus-visible:ring-2 focus-visible:ring-[#27604A] focus-visible:outline-none transition">
+                  <span class="w-[18px] h-[4px] rounded-full bg-current transition-all" id="alt1-weight-glyph-4"></span>
+                </button>
+
+                <!-- Weight 3 (7px) -->
+                <button type="button" role="radio" aria-checked="false" aria-label="Bold stroke, 7 pixels"
+                        onclick="setStrokeWeight(7, 'alt1')" id="alt1-weight-7"
+                        class="btn-tactile size-10 rounded-[10px] text-[#4A4A4F] dark:text-[#97979E] flex items-center justify-center hover:bg-[#F1F1F2] dark:hover:bg-[#242429] hover:text-[#141414] dark:hover:text-[#FBFBF9] focus-visible:ring-2 focus-visible:ring-[#27604A] focus-visible:outline-none transition">
+                  <span class="w-[18px] h-[7px] rounded-full bg-current transition-all" id="alt1-weight-glyph-7"></span>
+                </button>
+
+                <!-- Weight 4 (11px) -->
+                <button type="button" role="radio" aria-checked="false" aria-label="Heavy stroke, 11 pixels"
+                        onclick="setStrokeWeight(11, 'alt1')" id="alt1-weight-11"
+                        class="btn-tactile size-10 rounded-[10px] text-[#4A4A4F] dark:text-[#97979E] flex items-center justify-center hover:bg-[#F1F1F2] dark:hover:bg-[#242429] hover:text-[#141414] dark:hover:text-[#FBFBF9] focus-visible:ring-2 focus-visible:ring-[#27604A] focus-visible:outline-none transition">
+                  <span class="w-[18px] h-[10px] rounded-full bg-current transition-all" id="alt1-weight-glyph-11"></span>
+                </button>
+
+              </div>
+
+              <!-- ------------------------------------------------------------- -->
+              <!-- GROUP 2: COLOR SWATCHES (5 Quick + 1 More-Colors Wheel)       -->
+              <!-- (Separated by gap-2.5 from Group 1 — NO divider)              -->
+              <!-- ------------------------------------------------------------- -->
+              <div role="radiogroup" aria-label="Color palette" class="flex items-center gap-0.5">
+                
+                <!-- Swatch 1: Ink Black -->
+                <button type="button" role="radio" aria-checked="true" aria-label="Ink Black"
+                        onclick="setColor('#141414', 'alt1')" id="alt1-color-141414"
+                        class="btn-tactile size-10 rounded-[10px] flex items-center justify-center hover:bg-[#F1F1F2] dark:hover:bg-[#242429] focus-visible:ring-2 focus-visible:ring-[#27604A] focus-visible:outline-none transition">
+                  <span class="size-5 rounded-full bg-[#141414] border border-black/10 dark:border-white/20 swatch-selected"></span>
+                </button>
+
+                <!-- Swatch 2: Calm Charcoal / Slate -->
+                <button type="button" role="radio" aria-checked="false" aria-label="Calm Slate"
+                        onclick="setColor('#4A4A4F', 'alt1')" id="alt1-color-4A4A4F"
+                        class="btn-tactile size-10 rounded-[10px] flex items-center justify-center hover:bg-[#F1F1F2] dark:hover:bg-[#242429] focus-visible:ring-2 focus-visible:ring-[#27604A] focus-visible:outline-none transition">
+                  <span class="size-5 rounded-full bg-[#4A4A4F] border border-black/10"></span>
+                </button>
+
+                <!-- Swatch 3: Moss Pine -->
+                <button type="button" role="radio" aria-checked="false" aria-label="Moss Pine"
+                        onclick="setColor('#27604A', 'alt1')" id="alt1-color-27604A"
+                        class="btn-tactile size-10 rounded-[10px] flex items-center justify-center hover:bg-[#F1F1F2] dark:hover:bg-[#242429] focus-visible:ring-2 focus-visible:ring-[#27604A] focus-visible:outline-none transition">
+                  <span class="size-5 rounded-full bg-[#27604A] border border-black/10"></span>
+                </button>
+
+                <!-- Swatch 4: Warm Ochre -->
+                <button type="button" role="radio" aria-checked="false" aria-label="Warm Ochre"
+                        onclick="setColor('#D97706', 'alt1')" id="alt1-color-D97706"
+                        class="btn-tactile size-10 rounded-[10px] flex items-center justify-center hover:bg-[#F1F1F2] dark:hover:bg-[#242429] focus-visible:ring-2 focus-visible:ring-[#27604A] focus-visible:outline-none transition">
+                  <span class="size-5 rounded-full bg-[#D97706] border border-black/10"></span>
+                </button>
+
+                <!-- Swatch 5: Calm Denim Blue -->
+                <button type="button" role="radio" aria-checked="false" aria-label="Calm Denim"
+                        onclick="setColor('#2B6CB0', 'alt1')" id="alt1-color-2B6CB0"
+                        class="btn-tactile size-10 rounded-[10px] flex items-center justify-center hover:bg-[#F1F1F2] dark:hover:bg-[#242429] focus-visible:ring-2 focus-visible:ring-[#27604A] focus-visible:outline-none transition">
+                  <span class="size-5 rounded-full bg-[#2B6CB0] border border-black/10"></span>
+                </button>
+
+                <!-- More Colors Trigger -->
+                <div class="relative">
+                  <button type="button" aria-label="More colors" aria-haspopup="dialog" aria-expanded="false"
+                          onclick="togglePopover('alt1-popover-colors')" id="alt1-btn-more-colors"
+                          class="btn-tactile size-10 rounded-[10px] text-[#4A4A4F] dark:text-[#97979E] flex items-center justify-center hover:bg-[#F1F1F2] dark:hover:bg-[#242429] hover:text-[#141414] dark:hover:text-[#FBFBF9] focus-visible:ring-2 focus-visible:ring-[#27604A] focus-visible:outline-none transition">
+                    <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                      <circle cx="12" cy="12" r="8"/>
+                      <path d="M12 4a8 8 0 0 1 8 8"/>
+                      <circle cx="12" cy="12" r="3"/>
+                    </svg>
+                  </button>
+
+                  <!-- Popover: Color Palette (Hidden by default) -->
+                  <div id="alt1-popover-colors" class="hidden absolute bottom-full mb-2 left-1/2 -translate-x-1/2 w-48 p-2.5 rounded-[18px] bg-[#FBFBF9] dark:bg-[#1F1F24] border border-[#E5E3DD] dark:border-[#2A2A2F] shadow-float z-50 popover-anim">
+                    <div class="text-[10px] font-mono uppercase text-[#A09D97] dark:text-[#97979E] px-1 mb-2 font-medium">Palette</div>
+                    <div class="grid grid-cols-4 gap-1.5">
+                      <button type="button" onclick="setColor('#141414', 'alt1')" class="size-8 rounded-[8px] bg-[#141414] border border-black/10 hover:scale-105 transition" aria-label="Ink"></button>
+                      <button type="button" onclick="setColor('#4A4A4F', 'alt1')" class="size-8 rounded-[8px] bg-[#4A4A4F] border border-black/10 hover:scale-105 transition" aria-label="Slate"></button>
+                      <button type="button" onclick="setColor('#868E96', 'alt1')" class="size-8 rounded-[8px] bg-[#868E96] border border-black/10 hover:scale-105 transition" aria-label="Gray"></button>
+                      <button type="button" onclick="setColor('#E03131', 'alt1')" class="size-8 rounded-[8px] bg-[#E03131] border border-black/10 hover:scale-105 transition" aria-label="Crimson"></button>
+                      <button type="button" onclick="setColor('#27604A', 'alt1')" class="size-8 rounded-[8px] bg-[#27604A] border border-black/10 hover:scale-105 transition" aria-label="Moss"></button>
+                      <button type="button" onclick="setColor('#2F9E44', 'alt1')" class="size-8 rounded-[8px] bg-[#2F9E44] border border-black/10 hover:scale-105 transition" aria-label="Green"></button>
+                      <button type="button" onclick="setColor('#2B6CB0', 'alt1')" class="size-8 rounded-[8px] bg-[#2B6CB0] border border-black/10 hover:scale-105 transition" aria-label="Denim"></button>
+                      <button type="button" onclick="setColor('#1971C2', 'alt1')" class="size-8 rounded-[8px] bg-[#1971C2] border border-black/10 hover:scale-105 transition" aria-label="Blue"></button>
+                      <button type="button" onclick="setColor('#9C36B5', 'alt1')" class="size-8 rounded-[8px] bg-[#9C36B5] border border-black/10 hover:scale-105 transition" aria-label="Purple"></button>
+                      <button type="button" onclick="setColor('#D97706', 'alt1')" class="size-8 rounded-[8px] bg-[#D97706] border border-black/10 hover:scale-105 transition" aria-label="Amber"></button>
+                      <button type="button" onclick="setColor('#E8590C', 'alt1')" class="size-8 rounded-[8px] bg-[#E8590C] border border-black/10 hover:scale-105 transition" aria-label="Orange"></button>
+                      <button type="button" onclick="setColor('#FFFFFF', 'alt1')" class="size-8 rounded-[8px] bg-[#FFFFFF] border border-[#E5E3DD] hover:scale-105 transition" aria-label="White"></button>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+
+              <!-- ------------------------------------------------------------- -->
+              <!-- GROUP 3: SECONDARY STYLE KEYS (Fill, Dash, Opacity)           -->
+              <!-- (Separated by gap-2.5 from Group 2 — NO divider)              -->
+              <!-- ------------------------------------------------------------- -->
+              <div role="group" aria-label="Secondary attributes" class="flex items-center gap-0.5">
+                
+                <!-- Secondary Key 1: Fill Style -->
+                <div class="relative">
+                  <button type="button" aria-label="Fill style" aria-haspopup="dialog" aria-expanded="false"
+                          onclick="togglePopover('alt1-popover-fill')" id="alt1-btn-fill"
+                          class="btn-tactile size-10 rounded-[10px] text-[#4A4A4F] dark:text-[#97979E] flex items-center justify-center hover:bg-[#F1F1F2] dark:hover:bg-[#242429] hover:text-[#141414] dark:hover:text-[#FBFBF9] focus-visible:ring-2 focus-visible:ring-[#27604A] focus-visible:outline-none transition">
+                    <!-- Icon: Fill Preview -->
+                    <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                      <rect width="18" height="18" x="3" y="3" rx="3" fill="currentColor" fill-opacity="0.2"/>
+                      <path d="M3 9h18"/>
+                    </svg>
+                  </button>
+
+                  <!-- Popover: Fill Styles -->
+                  <div id="alt1-popover-fill" class="hidden absolute bottom-full mb-2 left-1/2 -translate-x-1/2 w-48 p-2 rounded-[18px] bg-[#FBFBF9] dark:bg-[#1F1F24] border border-[#E5E3DD] dark:border-[#2A2A2F] shadow-float z-50 popover-anim">
+                    <div class="text-[10px] font-mono uppercase text-[#A09D97] dark:text-[#97979E] px-2 py-1 font-medium">Fill Style</div>
+                    <div class="flex items-center gap-1 mt-1">
+                      <button type="button" onclick="setFill('none', 'alt1')" class="flex-1 py-2 rounded-[8px] hover:bg-[#F1F1F2] dark:hover:bg-[#242429] flex flex-col items-center gap-1 text-[10px] font-medium" title="No Fill">
+                        <svg class="size-4 text-[#4A4A4F]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect width="18" height="18" x="3" y="3" rx="3"/><line x1="3" y1="21" x2="21" y2="3"/></svg>
+                        <span>None</span>
+                      </button>
+                      <button type="button" onclick="setFill('semi', 'alt1')" class="flex-1 py-2 rounded-[8px] bg-[#E0EFE5] dark:bg-[#27604A]/30 text-[#27604A] dark:text-[#52B788] flex flex-col items-center gap-1 text-[10px] font-medium" title="Semi Fill">
+                        <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect width="18" height="18" x="3" y="3" rx="3" fill="currentColor" fill-opacity="0.25"/></svg>
+                        <span>Tint</span>
+                      </button>
+                      <button type="button" onclick="setFill('solid', 'alt1')" class="flex-1 py-2 rounded-[8px] hover:bg-[#F1F1F2] dark:hover:bg-[#242429] flex flex-col items-center gap-1 text-[10px] font-medium" title="Solid Fill">
+                        <svg class="size-4 text-[#4A4A4F]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect width="18" height="18" x="3" y="3" rx="3" fill="currentColor"/></svg>
+                        <span>Solid</span>
+                      </button>
+                      <button type="button" onclick="setFill('hatch', 'alt1')" class="flex-1 py-2 rounded-[8px] hover:bg-[#F1F1F2] dark:hover:bg-[#242429] flex flex-col items-center gap-1 text-[10px] font-medium" title="Hatch Fill">
+                        <svg class="size-4 text-[#4A4A4F]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect width="18" height="18" x="3" y="3" rx="3"/><path d="M4 10l6-6M4 16l12-12M4 20l16-16M10 20l10-10"/></svg>
+                        <span>Hatch</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Secondary Key 2: Stroke Dash Style -->
+                <div class="relative">
+                  <button type="button" aria-label="Stroke dash style" aria-haspopup="dialog" aria-expanded="false"
+                          onclick="togglePopover('alt1-popover-dash')" id="alt1-btn-dash"
+                          class="btn-tactile size-10 rounded-[10px] text-[#4A4A4F] dark:text-[#97979E] flex items-center justify-center hover:bg-[#F1F1F2] dark:hover:bg-[#242429] hover:text-[#141414] dark:hover:text-[#FBFBF9] focus-visible:ring-2 focus-visible:ring-[#27604A] focus-visible:outline-none transition">
+                    <!-- Icon: Dash Preview -->
+                    <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M3 12h5M11 12h5M19 12h2"/>
+                    </svg>
+                  </button>
+
+                  <!-- Popover: Dash Styles -->
+                  <div id="alt1-popover-dash" class="hidden absolute bottom-full mb-2 left-1/2 -translate-x-1/2 w-44 p-2 rounded-[18px] bg-[#FBFBF9] dark:bg-[#1F1F24] border border-[#E5E3DD] dark:border-[#2A2A2F] shadow-float z-50 popover-anim">
+                    <div class="text-[10px] font-mono uppercase text-[#A09D97] dark:text-[#97979E] px-2 py-1 font-medium">Stroke Style</div>
+                    <div class="flex items-center gap-1 mt-1">
+                      <button type="button" onclick="setDash('solid', 'alt1')" class="flex-1 py-2 rounded-[8px] bg-[#E0EFE5] dark:bg-[#27604A]/30 text-[#27604A] dark:text-[#52B788] flex flex-col items-center gap-1 text-[10px] font-medium" title="Solid Line">
+                        <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"/></svg>
+                        <span>Solid</span>
+                      </button>
+                      <button type="button" onclick="setDash('dashed', 'alt1')" class="flex-1 py-2 rounded-[8px] hover:bg-[#F1F1F2] dark:hover:bg-[#242429] flex flex-col items-center gap-1 text-[10px] font-medium" title="Dashed Line">
+                        <svg class="size-4 text-[#4A4A4F]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="4 3"><line x1="3" y1="12" x2="21" y2="12"/></svg>
+                        <span>Dash</span>
+                      </button>
+                      <button type="button" onclick="setDash('dotted', 'alt1')" class="flex-1 py-2 rounded-[8px] hover:bg-[#F1F1F2] dark:hover:bg-[#242429] flex flex-col items-center gap-1 text-[10px] font-medium" title="Dotted Line">
+                        <svg class="size-4 text-[#4A4A4F]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="1 3"><line x1="3" y1="12" x2="21" y2="12"/></svg>
+                        <span>Dot</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Secondary Key 3: Opacity -->
+                <div class="relative">
+                  <button type="button" aria-label="Opacity slider" aria-haspopup="dialog" aria-expanded="false"
+                          onclick="togglePopover('alt1-popover-opacity')" id="alt1-btn-opacity"
+                          class="btn-tactile size-10 rounded-[10px] text-[#4A4A4F] dark:text-[#97979E] flex items-center justify-center hover:bg-[#F1F1F2] dark:hover:bg-[#242429] hover:text-[#141414] dark:hover:text-[#FBFBF9] focus-visible:ring-2 focus-visible:ring-[#27604A] focus-visible:outline-none transition">
+                    <!-- Icon: Opacity Halftone Disc -->
+                    <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                      <circle cx="12" cy="12" r="9"/>
+                      <path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" fill-opacity="0.4"/>
+                    </svg>
+                  </button>
+
+                  <!-- Popover: Opacity Slider -->
+                  <div id="alt1-popover-opacity" class="hidden absolute bottom-full mb-2 left-1/2 -translate-x-1/2 w-52 p-3 rounded-[18px] bg-[#FBFBF9] dark:bg-[#1F1F24] border border-[#E5E3DD] dark:border-[#2A2A2F] shadow-float z-50 popover-anim">
+                    <div class="flex items-center justify-between mb-2">
+                      <span class="text-[10px] font-mono uppercase text-[#A09D97] dark:text-[#97979E] font-medium">Opacity</span>
+                      <span id="alt1-opacity-val" class="text-xs font-mono font-medium text-[#141414] dark:text-[#FBFBF9]">100%</span>
+                    </div>
+                    <input type="range" min="10" max="100" value="100" step="5" id="alt1-opacity-slider"
+                           oninput="setOpacity(this.value, 'alt1')" class="w-full" aria-label="Opacity range" />
+                    <div class="flex items-center justify-between gap-1 mt-2 text-[10px] font-mono">
+                      <button type="button" onclick="setOpacity(25, 'alt1')" class="px-1.5 py-0.5 rounded hover:bg-[#F1F1F2] dark:hover:bg-[#242429]">25%</button>
+                      <button type="button" onclick="setOpacity(50, 'alt1')" class="px-1.5 py-0.5 rounded hover:bg-[#F1F1F2] dark:hover:bg-[#242429]">50%</button>
+                      <button type="button" onclick="setOpacity(75, 'alt1')" class="px-1.5 py-0.5 rounded hover:bg-[#F1F1F2] dark:hover:bg-[#242429]">75%</button>
+                      <button type="button" onclick="setOpacity(100, 'alt1')" class="px-1.5 py-0.5 rounded hover:bg-[#F1F1F2] dark:hover:bg-[#242429]">100%</button>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+
+            </div>
+
+            <!-- =============================================================== -->
+            <!-- MAIN TOOLBAR DOCK (Reference Base)                              -->
+            <!-- =============================================================== -->
+            <div class="flex items-center p-1.5 rounded-[14px] bg-[#FBFBF9] dark:bg-[#17171A] border border-[#E5E3DD] dark:border-[#2A2A2F] shadow-card gap-2.5">
+              <!-- Navigate group -->
+              <div class="flex items-center gap-0.5">
+                <button type="button" class="size-10 rounded-[10px] text-[#4A4A4F] dark:text-[#97979E] flex items-center justify-center hover:bg-[#F1F1F2] dark:hover:bg-[#242429]"><svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="m3 3 7 18 3-7 7-3L3 3z"/></svg></button>
+                <button type="button" class="size-10 rounded-[10px] text-[#4A4A4F] dark:text-[#97979E] flex items-center justify-center hover:bg-[#F1F1F2] dark:hover:bg-[#242429]"><svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M18 11V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v0M14 10V4a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v2M10 10.5V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg></button>
+              </div>
+              <!-- Draw group -->
+              <div class="flex items-center gap-0.5">
+                <button type="button" class="size-10 rounded-[10px] text-[#4A4A4F] dark:text-[#97979E] flex items-center justify-center hover:bg-[#F1F1F2] dark:hover:bg-[#242429]"><svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg></button>
+                <button type="button" class="size-10 rounded-[10px] text-[#4A4A4F] dark:text-[#97979E] flex items-center justify-center hover:bg-[#F1F1F2] dark:hover:bg-[#242429]"><svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="m14 12-8.5 8.5a2.12 2.12 0 1 1-3-3L11 9"/><path d="M18 16l4-4-7-7-4 4"/></svg></button>
+              </div>
+              <!-- Insert group (Active shape) -->
+              <div class="flex items-center gap-0.5">
+                <button type="button" class="size-10 rounded-[10px] bg-[#141414] text-[#FBFBF9] dark:bg-[#FBFBF9] dark:text-[#141414] flex items-center justify-center shadow-press"><svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect width="18" height="18" x="3" y="3" rx="2"/></svg></button>
+                <button type="button" class="size-10 rounded-[10px] text-[#4A4A4F] dark:text-[#97979E] flex items-center justify-center hover:bg-[#F1F1F2] dark:hover:bg-[#242429]"><svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg></button>
+                <button type="button" class="size-10 rounded-[10px] text-[#4A4A4F] dark:text-[#97979E] flex items-center justify-center hover:bg-[#F1F1F2] dark:hover:bg-[#242429]"><svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg></button>
+              </div>
+            </div>
+
+          </div>
+
+        </div>
+
+      </section>
+
+      <!-- ##################################################################### -->
+      <!-- ALTERNATIVE 2: TONAL MOSS & UNIFIED ATTRIBUTES TRAY                   -->
+      <!-- ##################################################################### -->
+      <section id="alt2-card" class="flex flex-col bg-[#FBFBF9] dark:bg-[#17171A] rounded-[18px] border border-[#E5E3DD] dark:border-[#2A2A2F] shadow-card overflow-visible">
+        
+        <!-- Alt 2 Header Bar -->
+        <div class="p-5 border-b border-[#E5E3DD] dark:border-[#2A2A2F]">
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <div class="flex items-center gap-2">
+                <span class="px-2 py-0.5 rounded-[6px] bg-[#E0EFE5] text-[#27604A] font-mono text-[11px] font-semibold">Alternative 2</span>
+                <h3 class="text-base font-semibold text-[#141414] dark:text-[#FBFBF9]">Tonal Moss &amp; Unified Attributes Tray</h3>
+              </div>
+              <p class="text-xs text-[#4A4A4F] dark:text-[#97979E] mt-1">Single accent highlight (<code class="font-mono text-[#27604A]">--color-moss-wash</code>) · One unified expand panel · Zero fragmented popovers</p>
+            </div>
+            <span class="text-[10px] uppercase font-mono px-2 py-1 rounded-[6px] bg-[#E0EFE5] text-[#27604A] font-medium">Unified Panel</span>
+          </div>
+
+          <!-- Rationale Bullets -->
+          <div class="mt-4 grid grid-cols-3 gap-2 text-[11px] text-[#4A4A4F] dark:text-[#97979E]">
+            <div class="p-2 rounded-[10px] bg-[#F1F1F2] dark:bg-[#1F1F24]">
+              <strong class="block text-[#141414] dark:text-[#FBFBF9] font-medium">1. Non-default Tonal Pill</strong>
+              Customizations badge in quiet Moss tint rather than visual noise.
+            </div>
+            <div class="p-2 rounded-[10px] bg-[#F1F1F2] dark:bg-[#1F1F24]">
+              <strong class="block text-[#141414] dark:text-[#FBFBF9] font-medium">2. Unified Tray Trigger</strong>
+              One master expander replaces 3 jumpy popovers with one calm sheet.
+            </div>
+            <div class="p-2 rounded-[10px] bg-[#F1F1F2] dark:bg-[#1F1F24]">
+              <strong class="block text-[#141414] dark:text-[#FBFBF9] font-medium">3. Zero Clutter Tray</strong>
+              Neatly grouped Fill, Dash, Opacity &amp; Typo in one cohesive viewport.
+            </div>
+          </div>
+        </div>
+
+        <!-- Alt 2 Live Interactive Stage -->
+        <div class="p-6 bg-[#EDECEA]/60 dark:bg-[#121215]/60 flex flex-col items-center justify-end min-h-[360px] relative rounded-b-[18px]">
+          
+          <!-- ANCHORED CONTAINER: SATELLITE BAR & UNIFIED TRAY ABOVE MAIN TOOLBAR -->
+          <div class="w-full flex flex-col items-center relative">
+
+            <!-- =============================================================== -->
+            <!-- ALT 2 UNIFIED ATTRIBUTES EXPAND PANEL                           -->
+            <!-- (Toggled via the master expander button)                        -->
+            <!-- =============================================================== -->
+            <div id="alt2-unified-panel" 
+                 role="region" 
+                 aria-label="Unified Attribute Tray" 
+                 class="hidden absolute bottom-full mb-3 z-40 w-[380px] max-w-[calc(100vw-2rem)] p-3 rounded-[18px] bg-[#FBFBF9] dark:bg-[#1F1F24] border border-[#E5E3DD] dark:border-[#2A2A2F] shadow-float popover-anim flex flex-col gap-3">
+              
+              <!-- Panel Header with Quiet Reset -->
+              <div class="flex items-center justify-between border-b border-[#E5E3DD]/60 dark:border-[#2A2A2F]/60 pb-2">
+                <div class="flex items-center gap-1.5">
+                  <span class="size-2 rounded-full bg-[#27604A]"></span>
+                  <span class="text-xs font-semibold text-[#141414] dark:text-[#FBFBF9]">Style Attributes</span>
+                </div>
+                <button type="button" onclick="resetStyles('alt2')" class="text-[11px] font-mono text-[#A09D97] hover:text-[#27604A] transition-colors">
+                  Reset to default
+                </button>
+              </div>
+
+              <!-- Section 1: Fill Types (Zero peer dividers — pure spacing) -->
+              <div role="group" aria-label="Fill options" class="flex flex-col gap-1.5">
+                <span class="text-[10px] font-mono uppercase text-[#A09D97] dark:text-[#97979E] font-medium">Fill Type</span>
+                <div class="grid grid-cols-4 gap-1">
+                  <button type="button" onclick="setFill('none', 'alt2')" id="alt2-fill-none" class="py-2 px-1 rounded-[10px] hover:bg-[#F1F1F2] dark:hover:bg-[#242429] flex flex-col items-center gap-1 text-[11px] font-medium transition">
+                    <svg class="size-4 text-[#4A4A4F] dark:text-[#97979E]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect width="18" height="18" x="3" y="3" rx="3"/><line x1="3" y1="21" x2="21" y2="3"/></svg>
+                    <span>None</span>
+                  </button>
+                  <button type="button" onclick="setFill('semi', 'alt2')" id="alt2-fill-semi" class="py-2 px-1 rounded-[10px] bg-[#E0EFE5] text-[#27604A] dark:bg-[#27604A]/30 dark:text-[#52B788] flex flex-col items-center gap-1 text-[11px] font-medium transition">
+                    <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect width="18" height="18" x="3" y="3" rx="3" fill="currentColor" fill-opacity="0.25"/></svg>
+                    <span>Tint</span>
+                  </button>
+                  <button type="button" onclick="setFill('solid', 'alt2')" id="alt2-fill-solid" class="py-2 px-1 rounded-[10px] hover:bg-[#F1F1F2] dark:hover:bg-[#242429] flex flex-col items-center gap-1 text-[11px] font-medium transition">
+                    <svg class="size-4 text-[#4A4A4F] dark:text-[#97979E]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect width="18" height="18" x="3" y="3" rx="3" fill="currentColor"/></svg>
+                    <span>Solid</span>
+                  </button>
+                  <button type="button" onclick="setFill('hatch', 'alt2')" id="alt2-fill-hatch" class="py-2 px-1 rounded-[10px] hover:bg-[#F1F1F2] dark:hover:bg-[#242429] flex flex-col items-center gap-1 text-[11px] font-medium transition">
+                    <svg class="size-4 text-[#4A4A4F] dark:text-[#97979E]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect width="18" height="18" x="3" y="3" rx="3"/><path d="M4 10l6-6M4 16l12-12M4 20l16-16M10 20l10-10"/></svg>
+                    <span>Hatch</span>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Section 2: Dash & Outline -->
+              <div role="group" aria-label="Stroke options" class="flex flex-col gap-1.5">
+                <span class="text-[10px] font-mono uppercase text-[#A09D97] dark:text-[#97979E] font-medium">Outline Dash</span>
+                <div class="grid grid-cols-3 gap-1">
+                  <button type="button" onclick="setDash('solid', 'alt2')" id="alt2-dash-solid" class="py-2 rounded-[10px] bg-[#E0EFE5] text-[#27604A] dark:bg-[#27604A]/30 dark:text-[#52B788] flex flex-col items-center gap-1 text-[11px] font-medium transition">
+                    <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"/></svg>
+                    <span>Solid</span>
+                  </button>
+                  <button type="button" onclick="setDash('dashed', 'alt2')" id="alt2-dash-dashed" class="py-2 rounded-[10px] hover:bg-[#F1F1F2] dark:hover:bg-[#242429] flex flex-col items-center gap-1 text-[11px] font-medium transition">
+                    <svg class="size-4 text-[#4A4A4F] dark:text-[#97979E]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="4 3"><line x1="3" y1="12" x2="21" y2="12"/></svg>
+                    <span>Dashed</span>
+                  </button>
+                  <button type="button" onclick="setDash('dotted', 'alt2')" id="alt2-dash-dotted" class="py-2 rounded-[10px] hover:bg-[#F1F1F2] dark:hover:bg-[#242429] flex flex-col items-center gap-1 text-[11px] font-medium transition">
+                    <svg class="size-4 text-[#4A4A4F] dark:text-[#97979E]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="1 3"><line x1="3" y1="12" x2="21" y2="12"/></svg>
+                    <span>Dotted</span>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Section 3: Opacity Slider -->
+              <div class="flex flex-col gap-1.5">
+                <div class="flex items-center justify-between">
+                  <span class="text-[10px] font-mono uppercase text-[#A09D97] dark:text-[#97979E] font-medium">Opacity Level</span>
+                  <span id="alt2-opacity-val" class="text-xs font-mono font-semibold text-[#141414] dark:text-[#FBFBF9]">100%</span>
+                </div>
+                <input type="range" min="10" max="100" value="100" step="5" id="alt2-opacity-slider"
+                       oninput="setOpacity(this.value, 'alt2')" class="w-full" aria-label="Opacity range" />
+              </div>
+
+              <!-- Section 4: Typography / Connectors Contextual Row -->
+              <div id="alt2-context-section" class="flex flex-col gap-1.5 pt-1 border-t border-[#E5E3DD]/40 dark:border-[#2A2A2F]/40">
+                <span class="text-[10px] font-mono uppercase text-[#A09D97] dark:text-[#97979E] font-medium">Text Style (Inside Shape)</span>
+                <div class="flex items-center gap-1">
+                  <button type="button" class="flex-1 py-1.5 rounded-[8px] bg-[#F1F1F2] dark:bg-[#242429] font-sans text-xs text-[#141414] dark:text-[#FBFBF9] font-medium">Sans</button>
+                  <button type="button" class="flex-1 py-1.5 rounded-[8px] hover:bg-[#F1F1F2] dark:hover:bg-[#242429] font-serif text-xs text-[#4A4A4F] dark:text-[#97979E]">Serif</button>
+                  <button type="button" class="flex-1 py-1.5 rounded-[8px] hover:bg-[#F1F1F2] dark:hover:bg-[#242429] font-mono text-xs text-[#4A4A4F] dark:text-[#97979E]">Mono</button>
+                </div>
+              </div>
+
+            </div>
+
+            <!-- =============================================================== -->
+            <!-- ALT 2 SATELLITE BAR (Compact, Tonal & Unified)                  -->
+            <!-- =============================================================== -->
+            <div id="alt2-satellite-bar" 
+                 role="toolbar" 
+                 aria-label="Object Style Properties (Alternative 2)"
+                 class="relative mb-3 z-30 flex items-center p-1.5 rounded-[14px] bg-[#FBFBF9] dark:bg-[#1F1F24] border border-[#E5E3DD] dark:border-[#2A2A2F] shadow-card gap-2.5 transition-all">
+              
+              <!-- ------------------------------------------------------------- -->
+              <!-- GROUP 1: STROKE WEIGHTS (4 steps)                             -->
+              <!-- ------------------------------------------------------------- -->
+              <div role="radiogroup" aria-label="Stroke weight" class="flex items-center gap-0.5">
+                <button type="button" role="radio" aria-checked="false" aria-label="Fine stroke, 2px"
+                        onclick="setStrokeWeight(2, 'alt2')" id="alt2-weight-2"
+                        class="btn-tactile size-10 rounded-[10px] text-[#4A4A4F] dark:text-[#97979E] flex items-center justify-center hover:bg-[#F1F1F2] dark:hover:bg-[#242429] focus-visible:ring-2 focus-visible:ring-[#27604A] focus-visible:outline-none transition">
+                  <span class="w-[18px] h-[2px] rounded-full bg-current transition-all" id="alt2-weight-glyph-2"></span>
+                </button>
+                <button type="button" role="radio" aria-checked="true" aria-label="Medium stroke, 4px"
+                        onclick="setStrokeWeight(4, 'alt2')" id="alt2-weight-4"
+                        class="btn-tactile size-10 rounded-[10px] bg-[#141414] text-[#FBFBF9] dark:bg-[#FBFBF9] dark:text-[#141414] flex items-center justify-center shadow-press focus-visible:ring-2 focus-visible:ring-[#27604A] focus-visible:outline-none transition">
+                  <span class="w-[18px] h-[4px] rounded-full bg-current transition-all" id="alt2-weight-glyph-4"></span>
+                </button>
+                <button type="button" role="radio" aria-checked="false" aria-label="Bold stroke, 7px"
+                        onclick="setStrokeWeight(7, 'alt2')" id="alt2-weight-7"
+                        class="btn-tactile size-10 rounded-[10px] text-[#4A4A4F] dark:text-[#97979E] flex items-center justify-center hover:bg-[#F1F1F2] dark:hover:bg-[#242429] focus-visible:ring-2 focus-visible:ring-[#27604A] focus-visible:outline-none transition">
+                  <span class="w-[18px] h-[7px] rounded-full bg-current transition-all" id="alt2-weight-glyph-7"></span>
+                </button>
+                <button type="button" role="radio" aria-checked="false" aria-label="Heavy stroke, 11px"
+                        onclick="setStrokeWeight(11, 'alt2')" id="alt2-weight-11"
+                        class="btn-tactile size-10 rounded-[10px] text-[#4A4A4F] dark:text-[#97979E] flex items-center justify-center hover:bg-[#F1F1F2] dark:hover:bg-[#242429] focus-visible:ring-2 focus-visible:ring-[#27604A] focus-visible:outline-none transition">
+                  <span class="w-[18px] h-[10px] rounded-full bg-current transition-all" id="alt2-weight-glyph-11"></span>
+                </button>
+              </div>
+
+              <!-- ------------------------------------------------------------- -->
+              <!-- GROUP 2: COLOR SWATCHES (5 Quick + 1 More Colors)             -->
+              <!-- (Separated by gap-2.5 from Group 1 — NO divider)              -->
+              <!-- ------------------------------------------------------------- -->
+              <div role="radiogroup" aria-label="Color palette" class="flex items-center gap-0.5">
+                <button type="button" role="radio" aria-checked="true" aria-label="Ink Black"
+                        onclick="setColor('#141414', 'alt2')" id="alt2-color-141414"
+                        class="btn-tactile size-10 rounded-[10px] flex items-center justify-center hover:bg-[#F1F1F2] dark:hover:bg-[#242429] focus-visible:ring-2 focus-visible:ring-[#27604A] focus-visible:outline-none transition">
+                  <span class="size-5 rounded-full bg-[#141414] border border-black/10 dark:border-white/20 swatch-selected"></span>
+                </button>
+                <button type="button" role="radio" aria-checked="false" aria-label="Calm Slate"
+                        onclick="setColor('#4A4A4F', 'alt2')" id="alt2-color-4A4A4F"
+                        class="btn-tactile size-10 rounded-[10px] flex items-center justify-center hover:bg-[#F1F1F2] dark:hover:bg-[#242429] focus-visible:ring-2 focus-visible:ring-[#27604A] focus-visible:outline-none transition">
+                  <span class="size-5 rounded-full bg-[#4A4A4F] border border-black/10"></span>
+                </button>
+                <button type="button" role="radio" aria-checked="false" aria-label="Moss Pine"
+                        onclick="setColor('#27604A', 'alt2')" id="alt2-color-27604A"
+                        class="btn-tactile size-10 rounded-[10px] flex items-center justify-center hover:bg-[#F1F1F2] dark:hover:bg-[#242429] focus-visible:ring-2 focus-visible:ring-[#27604A] focus-visible:outline-none transition">
+                  <span class="size-5 rounded-full bg-[#27604A] border border-black/10"></span>
+                </button>
+                <button type="button" role="radio" aria-checked="false" aria-label="Warm Ochre"
+                        onclick="setColor('#D97706', 'alt2')" id="alt2-color-D97706"
+                        class="btn-tactile size-10 rounded-[10px] flex items-center justify-center hover:bg-[#F1F1F2] dark:hover:bg-[#242429] focus-visible:ring-2 focus-visible:ring-[#27604A] focus-visible:outline-none transition">
+                  <span class="size-5 rounded-full bg-[#D97706] border border-black/10"></span>
+                </button>
+                <button type="button" role="radio" aria-checked="false" aria-label="Calm Denim"
+                        onclick="setColor('#2B6CB0', 'alt2')" id="alt2-color-2B6CB0"
+                        class="btn-tactile size-10 rounded-[10px] flex items-center justify-center hover:bg-[#F1F1F2] dark:hover:bg-[#242429] focus-visible:ring-2 focus-visible:ring-[#27604A] focus-visible:outline-none transition">
+                  <span class="size-5 rounded-full bg-[#2B6CB0] border border-black/10"></span>
+                </button>
+
+                <!-- Color Wheel Trigger (Uses same clean popover) -->
+                <button type="button" aria-label="All colors" aria-haspopup="dialog"
+                        onclick="togglePopover('alt2-popover-colors')" id="alt2-btn-more-colors"
+                        class="btn-tactile size-10 rounded-[10px] text-[#4A4A4F] dark:text-[#97979E] flex items-center justify-center hover:bg-[#F1F1F2] dark:hover:bg-[#242429] focus-visible:ring-2 focus-visible:ring-[#27604A] focus-visible:outline-none transition">
+                  <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="8"/>
+                    <path d="M12 4a8 8 0 0 1 8 8"/>
+                    <circle cx="12" cy="12" r="3"/>
+                  </svg>
+                </button>
+
+                <!-- Alt 2 Colors Popover -->
+                <div id="alt2-popover-colors" class="hidden absolute bottom-full mb-2 left-1/2 -translate-x-1/2 w-48 p-2.5 rounded-[18px] bg-[#FBFBF9] dark:bg-[#1F1F24] border border-[#E5E3DD] dark:border-[#2A2A2F] shadow-float z-50 popover-anim">
+                  <div class="text-[10px] font-mono uppercase text-[#A09D97] dark:text-[#97979E] px-1 mb-2 font-medium">Palette</div>
+                  <div class="grid grid-cols-4 gap-1.5">
+                    <button type="button" onclick="setColor('#141414', 'alt2')" class="size-8 rounded-[8px] bg-[#141414] border border-black/10 hover:scale-105 transition" aria-label="Ink"></button>
+                    <button type="button" onclick="setColor('#4A4A4F', 'alt2')" class="size-8 rounded-[8px] bg-[#4A4A4F] border border-black/10 hover:scale-105 transition" aria-label="Slate"></button>
+                    <button type="button" onclick="setColor('#868E96', 'alt2')" class="size-8 rounded-[8px] bg-[#868E96] border border-black/10 hover:scale-105 transition" aria-label="Gray"></button>
+                    <button type="button" onclick="setColor('#E03131', 'alt2')" class="size-8 rounded-[8px] bg-[#E03131] border border-black/10 hover:scale-105 transition" aria-label="Crimson"></button>
+                    <button type="button" onclick="setColor('#27604A', 'alt2')" class="size-8 rounded-[8px] bg-[#27604A] border border-black/10 hover:scale-105 transition" aria-label="Moss"></button>
+                    <button type="button" onclick="setColor('#2F9E44', 'alt2')" class="size-8 rounded-[8px] bg-[#2F9E44] border border-black/10 hover:scale-105 transition" aria-label="Green"></button>
+                    <button type="button" onclick="setColor('#2B6CB0', 'alt2')" class="size-8 rounded-[8px] bg-[#2B6CB0] border border-black/10 hover:scale-105 transition" aria-label="Denim"></button>
+                    <button type="button" onclick="setColor('#1971C2', 'alt2')" class="size-8 rounded-[8px] bg-[#1971C2] border border-black/10 hover:scale-105 transition" aria-label="Blue"></button>
+                    <button type="button" onclick="setColor('#9C36B5', 'alt2')" class="size-8 rounded-[8px] bg-[#9C36B5] border border-black/10 hover:scale-105 transition" aria-label="Purple"></button>
+                    <button type="button" onclick="setColor('#D97706', 'alt2')" class="size-8 rounded-[8px] bg-[#D97706] border border-black/10 hover:scale-105 transition" aria-label="Amber"></button>
+                    <button type="button" onclick="setColor('#E8590C', 'alt2')" class="size-8 rounded-[8px] bg-[#E8590C] border border-black/10 hover:scale-105 transition" aria-label="Orange"></button>
+                    <button type="button" onclick="setColor('#FFFFFF', 'alt2')" class="size-8 rounded-[8px] bg-[#FFFFFF] border border-[#E5E3DD] hover:scale-105 transition" aria-label="White"></button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- ------------------------------------------------------------- -->
+              <!-- GROUP 3: TONAL MOSS ATTRIBUTE BADGE & MASTER EXPAND TRAY TRIGGER-->
+              <!-- (The Single Accent Model: --color-moss & --color-moss-wash)   -->
+              <!-- ------------------------------------------------------------- -->
+              <div role="group" aria-label="Extended attributes trigger" class="flex items-center gap-1">
+                
+                <!-- Tonal Moss State Chip: Displays customized non-default property -->
+                <div id="alt2-tonal-chip" 
+                     class="flex items-center gap-1.5 px-2.5 h-10 rounded-[10px] bg-[#E0EFE5] text-[#27604A] dark:bg-[#27604A]/25 dark:text-[#52B788] text-xs font-medium cursor-pointer transition select-none hover:opacity-90"
+                     onclick="toggleUnifiedPanel()"
+                     title="Click to view or edit non-default attributes">
+                  <span class="size-1.5 rounded-full bg-[#27604A] dark:bg-[#52B788]"></span>
+                  <span id="alt2-chip-label" class="font-mono text-[11px] font-semibold">Tint Fill</span>
+                </div>
+
+                <!-- Master Attributes Tray Button (Opens Unified Quiet Panel) -->
+                <button type="button" 
+                        id="alt2-tray-trigger"
+                        aria-label="Tune style attributes"
+                        aria-expanded="false"
+                        onclick="toggleUnifiedPanel()"
+                        class="btn-tactile size-10 rounded-[10px] text-[#4A4A4F] dark:text-[#97979E] flex items-center justify-center hover:bg-[#F1F1F2] dark:hover:bg-[#242429] hover:text-[#141414] dark:hover:text-[#FBFBF9] focus-visible:ring-2 focus-visible:ring-[#27604A] focus-visible:outline-none transition relative">
+                  <!-- Sliders / Attributes SVG glyph -->
+                  <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="4" y1="21" x2="4" y2="14"/>
+                    <line x1="4" y1="10" x2="4" y2="3"/>
+                    <line x1="12" y1="21" x2="12" y2="12"/>
+                    <line x1="12" y1="8" x2="12" y2="3"/>
+                    <line x1="20" y1="21" x2="20" y2="16"/>
+                    <line x1="20" y1="12" x2="20" y2="3"/>
+                    <line x1="1" y1="14" x2="7" y2="14"/>
+                    <line x1="9" y1="8" x2="15" y2="8"/>
+                    <line x1="17" y1="16" x2="23" y2="16"/>
+                  </svg>
+                  <!-- Subtle moss pip if modified -->
+                  <span id="alt2-tray-pip" class="size-1.5 rounded-full bg-[#27604A] absolute top-2 right-2 ring-1 ring-[#FBFBF9] dark:ring-[#1F1F24]"></span>
+                </button>
+
+              </div>
+
+            </div>
+
+            <!-- =============================================================== -->
+            <!-- MAIN TOOLBAR DOCK (Reference Base)                              -->
+            <!-- =============================================================== -->
+            <div class="flex items-center p-1.5 rounded-[14px] bg-[#FBFBF9] dark:bg-[#17171A] border border-[#E5E3DD] dark:border-[#2A2A2F] shadow-card gap-2.5">
+              <!-- Navigate group -->
+              <div class="flex items-center gap-0.5">
+                <button type="button" class="size-10 rounded-[10px] text-[#4A4A4F] dark:text-[#97979E] flex items-center justify-center hover:bg-[#F1F1F2] dark:hover:bg-[#242429]"><svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="m3 3 7 18 3-7 7-3L3 3z"/></svg></button>
+                <button type="button" class="size-10 rounded-[10px] text-[#4A4A4F] dark:text-[#97979E] flex items-center justify-center hover:bg-[#F1F1F2] dark:hover:bg-[#242429]"><svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M18 11V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v0M14 10V4a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v2M10 10.5V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg></button>
+              </div>
+              <!-- Draw group -->
+              <div class="flex items-center gap-0.5">
+                <button type="button" class="size-10 rounded-[10px] text-[#4A4A4F] dark:text-[#97979E] flex items-center justify-center hover:bg-[#F1F1F2] dark:hover:bg-[#242429]"><svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg></button>
+                <button type="button" class="size-10 rounded-[10px] text-[#4A4A4F] dark:text-[#97979E] flex items-center justify-center hover:bg-[#F1F1F2] dark:hover:bg-[#242429]"><svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="m14 12-8.5 8.5a2.12 2.12 0 1 1-3-3L11 9"/><path d="M18 16l4-4-7-7-4 4"/></svg></button>
+              </div>
+              <!-- Insert group (Active shape) -->
+              <div class="flex items-center gap-0.5">
+                <button type="button" class="size-10 rounded-[10px] bg-[#141414] text-[#FBFBF9] dark:bg-[#FBFBF9] dark:text-[#141414] flex items-center justify-center shadow-press"><svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect width="18" height="18" x="3" y="3" rx="2"/></svg></button>
+                <button type="button" class="size-10 rounded-[10px] text-[#4A4A4F] dark:text-[#97979E] flex items-center justify-center hover:bg-[#F1F1F2] dark:hover:bg-[#242429]"><svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg></button>
+                <button type="button" class="size-10 rounded-[10px] text-[#4A4A4F] dark:text-[#97979E] flex items-center justify-center hover:bg-[#F1F1F2] dark:hover:bg-[#242429]"><svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg></button>
+              </div>
+            </div>
+
+          </div>
+
+        </div>
+
+      </section>
+
+    </div>
+
+    <!-- ======================================================================= -->
+    <!-- DETAILED DESIGN SYSTEM SPECIFICATION, TOKENS & COMPARATIVE MATRIX       -->
+    <!-- ======================================================================= -->
+    <section id="spec-section" class="flex flex-col bg-[#FBFBF9] dark:bg-[#17171A] rounded-[18px] border border-[#E5E3DD] dark:border-[#2A2A2F] shadow-card p-6 gap-6">
+      
+      <!-- Spec Header -->
+      <div class="border-b border-[#E5E3DD] dark:border-[#2A2A2F] pb-4">
+        <span class="text-[10px] uppercase font-mono px-2 py-0.5 rounded bg-[#E0EFE5] text-[#27604A] font-semibold">Systems Blueprint</span>
+        <h2 class="text-xl font-bold tracking-tight text-[#141414] dark:text-[#FBFBF9] mt-1">Calm UI Toolbar Satellite Bar Specification</h2>
+        <p class="text-xs text-[#4A4A4F] dark:text-[#97979E] mt-0.5">Formal architectural rules, grouping mechanics, accessibility matrix, and comparative analysis.</p>
+      </div>
+
+      <!-- 1. The Subtraction Principle -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div class="p-4 rounded-[14px] bg-[#F1F1F2] dark:bg-[#1F1F24] flex flex-col gap-2">
+          <div class="flex items-center gap-2 text-[#27604A] dark:text-[#52B788] font-semibold text-xs uppercase tracking-wider">
+            <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/></svg>
+            Zero Peer Dividers
+          </div>
+          <p class="text-xs text-[#4A4A4F] dark:text-[#97979E] leading-relaxed">
+            Standard toolbars slice every group with harsh 1px vertical borders (<code class="font-mono text-[11px]">tbar-separator</code>). In Calm UI, peer separators are entirely eliminated. The eye parses grouping through pure spatial rhythm: <strong class="text-[#141414] dark:text-[#FBFBF9]">2px</strong> between related keys, <strong class="text-[#141414] dark:text-[#FBFBF9]">10px</strong> between conceptual clusters.
+          </p>
+        </div>
+
+        <div class="p-4 rounded-[14px] bg-[#F1F1F2] dark:bg-[#1F1F24] flex flex-col gap-2">
+          <div class="flex items-center gap-2 text-[#27604A] dark:text-[#52B788] font-semibold text-xs uppercase tracking-wider">
+            <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/></svg>
+            Target Budget (&ge;40px)
+          </div>
+          <p class="text-xs text-[#4A4A4F] dark:text-[#97979E] leading-relaxed">
+            Every interactive key satisfies WCAG 2.5.5 Level AAA hit-target guidelines with minimum dimensions of <strong class="text-[#141414] dark:text-[#FBFBF9]">40&times;40px</strong> (<code class="font-mono text-[11px]">size-10</code>). Icons are optical-grade 20px glyphs rendered with unified <code class="font-mono text-[11px]">stroke-width: 1.7</code>.
+          </p>
+        </div>
+
+        <div class="p-4 rounded-[14px] bg-[#F1F1F2] dark:bg-[#1F1F24] flex flex-col gap-2">
+          <div class="flex items-center gap-2 text-[#27604A] dark:text-[#52B788] font-semibold text-xs uppercase tracking-wider">
+            <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M2 12h20"/></svg>
+            Tonal State Accent
+          </div>
+          <p class="text-xs text-[#4A4A4F] dark:text-[#97979E] leading-relaxed">
+            To prevent visual fatigue, color is strictly restricted to one single ink-grade accent: <strong class="text-[#27604A]">--color-moss (#27604A)</strong> and its wash tint <strong class="text-[#27604A]">--color-moss-wash (#E0EFE5)</strong>. Only modified, non-default styles earn this tone.
+          </p>
+        </div>
+      </div>
+
+      <!-- 2. Side-by-Side Architectural Comparison Matrix -->
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-xs border-collapse">
+          <thead>
+            <tr class="border-b border-[#E5E3DD] dark:border-[#2A2A2F] text-[#A09D97] dark:text-[#97979E] uppercase font-mono text-[10px]">
+              <th class="py-2.5 px-3">Design Dimension</th>
+              <th class="py-2.5 px-3">Alternative 1: Floating Horizon Dock</th>
+              <th class="py-2.5 px-3">Alternative 2: Tonal Moss &amp; Unified Tray</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-[#E5E3DD]/60 dark:divide-[#2A2A2F]/60 text-[#4A4A4F] dark:text-[#97979E]">
+            <tr>
+              <td class="py-3 px-3 font-semibold text-[#141414] dark:text-[#FBFBF9]">Interaction Model</td>
+              <td class="py-3 px-3">Micro-popover per attribute key (Fill, Dash, Opacity).</td>
+              <td class="py-3 px-3">Single unified expand button opening a quiet comprehensive tray.</td>
+            </tr>
+            <tr>
+              <td class="py-3 px-3 font-semibold text-[#141414] dark:text-[#FBFBF9]">Resting Footprint</td>
+              <td class="py-3 px-3">Wider horizontal satellite bar (~490px) with all keys visible.</td>
+              <td class="py-3 px-3">Compact horizontal satellite bar (~420px), ultra-lean.</td>
+            </tr>
+            <tr>
+              <td class="py-3 px-3 font-semibold text-[#141414] dark:text-[#FBFBF9]">State Visibility</td>
+              <td class="py-3 px-3">Key glyphs display current preview icon in real-time.</td>
+              <td class="py-3 px-3">Tonal Moss chip (<code class="font-mono text-[11px] text-[#27604A]">#E0EFE5</code>) semi-statically reveals active non-default traits.</td>
+            </tr>
+            <tr>
+              <td class="py-3 px-3 font-semibold text-[#141414] dark:text-[#FBFBF9]">Multi-Attribute Latency</td>
+              <td class="py-3 px-3">High friction: Requires opening, selecting, and closing 3 separate popovers.</td>
+              <td class="py-3 px-3">Zero friction: Open tray once, adjust Fill, Dash, Opacity &amp; Typo simultaneously.</td>
+            </tr>
+            <tr>
+              <td class="py-3 px-3 font-semibold text-[#141414] dark:text-[#FBFBF9]">Tactile Sensation</td>
+              <td class="py-3 px-3">Segmented radio keys with active press <code class="font-mono text-[11px]">scale-[.96]</code>.</td>
+              <td class="py-3 px-3">Tonal pill badge with soft moss glow and unified tactile drawer.</td>
+            </tr>
+            <tr>
+              <td class="py-3 px-3 font-semibold text-[#141414] dark:text-[#FBFBF9]">Mobile / Narrow Viewport</td>
+              <td class="py-3 px-3">May require secondary horizontal scroll or key overflow on small screens.</td>
+              <td class="py-3 px-3">Excellent responsiveness: satellites stay narrow; tray handles density.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- 3. Complete Design System Tokens Matrix -->
+      <div class="border-t border-[#E5E3DD] dark:border-[#2A2A2F] pt-4">
+        <h3 class="text-xs font-semibold uppercase tracking-wider text-[#A09D97] dark:text-[#97979E] mb-3">Core CALM UI Design Tokens</h3>
+        <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2 font-mono text-[11px]">
+          <div class="p-2 rounded-[10px] bg-[#EDECEA] dark:bg-[#121215] border border-[#E5E3DD] dark:border-[#2A2A2F]">
+            <div class="size-4 rounded bg-[#EDECEA] border border-black/10 mb-1"></div>
+            <span class="text-[10px] text-[#A09D97] block">--color-canvas</span>
+            <span class="font-semibold text-[#141414] dark:text-[#FBFBF9]">#EDECEA</span>
+          </div>
+          <div class="p-2 rounded-[10px] bg-[#FBFBF9] dark:bg-[#1F1F24] border border-[#E5E3DD] dark:border-[#2A2A2F]">
+            <div class="size-4 rounded bg-[#FBFBF9] border border-black/10 mb-1"></div>
+            <span class="text-[10px] text-[#A09D97] block">--color-paper</span>
+            <span class="font-semibold text-[#141414] dark:text-[#FBFBF9]">#FBFBF9</span>
+          </div>
+          <div class="p-2 rounded-[10px] bg-[#FBFBF9] dark:bg-[#1F1F24] border border-[#E5E3DD] dark:border-[#2A2A2F]">
+            <div class="size-4 rounded bg-[#141414] mb-1"></div>
+            <span class="text-[10px] text-[#A09D97] block">--color-ink</span>
+            <span class="font-semibold text-[#141414] dark:text-[#FBFBF9]">#141414</span>
+          </div>
+          <div class="p-2 rounded-[10px] bg-[#FBFBF9] dark:bg-[#1F1F24] border border-[#E5E3DD] dark:border-[#2A2A2F]">
+            <div class="size-4 rounded bg-[#4A4A4F] mb-1"></div>
+            <span class="text-[10px] text-[#A09D97] block">--color-ink-soft</span>
+            <span class="font-semibold text-[#141414] dark:text-[#FBFBF9]">#4A4A4F</span>
+          </div>
+          <div class="p-2 rounded-[10px] bg-[#FBFBF9] dark:bg-[#1F1F24] border border-[#E5E3DD] dark:border-[#2A2A2F]">
+            <div class="size-4 rounded bg-[#27604A] mb-1"></div>
+            <span class="text-[10px] text-[#A09D97] block">--color-moss</span>
+            <span class="font-semibold text-[#27604A]">#27604A</span>
+          </div>
+          <div class="p-2 rounded-[10px] bg-[#FBFBF9] dark:bg-[#1F1F24] border border-[#E5E3DD] dark:border-[#2A2A2F]">
+            <div class="size-4 rounded bg-[#E0EFE5] border border-black/10 mb-1"></div>
+            <span class="text-[10px] text-[#A09D97] block">--color-moss-wash</span>
+            <span class="font-semibold text-[#27604A]">#E0EFE5</span>
+          </div>
+          <div class="p-2 rounded-[10px] bg-[#FBFBF9] dark:bg-[#1F1F24] border border-[#E5E3DD] dark:border-[#2A2A2F]">
+            <div class="size-4 rounded bg-[#F1F1F2] border border-black/10 mb-1"></div>
+            <span class="text-[10px] text-[#A09D97] block">--color-wash</span>
+            <span class="font-semibold text-[#141414] dark:text-[#FBFBF9]">#F1F1F2</span>
+          </div>
+          <div class="p-2 rounded-[10px] bg-[#FBFBF9] dark:bg-[#1F1F24] border border-[#E5E3DD] dark:border-[#2A2A2F]">
+            <div class="size-4 rounded bg-[#E5E3DD] mb-1"></div>
+            <span class="text-[10px] text-[#A09D97] block">--color-line</span>
+            <span class="font-semibold text-[#141414] dark:text-[#FBFBF9]">#E5E3DD</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 4. Accessibility & Roving Tabindex Implementation Guide -->
+      <div class="border-t border-[#E5E3DD] dark:border-[#2A2A2F] pt-4">
+        <h3 class="text-xs font-semibold uppercase tracking-wider text-[#A09D97] dark:text-[#97979E] mb-2">Accessibility &amp; Keyboard Interaction Contract</h3>
+        <p class="text-xs text-[#4A4A4F] dark:text-[#97979E] leading-relaxed">
+          Both alternatives strictly follow WAI-ARIA Toolbar and Radiogroup design patterns:
+        </p>
+        <ul class="list-disc list-inside mt-2 text-xs text-[#4A4A4F] dark:text-[#97979E] space-y-1">
+          <li><strong class="text-[#141414] dark:text-[#FBFBF9]">Roving Tabindex:</strong> Exactly one button in each radiogroup holds <code class="font-mono text-[11px]">tabindex="0"</code>; all peer options have <code class="font-mono text-[11px]">tabindex="-1"</code>.</li>
+          <li><strong class="text-[#141414] dark:text-[#FBFBF9]">Arrow Navigation:</strong> <kbd class="px-1.5 py-0.5 rounded bg-[#EDECEA] dark:bg-[#2A2A2F] font-mono text-[10px]">ArrowLeft</kbd> and <kbd class="px-1.5 py-0.5 rounded bg-[#EDECEA] dark:bg-[#2A2A2F] font-mono text-[10px]">ArrowRight</kbd> cycle selection and shift browser focus seamlessly.</li>
+          <li><strong class="text-[#141414] dark:text-[#FBFBF9]">Escape Dismissal:</strong> Pressing <kbd class="px-1.5 py-0.5 rounded bg-[#EDECEA] dark:bg-[#2A2A2F] font-mono text-[10px]">Escape</kbd> immediately collapses any open popover or the unified tray and returns focus to its trigger key.</li>
+          <li><strong class="text-[#141414] dark:text-[#FBFBF9]">Screen Readers:</strong> Clear, localized labels e.g. <code class="font-mono text-[11px]">aria-label="Fine stroke, 2 pixels"</code>, <code class="font-mono text-[11px]">aria-checked="true"</code>, and <code class="font-mono text-[11px]">role="radiogroup"</code>.</li>
+        </ul>
+      </div>
+
+    </section>
+
+  </main>
+
+  <!-- ========================================================================= -->
+  <!-- JAVASCRIPT: LIVE STATE SYNCHRONIZATION & INTERACTION CONTROLLER            -->
+  <!-- ========================================================================= -->
+  <script>
+    // Global State Store
+    const state = {
+      weight: 4,
+      color: '#141414',
+      fill: 'semi',
+      dash: 'solid',
+      opacity: 100,
+      activeTool: 'rectangle',
+      activePopover: null,
+      unifiedOpen: false,
+      theme: 'light',
+      showGuides: false,
+      viewMode: 'both'
+    };
+
+    // Color swatches registry
+    const swatches = ['#141414', '#4A4A4F', '#27604A', '#D97706', '#2B6CB0'];
+
+    // Initialize
+    document.addEventListener('DOMContentLoaded', () => {
+      syncUI();
+      setupKeyboardNavigation();
+      document.addEventListener('click', handleOutsideClick);
+    });
+
+    // Close popovers when clicking outside
+    function handleOutsideClick(e) {
+      if (!e.target.closest('#alt1-satellite-bar') && !e.target.closest('#alt2-satellite-bar') && !e.target.closest('#alt2-unified-panel')) {
+        closeAllPopovers();
+        if (state.unifiedOpen) {
+          toggleUnifiedPanel(false);
+        }
+      }
+    }
+
+    function closeAllPopovers() {
+      ['alt1-popover-colors', 'alt1-popover-fill', 'alt1-popover-dash', 'alt1-popover-opacity', 'alt2-popover-colors'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.classList.add('hidden');
+      });
+      state.activePopover = null;
+    }
+
+    function togglePopover(popoverId) {
+      const el = document.getElementById(popoverId);
+      if (!el) return;
+      const isCurrentlyOpen = !el.classList.contains('hidden');
+      closeAllPopovers();
+      if (!isCurrentlyOpen) {
+        el.classList.remove('hidden');
+        state.activePopover = popoverId;
+      }
+    }
+
+    // Toggle Alternative 2 Unified Tray Panel
+    function toggleUnifiedPanel(force) {
+      const panel = document.getElementById('alt2-unified-panel');
+      const trigger = document.getElementById('alt2-tray-trigger');
+      if (!panel || !trigger) return;
+      
+      const nextState = (typeof force === 'boolean') ? force : panel.classList.contains('hidden');
+      state.unifiedOpen = nextState;
+      
+      if (nextState) {
+        closeAllPopovers();
+        panel.classList.remove('hidden');
+        trigger.setAttribute('aria-expanded', 'true');
+        trigger.classList.add('bg-[#F1F1F2]', 'dark:bg-[#242429]');
+      } else {
+        panel.classList.add('hidden');
+        trigger.setAttribute('aria-expanded', 'false');
+        trigger.classList.remove('bg-[#F1F1F2]', 'dark:bg-[#242429]');
+      }
+    }
+
+    // Set Stroke Weight
+    function setStrokeWeight(val) {
+      state.weight = val;
+      syncUI();
+    }
+
+    // Set Color
+    function setColor(hex) {
+      state.color = hex;
+      closeAllPopovers();
+      syncUI();
+    }
+
+    // Set Fill Style
+    function setFill(style) {
+      state.fill = style;
+      closeAllPopovers();
+      syncUI();
+    }
+
+    // Set Dash Style
+    function setDash(dash) {
+      state.dash = dash;
+      closeAllPopovers();
+      syncUI();
+    }
+
+    // Set Opacity
+    function setOpacity(val) {
+      state.opacity = parseInt(val, 10);
+      syncUI();
+    }
+
+    // Reset styles in Alt 2
+    function resetStyles() {
+      state.weight = 4;
+      state.color = '#141414';
+      state.fill = 'semi';
+      state.dash = 'solid';
+      state.opacity = 100;
+      syncUI();
+    }
+
+    // Set Active Tool Simulator
+    function setActiveTool(tool) {
+      state.activeTool = tool;
+      const textElem = document.getElementById('live-shape-text');
+      const rectElem = document.getElementById('live-shape-rect');
+      if (textElem && rectElem) {
+        if (tool === 'draw') {
+          textElem.textContent = 'Freehand Pen Object';
+        } else if (tool === 'arrow') {
+          textElem.textContent = 'Connector / Arrow Object';
+        } else if (tool === 'text') {
+          textElem.textContent = 'Typography Frame Object';
+        } else {
+          textElem.textContent = 'Interactive Shape Object';
+        }
+      }
+      syncUI();
+    }
+
+    // Master Synchronization function
+    function syncUI() {
+      // 1. Update Preview Stage readouts
+      document.getElementById('preview-weight-txt').textContent = state.weight + 'px';
+      document.getElementById('preview-color-txt').textContent = state.color;
+      document.getElementById('preview-fill-txt').textContent = 
+        state.fill === 'none' ? 'None' : 
+        state.fill === 'solid' ? 'Solid' : 
+        state.fill === 'hatch' ? 'Hatch Pattern' : 'Tint (20%)';
+      document.getElementById('preview-dash-txt').textContent = 
+        state.dash === 'solid' ? 'Solid' : 
+        state.dash === 'dashed' ? 'Dashed' : 'Dotted';
+      document.getElementById('preview-opacity-txt').textContent = state.opacity + '%';
+
+      // 2. Update Canvas SVG Object
+      const rect = document.getElementById('live-shape-rect');
+      const hatchStroke = document.getElementById('canvas-hatch-stroke');
+      const text = document.getElementById('live-shape-text');
+
+      if (rect) {
+        rect.setAttribute('stroke', state.color);
+        rect.setAttribute('stroke-width', state.weight);
+        rect.style.opacity = state.opacity / 100;
+
+        if (state.dash === 'dashed') {
+          rect.setAttribute('stroke-dasharray', '8 6');
+        } else if (state.dash === 'dotted') {
+          rect.setAttribute('stroke-dasharray', '2 6');
+        } else {
+          rect.removeAttribute('stroke-dasharray');
+        }
+
+        if (state.fill === 'none') {
+          rect.setAttribute('fill', 'transparent');
+        } else if (state.fill === 'solid') {
+          rect.setAttribute('fill', state.color);
+          rect.setAttribute('fill-opacity', '1');
+        } else if (state.fill === 'hatch') {
+          if (hatchStroke) hatchStroke.setAttribute('stroke', state.color);
+          rect.setAttribute('fill', 'url(#canvas-hatch-pattern)');
+          rect.setAttribute('fill-opacity', '1');
+        } else {
+          // semi tint
+          rect.setAttribute('fill', state.color);
+          rect.setAttribute('fill-opacity', '0.2');
+        }
+      }
+
+      if (text) {
+        text.setAttribute('fill', state.color);
+        text.style.opacity = state.opacity / 100;
+      }
+
+      // 3. Sync Alt 1 & Alt 2 Weight Buttons
+      [2, 4, 7, 11].forEach(w => {
+        ['alt1', 'alt2'].forEach(prefix => {
+          const btn = document.getElementById(`${prefix}-weight-${w}`);
+          const glyph = document.getElementById(`${prefix}-weight-glyph-${w}`);
+          if (!btn) return;
+          const isSelected = (state.weight === w);
+          btn.setAttribute('aria-checked', isSelected ? 'true' : 'false');
+          btn.tabIndex = isSelected ? 0 : -1;
+          if (isSelected) {
+            btn.className = "btn-tactile size-10 rounded-[10px] bg-[#141414] text-[#FBFBF9] dark:bg-[#FBFBF9] dark:text-[#141414] flex items-center justify-center shadow-press focus-visible:ring-2 focus-visible:ring-[#27604A] focus-visible:outline-none transition";
+          } else {
+            btn.className = "btn-tactile size-10 rounded-[10px] text-[#4A4A4F] dark:text-[#97979E] flex items-center justify-center hover:bg-[#F1F1F2] dark:hover:bg-[#242429] hover:text-[#141414] dark:hover:text-[#FBFBF9] focus-visible:ring-2 focus-visible:ring-[#27604A] focus-visible:outline-none transition";
+          }
+          if (glyph) {
+            glyph.style.backgroundColor = isSelected ? 'currentColor' : state.color;
+          }
+        });
+      });
+
+      // 4. Sync Color Swatches
+      ['alt1', 'alt2'].forEach(prefix => {
+        swatches.forEach(hex => {
+          const key = hex.replace('#', '');
+          const btn = document.getElementById(`${prefix}-color-${key}`);
+          if (!btn) return;
+          const dot = btn.querySelector('span');
+          const isSelected = (state.color === hex);
+          btn.setAttribute('aria-checked', isSelected ? 'true' : 'false');
+          btn.tabIndex = isSelected ? 0 : -1;
+          if (dot) {
+            if (isSelected) {
+              dot.classList.add('swatch-selected');
+            } else {
+              dot.classList.remove('swatch-selected');
+            }
+          }
+        });
+      });
+
+      // 5. Sync Sliders & Text
+      const op1 = document.getElementById('alt1-opacity-val');
+      const op2 = document.getElementById('alt2-opacity-val');
+      const s1 = document.getElementById('alt1-opacity-slider');
+      const s2 = document.getElementById('alt2-opacity-slider');
+      if (op1) op1.textContent = state.opacity + '%';
+      if (op2) op2.textContent = state.opacity + '%';
+      if (s1) s1.value = state.opacity;
+      if (s2) s2.value = state.opacity;
+
+      // 6. Sync Alt 2 Tonal Chip & Tray Pip
+      const chip = document.getElementById('alt2-tonal-chip');
+      const chipLabel = document.getElementById('alt2-chip-label');
+      const pip = document.getElementById('alt2-tray-pip');
+      const isCustomized = (state.fill !== 'none' || state.dash !== 'solid' || state.opacity !== 100);
+
+      if (chip && chipLabel && pip) {
+        if (isCustomized) {
+          chip.classList.remove('hidden');
+          pip.classList.remove('hidden');
+          let textParts = [];
+          if (state.fill === 'semi') textParts.push('Tint');
+          if (state.fill === 'solid') textParts.push('Solid');
+          if (state.fill === 'hatch') textParts.push('Hatch');
+          if (state.dash !== 'solid') textParts.push(state.dash === 'dashed' ? 'Dash' : 'Dot');
+          if (state.opacity !== 100) textParts.push(state.opacity + '%');
+          chipLabel.textContent = textParts.join(' · ') || 'Custom';
+        } else {
+          chip.classList.add('hidden');
+          pip.classList.add('hidden');
+        }
+      }
+
+      // 7. Sync Unified Panel Selection Highlights
+      ['none', 'semi', 'solid', 'hatch'].forEach(f => {
+        const b = document.getElementById(`alt2-fill-${f}`);
+        if (!b) return;
+        if (state.fill === f) {
+          b.className = "py-2 px-1 rounded-[10px] bg-[#E0EFE5] text-[#27604A] dark:bg-[#27604A]/30 dark:text-[#52B788] flex flex-col items-center gap-1 text-[11px] font-medium transition";
+        } else {
+          b.className = "py-2 px-1 rounded-[10px] hover:bg-[#F1F1F2] dark:hover:bg-[#242429] flex flex-col items-center gap-1 text-[11px] font-medium transition";
+        }
+      });
+
+      ['solid', 'dashed', 'dotted'].forEach(d => {
+        const b = document.getElementById(`alt2-dash-${d}`);
+        if (!b) return;
+        if (state.dash === d) {
+          b.className = "py-2 rounded-[10px] bg-[#E0EFE5] text-[#27604A] dark:bg-[#27604A]/30 dark:text-[#52B788] flex flex-col items-center gap-1 text-[11px] font-medium transition";
+        } else {
+          b.className = "py-2 rounded-[10px] hover:bg-[#F1F1F2] dark:hover:bg-[#242429] flex flex-col items-center gap-1 text-[11px] font-medium transition";
+        }
+      });
+    }
+
+    // Keyboard Roving Tabindex Handlers
+    function setupKeyboardNavigation() {
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+          closeAllPopovers();
+          if (state.unifiedOpen) toggleUnifiedPanel(false);
+        }
+      });
+
+      // Radiogroup roving tabindex for weights & colors
+      const radiogroups = document.querySelectorAll('[role="radiogroup"]');
+      radiogroups.forEach(group => {
+        group.addEventListener('keydown', (e) => {
+          if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
+          const radios = Array.from(group.querySelectorAll('[role="radio"]'));
+          const currentIndex = radios.indexOf(document.activeElement);
+          if (currentIndex < 0) return;
+          e.preventDefault();
+
+          let nextIndex = currentIndex;
+          if (e.key === 'ArrowRight') {
+            nextIndex = (currentIndex + 1) % radios.length;
+          } else if (e.key === 'ArrowLeft') {
+            nextIndex = (currentIndex - 1 + radios.length) % radios.length;
+          } else if (e.key === 'Home') {
+            nextIndex = 0;
+          } else if (e.key === 'End') {
+            nextIndex = radios.length - 1;
+          }
+
+          radios[nextIndex].click();
+          radios[nextIndex].focus();
+        });
+      });
+    }
+
+    // View Mode Switcher
+    function setViewMode(mode) {
+      state.viewMode = mode;
+      const card1 = document.getElementById('alt1-card');
+      const card2 = document.getElementById('alt2-card');
+      const spec = document.getElementById('spec-section');
+      const container = document.getElementById('comparison-container');
+
+      ['both', 'alt1', 'alt2', 'spec'].forEach(m => {
+        const btn = document.getElementById(`view-tab-${m}`);
+        if (!btn) return;
+        if (m === mode) {
+          btn.className = "px-2.5 py-1.5 rounded-[8px] transition-all bg-[#FBFBF9] dark:bg-[#17171A] text-[#141414] dark:text-[#FBFBF9] shadow-sm font-semibold";
+        } else {
+          btn.className = "px-2.5 py-1.5 rounded-[8px] transition-all hover:text-[#141414] dark:hover:text-[#FBFBF9]";
+        }
+      });
+
+      if (mode === 'both') {
+        container.classList.remove('hidden');
+        card1.classList.remove('hidden');
+        card2.classList.remove('hidden');
+        spec.classList.remove('hidden');
+      } else if (mode === 'alt1') {
+        container.classList.remove('hidden');
+        card1.classList.remove('hidden');
+        card2.classList.add('hidden');
+        spec.classList.add('hidden');
+      } else if (mode === 'alt2') {
+        container.classList.remove('hidden');
+        card1.classList.add('hidden');
+        card2.classList.remove('hidden');
+        spec.classList.add('hidden');
+      } else if (mode === 'spec') {
+        container.classList.add('hidden');
+        spec.classList.remove('hidden');
+      }
+    }
+
+    // Spacing Guides Overlay
+    function toggleGuides() {
+      state.showGuides = !state.showGuides;
+      const btn = document.getElementById('guides-state');
+      if (state.showGuides) {
+        document.body.classList.add('show-guides');
+        btn.textContent = 'ON';
+        btn.className = 'text-[#27604A] font-bold';
+      } else {
+        document.body.classList.remove('show-guides');
+        btn.textContent = 'OFF';
+        btn.className = 'text-[#A09D97]';
+      }
+    }
+
+    // Theme Switcher
+    function toggleTheme() {
+      state.theme = state.theme === 'light' ? 'dark' : 'light';
+      if (state.theme === 'dark') {
+        document.documentElement.classList.add('dark');
+      } else {
+        document.documentElement.classList.remove('dark');
+      }
+      syncUI();
+    }
+  </script>
+
+</body>
+</html>

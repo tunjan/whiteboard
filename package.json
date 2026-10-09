@@ -21,10 +21,12 @@
     "format:check": "prettier --check .",
     "db:up": "docker compose up -d",
     "db:down": "docker compose down",
-    "db:push": "npm run db:push -w server"
+    "db:push": "npm run db:push -w server",
+    "lint": "oxlint client/src server/src shared/src"
   },
   "devDependencies": {
     "concurrently": "^9.1.0",
+    "oxlint": "^1.86.0",
     "prettier": "^3.9.6",
     "typescript": "^7.0.2"
   }

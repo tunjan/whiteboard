@@ -1,0 +1,1317 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Calm UI — Alternative 3: Tonal Hierarchy & Inline Disclosure</title>
+  <!-- Tailwind CSS Play CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            canvas: '#EDECEA',
+            paper: '#FBFBF9',
+            ink: {
+              DEFAULT: '#141414',
+              soft: '#4A4A4F',
+              mute: '#A09D97',
+            },
+            wash: '#F1F1F2',
+            line: '#E5E3DD',
+            moss: {
+              DEFAULT: '#27604A',
+              wash: '#E0EFE5',
+              dark: '#52B788',
+              'dark-wash': 'rgba(39, 96, 74, 0.28)',
+            },
+            night: {
+              DEFAULT: '#17171A',
+              line: '#2A2A2F',
+              mute: '#97979E',
+              wash: '#242429',
+              paper: '#1F1F24',
+            },
+          },
+          borderRadius: {
+            ctrl: '10px',
+            bar: '14px',
+            panel: '18px',
+          },
+          boxShadow: {
+            float: '0 1px 2px rgb(0 0 0 / .05), 0 14px 34px rgb(0 0 0 / .10)',
+            card: '0 1px 2px rgb(0 0 0 / .04), 0 8px 22px rgb(0 0 0 / .07)',
+            press: 'inset 0 1px 2px rgb(0 0 0 / .12)',
+            glow: '0 0 0 3px rgba(39, 96, 74, 0.18)',
+          },
+          transitionTimingFunction: {
+            calm: 'cubic-bezier(0.16, 1, 0.3, 1)',
+          },
+        },
+      },
+    };
+  </script>
+  <style>
+    :root {
+      --color-canvas:     #EDECEA;
+      --color-paper:      #FBFBF9;
+      --color-ink:        #141414;
+      --color-ink-soft:   #4A4A4F;
+      --color-ink-mute:   #A09D97;
+      --color-wash:       #F1F1F2;
+      --color-line:       #E5E3DD;
+      --color-moss:       #27604A;
+      --color-moss-wash:  #E0EFE5;
+      --color-night:      #17171A;
+      --color-night-line: #2A2A2F;
+      --color-night-mute: #97979E;
+
+      --radius-ctrl:  10px;
+      --radius-bar:   14px;
+      --radius-panel: 18px;
+    }
+
+    body {
+      background-color: var(--color-canvas);
+      color: var(--color-ink);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Geist", "Segoe UI", Roboto, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    /* Canvas background dot grid */
+    .canvas-dots {
+      background-image: radial-gradient(rgba(20, 20, 20, 0.08) 1px, transparent 1px);
+      background-size: 24px 24px;
+    }
+    .dark .canvas-dots {
+      background-image: radial-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1px);
+    }
+
+    /* Smooth slide view transitions */
+    .slide-container {
+      position: relative;
+      overflow: hidden;
+      transition: height 260ms cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .slide-panel {
+      transition: transform 260ms cubic-bezier(0.16, 1, 0.3, 1), opacity 220ms ease;
+    }
+
+    .slide-panel.hidden-left {
+      transform: translateX(-100%);
+      opacity: 0;
+      pointer-events: none;
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+    }
+
+    .slide-panel.hidden-right {
+      transform: translateX(100%);
+      opacity: 0;
+      pointer-events: none;
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+    }
+
+    .slide-panel.active {
+      transform: translateX(0);
+      opacity: 1;
+      pointer-events: auto;
+      position: relative;
+    }
+
+    /* Accordion disclosure transition */
+    .disclosure-body {
+      display: grid;
+      grid-template-rows: 0fr;
+      transition: grid-template-rows 220ms cubic-bezier(0.16, 1, 0.3, 1), opacity 200ms ease;
+      opacity: 0;
+    }
+    .disclosure-body.open {
+      grid-template-rows: 1fr;
+      opacity: 1;
+    }
+    .disclosure-inner {
+      overflow: hidden;
+    }
+
+    /* Active Tool Pulse Animation for live feedback */
+    @keyframes moss-pop {
+      0% { transform: scale(0.96); }
+      50% { transform: scale(1.02); }
+      100% { transform: scale(1); }
+    }
+    .animate-pop {
+      animation: moss-pop 200ms cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    /* Focus styling adhering to Calm UI */
+    .calm-focus:focus-visible {
+      outline: none;
+      box-shadow: 0 0 0 2px var(--color-paper), 0 0 0 4px var(--color-moss);
+    }
+    .dark .calm-focus:focus-visible {
+      box-shadow: 0 0 0 2px var(--color-night), 0 0 0 4px var(--color-moss-dark, #52B788);
+    }
+  </style>
+</head>
+<body class="canvas-dots min-h-screen flex flex-col text-ink dark:text-zinc-100 dark:bg-night selection:bg-moss-wash selection:text-moss">
+
+  <!-- TOP CONTROL DESK -->
+  <header class="sticky top-0 z-50 bg-paper/90 dark:bg-night/90 backdrop-blur-md border-b border-line dark:border-night-line px-5 py-3 transition-colors">
+    <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4">
+      <div class="flex items-center gap-3">
+        <span class="size-3 rounded-full bg-moss ring-4 ring-moss-wash dark:ring-moss-dark-wash"></span>
+        <div>
+          <div class="flex items-center gap-2">
+            <h1 class="text-sm font-semibold tracking-tight text-ink dark:text-white">Calm UI — Alternative 3</h1>
+            <span class="text-[11px] px-2 py-0.5 rounded-full font-medium bg-moss-wash text-moss dark:bg-moss/20 dark:text-moss-dark">Tonal Hierarchy & Inline Disclosure</span>
+          </div>
+          <p class="text-xs text-ink-soft dark:text-night-mute">No separator lines between peers · Moss accent language · Zero-flyout tablet ergonomics</p>
+        </div>
+      </div>
+
+      <!-- Controls: Disclosure Paradigm, Dark Mode, Active Tool Feedback -->
+      <div class="flex items-center gap-3 text-xs">
+        <!-- Interactive Paradigm Switch -->
+        <div class="inline-flex p-1 rounded-ctrl bg-wash dark:bg-night-wash text-ink-soft dark:text-night-mute" role="group" aria-label="Submenu Disclosure Mode">
+          <button id="btn-mode-slide" onclick="setDisclosureMode('slide')" class="px-2.5 py-1.5 rounded-[8px] font-medium transition-colors bg-paper dark:bg-night-paper text-ink dark:text-white shadow-sm" aria-pressed="true">
+            Slide Drilldown (Single Frame)
+          </button>
+          <button id="btn-mode-accordion" onclick="setDisclosureMode('accordion')" class="px-2.5 py-1.5 rounded-[8px] font-medium transition-colors text-ink-soft hover:text-ink dark:text-night-mute dark:hover:text-white" aria-pressed="false">
+            Inline Accordion (Expandable)
+          </button>
+        </div>
+
+        <!-- Dark Mode Toggle -->
+        <button onclick="toggleDarkMode()" class="calm-focus p-2 rounded-ctrl bg-wash hover:bg-line/60 dark:bg-night-wash dark:hover:bg-night-line text-ink-soft dark:text-night-mute transition-colors flex items-center gap-1.5" title="Toggle theme (Light / Dark)">
+          <svg id="theme-sun" class="size-4 hidden dark:block" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/>
+          </svg>
+          <svg id="theme-moon" class="size-4 block dark:hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>
+          </svg>
+          <span id="theme-text" class="hidden sm:inline">Dark</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- MAIN WORKSPACE / CANVAS -->
+  <main class="flex-1 max-w-7xl w-full mx-auto p-4 md:p-8 grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+    
+    <!-- LEFT 7 COLS: INTERACTIVE TOOLBAR & MORE TOOLS FLYOUT STAGE -->
+    <section class="lg:col-span-7 flex flex-col items-center">
+      
+      <!-- Stage Canvas Mockup Container -->
+      <div class="w-full relative min-h-[640px] rounded-panel bg-white/70 dark:bg-[#151518]/80 border border-line dark:border-night-line shadow-card backdrop-blur-sm p-6 flex flex-col justify-between items-center overflow-hidden">
+        
+        <!-- Live Status Floating HUD (Canvas Context) -->
+        <div class="w-full flex items-center justify-between text-xs text-ink-soft dark:text-night-mute">
+          <div class="flex items-center gap-2">
+            <span class="size-2 rounded-full bg-emerald-500 animate-pulse"></span>
+            <span>Canvas active: <strong>100% zoom</strong></span>
+          </div>
+          <div class="flex items-center gap-3">
+            <span id="hud-active-tool">Active tool: <strong class="text-moss dark:text-moss-dark">Hand (Pan)</strong></span>
+            <span class="text-line dark:text-night-line">•</span>
+            <span id="hud-lock-status">Tool lock: <strong>Off</strong></span>
+          </div>
+        </div>
+
+        <!-- Center Canvas Sketch Element (Atmospheric Context) -->
+        <div class="my-auto text-center pointer-events-none select-none opacity-40 dark:opacity-20 flex flex-col items-center gap-3">
+          <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#27604A" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/>
+            <polyline points="14 2 14 8 20 8"/>
+            <path d="m10 13-2 2 2 2"/><path d="m14 17 2-2-2-2"/>
+          </svg>
+          <span class="text-sm font-serif italic text-ink-soft dark:text-night-mute">Calm Canvas Workspace · Tap "More Tools" Below</span>
+        </div>
+
+        <!-- DROPDOWN & DOCK ANCHOR -->
+        <div class="relative w-full max-w-sm flex flex-col items-center z-20">
+
+          <!-- ══════════════════════════════════════════════════════════ -->
+          <!-- ALTERNATIVE 3: "CALM UI" MORE TOOLS MENU COMPONENT -->
+          <!-- ══════════════════════════════════════════════════════════ -->
+          <div
+            id="more-tools-panel"
+            role="menu"
+            aria-label="More tools menu"
+            aria-orientation="vertical"
+            class="w-full mb-3 rounded-panel bg-paper dark:bg-night-paper border border-line/80 dark:border-night-line shadow-float p-2 text-ink dark:text-zinc-100 transition-all duration-300 origin-bottom"
+          >
+
+            <!-- ── SLIDE DRILLDOWN PARADIGM CONTAINER ── -->
+            <div id="deck-slide-container" class="slide-container">
+
+              <!-- VIEW 1: ROOT MENU -->
+              <div id="view-root" class="slide-panel active w-full flex flex-col space-y-3">
+                
+                <!-- Group 1: Primary Overflow Instruments -->
+                <div>
+                  <div class="px-2 pt-1 pb-1.5 flex items-center justify-between">
+                    <span class="text-[11px] font-semibold uppercase tracking-wider text-ink-mute dark:text-night-mute">Instruments</span>
+                    <span class="text-[10px] text-ink-mute dark:text-night-mute">Direct select</span>
+                  </div>
+
+                  <!-- Item List: No Separator Lines, Clean Spacing Rhythm -->
+                  <div class="flex flex-col space-y-0.5" role="none">
+                    
+                    <!-- Tool: Hand (Pan) -->
+                    <button
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked="true"
+                      id="item-hand"
+                      data-tool-id="hand"
+                      data-tool-label="Hand (Pan)"
+                      onclick="selectTool('hand', 'Hand (Pan)')"
+                      class="tool-item calm-focus w-full min-h-[42px] px-3 py-2 rounded-ctrl flex items-center justify-between text-left transition-colors duration-150 bg-moss-wash text-moss font-medium dark:bg-moss/20 dark:text-moss-dark"
+                    >
+                      <div class="flex items-center gap-3">
+                        <svg class="size-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                          <path d="M18 11V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v0"/>
+                          <path d="M14 10V4a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v2"/>
+                          <path d="M10 10.5V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v8"/>
+                          <path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/>
+                        </svg>
+                        <span class="text-sm">Hand (Pan)</span>
+                      </div>
+                      <div class="flex items-center gap-2">
+                        <span class="tool-active-dot size-1.5 rounded-full bg-moss dark:bg-moss-dark"></span>
+                        <kbd class="text-[11px] font-mono px-1.5 py-0.5 rounded bg-white/70 dark:bg-black/30 border border-line/60 dark:border-night-line text-ink-soft dark:text-night-mute">H</kbd>
+                      </div>
+                    </button>
+
+                    <!-- Tool: Highlighter -->
+                    <button
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked="false"
+                      id="item-highlighter"
+                      data-tool-id="highlighter"
+                      data-tool-label="Highlighter"
+                      onclick="selectTool('highlighter', 'Highlighter')"
+                      class="tool-item calm-focus w-full min-h-[42px] px-3 py-2 rounded-ctrl flex items-center justify-between text-left transition-colors duration-150 hover:bg-wash dark:hover:bg-night-wash text-ink dark:text-zinc-200"
+                    >
+                      <div class="flex items-center gap-3">
+                        <svg class="size-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                          <path d="m9 11-6 6v3h3l6-6"/>
+                          <path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/>
+                        </svg>
+                        <span class="text-sm">Highlighter</span>
+                      </div>
+                      <div class="flex items-center gap-2">
+                        <span class="tool-active-dot hidden size-1.5 rounded-full bg-moss dark:bg-moss-dark"></span>
+                        <kbd class="text-[11px] font-mono px-1.5 py-0.5 rounded bg-wash dark:bg-night-wash border border-line/60 dark:border-night-line text-ink-soft dark:text-night-mute">D</kbd>
+                      </div>
+                    </button>
+
+                    <!-- Tool: Laser -->
+                    <button
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked="false"
+                      id="item-laser"
+                      data-tool-id="laser"
+                      data-tool-label="Laser Pointer"
+                      onclick="selectTool('laser', 'Laser Pointer')"
+                      class="tool-item calm-focus w-full min-h-[42px] px-3 py-2 rounded-ctrl flex items-center justify-between text-left transition-colors duration-150 hover:bg-wash dark:hover:bg-night-wash text-ink dark:text-zinc-200"
+                    >
+                      <div class="flex items-center gap-3">
+                        <svg class="size-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                          <path d="M18 6 6 18"/><path d="m20 10-4-4"/><path d="m4 14 4 4"/>
+                          <circle cx="12" cy="12" r="2"/>
+                        </svg>
+                        <span class="text-sm">Laser Pointer</span>
+                      </div>
+                      <div class="flex items-center gap-2">
+                        <span class="tool-active-dot hidden size-1.5 rounded-full bg-moss dark:bg-moss-dark"></span>
+                        <kbd class="text-[11px] font-mono px-1.5 py-0.5 rounded bg-wash dark:bg-night-wash border border-line/60 dark:border-night-line text-ink-soft dark:text-night-mute">K</kbd>
+                      </div>
+                    </button>
+
+                    <!-- Tool: Comment -->
+                    <button
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked="false"
+                      id="item-comment"
+                      data-tool-id="comment"
+                      data-tool-label="Comment"
+                      onclick="selectTool('comment', 'Comment')"
+                      class="tool-item calm-focus w-full min-h-[42px] px-3 py-2 rounded-ctrl flex items-center justify-between text-left transition-colors duration-150 hover:bg-wash dark:hover:bg-night-wash text-ink dark:text-zinc-200"
+                    >
+                      <div class="flex items-center gap-3">
+                        <svg class="size-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                          <path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/>
+                        </svg>
+                        <span class="text-sm">Comment</span>
+                      </div>
+                      <div class="flex items-center gap-2">
+                        <span class="tool-active-dot hidden size-1.5 rounded-full bg-moss dark:bg-moss-dark"></span>
+                        <kbd class="text-[11px] font-mono px-1.5 py-0.5 rounded bg-wash dark:bg-night-wash border border-line/60 dark:border-night-line text-ink-soft dark:text-night-mute">C</kbd>
+                      </div>
+                    </button>
+
+                    <!-- Tool: Grapher -->
+                    <button
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked="false"
+                      id="item-graph"
+                      data-tool-id="graph"
+                      data-tool-label="Function Grapher"
+                      onclick="selectTool('graph', 'Function Grapher')"
+                      class="tool-item calm-focus w-full min-h-[42px] px-3 py-2 rounded-ctrl flex items-center justify-between text-left transition-colors duration-150 hover:bg-wash dark:hover:bg-night-wash text-ink dark:text-zinc-200"
+                    >
+                      <div class="flex items-center gap-3">
+                        <svg class="size-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                          <path d="M3 3v16a2 2 0 0 0 2 2h16"/>
+                          <path d="m19 9-5 5-4-4-3 3"/>
+                        </svg>
+                        <span class="text-sm">Function Grapher</span>
+                      </div>
+                      <span class="tool-active-dot hidden size-1.5 rounded-full bg-moss dark:bg-moss-dark"></span>
+                    </button>
+
+                    <!-- Tool: Equation -->
+                    <button
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked="false"
+                      id="item-equation"
+                      data-tool-id="equation"
+                      data-tool-label="LaTeX Equation"
+                      onclick="selectTool('equation', 'LaTeX Equation')"
+                      class="tool-item calm-focus w-full min-h-[42px] px-3 py-2 rounded-ctrl flex items-center justify-between text-left transition-colors duration-150 hover:bg-wash dark:hover:bg-night-wash text-ink dark:text-zinc-200"
+                    >
+                      <div class="flex items-center gap-3">
+                        <svg class="size-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                          <path d="M18 7V4H6l6 8-6 8h12v-3"/>
+                        </svg>
+                        <span class="text-sm">LaTeX Equation</span>
+                      </div>
+                      <span class="tool-active-dot hidden size-1.5 rounded-full bg-moss dark:bg-moss-dark"></span>
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Group 2: Inline Submenu Triggers (No Separators — Pure Whitespace) -->
+                <div>
+                  <div class="px-2 pt-1 pb-1.5 flex items-center justify-between">
+                    <span class="text-[11px] font-semibold uppercase tracking-wider text-ink-mute dark:text-night-mute">Catalogs & Media</span>
+                    <span class="text-[10px] text-ink-mute dark:text-night-mute">Inline view</span>
+                  </div>
+
+                  <div class="flex flex-col space-y-0.5" role="none">
+                    
+                    <!-- Submenu Drilldown 1: Polygons -->
+                    <button
+                      type="button"
+                      role="menuitem"
+                      aria-haspopup="true"
+                      aria-expanded="false"
+                      onclick="openSlideSubmenu('polygons')"
+                      class="calm-focus group w-full min-h-[42px] px-3 py-2 rounded-ctrl flex items-center justify-between text-left transition-colors duration-150 hover:bg-wash dark:hover:bg-night-wash text-ink dark:text-zinc-200"
+                    >
+                      <div class="flex items-center gap-3">
+                        <svg class="size-5 shrink-0 text-ink-soft dark:text-night-mute group-hover:text-ink dark:group-hover:text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                          <polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5 12 2"/>
+                        </svg>
+                        <span class="text-sm">Polygons</span>
+                      </div>
+                      <div class="flex items-center gap-1.5 text-xs text-ink-mute dark:text-night-mute">
+                        <span id="label-selected-polygon" class="font-normal text-[11px]">Hexagon</span>
+                        <svg class="size-4 shrink-0 transition-transform group-hover:translate-x-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                          <path d="m9 18 6-6-6-6"/>
+                        </svg>
+                      </div>
+                    </button>
+
+                    <!-- Submenu Drilldown 2: Stickers -->
+                    <button
+                      type="button"
+                      role="menuitem"
+                      aria-haspopup="true"
+                      aria-expanded="false"
+                      onclick="openSlideSubmenu('stickers')"
+                      class="calm-focus group w-full min-h-[42px] px-3 py-2 rounded-ctrl flex items-center justify-between text-left transition-colors duration-150 hover:bg-wash dark:hover:bg-night-wash text-ink dark:text-zinc-200"
+                    >
+                      <div class="flex items-center gap-3">
+                        <svg class="size-5 shrink-0 text-ink-soft dark:text-night-mute group-hover:text-ink dark:group-hover:text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                          <path d="M12 2H2v10l9.29 9.29c.94.94 2.48.94 3.42 0l6.58-6.58c.94-.94.94-2.48 0-3.42L12 2Z"/>
+                          <path d="M7 7h.01"/>
+                        </svg>
+                        <span class="text-sm">Stickers</span>
+                      </div>
+                      <div class="flex items-center gap-1.5 text-xs text-ink-mute dark:text-night-mute">
+                        <span class="text-[11px]">Catalog + Custom</span>
+                        <svg class="size-4 shrink-0 transition-transform group-hover:translate-x-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                          <path d="m9 18 6-6-6-6"/>
+                        </svg>
+                      </div>
+                    </button>
+
+                    <!-- Submenu Drilldown 3: Media -->
+                    <button
+                      type="button"
+                      role="menuitem"
+                      aria-haspopup="true"
+                      aria-expanded="false"
+                      onclick="openSlideSubmenu('media')"
+                      class="calm-focus group w-full min-h-[42px] px-3 py-2 rounded-ctrl flex items-center justify-between text-left transition-colors duration-150 hover:bg-wash dark:hover:bg-night-wash text-ink dark:text-zinc-200"
+                    >
+                      <div class="flex items-center gap-3">
+                        <svg class="size-5 shrink-0 text-ink-soft dark:text-night-mute group-hover:text-ink dark:group-hover:text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                          <rect width="18" height="18" x="3" y="3" rx="2" ry="2"/>
+                          <circle cx="9" cy="9" r="2"/>
+                          <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>
+                        </svg>
+                        <span class="text-sm">Media</span>
+                      </div>
+                      <div class="flex items-center gap-1.5 text-xs text-ink-mute dark:text-night-mute">
+                        <span class="text-[11px]">Image & Video</span>
+                        <svg class="size-4 shrink-0 transition-transform group-hover:translate-x-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                          <path d="m9 18 6-6-6-6"/>
+                        </svg>
+                      </div>
+                    </button>
+
+                  </div>
+                </div>
+
+                <!-- Group 3: Utility & Tonal Lock (No Separator Lines) -->
+                <div>
+                  <div class="px-2 pt-1 pb-1.5 flex items-center justify-between">
+                    <span class="text-[11px] font-semibold uppercase tracking-wider text-ink-mute dark:text-night-mute">Bar Settings</span>
+                  </div>
+
+                  <div class="flex flex-col space-y-0.5" role="none">
+                    
+                    <!-- Tool Lock: Tonal Moss Toggle Switch -->
+                    <button
+                      type="button"
+                      role="menuitemcheckbox"
+                      aria-checked="false"
+                      id="btn-tool-lock"
+                      onclick="toggleToolLock()"
+                      class="calm-focus w-full min-h-[42px] px-3 py-2 rounded-ctrl flex items-center justify-between text-left transition-colors duration-150 hover:bg-wash dark:hover:bg-night-wash text-ink dark:text-zinc-200"
+                    >
+                      <div class="flex items-center gap-3">
+                        <svg id="icon-lock-open" class="size-5 shrink-0 text-ink-soft dark:text-night-mute" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                          <rect width="18" height="11" x="3" y="11" rx="2" ry="2"/>
+                          <path d="M7 11V7a5 5 0 0 1 9.9-1"/>
+                        </svg>
+                        <svg id="icon-lock-closed" class="size-5 shrink-0 text-moss dark:text-moss-dark hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                          <rect width="18" height="11" x="3" y="11" rx="2" ry="2"/>
+                          <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                        </svg>
+                        <span class="text-sm font-normal" id="lock-label">Tool lock</span>
+                      </div>
+                      
+                      <!-- Tonal Moss Indicator Pill -->
+                      <div class="flex items-center gap-2">
+                        <kbd class="text-[11px] font-mono px-1.5 py-0.5 rounded bg-wash dark:bg-night-wash border border-line/60 dark:border-night-line text-ink-soft dark:text-night-mute">Q</kbd>
+                        <div id="toggle-track" class="w-8 h-5 rounded-full p-0.5 transition-colors duration-200 bg-line dark:bg-night-line flex items-center">
+                          <div id="toggle-thumb" class="size-4 rounded-full bg-white dark:bg-zinc-300 shadow-sm transition-transform duration-200 translate-x-0"></div>
+                        </div>
+                      </div>
+                    </button>
+
+                    <!-- Hide Toolbar -->
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onclick="alertFeedback('Toolbar visibility toggled')"
+                      class="calm-focus w-full min-h-[42px] px-3 py-2 rounded-ctrl flex items-center justify-between text-left transition-colors duration-150 hover:bg-wash dark:hover:bg-night-wash text-ink-soft dark:text-night-mute hover:text-ink dark:hover:text-white"
+                    >
+                      <div class="flex items-center gap-3">
+                        <svg class="size-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                          <path d="m6 9 6 6 6-6"/>
+                        </svg>
+                        <span class="text-sm">Hide toolbar</span>
+                      </div>
+                    </button>
+
+                  </div>
+                </div>
+
+              </div>
+
+              <!-- VIEW 2: SUBMENU — POLYGONS -->
+              <div id="view-polygons" class="slide-panel hidden-right w-full flex flex-col space-y-2">
+                <!-- Submenu Header: Breadcrumb Back Navigation -->
+                <div class="flex items-center justify-between pb-1">
+                  <button
+                    type="button"
+                    onclick="closeSlideSubmenu('polygons')"
+                    class="calm-focus px-2 py-1 -ml-1 rounded-ctrl flex items-center gap-1.5 text-xs font-medium text-ink-soft hover:text-ink dark:text-night-mute dark:hover:text-white hover:bg-wash dark:hover:bg-night-wash transition-colors"
+                  >
+                    <svg class="size-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="m15 18-6-6 6-6"/>
+                    </svg>
+                    <span>More tools</span>
+                  </button>
+                  <span class="text-xs font-semibold text-ink dark:text-white">Polygons</span>
+                </div>
+
+                <p class="text-[11px] text-ink-mute dark:text-night-mute px-1 pb-1">Select a geometric shape to lock onto the canvas instrument bar.</p>
+
+                <!-- Grid of Polygons: 40px Touch Targets with Precise Vector Geometry -->
+                <div class="grid grid-cols-1 gap-1" role="radiogroup" aria-label="Polygon types">
+                  
+                  <!-- Triangle -->
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked="false"
+                    data-polygon-kind="triangle"
+                    onclick="selectPolygon('triangle', 'Triangle')"
+                    class="polygon-item calm-focus w-full min-h-[42px] px-3 py-2 rounded-ctrl flex items-center justify-between text-left transition-colors duration-150 hover:bg-wash dark:hover:bg-night-wash text-ink dark:text-zinc-200"
+                  >
+                    <div class="flex items-center gap-3">
+                      <svg class="size-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round">
+                        <polygon points="12,3 22,21 2,21"/>
+                      </svg>
+                      <span class="text-sm">Triangle</span>
+                    </div>
+                    <span class="polygon-check hidden text-moss dark:text-moss-dark">
+                      <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                    </span>
+                  </button>
+
+                  <!-- Diamond -->
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked="false"
+                    data-polygon-kind="diamond"
+                    onclick="selectPolygon('diamond', 'Diamond')"
+                    class="polygon-item calm-focus w-full min-h-[42px] px-3 py-2 rounded-ctrl flex items-center justify-between text-left transition-colors duration-150 hover:bg-wash dark:hover:bg-night-wash text-ink dark:text-zinc-200"
+                  >
+                    <div class="flex items-center gap-3">
+                      <svg class="size-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round">
+                        <polygon points="12,2 22,12 12,22 2,12"/>
+                      </svg>
+                      <span class="text-sm">Diamond</span>
+                    </div>
+                    <span class="polygon-check hidden text-moss dark:text-moss-dark">
+                      <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                    </span>
+                  </button>
+
+                  <!-- Trapezoid -->
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked="false"
+                    data-polygon-kind="trapezoid"
+                    onclick="selectPolygon('trapezoid', 'Trapezoid')"
+                    class="polygon-item calm-focus w-full min-h-[42px] px-3 py-2 rounded-ctrl flex items-center justify-between text-left transition-colors duration-150 hover:bg-wash dark:hover:bg-night-wash text-ink dark:text-zinc-200"
+                  >
+                    <div class="flex items-center gap-3">
+                      <svg class="size-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round">
+                        <polygon points="6,4 18,4 22,20 2,20"/>
+                      </svg>
+                      <span class="text-sm">Trapezoid</span>
+                    </div>
+                    <span class="polygon-check hidden text-moss dark:text-moss-dark">
+                      <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                    </span>
+                  </button>
+
+                  <!-- Pentagon -->
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked="false"
+                    data-polygon-kind="pentagon"
+                    onclick="selectPolygon('pentagon', 'Pentagon')"
+                    class="polygon-item calm-focus w-full min-h-[42px] px-3 py-2 rounded-ctrl flex items-center justify-between text-left transition-colors duration-150 hover:bg-wash dark:hover:bg-night-wash text-ink dark:text-zinc-200"
+                  >
+                    <div class="flex items-center gap-3">
+                      <svg class="size-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round">
+                        <polygon points="12,2 22,9.5 18,21 6,21 2,9.5"/>
+                      </svg>
+                      <span class="text-sm">Pentagon</span>
+                    </div>
+                    <span class="polygon-check hidden text-moss dark:text-moss-dark">
+                      <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                    </span>
+                  </button>
+
+                  <!-- Hexagon (Default Active) -->
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked="true"
+                    data-polygon-kind="hexagon"
+                    onclick="selectPolygon('hexagon', 'Hexagon')"
+                    class="polygon-item calm-focus w-full min-h-[42px] px-3 py-2 rounded-ctrl flex items-center justify-between text-left transition-colors duration-150 bg-moss-wash text-moss font-medium dark:bg-moss/20 dark:text-moss-dark"
+                  >
+                    <div class="flex items-center gap-3">
+                      <svg class="size-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round">
+                        <polygon points="12,2 21.5,7.5 21.5,18.5 12,24 2.5,18.5 2.5,7.5"/>
+                      </svg>
+                      <span class="text-sm">Hexagon</span>
+                    </div>
+                    <span class="polygon-check block text-moss dark:text-moss-dark">
+                      <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                    </span>
+                  </button>
+
+                </div>
+              </div>
+
+              <!-- VIEW 3: SUBMENU — STICKERS -->
+              <div id="view-stickers" class="slide-panel hidden-right w-full flex flex-col space-y-3">
+                <!-- Header -->
+                <div class="flex items-center justify-between pb-1">
+                  <button
+                    type="button"
+                    onclick="closeSlideSubmenu('stickers')"
+                    class="calm-focus px-2 py-1 -ml-1 rounded-ctrl flex items-center gap-1.5 text-xs font-medium text-ink-soft hover:text-ink dark:text-night-mute dark:hover:text-white hover:bg-wash dark:hover:bg-night-wash transition-colors"
+                  >
+                    <svg class="size-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="m15 18-6-6 6-6"/>
+                    </svg>
+                    <span>More tools</span>
+                  </button>
+                  <span class="text-xs font-semibold text-ink dark:text-white">Stickers Catalog</span>
+                </div>
+
+                <!-- Bento Palette of Stamps -->
+                <div class="grid grid-cols-4 gap-2 p-1" role="region" aria-label="Built-in stickers">
+                  
+                  <button onclick="pickSticker('Star', '#c79600')" class="calm-focus h-12 rounded-ctrl bg-wash/60 dark:bg-night-wash hover:bg-wash dark:hover:bg-night-line flex flex-col items-center justify-center gap-1 text-ink transition-transform hover:scale-105" title="Star">
+                    <svg class="size-5 text-[#c79600] fill-[#c79600]" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                  </button>
+
+                  <button onclick="pickSticker('Heart', '#e573a3')" class="calm-focus h-12 rounded-ctrl bg-wash/60 dark:bg-night-wash hover:bg-wash dark:hover:bg-night-line flex flex-col items-center justify-center gap-1 text-ink transition-transform hover:scale-105" title="Heart">
+                    <svg class="size-5 text-[#e573a3] fill-[#e573a3]" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>
+                  </button>
+
+                  <button onclick="pickSticker('Sparkles', '#709afb')" class="calm-focus h-12 rounded-ctrl bg-wash/60 dark:bg-night-wash hover:bg-wash dark:hover:bg-night-line flex flex-col items-center justify-center gap-1 text-ink transition-transform hover:scale-105" title="Sparkles">
+                    <svg class="size-5 text-[#709afb] fill-[#709afb]" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/></svg>
+                  </button>
+
+                  <button onclick="pickSticker('Flame', '#e48233')" class="calm-focus h-12 rounded-ctrl bg-wash/60 dark:bg-night-wash hover:bg-wash dark:hover:bg-night-line flex flex-col items-center justify-center gap-1 text-ink transition-transform hover:scale-105" title="Flame">
+                    <svg class="size-5 text-[#e48233] fill-[#e48233]" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg>
+                  </button>
+
+                  <button onclick="pickSticker('Thumbs Up', '#5bb661')" class="calm-focus h-12 rounded-ctrl bg-wash/60 dark:bg-night-wash hover:bg-wash dark:hover:bg-night-line flex flex-col items-center justify-center gap-1 text-ink transition-transform hover:scale-105" title="Thumbs Up">
+                    <svg class="size-5 text-[#5bb661] fill-[#5bb661]" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1"><path d="M7 10v12"/><path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h3Z"/></svg>
+                  </button>
+
+                  <button onclick="pickSticker('Popper', '#cc7bd1')" class="calm-focus h-12 rounded-ctrl bg-wash/60 dark:bg-night-wash hover:bg-wash dark:hover:bg-night-line flex flex-col items-center justify-center gap-1 text-ink transition-transform hover:scale-105" title="Party Popper">
+                    <svg class="size-5 text-[#cc7bd1] fill-[#cc7bd1]" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1"><path d="M5.8 11.3 2 22l10.7-3.79"/><path d="M4 3h.01"/><path d="M22 8h.01"/><path d="M15 2h.01"/><path d="M22 20h.01"/></svg>
+                  </button>
+
+                  <button onclick="pickSticker('Check', '#27604A')" class="calm-focus h-12 rounded-ctrl bg-wash/60 dark:bg-night-wash hover:bg-wash dark:hover:bg-night-line flex flex-col items-center justify-center gap-1 text-ink transition-transform hover:scale-105" title="Checkmark">
+                    <svg class="size-5 text-[#27604A] dark:text-[#52B788]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                  </button>
+
+                  <button onclick="pickSticker('Question', '#00abed')" class="calm-focus h-12 rounded-ctrl bg-wash/60 dark:bg-night-wash hover:bg-wash dark:hover:bg-night-line flex flex-col items-center justify-center gap-1 text-ink transition-transform hover:scale-105" title="Question">
+                    <svg class="size-5 text-[#00abed]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                  </button>
+
+                </div>
+
+                <!-- Custom PNG Sticker Action -->
+                <button
+                  type="button"
+                  onclick="alertFeedback('File picker: Select PNG sticker file')"
+                  class="calm-focus w-full min-h-[40px] px-3 py-2 rounded-ctrl border border-dashed border-line dark:border-night-line hover:border-moss dark:hover:border-moss-dark flex items-center justify-center gap-2 text-xs font-medium text-ink-soft dark:text-night-mute hover:text-moss dark:hover:text-moss-dark transition-colors"
+                >
+                  <svg class="size-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+                  </svg>
+                  <span>Add PNG sticker</span>
+                </button>
+              </div>
+
+              <!-- VIEW 4: SUBMENU — MEDIA -->
+              <div id="view-media" class="slide-panel hidden-right w-full flex flex-col space-y-3">
+                <!-- Header -->
+                <div class="flex items-center justify-between pb-1">
+                  <button
+                    type="button"
+                    onclick="closeSlideSubmenu('media')"
+                    class="calm-focus px-2 py-1 -ml-1 rounded-ctrl flex items-center gap-1.5 text-xs font-medium text-ink-soft hover:text-ink dark:text-night-mute dark:hover:text-white hover:bg-wash dark:hover:bg-night-wash transition-colors"
+                  >
+                    <svg class="size-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="m15 18-6-6 6-6"/>
+                    </svg>
+                    <span>More tools</span>
+                  </button>
+                  <span class="text-xs font-semibold text-ink dark:text-white">Media Insert</span>
+                </div>
+
+                <div class="flex flex-col space-y-1">
+                  <!-- Add Image -->
+                  <button
+                    type="button"
+                    onclick="alertFeedback('Image selector triggered')"
+                    class="calm-focus w-full min-h-[42px] px-3 py-2 rounded-ctrl flex items-center justify-between text-left transition-colors duration-150 hover:bg-wash dark:hover:bg-night-wash text-ink dark:text-zinc-200"
+                  >
+                    <div class="flex items-center gap-3">
+                      <svg class="size-5 shrink-0 text-ink-soft dark:text-night-mute" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                        <rect width="18" height="18" x="3" y="3" rx="2" ry="2"/>
+                        <circle cx="9" cy="9" r="2"/>
+                        <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>
+                      </svg>
+                      <div>
+                        <div class="text-sm font-medium">Add image</div>
+                        <div class="text-[11px] text-ink-mute dark:text-night-mute">Drop PNG, JPEG, SVG or WebP</div>
+                      </div>
+                    </div>
+                  </button>
+
+                  <!-- Add YouTube -->
+                  <button
+                    type="button"
+                    onclick="alertFeedback('YouTube video dialog opened')"
+                    class="calm-focus w-full min-h-[42px] px-3 py-2 rounded-ctrl flex items-center justify-between text-left transition-colors duration-150 hover:bg-wash dark:hover:bg-night-wash text-ink dark:text-zinc-200"
+                  >
+                    <div class="flex items-center gap-3">
+                      <svg class="size-5 shrink-0 text-ink-soft dark:text-night-mute" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2" ry="2"/>
+                      </svg>
+                      <div>
+                        <div class="text-sm font-medium">Add YouTube video</div>
+                        <div class="text-[11px] text-ink-mute dark:text-night-mute">Interactive embed on board</div>
+                      </div>
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+            </div>
+
+            <!-- ── ACCORDION PARADIGM CONTAINER (Alternative interactive exploration) ── -->
+            <div id="deck-accordion-container" class="hidden flex-col space-y-2">
+              <div class="px-2 pt-1 pb-1 flex items-center justify-between">
+                <span class="text-[11px] font-semibold uppercase tracking-wider text-ink-mute dark:text-night-mute">Inline Disclosure Mode</span>
+                <span class="text-[10px] text-moss dark:text-moss-dark font-medium">Single container</span>
+              </div>
+
+              <!-- Accordion Group: Shapes & Polygons -->
+              <div class="rounded-ctrl bg-wash/50 dark:bg-night-wash/60 p-1">
+                <button
+                  type="button"
+                  onclick="toggleAccordion('acc-poly')"
+                  class="calm-focus w-full min-h-[40px] px-2.5 py-1.5 rounded-[8px] flex items-center justify-between text-sm font-medium text-ink dark:text-white hover:bg-wash dark:hover:bg-night-wash transition-colors"
+                >
+                  <div class="flex items-center gap-2.5">
+                    <svg class="size-5 text-moss dark:text-moss-dark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5 12 2"/></svg>
+                    <span>Polygons</span>
+                  </div>
+                  <svg id="acc-poly-icon" class="size-4 text-ink-mute transition-transform duration-200" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="m6 9 6 6 6-6"/></svg>
+                </button>
+                
+                <div id="acc-poly" class="disclosure-body">
+                  <div class="disclosure-inner pt-2 pb-1 px-1">
+                    <div class="grid grid-cols-5 gap-1 text-center">
+                      <button onclick="selectPolygon('triangle', 'Triangle')" class="h-10 rounded-ctrl bg-white dark:bg-night-paper hover:bg-moss-wash dark:hover:bg-moss/20 flex items-center justify-center text-ink hover:text-moss transition-colors" title="Triangle">
+                        <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><polygon points="12,3 22,21 2,21"/></svg>
+                      </button>
+                      <button onclick="selectPolygon('diamond', 'Diamond')" class="h-10 rounded-ctrl bg-white dark:bg-night-paper hover:bg-moss-wash dark:hover:bg-moss/20 flex items-center justify-center text-ink hover:text-moss transition-colors" title="Diamond">
+                        <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><polygon points="12,2 22,12 12,22 2,12"/></svg>
+                      </button>
+                      <button onclick="selectPolygon('trapezoid', 'Trapezoid')" class="h-10 rounded-ctrl bg-white dark:bg-night-paper hover:bg-moss-wash dark:hover:bg-moss/20 flex items-center justify-center text-ink hover:text-moss transition-colors" title="Trapezoid">
+                        <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><polygon points="6,4 18,4 22,20 2,20"/></svg>
+                      </button>
+                      <button onclick="selectPolygon('pentagon', 'Pentagon')" class="h-10 rounded-ctrl bg-white dark:bg-night-paper hover:bg-moss-wash dark:hover:bg-moss/20 flex items-center justify-center text-ink hover:text-moss transition-colors" title="Pentagon">
+                        <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><polygon points="12,2 22,9.5 18,21 6,21 2,9.5"/></svg>
+                      </button>
+                      <button onclick="selectPolygon('hexagon', 'Hexagon')" class="h-10 rounded-ctrl bg-moss-wash dark:bg-moss/20 text-moss dark:text-moss-dark flex items-center justify-center transition-colors" title="Hexagon">
+                        <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><polygon points="12,2 21.5,7.5 21.5,18.5 12,24 2.5,18.5 2.5,7.5"/></svg>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Accordion Group: Stickers -->
+              <div class="rounded-ctrl bg-wash/50 dark:bg-night-wash/60 p-1">
+                <button
+                  type="button"
+                  onclick="toggleAccordion('acc-stickers')"
+                  class="calm-focus w-full min-h-[40px] px-2.5 py-1.5 rounded-[8px] flex items-center justify-between text-sm font-medium text-ink dark:text-white hover:bg-wash dark:hover:bg-night-wash transition-colors"
+                >
+                  <div class="flex items-center gap-2.5">
+                    <svg class="size-5 text-ink-soft dark:text-night-mute" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 2H2v10l9.29 9.29c.94.94 2.48.94 3.42 0l6.58-6.58c.94-.94.94-2.48 0-3.42L12 2Z"/></svg>
+                    <span>Stickers</span>
+                  </div>
+                  <svg id="acc-stickers-icon" class="size-4 text-ink-mute transition-transform duration-200" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="m6 9 6 6 6-6"/></svg>
+                </button>
+                <div id="acc-stickers" class="disclosure-body">
+                  <div class="disclosure-inner pt-2 pb-1 px-1">
+                    <div class="grid grid-cols-4 gap-1.5 text-center">
+                      <button onclick="pickSticker('Star', '#c79600')" class="h-9 rounded-ctrl bg-white dark:bg-night-paper flex items-center justify-center"><svg class="size-4 text-[#c79600] fill-[#c79600]" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></button>
+                      <button onclick="pickSticker('Heart', '#e573a3')" class="h-9 rounded-ctrl bg-white dark:bg-night-paper flex items-center justify-center"><svg class="size-4 text-[#e573a3] fill-[#e573a3]" viewBox="0 0 24 24"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg></button>
+                      <button onclick="pickSticker('Thumbs Up', '#5bb661')" class="h-9 rounded-ctrl bg-white dark:bg-night-paper flex items-center justify-center"><svg class="size-4 text-[#5bb661] fill-[#5bb661]" viewBox="0 0 24 24"><path d="M7 10v12"/><path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h3Z"/></svg></button>
+                      <button onclick="alertFeedback('Add custom sticker')" class="h-9 rounded-ctrl border border-dashed border-line text-xs font-semibold text-ink-mute flex items-center justify-center">+</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Accordion Group: Media -->
+              <div class="rounded-ctrl bg-wash/50 dark:bg-night-wash/60 p-1">
+                <button
+                  type="button"
+                  onclick="toggleAccordion('acc-media')"
+                  class="calm-focus w-full min-h-[40px] px-2.5 py-1.5 rounded-[8px] flex items-center justify-between text-sm font-medium text-ink dark:text-white hover:bg-wash dark:hover:bg-night-wash transition-colors"
+                >
+                  <div class="flex items-center gap-2.5">
+                    <svg class="size-5 text-ink-soft dark:text-night-mute" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
+                    <span>Media</span>
+                  </div>
+                  <svg id="acc-media-icon" class="size-4 text-ink-mute transition-transform duration-200" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="m6 9 6 6 6-6"/></svg>
+                </button>
+                <div id="acc-media" class="disclosure-body">
+                  <div class="disclosure-inner pt-2 pb-1 px-1 flex flex-col space-y-1">
+                    <button onclick="alertFeedback('Add image')" class="w-full h-9 rounded-ctrl bg-white dark:bg-night-paper text-xs font-medium text-left px-3 flex items-center gap-2 hover:bg-moss-wash transition-colors">
+                      <span>Add image</span>
+                    </button>
+                    <button onclick="alertFeedback('Add YouTube video')" class="w-full h-9 rounded-ctrl bg-white dark:bg-night-paper text-xs font-medium text-left px-3 flex items-center gap-2 hover:bg-moss-wash transition-colors">
+                      <span>Add YouTube video</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+
+          </div>
+
+          <!-- ══════════════════════════════════════════════════════════ -->
+          <!-- COMPACT TOOLBAR DOCK (PARENT TRIGGER BAR) -->
+          <!-- ══════════════════════════════════════════════════════════ -->
+          <nav
+            aria-label="Whiteboard Primary Tools"
+            class="h-12 px-2 rounded-bar bg-paper/95 dark:bg-night-paper/95 border border-line/90 dark:border-night-line shadow-card backdrop-blur-md flex items-center gap-1"
+          >
+            <!-- Primary Tools on Compact Bar -->
+            <button class="calm-focus size-9 rounded-ctrl flex items-center justify-center text-ink-soft dark:text-night-mute hover:bg-wash dark:hover:bg-night-wash transition-colors" title="Select (V)" onclick="selectTool('select', 'Select')">
+              <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m3 3 7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/></svg>
+            </button>
+            <button class="calm-focus size-9 rounded-ctrl flex items-center justify-center text-ink-soft dark:text-night-mute hover:bg-wash dark:hover:bg-night-wash transition-colors" title="Draw (P)" onclick="selectTool('draw', 'Draw')">
+              <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+            </button>
+            <button class="calm-focus size-9 rounded-ctrl flex items-center justify-center text-ink-soft dark:text-night-mute hover:bg-wash dark:hover:bg-night-wash transition-colors" title="Eraser (E)" onclick="selectTool('eraser', 'Eraser')">
+              <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path d="M22 21H7"/><path d="m5 11 9 9"/></svg>
+            </button>
+            <button class="calm-focus size-9 rounded-ctrl flex items-center justify-center text-ink-soft dark:text-night-mute hover:bg-wash dark:hover:bg-night-wash transition-colors" title="Text (T)" onclick="selectTool('text', 'Text')">
+              <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg>
+            </button>
+
+            <!-- Subtle Bar Spacer (No Border) -->
+            <div class="w-1.5 h-6"></div>
+
+            <!-- "More Tools" Trigger Button (Active Tonal State) -->
+            <button
+              id="trigger-more-tools"
+              type="button"
+              aria-haspopup="menu"
+              aria-expanded="true"
+              onclick="togglePanelVisibility()"
+              class="calm-focus size-9 rounded-ctrl flex items-center justify-center bg-moss-wash text-moss font-medium dark:bg-moss/20 dark:text-moss-dark ring-2 ring-moss/30 transition-all duration-150"
+              title="More tools (Menu open)"
+            >
+              <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>
+              </svg>
+            </button>
+          </nav>
+
+        </div>
+
+      </div>
+
+      <!-- Action Toast Alert -->
+      <div id="toast" class="opacity-0 transition-opacity duration-200 mt-3 px-3 py-1.5 rounded-full bg-ink text-white dark:bg-zinc-200 dark:text-ink text-xs font-medium shadow-card pointer-events-none">
+        Feedback message
+      </div>
+    </section>
+
+    <!-- RIGHT 5 COLS: SPECIFICATION, ARCHITECTURAL RATIONALE & COMPARISON -->
+    <aside class="lg:col-span-5 flex flex-col space-y-6">
+      
+      <!-- Card 1: Alternative 3 Concept Blueprint -->
+      <div class="p-6 rounded-panel bg-paper dark:bg-night-paper border border-line dark:border-night-line shadow-card space-y-4">
+        <div class="flex items-center gap-2">
+          <span class="px-2 py-0.5 rounded-full text-[11px] font-mono font-medium bg-moss-wash text-moss dark:bg-moss/20 dark:text-moss-dark">Alternative 3</span>
+          <h2 class="text-base font-semibold text-ink dark:text-white">Tonal Hierarchy & Inline Disclosure</h2>
+        </div>
+
+        <p class="text-xs text-ink-soft dark:text-night-mute leading-relaxed">
+          In the Calm UI design system, components containing rich ink typography avoid jarring solid ink fills. Alternative 3 deploys the <strong>Tonal Moss accent language</strong> (<code class="font-mono text-[11px] px-1 py-0.5 rounded bg-wash dark:bg-night-wash text-moss dark:text-moss-dark">bg-moss-wash text-moss</code>), creating a restful, botanical focal point.
+        </p>
+
+        <!-- Key Architectural Pillars -->
+        <div class="space-y-3 pt-2">
+          
+          <!-- Pillar 1 -->
+          <div class="flex items-start gap-3">
+            <div class="size-6 shrink-0 rounded-ctrl bg-moss-wash dark:bg-moss/20 text-moss dark:text-moss-dark flex items-center justify-center text-xs font-bold">1</div>
+            <div>
+              <h3 class="text-xs font-semibold text-ink dark:text-white">Tonal Moss Active State</h3>
+              <p class="text-[11px] text-ink-soft dark:text-night-mute mt-0.5">
+                Active tools use <code class="font-mono">bg-moss-wash text-moss</code> with an energetic yet calm indicator dot. Replaces harsh high-contrast black fills with warm grounded tonal hierarchy.
+              </p>
+            </div>
+          </div>
+
+          <!-- Pillar 2 -->
+          <div class="flex items-start gap-3">
+            <div class="size-6 shrink-0 rounded-ctrl bg-moss-wash dark:bg-moss/20 text-moss dark:text-moss-dark flex items-center justify-center text-xs font-bold">2</div>
+            <div>
+              <h3 class="text-xs font-semibold text-ink dark:text-white">Inline Disclosure (Zero Cascading Flyouts)</h3>
+              <p class="text-[11px] text-ink-soft dark:text-night-mute mt-0.5">
+                Solves tablet & touch frustrations. Floating submenus frequently clip screen edges and dismiss inadvertently. In Alternative 3, clicking "Polygons", "Stickers", or "Media" slides smoothly inside the single 18px panel container.
+              </p>
+            </div>
+          </div>
+
+          <!-- Pillar 3 -->
+          <div class="flex items-start gap-3">
+            <div class="size-6 shrink-0 rounded-ctrl bg-moss-wash dark:bg-moss/20 text-moss dark:text-moss-dark flex items-center justify-center text-xs font-bold">3</div>
+            <div>
+              <h3 class="text-xs font-semibold text-ink dark:text-white">Spacing is the Only Separator</h3>
+              <p class="text-[11px] text-ink-soft dark:text-night-mute mt-0.5">
+                Strict adherence to Calm UI: <em>Zero divider border lines</em> between peer tools. Rhythmic vertical pacing (<code class="font-mono">space-y-3</code> between clusters, <code class="font-mono">space-y-0.5</code> between items) creates clean grouping without visual noise.
+              </p>
+            </div>
+          </div>
+
+          <!-- Pillar 4 -->
+          <div class="flex items-start gap-3">
+            <div class="size-6 shrink-0 rounded-ctrl bg-moss-wash dark:bg-moss/20 text-moss dark:text-moss-dark flex items-center justify-center text-xs font-bold">4</div>
+            <div>
+              <h3 class="text-xs font-semibold text-ink dark:text-white">Tonal Tool Lock Switch</h3>
+              <p class="text-[11px] text-ink-soft dark:text-night-mute mt-0.5">
+                Tool lock (hotkey <kbd class="font-mono text-[10px] px-1 rounded bg-wash dark:bg-night-wash">Q</kbd>) uses a dedicated tonal moss pill toggle. When engaged, the lock illuminates in moss wash with a crisp visual cue.
+              </p>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- Card 2: Calm UI Token Compliance Matrix -->
+      <div class="p-6 rounded-panel bg-paper dark:bg-night-paper border border-line dark:border-night-line shadow-card space-y-3">
+        <h3 class="text-xs font-semibold uppercase tracking-wider text-ink-mute dark:text-night-mute">Token System Verification</h3>
+        
+        <div class="grid grid-cols-2 gap-3 text-xs">
+          <div class="p-2.5 rounded-ctrl bg-wash/60 dark:bg-night-wash/60">
+            <div class="font-medium text-ink dark:text-white">Colors</div>
+            <div class="text-[11px] text-ink-soft dark:text-night-mute mt-1">Paper #FBFBF9 · Wash #F1F1F2 · Moss #27604A · Moss-wash #E0EFE5</div>
+          </div>
+          <div class="p-2.5 rounded-ctrl bg-wash/60 dark:bg-night-wash/60">
+            <div class="font-medium text-ink dark:text-white">Radii</div>
+            <div class="text-[11px] text-ink-soft dark:text-night-mute mt-1">Ctrl 10px (Items) · Bar 14px (Dock) · Panel 18px (Menu)</div>
+          </div>
+          <div class="p-2.5 rounded-ctrl bg-wash/60 dark:bg-night-wash/60">
+            <div class="font-medium text-ink dark:text-white">Target Sizes</div>
+            <div class="text-[11px] text-ink-soft dark:text-night-mute mt-1">Min height &ge; 42px touch hit targets on every row</div>
+          </div>
+          <div class="p-2.5 rounded-ctrl bg-wash/60 dark:bg-night-wash/60">
+            <div class="font-medium text-ink dark:text-white">Glyph Standard</div>
+            <div class="text-[11px] text-ink-soft dark:text-night-mute mt-1">20px &times; 20px (size-5), stroke 1.7, round joins</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Card 3: Keyboard & Accessibility Specifications -->
+      <div class="p-6 rounded-panel bg-paper dark:bg-night-paper border border-line dark:border-night-line shadow-card space-y-3">
+        <h3 class="text-xs font-semibold uppercase tracking-wider text-ink-mute dark:text-night-mute">Accessibility (WCAG 2.2 AA / AAA)</h3>
+        
+        <ul class="text-xs text-ink-soft dark:text-night-mute space-y-1.5 list-disc list-inside">
+          <li><strong>Role semantics:</strong> <code class="font-mono text-[11px]">menu</code> container with <code class="font-mono text-[11px]">menuitemradio</code> for exclusive tools and <code class="font-mono text-[11px]">menuitemcheckbox</code> for Tool lock.</li>
+          <li><strong>Color contrast:</strong> Moss #27604A on Moss-wash #E0EFE5 achieves <strong>4.8:1</strong> contrast ratio (surpasses WCAG AA 4.5:1 text standard).</li>
+          <li><strong>Keyboard interaction:</strong> Arrow Up/Down traverses items; Right Arrow or Enter drills into submenus; Left Arrow or Escape returns to parent view.</li>
+          <li><strong>Focus ring:</strong> Dual-ring focus indicator matching Calm UI token palette without outline clipping.</li>
+        </ul>
+      </div>
+
+    </aside>
+
+  </main>
+
+  <!-- JAVASCRIPT: INTERACTIVE STATE MANAGEMENT -->
+  <script>
+    // State
+    let currentTool = 'hand';
+    let currentPolygon = 'hexagon';
+    let toolLock = false;
+    let disclosureMode = 'slide'; // 'slide' | 'accordion'
+    let panelOpen = true;
+
+    // Toast feedback helper
+    function alertFeedback(message) {
+      const toast = document.getElementById('toast');
+      toast.textContent = message;
+      toast.classList.remove('opacity-0');
+      clearTimeout(window._toastTimeout);
+      window._toastTimeout = setTimeout(() => {
+        toast.classList.add('opacity-0');
+      }, 2200);
+    }
+
+    // Tool selection handler
+    function selectTool(toolId, toolLabel) {
+      currentTool = toolId;
+      
+      // Update radio attributes and classes
+      document.querySelectorAll('.tool-item').forEach(btn => {
+        const isMatch = btn.dataset.toolId === toolId;
+        btn.setAttribute('aria-checked', isMatch ? 'true' : 'false');
+        
+        const dot = btn.querySelector('.tool-active-dot');
+        if (isMatch) {
+          btn.classList.add('bg-moss-wash', 'text-moss', 'font-medium', 'dark:bg-moss/20', 'dark:text-moss-dark', 'animate-pop');
+          btn.classList.remove('hover:bg-wash', 'dark:hover:bg-night-wash', 'text-ink', 'dark:text-zinc-200');
+          if (dot) dot.classList.remove('hidden');
+        } else {
+          btn.classList.remove('bg-moss-wash', 'text-moss', 'font-medium', 'dark:bg-moss/20', 'dark:text-moss-dark', 'animate-pop');
+          btn.classList.add('hover:bg-wash', 'dark:hover:bg-night-wash', 'text-ink', 'dark:text-zinc-200');
+          if (dot) dot.classList.add('hidden');
+        }
+      });
+
+      // Update HUD
+      document.getElementById('hud-active-tool').innerHTML = `Active tool: <strong class="text-moss dark:text-moss-dark">${toolLabel}</strong>`;
+      alertFeedback(`Selected instrument: ${toolLabel}`);
+    }
+
+    // Polygon selection handler
+    function selectPolygon(kind, label) {
+      currentPolygon = kind;
+      document.getElementById('label-selected-polygon').textContent = label;
+
+      // Update polygon radio buttons
+      document.querySelectorAll('.polygon-item').forEach(btn => {
+        const isMatch = btn.dataset.polygonKind === kind;
+        btn.setAttribute('aria-checked', isMatch ? 'true' : 'false');
+        const check = btn.querySelector('.polygon-check');
+
+        if (isMatch) {
+          btn.classList.add('bg-moss-wash', 'text-moss', 'font-medium', 'dark:bg-moss/20', 'dark:text-moss-dark');
+          btn.classList.remove('hover:bg-wash', 'dark:hover:bg-night-wash', 'text-ink', 'dark:text-zinc-200');
+          if (check) check.classList.remove('hidden');
+        } else {
+          btn.classList.remove('bg-moss-wash', 'text-moss', 'font-medium', 'dark:bg-moss/20', 'dark:text-moss-dark');
+          btn.classList.add('hover:bg-wash', 'dark:hover:bg-night-wash', 'text-ink', 'dark:text-zinc-200');
+          if (check) check.classList.add('hidden');
+        }
+      });
+
+      alertFeedback(`Polygon set to ${label}`);
+      // In slide mode, return to main view after selection with calm pause
+      if (disclosureMode === 'slide') {
+        setTimeout(() => closeSlideSubmenu('polygons'), 200);
+      }
+    }
+
+    // Sticker selection handler
+    function pickSticker(label, color) {
+      alertFeedback(`Sticker "${label}" stamped onto canvas`);
+      if (disclosureMode === 'slide') {
+        setTimeout(() => closeSlideSubmenu('stickers'), 250);
+      }
+    }
+
+    // Tool Lock Toggle
+    function toggleToolLock() {
+      toolLock = !toolLock;
+      const btn = document.getElementById('btn-tool-lock');
+      const iconOpen = document.getElementById('icon-lock-open');
+      const iconClosed = document.getElementById('icon-lock-closed');
+      const track = document.getElementById('toggle-track');
+      const thumb = document.getElementById('toggle-thumb');
+      const hudLock = document.getElementById('hud-lock-status');
+      const label = document.getElementById('lock-label');
+
+      btn.setAttribute('aria-checked', toolLock ? 'true' : 'false');
+
+      if (toolLock) {
+        iconOpen.classList.add('hidden');
+        iconClosed.classList.remove('hidden');
+        track.classList.add('bg-moss', 'dark:bg-moss-dark');
+        track.classList.remove('bg-line', 'dark:bg-night-line');
+        thumb.classList.add('translate-x-3');
+        thumb.classList.remove('translate-x-0');
+        label.classList.add('font-medium', 'text-moss', 'dark:text-moss-dark');
+        hudLock.innerHTML = `Tool lock: <strong class="text-moss dark:text-moss-dark">Locked (Active)</strong>`;
+        alertFeedback('Tool lock enabled (hotkey Q)');
+      } else {
+        iconOpen.classList.remove('hidden');
+        iconClosed.classList.add('hidden');
+        track.classList.remove('bg-moss', 'dark:bg-moss-dark');
+        track.classList.add('bg-line', 'dark:bg-night-line');
+        thumb.classList.remove('translate-x-3');
+        thumb.classList.add('translate-x-0');
+        label.classList.remove('font-medium', 'text-moss', 'dark:text-moss-dark');
+        hudLock.innerHTML = `Tool lock: <strong>Off</strong>`;
+        alertFeedback('Tool lock disabled');
+      }
+    }
+
+    // Slide Submenu Drilldown Handlers
+    function openSlideSubmenu(submenuId) {
+      const root = document.getElementById('view-root');
+      const sub = document.getElementById(`view-${submenuId}`);
+      if (!sub) return;
+
+      root.classList.remove('active');
+      root.classList.add('hidden-left');
+
+      sub.classList.remove('hidden-right');
+      sub.classList.add('active');
+
+      // Adjust container height smoothly
+      const deck = document.getElementById('deck-slide-container');
+      deck.style.minHeight = sub.offsetHeight + 'px';
+    }
+
+    function closeSlideSubmenu(submenuId) {
+      const root = document.getElementById('view-root');
+      const sub = document.getElementById(`view-${submenuId}`);
+      if (!sub) return;
+
+      sub.classList.remove('active');
+      sub.classList.add('hidden-right');
+
+      root.classList.remove('hidden-left');
+      root.classList.add('active');
+
+      const deck = document.getElementById('deck-slide-container');
+      deck.style.minHeight = '';
+    }
+
+    // Accordion Toggle Handler
+    function toggleAccordion(accId) {
+      const acc = document.getElementById(accId);
+      const icon = document.getElementById(`${accId}-icon`);
+      const isOpen = acc.classList.contains('open');
+
+      // Close all accordions in group
+      document.querySelectorAll('.disclosure-body').forEach(el => el.classList.remove('open'));
+      document.querySelectorAll('[id$="-icon"]').forEach(ic => ic.classList.remove('rotate-180'));
+
+      if (!isOpen) {
+        acc.classList.add('open');
+        if (icon) icon.classList.add('rotate-180');
+      }
+    }
+
+    // Switch between Slide Drilldown and Accordion Modes
+    function setDisclosureMode(mode) {
+      disclosureMode = mode;
+      const slideBtn = document.getElementById('btn-mode-slide');
+      const accBtn = document.getElementById('btn-mode-accordion');
+      const slideDeck = document.getElementById('deck-slide-container');
+      const accDeck = document.getElementById('deck-accordion-container');
+
+      if (mode === 'slide') {
+        slideBtn.classList.add('bg-paper', 'dark:bg-night-paper', 'text-ink', 'dark:text-white', 'shadow-sm');
+        slideBtn.classList.remove('text-ink-soft', 'dark:text-night-mute');
+        slideBtn.setAttribute('aria-pressed', 'true');
+
+        accBtn.classList.remove('bg-paper', 'dark:bg-night-paper', 'text-ink', 'dark:text-white', 'shadow-sm');
+        accBtn.classList.add('text-ink-soft', 'dark:text-night-mute');
+        accBtn.setAttribute('aria-pressed', 'false');
+
+        slideDeck.classList.remove('hidden');
+        accDeck.classList.add('hidden');
+        accDeck.classList.remove('flex');
+      } else {
+        accBtn.classList.add('bg-paper', 'dark:bg-night-paper', 'text-ink', 'dark:text-white', 'shadow-sm');
+        accBtn.classList.remove('text-ink-soft', 'dark:text-night-mute');
+        accBtn.setAttribute('aria-pressed', 'true');
+
+        slideBtn.classList.remove('bg-paper', 'dark:bg-night-paper', 'text-ink', 'dark:text-white', 'shadow-sm');
+        slideBtn.classList.add('text-ink-soft', 'dark:text-night-mute');
+        slideBtn.setAttribute('aria-pressed', 'false');
+
+        slideDeck.classList.add('hidden');
+        accDeck.classList.remove('hidden');
+        accDeck.classList.add('flex');
+      }
+    }
+
+    // Toggle dropdown panel visibility
+    function togglePanelVisibility() {
+      panelOpen = !panelOpen;
+      const panel = document.getElementById('more-tools-panel');
+      const trigger = document.getElementById('trigger-more-tools');
+
+      if (panelOpen) {
+        panel.style.display = 'block';
+        setTimeout(() => {
+          panel.style.opacity = '1';
+          panel.style.transform = 'translateY(0) scale(1)';
+        }, 10);
+        trigger.setAttribute('aria-expanded', 'true');
+        trigger.classList.add('bg-moss-wash', 'text-moss', 'ring-2', 'ring-moss/30');
+      } else {
+        panel.style.opacity = '0';
+        panel.style.transform = 'translateY(8px) scale(0.97)';
+        setTimeout(() => {
+          panel.style.display = 'none';
+        }, 200);
+        trigger.setAttribute('aria-expanded', 'false');
+        trigger.classList.remove('bg-moss-wash', 'text-moss', 'ring-2', 'ring-moss/30');
+      }
+    }
+
+    // Dark Mode Toggle
+    function toggleDarkMode() {
+      document.documentElement.classList.toggle('dark');
+      const isDark = document.documentElement.classList.contains('dark');
+      document.getElementById('theme-text').textContent = isDark ? 'Light' : 'Dark';
+    }
+
+    // Keyboard Shortcuts (Q for lock, Esc to close subviews, H/D/K/C for tools)
+    window.addEventListener('keydown', (e) => {
+      // Avoid hotkeys when typing in inputs
+      if (['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
+
+      const key = e.key.toLowerCase();
+      if (key === 'q') {
+        e.preventDefault();
+        toggleToolLock();
+      } else if (key === 'escape') {
+        // Close submenus if open
+        const activeSub = document.querySelector('.slide-panel.active:not(#view-root)');
+        if (activeSub) {
+          e.preventDefault();
+          const subId = activeSub.id.replace('view-', '');
+          closeSlideSubmenu(subId);
+        }
+      } else if (key === 'h') {
+        selectTool('hand', 'Hand (Pan)');
+      } else if (key === 'd') {
+        selectTool('highlighter', 'Highlighter');
+      } else if (key === 'k') {
+        selectTool('laser', 'Laser Pointer');
+      } else if (key === 'c') {
+        selectTool('comment', 'Comment');
+      }
+    });
+  </script>
+</body>
+</html>

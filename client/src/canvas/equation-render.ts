@@ -11,6 +11,7 @@
 import { useCallback, useSyncExternalStore } from 'react';
 import type { EquationRender } from './equation-convert';
 import { ensureTypesetEngine, typesetOnce } from './equation-typeset-client';
+import { persistRender, readPersistedRender } from './equation-persist';
 
 export type { EquationRender };
 
@@ -95,6 +96,8 @@ const listeners = new Map<string, Set<() => void>>();
 function notify(key: string): void {
   const subscribers = listeners.get(key);
   if (!subscribers) return;
+  // Snapshot: a listener may unsubscribe while we iterate.
+  // oxlint-disable-next-line unicorn/no-useless-spread
   for (const listener of [...subscribers]) listener();
 }
 
@@ -196,7 +199,15 @@ export function typesetEquation(
   const existing = inFlight.get(key);
   if (existing) return existing;
 
-  const request = typesetOnce(latex, inline)
+  const request = readPersistedRender(key)
+    .then(
+      (stored) =>
+        stored ??
+        typesetOnce(latex, inline).then((render) => {
+          persistRender(key, render);
+          return render;
+        }),
+    )
     .then((render) => cacheRender(key, render))
     .finally(() => {
       inFlight.delete(key);

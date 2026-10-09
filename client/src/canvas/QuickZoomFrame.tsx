@@ -15,7 +15,7 @@ export function QuickZoomFrame({
   return (
     <div
       aria-hidden
-      className="pointer-events-none absolute z-[var(--z-canvas-hud)] rounded-[2px] border-2 border-[var(--action-solid,#3b82f6)] bg-[color-mix(in_srgb,var(--action-solid,#3b82f6)_10%,transparent)]"
+      className="pointer-events-none absolute z-[var(--z-canvas-hud)] rounded-[2px] border-2 border-[var(--link,#2563eb)] bg-[color-mix(in_srgb,var(--link,#2563eb)_10%,transparent)]"
       style={{
         left: center.x - width / 2,
         top: center.y - height / 2,

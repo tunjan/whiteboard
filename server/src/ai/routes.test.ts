@@ -1,6 +1,16 @@
-import { describe, expect, it } from 'vitest';
-import { MAX_INK_IMAGE_CHARS, MAX_LATEX_PROMPT_CHARS } from '@whiteboard/shared';
+import { describe, expect, it, vi } from 'vitest';
+import {
+  MAX_AUDIO_CHARS,
+  MAX_INK_IMAGE_CHARS,
+  MAX_LATEX_PROMPT_CHARS,
+} from '@whiteboard/shared';
 import { aiRoutes } from './routes';
+
+// Board access has its own suite (boards/routes.test.ts); here every request
+// is one a board editor sent.
+vi.mock('../boards/access', () => ({
+  requireBoardEdit: async (_c: unknown, next: () => Promise<void>) => next(),
+}));
 
 /**
  * Request validation only — every case here is rejected before a model is
@@ -82,5 +92,19 @@ describe('POST /latex/prompt', () => {
   it('rejects a description past the length cap', async () => {
     const prompt = 'x'.repeat(MAX_LATEX_PROMPT_CHARS + 1);
     expect((await post('/latex/prompt', { prompt })).status).toBe(400);
+  });
+});
+
+describe('POST /transcribe', () => {
+  it.each([{}, { audio: 'AAAA' }, { audio: 'AAAA', format: 'wav' }, { audio: '', format: 'webm' }])(
+    'rejects %j',
+    async (body) => {
+      expect((await post('/transcribe', body)).status).toBe(400);
+    },
+  );
+
+  it('rejects an oversized clip', async () => {
+    const audio = 'A'.repeat(MAX_AUDIO_CHARS + 1);
+    expect((await post('/transcribe', { audio, format: 'webm' })).status).toBe(413);
   });
 });

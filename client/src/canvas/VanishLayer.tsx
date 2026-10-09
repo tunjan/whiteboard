@@ -1,5 +1,5 @@
-import { type Camera } from './camera';
-import { useCameraTransform } from './use-camera-interaction';
+import { cameraToTransform } from './camera';
+import { useCameraFollow } from './use-camera-interaction';
 import { ShapeView } from './ShapeView';
 import { useVanishStore } from './use-vanish-store';
 
@@ -16,21 +16,24 @@ import { useVanishStore } from './use-vanish-store';
  * common case is deleting what you just selected, and that shape is the one the
  * eye is following.
  */
-export function VanishLayer({ camera }: { camera: Camera }) {
-  const transform = useCameraTransform(camera);
+export function VanishLayer() {
+  const [camera, follow] = useCameraFollow<SVGGElement>();
   const ghosts = useVanishStore((s) => s.ghosts);
   if (ghosts.length === 0) return null;
   return (
     <svg className="pointer-events-none absolute inset-0 z-[var(--z-canvas-shapes)] h-full w-full">
-      <g transform={transform}>
-        {ghosts.map((ghost) => (
-          // The animated opacity rides on this wrapper; `ShapeView` composites
-          // the shape's own resolved opacity inside it, so a half-transparent
-          // or eraser-dimmed shape fades from where it actually was.
-          <g key={ghost.key} className="shape-vanish">
-            <ShapeView shape={ghost.shape} opacity={ghost.opacity} />
-          </g>
-        ))}
+      <g ref={follow}>
+        <g transform={cameraToTransform(camera)}>
+          {ghosts.map((ghost) => (
+            // The animated opacity rides on this wrapper; `ShapeView`
+            // composites the shape's own resolved opacity inside it, so a
+            // half-transparent or eraser-dimmed shape fades from where it
+            // actually was.
+            <g key={ghost.key} className="shape-vanish">
+              <ShapeView shape={ghost.shape} opacity={ghost.opacity} />
+            </g>
+          ))}
+        </g>
       </g>
     </svg>
   );

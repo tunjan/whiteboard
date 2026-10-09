@@ -7,12 +7,12 @@ import type {
   FrameShape,
   GroupShape,
   RectangleShape,
+  Shape,
   TextShape,
 } from '@whiteboard/shared';
 import './shapes/register';
 import {
-  addComment,
-  addCommentReply,
+  compareIndex,
   createPage,
   deletePage,
   documentByteSize,
@@ -27,6 +27,8 @@ import {
   undo,
   useDocumentStore,
 } from './use-document-store';
+import { addComment, addCommentReply } from './board-records';
+import { shapeStore } from './engine/shape-store';
 import * as Y from 'yjs';
 import { useBoardLoadingStore } from '@/board/use-board-loading-store';
 import { residentPageDoc } from './page-docs';
@@ -156,7 +158,7 @@ const drawnPoints = (id: string): DrawPoint[] => {
   return shape?.type === 'draw' ? shape.props.points : [];
 };
 
-const ids = () => useDocumentStore.getState().shapes.map((s) => s.id);
+const ids = () => shapeStore.sorted.get().map((s) => s.id);
 
 const box = (minX: number, minY: number, maxX: number, maxY: number) => ({
   minX,
@@ -250,7 +252,7 @@ describe('page transitions', () => {
     useCameraStore.getState().setCamera({ x: -30, y: 5, z: 0.5 });
 
     setCurrentPage(firstPageId);
-    expect(useDocumentStore.getState().shapes.map((shape) => shape.id)).toEqual(
+    expect(shapeStore.sorted.get().map((shape) => shape.id)).toEqual(
       ['group-a', 'rect-a', 'text-a'],
     );
     expect(useSelectionStore.getState().selectedIds).toEqual([
@@ -311,32 +313,117 @@ describe('page transitions', () => {
     expect(spatialIndex.size).toBe(0);
   });
 
+  /** Apply `edit` to `pageId` the way a peer's update would arrive. */
+  const peerEditsPage = (
+    pageId: string,
+    edit: (shapes: Y.Map<unknown>) => void,
+  ) => {
+    const page = residentPageDoc(pageId)!;
+    const peer = new Y.Doc();
+    Y.applyUpdate(peer, Y.encodeStateAsUpdate(page.doc));
+    peer.transact(() => edit(peer.getMap('shapes')));
+    Y.applyUpdate(
+      page.doc,
+      Y.encodeStateAsUpdate(peer, Y.encodeStateVector(page.doc)),
+      {},
+    );
+    peer.destroy();
+  };
+
+  it('patches in what a peer changed on a page while it was parked', () => {
+    const firstPageId = useDocumentStore.getState().currentPageId;
+    for (let i = 0; i < 8; i++)
+      editor.createShape({ ...rect(`rect-${i}`, `a${i}`), x: i * 100 });
+    const untouched = editor.getShape('rect-7');
+    const secondPageId = createPage('Page 2');
+
+    peerEditsPage(firstPageId, (shapes) => {
+      (shapes.get('rect-0') as Y.Map<unknown>).set('x', 5000);
+      shapes.delete('rect-1');
+    });
+
+    setCurrentPage(firstPageId);
+    expect(ids()).toEqual(
+      ['rect-0', 'rect-2', 'rect-3', 'rect-4', 'rect-5', 'rect-6', 'rect-7'],
+    );
+    expect(editor.getShape('rect-0')?.x).toBe(5000);
+    expect(spatialIndex.search(box(4995, -5, 5005, 5))).toEqual(['rect-0']);
+    expect(spatialIndex.search(box(95, -5, 105, 5))).toEqual([]);
+    // Patched, not re-derived: a shape nobody touched is the same object.
+    expect(editor.getShape('rect-7')).toBe(untouched);
+    // The user never saw rect-1 go, so it does not fade out in front of them.
+    expect(useVanishStore.getState().ghosts).toEqual([]);
+
+    setCurrentPage(secondPageId);
+    expect(spatialIndex.size).toBe(0);
+  });
+
+  it('re-derives a parked page a peer changed most of', () => {
+    const firstPageId = useDocumentStore.getState().currentPageId;
+    editor.createShape(rect('rect-a', 'a1'));
+    editor.createShape(rect('rect-b', 'a2'));
+    const untouched = editor.getShape('rect-b');
+    createPage('Page 2');
+
+    peerEditsPage(firstPageId, (shapes) => {
+      (shapes.get('rect-a') as Y.Map<unknown>).set('x', 300);
+    });
+
+    setCurrentPage(firstPageId);
+    expect(editor.getShape('rect-a')?.x).toBe(300);
+    expect(spatialIndex.search(box(295, -5, 305, 5))).toEqual(['rect-a']);
+    expect(editor.getShape('rect-b')).not.toBe(untouched);
+    expect(editor.getShape('rect-b')).toEqual(untouched);
+  });
+
+  it('publishes shape edits without waking the zustand store', () => {
+    editor.createShape(rect('rect-a', 'a1'));
+    const listener = vi.fn();
+    const stop = useDocumentStore.subscribe(listener);
+    editor.updateShape('rect-a', { x: 5 });
+    stop();
+    expect(shapeStore.peek('rect-a')?.x).toBe(5);
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it('keeps an uploaded image blob id when a stale gesture writes it back empty', () => {
+    const pending = { blobId: '', w: 10, h: 10, naturalWidth: 10, naturalHeight: 10 };
+    editor.createShape({
+      id: 'img',
+      type: 'image',
+      x: 0,
+      y: 0,
+      rotation: 0,
+      index: 'a1',
+      props: pending,
+    } as Shape);
+    editor.updateShape('img', { props: { blobId: 'blob-1', thumbBlobId: 'thumb-1' } });
+    // A resize that began before the upload landed sends its starting props.
+    editor.updateShape('img', { props: { ...pending, w: 20 } });
+    const props = editor.getShape('img')!.props as Record<string, unknown>;
+    expect(props).toMatchObject({ blobId: 'blob-1', thumbBlobId: 'thumb-1', w: 20 });
+  });
+
   it('publishes the shape lookup of the page that is open', () => {
     const firstPageId = useDocumentStore.getState().currentPageId;
     editor.createShape(rect('rect-a', 'a1'));
-    const firstLookup = useDocumentStore.getState().shapesById;
-    expect(firstLookup.get('rect-a')).toBeDefined();
+    expect(shapeStore.peek('rect-a')).toBeDefined();
 
     const secondPageId = createPage('Page 2');
     // Consumers read shapes through this map; left pointing at the page just
     // left, every lookup would answer for the wrong page.
     expect(
-      useDocumentStore.getState().shapesById.get('rect-a'),
+      shapeStore.peek('rect-a'),
     ).toBeUndefined();
     editor.createShape(rect('rect-b', 'a1'));
-    expect(useDocumentStore.getState().shapesById.get('rect-b')).toBeDefined();
+    expect(shapeStore.peek('rect-b')).toBeDefined();
 
     setCurrentPage(firstPageId);
-    expect(useDocumentStore.getState().shapesById.get('rect-a')).toBeDefined();
+    expect(shapeStore.peek('rect-a')).toBeDefined();
     expect(
-      useDocumentStore.getState().shapesById.get('rect-b'),
+      shapeStore.peek('rect-b'),
     ).toBeUndefined();
 
-    // Stable within a page, so a plain reference check keeps consumers from
-    // re-rendering on every mutation.
-    const before = useDocumentStore.getState().shapesById;
-    editor.updateShape('rect-a', { x: 5 });
-    expect(useDocumentStore.getState().shapesById).toBe(before);
     expect(secondPageId).not.toBe(firstPageId);
   });
 
@@ -437,7 +524,7 @@ describe('duplicatePage', () => {
       'Page 1 Copy',
     );
 
-    const copied = useDocumentStore.getState().shapes;
+    const copied = shapeStore.sorted.get();
     expect(copied).toHaveLength(2);
     // Fresh ids: the copy is an independent page, not an alias of the source.
     expect(copied.map((shape) => shape.id)).not.toContain('rect-a');
@@ -447,7 +534,7 @@ describe('duplicatePage', () => {
     ]);
 
     setCurrentPage(firstPageId);
-    expect(useDocumentStore.getState().shapes.map((shape) => shape.id)).toEqual(
+    expect(shapeStore.sorted.get().map((shape) => shape.id)).toEqual(
       ['rect-a', 'rect-b'],
     );
   });
@@ -457,7 +544,7 @@ describe('duplicatePage', () => {
     editor.createShape(rect('rect-a', 'a1'));
 
     await duplicatePage(firstPageId);
-    const copyShapeId = useDocumentStore.getState().shapes[0]!.id;
+    const copyShapeId = shapeStore.sorted.get()[0]!.id;
     editor.updateShape(copyShapeId, { x: 999 });
 
     setCurrentPage(firstPageId);
@@ -476,7 +563,7 @@ describe('duplicatePage', () => {
 
     await duplicatePage(firstPageId);
 
-    const copied = useDocumentStore.getState().shapes;
+    const copied = shapeStore.sorted.get();
     const copiedGroup = copied.find((shape) => shape.type === 'group')!;
     const copiedRect = copied.find((shape) => shape.type === 'rectangle')!;
     const copiedArrow = copied.find((shape) => shape.type === 'arrow')!;
@@ -535,7 +622,7 @@ describe('moveShapesToPage', () => {
 
     // The whole group travels: its children come with it, and none is stranded.
     moveShapesToPage(['group-a'], secondPageId);
-    expect(useDocumentStore.getState().shapes).toEqual([]);
+    expect(shapeStore.sorted.get()).toEqual([]);
 
     setCurrentPage(secondPageId);
     expect(editor.getShape('rect-a')?.parentId).toBe('group-a');
@@ -628,13 +715,13 @@ describe('document store snapshot', () => {
     editor.createShape(rect('a', 'a1'));
     editor.createShape(rect('b', 'a2'));
     editor.createShape(rect('c', 'a3'));
-    const before = useDocumentStore.getState().shapes;
+    const before = shapeStore.sorted.get();
     expect(before.map((s) => s.id)).toEqual(['a', 'b', 'c']);
 
     // Moving a shape changes x/y but not its z-`index`: the incremental branch
     // must swap only that entry and keep the rest (order + object identity).
     editor.updateShape('b', { x: 999 });
-    const after = useDocumentStore.getState().shapes;
+    const after = shapeStore.sorted.get();
 
     expect(after).not.toBe(before); // fresh array so subscribers re-render
     expect(after.map((s) => s.id)).toEqual(['a', 'b', 'c']);
@@ -654,6 +741,45 @@ describe('document store snapshot', () => {
 
     editor.updateShape('a', { index: 'a3' }); // move a after b
     expect(ids()).toEqual(['b', 'a']);
+  });
+
+  it('keeps the z-order a full sort would give across mixed batches', () => {
+    // Deterministic LCG: a failure replays the same sequence.
+    let seed = 7;
+    const rand = (n: number) => {
+      seed = (seed * 1664525 + 1013904223) >>> 0;
+      return seed % n;
+    };
+    // Few distinct indexes, so equal indexes fall back to the id tiebreak.
+    const index = () => `a${rand(12).toString(36)}`;
+    const live = new Set<string>();
+    let next = 0;
+    for (let step = 0; step < 300; step++) {
+      // Most batches are small and splice; some exceed the splice budget.
+      const size = rand(10) === 0 ? 40 : 1 + rand(4);
+      editor.transact(() => {
+        for (let k = 0; k < size; k++) {
+          const pool = [...live];
+          const op = pool.length === 0 ? 0 : rand(4);
+          const id = pool[rand(pool.length)]!;
+          if (op === 0) {
+            const created = `s${next++}`;
+            editor.createShape(rect(created, index()));
+            live.add(created);
+          } else if (op === 1) {
+            editor.deleteShapes([id]);
+            live.delete(id);
+          } else if (op === 2) editor.updateShape(id, { index: index() });
+          else editor.updateShape(id, { x: rand(100) });
+        }
+      });
+      const published = shapeStore.sorted.get();
+      expect(published.map((s) => s.id)).toEqual(
+        editor.getShapes().slice().sort(compareIndex).map((s) => s.id),
+      );
+      expect(published.map((s) => s.id).sort()).toEqual([...live].sort());
+      for (const s of published) expect(s).toBe(editor.getShape(s.id));
+    }
   });
 
   it('reflects creations and deletions in the snapshot', () => {
@@ -885,6 +1011,43 @@ describe('ink points storage', () => {
     expect(shape.props.color).toBe('#ff0000');
   });
 
+  it('sends only the new points on a live write, not the unchanged props', () => {
+    // Bytes emitted to peers for a stroke written the way the draw tool does:
+    // the growing point array plus `isComplete: false` on every write.
+    const wireBytes = (id: string, extra: Record<string, unknown>): number => {
+      const page = residentPageDoc(useDocumentStore.getState().currentPageId)!;
+      editor.createShape(draw(id, []));
+      let bytes = 0;
+      const count = (update: Uint8Array) => (bytes += update.byteLength);
+      page.doc.on('updateV2', count);
+      const points: DrawPoint[] = [];
+      for (const p of stroke(300)) {
+        points.push(p);
+        if (points.length % 5 === 0) {
+          editor.updateShape(id, { props: { points: [...points], ...extra } });
+        }
+      }
+      page.doc.off('updateV2', count);
+      return bytes;
+    };
+
+    const pointsOnly = wireBytes('points-only', {});
+    const liveWrites = wireBytes('live', { isComplete: false });
+    // Rewriting props every write measured ~5x the points-only cost.
+    expect(liveWrites / pointsOnly).toBeLessThan(1.1);
+  });
+
+  it('emits nothing for a patch that changes nothing', () => {
+    const page = residentPageDoc(useDocumentStore.getState().currentPageId)!;
+    editor.createShape(rect('r', 'a1'));
+    let updates = 0;
+    const count = () => (updates += 1);
+    page.doc.on('updateV2', count);
+    editor.updateShape('r', { x: 0, y: 0, props: { w: 10, color: '#000000' } });
+    page.doc.off('updateV2', count);
+    expect(updates).toBe(0);
+  });
+
   it('handles an empty stroke and a single point', () => {
     editor.createShape(draw('empty', []));
     expect(drawnPoints('empty')).toEqual([]);
@@ -911,7 +1074,7 @@ describe('the stroke the local pointer is drawing', () => {
   it('reaches the document every frame without republishing the snapshot', () => {
     editor.createShape(draw('live', stroke(2)));
     beginLiveStroke('live');
-    const published = useDocumentStore.getState().shapes;
+    const published = shapeStore.sorted.get();
 
     for (let n = 3; n <= 12; n++) {
       editor.updateShape('live', { props: { points: stroke(n) } });
@@ -919,19 +1082,19 @@ describe('the stroke the local pointer is drawing', () => {
       expect(drawnPoints('live')).toHaveLength(n);
       // ...while locally the active-stroke layer is already drawing it, so
       // rebuilding the page's derived state to say so would be pure cost.
-      expect(useDocumentStore.getState().shapes).toBe(published);
+      expect(shapeStore.sorted.get()).toBe(published);
     }
   });
 
   it('still publishes when anything else changes', () => {
     editor.createShape(draw('live', stroke(2)));
     beginLiveStroke('live');
-    const published = useDocumentStore.getState().shapes;
+    const published = shapeStore.sorted.get();
 
     // A peer's edit, an arrow rerouting, an eraser — none of it may be held up
     // behind somebody's pen.
     editor.createShape(rect('other', 'a2'));
-    expect(useDocumentStore.getState().shapes).not.toBe(published);
+    expect(shapeStore.sorted.get()).not.toBe(published);
   });
 
   it('publishes the settled stroke once the tool releases it', () => {
@@ -945,9 +1108,7 @@ describe('the stroke the local pointer is drawing', () => {
     endLiveStroke();
     editor.updateShape('live', { props: { points: stroke(41) } });
 
-    const shape = useDocumentStore
-      .getState()
-      .shapes.find((s) => s.id === 'live');
+    const shape = shapeStore.sorted.get().find((s) => s.id === 'live');
     expect(shape?.type === 'draw' && shape.props.points).toHaveLength(41);
   });
 });
@@ -996,7 +1157,7 @@ describe('edits arriving from outside this client', () => {
     // Someone else's pen writes a frame of their stroke per animation frame of
     // *their* machine, which is not this one's. Ten arrive here between paints.
     for (let n = 0; n < 10; n++) {
-      const published = useDocumentStore.getState().shapes;
+      const published = shapeStore.sorted.get();
       fromPeer((shapes) => {
         const m = new Y.Map<unknown>();
         m.set('id', `peer-${n}`);
@@ -1019,7 +1180,7 @@ describe('edits arriving from outside this client', () => {
       // document — only the React publish waits.
       expect(editor.getShape(`peer-${n}`)?.x).toBe(n);
       expect(spatialIndex.search(box(-1, -1, 100, 100))).toContain(`peer-${n}`);
-      expect(useDocumentStore.getState().shapes).toBe(published);
+      expect(shapeStore.sorted.get()).toBe(published);
     }
 
     paint();
@@ -1052,9 +1213,9 @@ describe('edits arriving from outside this client', () => {
     expect(ids()).toEqual(['peer', 'mine']);
 
     // ...so the frame the peer's update queued has nothing left to say.
-    const published = useDocumentStore.getState().shapes;
+    const published = shapeStore.sorted.get();
     paint();
-    expect(useDocumentStore.getState().shapes).toBe(published);
+    expect(shapeStore.sorted.get()).toBe(published);
   });
 
   it('publishes an undo immediately', () => {
@@ -1148,5 +1309,21 @@ describe('deleted shapes fade out', () => {
     createPage();
 
     expect(ghostIds()).toEqual([]);
+  });
+});
+
+describe('reads inside a transaction', () => {
+  // Pinned, not endorsed: the cache only catches up when the outermost
+  // transaction commits, and `getShape` reads through it while `getShapes`
+  // does not. `place-pdf.ts` works around exactly this.
+  it('sees a new shape through getShape but not getShapes until commit', () => {
+    editor.transact(() => {
+      editor.createShape(rect('mid-transaction', 'a1'));
+      expect(editor.getShape('mid-transaction')?.id).toBe('mid-transaction');
+      expect(editor.getShapes().map((s) => s.id)).not.toContain(
+        'mid-transaction',
+      );
+    });
+    expect(editor.getShapes().map((s) => s.id)).toContain('mid-transaction');
   });
 });

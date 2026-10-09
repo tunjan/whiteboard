@@ -15,6 +15,27 @@
  */
 export const MAX_INK_IMAGE_CHARS = 6 * 1024 * 1024;
 
+/**
+ * Ceiling on a dictated clip, in characters of its base64 body. Opus runs at
+ * ~4 KB a second, so this is well over a minute of speech — far past anything
+ * the 200-character description below could hold.
+ */
+export const MAX_AUDIO_CHARS = 1024 * 1024;
+
+/** Containers `MediaRecorder` produces: webm in Chrome/Firefox, mp4 in Safari. */
+export const AUDIO_FORMATS = ['webm', 'mp4'] as const;
+export type AudioFormat = (typeof AUDIO_FORMATS)[number];
+
+export interface TranscribeRequest {
+  /** Base64 audio, no `data:` prefix. */
+  audio: string;
+  format: AudioFormat;
+}
+
+export interface TranscribeResponse {
+  text: string;
+}
+
 /** Longest description accepted for "quadratic formula"-style generation. */
 export const MAX_LATEX_PROMPT_CHARS = 200;
 
@@ -44,4 +65,9 @@ export interface LatexFromPromptRequest {
 export interface LatexResponse {
   /** LaTeX body — no `$` delimiters, ready to drop into `EquationProps.latex`. */
   latex: string;
+}
+
+export interface GraphFromInkResponse {
+  /** Graph-parser expressions, one per row, unvalidated. */
+  expressions: string[];
 }

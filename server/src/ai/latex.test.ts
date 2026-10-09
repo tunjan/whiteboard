@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { LATEX_UNREADABLE, MAX_LATEX_CHARS } from '@whiteboard/shared';
-import { extractLatex } from './latex';
+import { extractGraphExpressions, extractLatex } from './latex';
 
 describe('extractLatex', () => {
   it('passes a bare body through', () => {
@@ -76,5 +76,25 @@ describe('extractLatex', () => {
     expect(extractLatex('x'.repeat(MAX_LATEX_CHARS + 1))).toEqual({
       reason: 'too-long',
     });
+  });
+});
+
+describe('extractGraphExpressions', () => {
+  it('splits rows, drops blanks, peels fences and stray $', () => {
+    expect(
+      extractGraphExpressions('```\ny=x^2\n\n$x^2+y^2=9$\n(1,2)\n```'),
+    ).toEqual({ expressions: ['y=x^2', 'x^2+y^2=9', '(1,2)'] });
+  });
+
+  it('reports the refusal sentinel, fenced or not', () => {
+    expect(extractGraphExpressions(LATEX_UNREADABLE)).toEqual({ reason: 'unreadable' });
+    expect(extractGraphExpressions(`\`\`\`\n${LATEX_UNREADABLE}\n\`\`\``)).toEqual({
+      reason: 'unreadable',
+    });
+  });
+
+  it('rejects empty and runaway replies', () => {
+    expect(extractGraphExpressions('  ')).toEqual({ reason: 'empty' });
+    expect(extractGraphExpressions('y=x\n'.repeat(11))).toEqual({ reason: 'too-long' });
   });
 });

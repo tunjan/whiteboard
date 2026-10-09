@@ -12,7 +12,9 @@ import type {
 } from '@whiteboard/shared';
 import { orthogonalRoute } from '@/canvas/shapes/connector-routing';
 import { stabilizeTextPosition } from '@/canvas/shapes/text-measure';
-import { editor, useDocumentStore } from '@/canvas/use-document-store';
+import { editor } from '@/canvas/use-document-store';
+import { shapeStore } from '@/canvas/engine/shape-store';
+import { useStoreValue } from '@/canvas/use-shapes';
 import { useSelectionStore } from '@/canvas/use-selection-store';
 import { paletteColors, useStyleStore } from '@/canvas/use-style-store';
 import { useThemeStore } from '@/use-theme-store';
@@ -32,6 +34,8 @@ const DASHABLE = new Set([
 /** Which controls apply to what is being styled right now. */
 export interface StyleFlags {
   eraserMode: boolean;
+  /** The sticker palette: which stamp the sticker tool lays down. */
+  sticker: boolean;
   color: boolean;
   size: boolean;
   fill: boolean;
@@ -47,6 +51,7 @@ export interface StyleFlags {
 /** The eraser's bar: its mode, and nothing it has no use for. */
 const ERASER_ONLY: StyleFlags = {
   eraserMode: true,
+  sticker: false,
   color: false,
   size: false,
   fill: false,
@@ -138,10 +143,12 @@ function useSharedValue<T>(
   ids: string[],
   read: (props: StyleProps, shape: Shape) => T | undefined,
 ): T | undefined {
-  return useDocumentStore((s) => {
+  // Keyed on `ids` alone: every caller passes a pure field accessor, so the
+  // `read` a render closes over answers the same as the one before it.
+  return useStoreValue(() => {
     let shared: T | undefined;
     for (const id of ids) {
-      const shape = id ? s.shapesById.get(id) : undefined;
+      const shape = id ? shapeStore.record(id).get() : undefined;
       if (!shape) continue;
       const value = read(shape.props as StyleProps, shape);
       if (value === undefined) continue;
@@ -149,7 +156,7 @@ function useSharedValue<T>(
       else if (shared !== value) return undefined;
     }
     return shared;
-  });
+  }, [ids]);
 }
 
 /**
@@ -197,32 +204,34 @@ export function useStyleControls(activeToolId: string): StyleControls {
   // the selector and subscribe to that string. Subscribing to the page shapes
   // record instead would re-render the caller once per frame of every stroke,
   // because the record is a fresh object on every mutation.
-  const selectedType = useDocumentStore((s) => {
+  const selectedType = useStoreValue(() => {
     if (selectedIds.length === 0) return null;
     const firstId = selectedIds[0];
-    const firstShape = firstId ? s.shapesById.get(firstId) : undefined;
+    const firstShape = firstId ? shapeStore.record(firstId).get() : undefined;
     if (!firstShape) return null;
     const allSameType = selectedIds.every(
-      (id) => id && s.shapesById.get(id)?.type === firstShape.type,
+      (id) => id && shapeStore.record(id).get()?.type === firstShape.type,
     );
     return allSameType ? firstShape.type : 'mixed';
-  });
+  }, [selectedIds]);
   // Whether the selection holds a stroke that closed on itself. Only those have
   // an interior, so the fill control would be inert on any other pen stroke.
-  const hasClosedDraw = useDocumentStore((s) =>
-    selectedIds.some((id) => {
-      const shape = id ? s.shapesById.get(id) : undefined;
-      return shape?.type === 'draw' && shape.props.isClosed;
-    }),
+  const hasClosedDraw = useStoreValue(
+    () =>
+      selectedIds.some((id) => {
+        const shape = id ? shapeStore.record(id).get() : undefined;
+        return shape?.type === 'draw' && !!shape.props.isClosed;
+      }),
+    [selectedIds],
   );
-  const connectorLabel = useDocumentStore((s) => {
+  const connectorLabel = useStoreValue(() => {
     if (selectedIds.length !== 1) return '';
     const id = selectedIds[0];
-    const shape = id ? s.shapesById.get(id) : undefined;
+    const shape = id ? shapeStore.record(id).get() : undefined;
     return shape && (shape.type === 'line' || shape.type === 'arrow')
       ? (shape.props.label ?? '')
       : '';
-  });
+  }, [selectedIds]);
 
   // What the selection reads as, property by property. Each falls back to the
   // style new shapes inherit, which is what the bar shows with nothing selected
@@ -262,11 +271,12 @@ export function useStyleControls(activeToolId: string): StyleControls {
   const targetType =
     activeToolId !== 'select' ? activeToolId : selectedType;
 
-  const visible =
+  const styleable =
     stylable && targetType !== 'graph' && targetType !== 'equation';
 
   const show: StyleFlags = isEraser ? ERASER_ONLY : {
     eraserMode: false,
+    sticker: activeToolId === 'sticker',
     // Media and stickers carry fixed artwork colors. Frames do expose color for
     // their structural border and title, while opacity remains shape-level.
     color:
@@ -283,6 +293,8 @@ export function useStyleControls(activeToolId: string): StyleControls {
       targetType === 'rectangle' ||
       targetType === 'ellipse' ||
       targetType === 'polygon' ||
+      targetType === 'straightedge' ||
+      targetType === 'compass' ||
       targetType === 'mixed',
 
     fill:
@@ -299,13 +311,20 @@ export function useStyleControls(activeToolId: string): StyleControls {
       targetType === 'rectangle' ||
       targetType === 'ellipse' ||
       targetType === 'polygon' ||
+      targetType === 'straightedge' ||
+      targetType === 'compass' ||
       targetType === 'mixed',
 
     // The highlighter fixes its own translucency — that is what separates a
     // highlight from a coloured band — so the slider would be inert while it is
-    // the active tool. It returns for the selection, where it edits the stroke
-    // that was drawn like it edits any other shape.
-    opacity: activeToolId !== 'highlighter',
+    // the active tool. A selection's opacity lives on the selection toolbar,
+    // next to the object, so it is only a style-bar control for a tool's
+    // defaults.
+    // Stickers stamp as art, and one slider alone is not worth a key.
+    opacity:
+      activeToolId !== 'highlighter' &&
+      activeToolId !== 'select' &&
+      activeToolId !== 'sticker',
 
     font: targetType === 'text' || targetType === 'mixed',
     align: targetType === 'text' || targetType === 'mixed',
@@ -316,6 +335,9 @@ export function useStyleControls(activeToolId: string): StyleControls {
       selectedIds.length === 1 &&
       (targetType === 'line' || targetType === 'arrow'),
   };
+
+  // A selection with nothing left to style here (an image, say) has no bar.
+  const visible = styleable && Object.values(show).some(Boolean);
 
   // Switching theme keeps the same palette slot rather than stranding the pen
   // on a color that is no longer shown.
@@ -330,6 +352,7 @@ export function useStyleControls(activeToolId: string): StyleControls {
     );
     const next = slot >= 0 ? to[slot] : undefined;
     if (next) setColor(next.value);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [theme]);
 
   const applyColor = (value: string) => {

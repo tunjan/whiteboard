@@ -3,6 +3,7 @@ import { blobUrl } from '../../board/blobs';
 import { linkHostname } from '../link-url';
 import { useLodDetail } from '../lod';
 import { boxBounds, boxHitTest, rotationTransform } from './box-geometry';
+import { PaintedShadow, roundedRectPath } from './painted-shadow';
 import { MEDIA_CORNER_RADIUS } from './style';
 import { layoutText, measureTextWidth, TEXT_FONT_FAMILY } from './text-measure';
 import type { ShapeUtil } from './types';
@@ -147,6 +148,10 @@ function cardLayout(props: BookmarkProps): CardLayout {
   };
 }
 
+const BOOKMARK_SHADOW_BLUR = 3;
+const BOOKMARK_SHADOW_DY = 2;
+const BOOKMARK_SHADOW_OPACITY = 0.1;
+
 export const bookmarkUtil: ShapeUtil<'bookmark'> = {
   type: 'bookmark',
   canResize: true,
@@ -189,7 +194,6 @@ export const bookmarkUtil: ShapeUtil<'bookmark'> = {
     );
     const clipId = `bookmark-clip-${shape.id}`;
     const imageClipId = `bookmark-image-clip-${shape.id}`;
-    const shadowId = `bookmark-shadow-${shape.id}`;
     const shadow = detail === 'high';
     const loading = props.status === 'loading';
 
@@ -218,37 +222,25 @@ export const bookmarkUtil: ShapeUtil<'bookmark'> = {
               />
             </clipPath>
           )}
-          {shadow && (
-            <filter
-              id={shadowId}
-              x={shape.x - 24}
-              y={shape.y - 24}
-              width={w + 48}
-              height={h + 48}
-              filterUnits="userSpaceOnUse"
-            >
-              <feDropShadow
-                dx={0}
-                dy={2}
-                stdDeviation={3}
-                floodColor="#000000"
-                floodOpacity={0.1}
-              />
-            </filter>
-          )}
         </defs>
 
-        <g filter={shadow ? `url(#${shadowId})` : undefined}>
-          <rect
-            x={shape.x}
-            y={shape.y}
-            width={w}
-            height={h}
-            rx={radius}
-            ry={radius}
-            fill="var(--color-card)"
+        {shadow && (
+          <PaintedShadow
+            d={roundedRectPath(shape.x, shape.y, w, h, radius)}
+            dy={BOOKMARK_SHADOW_DY}
+            blur={BOOKMARK_SHADOW_BLUR}
+            opacity={BOOKMARK_SHADOW_OPACITY}
           />
-        </g>
+        )}
+        <rect
+          x={shape.x}
+          y={shape.y}
+          width={w}
+          height={h}
+          rx={radius}
+          ry={radius}
+          fill="var(--color-card)"
+        />
 
         {layout.imageHeight > 0 && (
           <g clipPath={`url(#${imageClipId})`}>

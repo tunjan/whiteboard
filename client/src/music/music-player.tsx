@@ -3,24 +3,29 @@ import {
   Music2,
   Pause,
   Play,
-  RotateCcw,
+  SkipBack,
+  SkipForward,
   Volume1,
   Volume2,
   VolumeX,
 } from 'lucide-react';
-import type { MusicLibraryResponse, MusicTrack } from '@whiteboard/shared';
-import { setMusicPlayback } from '@/canvas/use-document-store';
+import type {
+  MusicLibraryResponse,
+  MusicPlaylist,
+  MusicTrack,
+} from '@whiteboard/shared';
+import { setMusicPlayback } from '@/canvas/board-records';
 import type { Identity } from '@/collab/identity';
 import { Button, buttonVariants } from '@/components/ui/button';
 import {
   Popover,
   PopoverContent,
-  PopoverHeader,
   PopoverTitle,
   PopoverTrigger,
 } from '@/components/ui/popover';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Slider } from '@/components/ui/slider';
+import { LevelMeter } from '@/components/ui/level-meter';
 import { CHROME_CONTROLS } from '@/components/ui/surface';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
@@ -30,6 +35,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+import { ScrubRail } from './scrub-rail';
 import { useMusicPlaybackStore } from './use-music-playback-store';
 
 interface MusicPlayerProps {
@@ -42,6 +48,11 @@ interface MusicPlayerProps {
 // the shared playback state. Persisted so it survives reloads.
 const VOLUME_STORAGE_KEY = 'whiteboard:music-volume';
 
+// How far into a track "previous" stops meaning the track before and starts
+// meaning this one from the top. The universal player idiom, and it is why
+// there is no separate restart key.
+const RESTART_WINDOW_SECONDS = 3;
+
 function readStoredVolume(): number {
   if (typeof window === 'undefined') return 1;
   const raw = window.localStorage.getItem(VOLUME_STORAGE_KEY);
@@ -49,6 +60,20 @@ function readStoredVolume(): number {
   return Number.isFinite(parsed) ? Math.min(1, Math.max(0, parsed)) : 1;
 }
 
+/**
+ * Shared playlist playback.
+ *
+ * The panel is three zones and the boundaries carry the meaning, so nothing
+ * has to be explained in words:
+ *
+ *   1. what is playing, and the transport that changes it — the room's
+ *   2. the library you pick from — also the room's
+ *   3. below a hairline, on its own ground: volume, which is only yours
+ *
+ * Every control above the hairline moves for everyone in the board; the one
+ * below it moves for nobody but you. That is the single fact this panel has to
+ * get across, and it is drawn rather than written.
+ */
 export function MusicPlayer({
   identity,
   showLabel = false,
@@ -99,11 +124,11 @@ export function MusicPlayer({
     [];
   const tracksById = useMemo(() => {
     const tracks = new Map<string, MusicTrack>();
-    for (const playlist of playlists) {
+    for (const playlist of library?.playlists ?? []) {
       for (const track of playlist.tracks) tracks.set(track.id, track);
     }
     return tracks;
-  }, [playlists]);
+  }, [library]);
   const currentTrack = playback.trackId
     ? (tracksById.get(playback.trackId) ?? null)
     : null;
@@ -113,6 +138,13 @@ export function MusicPlayer({
     duration || Number.POSITIVE_INFINITY,
     Math.max(0, seekPreview ?? displayTime),
   );
+  // Skipping walks the playlist the *playing* track came from, which is not
+  // necessarily the one being browsed underneath.
+  const currentPlaylist = currentTrack
+    ? (playlists.find((playlist) =>
+        playlist.tracks.some((track) => track.id === currentTrack.id),
+      ) ?? null)
+    : null;
   // Attribution only when it isn't yours — the common case is you, and naming
   // yourself back is a line of text that tells nobody anything.
   const startedByPeer =
@@ -224,16 +256,19 @@ export function MusicPlayer({
     playTrack(track);
   }
 
-  function restartTrack() {
+  function skip(offset: number) {
+    const next = neighbourTrack(currentPlaylist, currentTrack, offset);
+    if (next) playTrack(next);
+  }
+
+  /** Back to the top of this track, unless you are still near it. */
+  function playPrevious() {
     if (!currentTrack) return;
-    setAudioBlocked(false);
-    setSeekPreview(null);
-    setMusicPlayback({
-      trackId: currentTrack.id,
-      status: 'playing',
-      position: 0,
-      requestedBy: publishRequester(),
-    });
+    if (displayTime > RESTART_WINDOW_SECONDS) {
+      playTrack(currentTrack);
+      return;
+    }
+    skip(-1);
   }
 
   function enableAudio() {
@@ -267,7 +302,9 @@ export function MusicPlayer({
     <>
       {/* Trigger — playing takes the chrome's quiet pressed idiom (hairline +
           recessed fill); colour is reserved for status, and "playing" is an
-          on/off state. */}
+          on/off state. The mark inside is the level meter, the same one the
+          library row uses, so the rail answers "is something on" with the
+          figure the panel already taught. */}
       <Popover>
         <TooltipProvider delay={300}>
           <Tooltip>
@@ -289,7 +326,7 @@ export function MusicPlayer({
               }
             >
               {isPlaying ? (
-                <Volume2 aria-hidden="true" />
+                <LevelMeter className="size-4" />
               ) : (
                 <Music2 aria-hidden="true" />
               )}
@@ -299,40 +336,48 @@ export function MusicPlayer({
           </Tooltip>
         </TooltipProvider>
 
-        {/* One flat surface, tiers held apart by gap alone — the same shell the
-            other chrome popovers use. Nothing is shown disabled: with no track
-            chosen the panel is just its library. */}
         <PopoverContent
           side="bottom"
           align="end"
           sideOffset={10}
           className={cn(
             CHROME_CONTROLS,
-            'w-[min(20rem,calc(100vw-2rem))] gap-5 p-4',
+            'w-[min(20rem,calc(100vw-2rem))] gap-0 overflow-hidden p-0',
           )}
         >
-          <PopoverHeader className="flex-row items-center justify-between gap-3">
-            <PopoverTitle>Music</PopoverTitle>
-            {startedByPeer ? (
-              <span className="min-w-0 truncate text-xs text-fg-muted">
-                {playback.requestedBy}
-              </span>
-            ) : null}
-          </PopoverHeader>
+          {/* The trigger is a music key and the panel is its contents, so a
+              "Music" heading is a word spent restating the button that opened
+              it. Kept for the accessible name, which has no such context. */}
+          <PopoverTitle className="sr-only">Music</PopoverTitle>
 
           {currentTrack ? (
-            <div className="flex flex-col gap-3">
-              <div className="min-w-0" aria-live="polite">
-                <p className="truncate text-sm font-medium text-fg">
-                  {currentTrack.title}
-                </p>
-                <p className="truncate text-xs text-fg-muted">
-                  {trackSubtitle(currentTrack)}
-                </p>
+            <div className="flex flex-col gap-3 px-3 pt-3">
+              <div className="flex items-start gap-2">
+                <div className="min-w-0 flex-1" aria-live="polite">
+                  <p className="truncate text-sm font-medium text-fg">
+                    {currentTrack.title}
+                  </p>
+                  <p className="truncate text-xs text-fg-muted">
+                    {trackSubtitle(currentTrack)}
+                  </p>
+                </div>
+                {/* Who put it on, next to what they put on — the one place it
+                    explains anything. */}
+                {startedByPeer ? (
+                  <span className="max-w-24 shrink-0 truncate text-2xs text-fg-subtle">
+                    <span className="sr-only">Started by </span>
+                    {playback.requestedBy}
+                  </span>
+                ) : null}
               </div>
 
-              <div className="flex flex-col gap-1.5">
-                <Slider
+              {/* Elapsed and remaining flank the rail instead of sitting under
+                  it: one row, and each number is beside the end it describes. */}
+              <div className="flex items-center gap-2.5">
+                <span className="w-9 shrink-0 font-mono text-2xs tabular-nums text-fg-muted">
+                  {formatTime(timelineTime)}
+                </span>
+                <ScrubRail
                   aria-label="Track position"
                   aria-valuetext={`${formatTime(timelineTime)} of ${
                     duration > 0 ? formatTime(duration) : 'unknown'
@@ -347,18 +392,28 @@ export function MusicPlayer({
                   }
                   onValueCommitted={seekTrack}
                 />
-                <div className="flex items-center justify-between font-mono text-xs tabular-nums text-fg-muted">
-                  <span>{formatTime(timelineTime)}</span>
-                  <span>{duration > 0 ? formatTime(duration) : '--:--'}</span>
-                </div>
+                <span className="w-9 shrink-0 text-right font-mono text-2xs tabular-nums text-fg-muted">
+                  {duration > 0 ? formatTime(duration) : '--:--'}
+                </span>
               </div>
 
-              {/* Transport left, volume right — the fader is deliberately short
-                  so it reads as secondary to the full-width timeline. */}
-              <div className="flex items-center gap-2">
+              {/* One centred cluster. Play is the key you actually aim at, so
+                  it is the larger one and the only filled one; the skips are
+                  ghosts either side of it. */}
+              <div className="flex items-center justify-center gap-1">
                 <Button
                   type="button"
+                  variant="ghost"
                   size="icon-sm"
+                  aria-label="Previous track"
+                  onClick={playPrevious}
+                >
+                  <SkipBack aria-hidden="true" />
+                </Button>
+                <Button
+                  type="button"
+                  size="icon-md"
+                  className="rounded-full"
                   aria-label={isPlaying ? 'Pause' : 'Play'}
                   onClick={togglePlayback}
                 >
@@ -372,32 +427,14 @@ export function MusicPlayer({
                   type="button"
                   variant="ghost"
                   size="icon-sm"
-                  aria-label="Restart track"
-                  onClick={restartTrack}
+                  aria-label="Next track"
+                  disabled={
+                    neighbourTrack(currentPlaylist, currentTrack, 1) === null
+                  }
+                  onClick={() => skip(1)}
                 >
-                  <RotateCcw aria-hidden="true" />
+                  <SkipForward aria-hidden="true" />
                 </Button>
-                <div className="ml-auto flex w-36 items-center gap-1.5">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label={muted ? 'Unmute' : 'Mute'}
-                    onClick={toggleMute}
-                  >
-                    <VolumeIcon aria-hidden="true" />
-                  </Button>
-                  <Slider
-                    aria-label="Volume"
-                    min={0}
-                    max={1}
-                    step={0.01}
-                    value={volume}
-                    onValueChange={(next) =>
-                      setVolume(Array.isArray(next) ? next[0]! : next)
-                    }
-                  />
-                </div>
               </div>
 
               {/* The browser refused autoplay — unblocking is the one thing
@@ -417,7 +454,7 @@ export function MusicPlayer({
             </div>
           ) : null}
 
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-2 p-3">
             {library === null && !libraryError ? (
               <div
                 role="status"
@@ -442,6 +479,8 @@ export function MusicPlayer({
               />
             ) : (
               <>
+                {/* A playlist is a value inside a group, so it takes the
+                    board's recess idiom rather than an inverted chip. */}
                 {playlists.length > 1 ? (
                   <Tabs
                     value={activePlaylist ?? ''}
@@ -464,10 +503,11 @@ export function MusicPlayer({
                 <div
                   role="listbox"
                   aria-label={`Tracks in ${activePlaylist ?? 'library'}`}
-                  className="scrollbar-none -mx-2 flex max-h-56 flex-col overflow-y-auto px-2"
+                  className="scrollbar-none -mx-1 flex max-h-56 flex-col overflow-y-auto px-1"
                 >
                   {activeTracks.map((track) => {
                     const active = track.id === currentTrack?.id;
+                    const sounding = active && isPlaying;
                     return (
                       <button
                         key={track.id}
@@ -487,14 +527,20 @@ export function MusicPlayer({
                           active && 'bg-panel',
                         )}
                       >
-                        {/* Fixed glyph slot: the current track states itself,
-                            the others only answer the cursor. */}
+                        {/* Fixed glyph slot, three readings in one place: the
+                            sounding track meters, the paused-but-chosen one
+                            shows its play key, the rest answer the cursor.
+                            Hovering the sounding track swaps the meter for
+                            pause, so the row states what the click will do. */}
                         <span
                           aria-hidden="true"
-                          className="flex size-3.5 shrink-0 items-center justify-center text-fg-muted"
+                          className="flex size-3.5 shrink-0 items-center justify-center text-fg-secondary"
                         >
-                          {active && isPlaying ? (
-                            <Pause className="size-3.5" />
+                          {sounding ? (
+                            <>
+                              <LevelMeter className="group-hover/track:hidden" />
+                              <Pause className="hidden size-3.5 group-hover/track:block" />
+                            </>
                           ) : active ? (
                             <Play className="size-3.5" />
                           ) : (
@@ -522,6 +568,34 @@ export function MusicPlayer({
                 </div>
               </>
             )}
+          </div>
+
+          {/* Below the line: the only control in this panel that nobody else
+              feels. The hairline and the change of ground are the whole
+              explanation — the alternative was a sentence saying so. */}
+          <div className="flex items-center gap-1.5 border-t border-border-subtle bg-panel px-2 py-1.5 [--chrome-hover:var(--color-surface)]">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              aria-label={
+                muted ? 'Unmute (only for you)' : 'Mute (only for you)'
+              }
+              onClick={toggleMute}
+            >
+              <VolumeIcon aria-hidden="true" />
+            </Button>
+            <Slider
+              aria-label="Volume, only for you"
+              className="[--wb-slider-thumb:1.25rem] [--wb-slider-track:1rem]"
+              min={0}
+              max={1}
+              step={0.01}
+              value={volume}
+              onValueChange={(next) =>
+                setVolume(Array.isArray(next) ? next[0]! : next)
+              }
+            />
           </div>
         </PopoverContent>
       </Popover>
@@ -567,6 +641,22 @@ function LibraryNotice({
       </Button>
     </div>
   );
+}
+
+/**
+ * The track `offset` places away in its own playlist. Does not wrap: the end of
+ * a playlist is a real edge, and a "next" key that silently returns to track
+ * one hides it.
+ */
+function neighbourTrack(
+  playlist: MusicPlaylist | null,
+  track: MusicTrack | null,
+  offset: number,
+): MusicTrack | null {
+  if (!playlist || !track) return null;
+  const index = playlist.tracks.findIndex((entry) => entry.id === track.id);
+  if (index < 0) return null;
+  return playlist.tracks[index + offset] ?? null;
 }
 
 function sharedPosition(playback: {

@@ -1,16 +1,12 @@
-import { Axis3D, Blend } from 'lucide-react';
 import type { GraphProps } from '@whiteboard/shared';
-import { Field, FieldLabel } from '@/components/ui/field';
 import { Switch } from '@/components/ui/switch';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/components/ui/tooltip';
 
-/* ─── Compact Display Toggles ───────────────────────────────────────────── */
+const TOGGLES = [
+  { key: 'showAxisLabels', label: 'Axis numbers' },
+  { key: 'showIntersections', label: 'Intersections' },
+] as const;
 
+/** How the graph is drawn: a footer on the panel's recessed ground. */
 export function DisplaySettings({
   showAxisLabels,
   showIntersections,
@@ -20,65 +16,22 @@ export function DisplaySettings({
   showIntersections: boolean;
   onPatch: (patch: Partial<GraphProps>) => void;
 }) {
+  const values = { showAxisLabels, showIntersections };
   return (
-    <TooltipProvider delay={300}>
-      <div className="flex items-center justify-around gap-4 px-1 py-0.5">
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Field
-                orientation="horizontal"
-                className="items-center gap-2"
-              >
-                <Switch
-                  id="graph-axis-numbers"
-                  checked={showAxisLabels}
-                  onCheckedChange={(checked) => onPatch({ showAxisLabels: checked })}
-                />
-                <FieldLabel
-                  htmlFor="graph-axis-numbers"
-                  className="cursor-pointer select-none text-fg-secondary hover:text-fg"
-                >
-                  <span className="grid size-5 place-items-center">
-                    <Axis3D className="size-4" aria-hidden="true" />
-                  </span>
-                  <span className="sr-only">Axis numbers</span>
-                </FieldLabel>
-              </Field>
-            }
+    <div className="flex shrink-0 items-center gap-5 border-t border-border bg-panel px-3 py-2.5">
+      {TOGGLES.map(({ key, label }) => (
+        <label
+          key={key}
+          className="flex cursor-pointer items-center gap-2 text-xs text-fg-secondary select-none hover:text-fg"
+        >
+          <Switch
+            size="sm"
+            checked={values[key]}
+            onCheckedChange={(checked) => onPatch({ [key]: checked })}
           />
-          <TooltipContent side="bottom">Axis numbers</TooltipContent>
-        </Tooltip>
-
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Field
-                orientation="horizontal"
-                className="items-center gap-2"
-              >
-                <Switch
-                  id="graph-intersections"
-                  checked={showIntersections}
-                  onCheckedChange={(checked) =>
-                    onPatch({ showIntersections: checked })
-                  }
-                />
-                <FieldLabel
-                  htmlFor="graph-intersections"
-                  className="cursor-pointer select-none text-fg-secondary hover:text-fg"
-                >
-                  <span className="grid size-5 place-items-center">
-                    <Blend className="size-4" aria-hidden="true" />
-                  </span>
-                  <span className="sr-only">Intersections</span>
-                </FieldLabel>
-              </Field>
-            }
-          />
-          <TooltipContent side="bottom">Intersections</TooltipContent>
-        </Tooltip>
-      </div>
-    </TooltipProvider>
+          {label}
+        </label>
+      ))}
+    </div>
   );
 }

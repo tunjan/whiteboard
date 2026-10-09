@@ -1,11 +1,12 @@
 import { useLodDetail } from '../lod';
 import { boxBounds, boxHitTest, rotationTransform } from './box-geometry';
+import { PaintedShadow, roundedRectPath } from './painted-shadow';
 import { MEDIA_CORNER_RADIUS } from './style';
 import type { ShapeUtil } from './types';
 
 const VIDEO_SHADOW_BLUR = 1;
 const VIDEO_SHADOW_DY = 1;
-const VIDEO_SHADOW_MARGIN = 16;
+const VIDEO_SHADOW_OPACITY = 0.08;
 
 /** YouTube thumbnail URL for a video id. */
 export function youtubeThumbnail(videoId: string): string {
@@ -47,7 +48,6 @@ export const videoUtil: ShapeUtil<'video'> = {
     const detail = useLodDetail();
     if (!videoId) return null;
     const clipId = `video-clip-${shape.id}`;
-    const shadowId = `video-shadow-${shape.id}`;
     const radius = Math.min(MEDIA_CORNER_RADIUS, w / 4, h / 4);
     const shadow = detail === 'high';
     // Centered play badge sized relative to the box.
@@ -68,26 +68,16 @@ export const videoUtil: ShapeUtil<'video'> = {
               ry={radius}
             />
           </clipPath>
-          {shadow && (
-            <filter
-              id={shadowId}
-              x={shape.x - VIDEO_SHADOW_MARGIN}
-              y={shape.y - VIDEO_SHADOW_MARGIN}
-              width={w + VIDEO_SHADOW_MARGIN * 2}
-              height={h + VIDEO_SHADOW_MARGIN * 2}
-              filterUnits="userSpaceOnUse"
-            >
-              <feDropShadow
-                dx={0}
-                dy={VIDEO_SHADOW_DY}
-                stdDeviation={VIDEO_SHADOW_BLUR}
-                floodColor="#000000"
-                floodOpacity={0.08}
-              />
-            </filter>
-          )}
         </defs>
-        <g filter={shadow ? `url(#${shadowId})` : undefined} clipPath={`url(#${clipId})`}>
+        {shadow && (
+          <PaintedShadow
+            d={roundedRectPath(shape.x, shape.y, w, h, radius)}
+            dy={VIDEO_SHADOW_DY}
+            blur={VIDEO_SHADOW_BLUR}
+            opacity={VIDEO_SHADOW_OPACITY}
+          />
+        )}
+        <g clipPath={`url(#${clipId})`}>
           <rect x={shape.x} y={shape.y} width={w} height={h} fill="#000000" />
           <image
             href={youtubeThumbnail(videoId)}

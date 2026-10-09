@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ImageShape } from '@whiteboard/shared';
 import { imageHref } from '../board/blobs';
-import type { Camera } from './camera';
 import { worldToScreen } from './camera';
+import { useCameraFollow } from './use-camera-interaction';
 import { editor } from './use-document-store';
 import { useImageCroppingStore } from './use-image-cropping-store';
 
@@ -45,13 +45,8 @@ function rotateVec(x: number, y: number, rad: number) {
  * is up. Shows the full source dimmed with a draggable crop rectangle; commits
  * the visible sub-rect as `props.crop` (fractions) plus a new box.
  */
-export function ImageCropOverlay({
-  shape,
-  camera,
-}: {
-  shape: ImageShape;
-  camera: Camera;
-}) {
+export function ImageCropOverlay({ shape }: { shape: ImageShape }) {
+  const [camera, follow] = useCameraFollow<SVGGElement>();
   const stop = useImageCroppingStore((s) => s.stop);
 
   // The full source's world rect (fixed for the session) and the live crop rect.
@@ -187,56 +182,58 @@ export function ImageCropOverlay({
             <rect x={rs.x} y={rs.y} width={rW} height={rH} />
           </clipPath>
         </defs>
-        <g transform={deg ? `rotate(${deg} ${pivot.x} ${pivot.y})` : undefined}>
-          {/* Dimmed full image, then the crop region at full opacity. */}
-          <image
-            href={href}
-            x={fs.x}
-            y={fs.y}
-            width={fW}
-            height={fH}
-            preserveAspectRatio="none"
-            opacity={0.4}
-          />
-          <image
-            href={href}
-            x={fs.x}
-            y={fs.y}
-            width={fW}
-            height={fH}
-            preserveAspectRatio="none"
-            clipPath={`url(#crop-rect-${shape.id})`}
-          />
-          {/* Crop rect: body is draggable to move the crop. */}
-          <rect
-            x={rs.x}
-            y={rs.y}
-            width={rW}
-            height={rH}
-            fill="transparent"
-            stroke="var(--action-solid, #3b82f6)"
-            strokeWidth={1.5}
-            style={{ cursor: 'move' }}
-            onPointerDown={startDrag('move')}
-          />
-          {HANDLES.map((id) => {
-            const { cx, cy } = handlePos(id);
-            return (
-              <rect
-                key={id}
-                x={cx - 5}
-                y={cy - 5}
-                width={10}
-                height={10}
-                rx={2}
-                fill="var(--background, var(--bg-canvas, #ffffff))"
-                stroke="var(--action-solid, #3b82f6)"
-                strokeWidth={1.5}
-                style={{ cursor: CURSORS[id] }}
-                onPointerDown={startDrag(id)}
-              />
-            );
-          })}
+        <g ref={follow}>
+          <g transform={deg ? `rotate(${deg} ${pivot.x} ${pivot.y})` : undefined}>
+            {/* Dimmed full image, then the crop region at full opacity. */}
+            <image
+              href={href}
+              x={fs.x}
+              y={fs.y}
+              width={fW}
+              height={fH}
+              preserveAspectRatio="none"
+              opacity={0.4}
+            />
+            <image
+              href={href}
+              x={fs.x}
+              y={fs.y}
+              width={fW}
+              height={fH}
+              preserveAspectRatio="none"
+              clipPath={`url(#crop-rect-${shape.id})`}
+            />
+            {/* Crop rect: body is draggable to move the crop. */}
+            <rect
+              x={rs.x}
+              y={rs.y}
+              width={rW}
+              height={rH}
+              fill="transparent"
+              stroke="var(--link, #2563eb)"
+              strokeWidth={1.5}
+              style={{ cursor: 'move' }}
+              onPointerDown={startDrag('move')}
+            />
+            {HANDLES.map((id) => {
+              const { cx, cy } = handlePos(id);
+              return (
+                <rect
+                  key={id}
+                  x={cx - 5}
+                  y={cy - 5}
+                  width={10}
+                  height={10}
+                  rx={2}
+                  fill="var(--background, var(--bg-canvas, #fafafa))"
+                  stroke="var(--link, #2563eb)"
+                  strokeWidth={1.5}
+                  style={{ cursor: CURSORS[id] }}
+                  onPointerDown={startDrag(id)}
+                />
+              );
+            })}
+          </g>
         </g>
       </svg>
     </div>

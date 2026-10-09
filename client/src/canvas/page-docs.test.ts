@@ -133,6 +133,32 @@ describe('residency', () => {
     expect(evicted).toEqual(['p1']);
   });
 
+  it('evicts down to the limit when an eviction releases another pin', () => {
+    // Evicting p1 lets go of p2's pin — as the document store does for the
+    // target of a cross-page move — which re-enters eviction mid-pass.
+    closePageDocs();
+    openPageDocs({
+      boardId: 'board-1',
+      persist: true,
+      socket: null,
+      onEvict: (pageId) => {
+        evicted.push(pageId);
+        if (pageId === 'p1') unpinPageDoc('p2');
+      },
+    });
+    evicted = [];
+    pinPageDoc('p2');
+    acquirePageDoc('p1');
+    acquirePageDoc('p2');
+    acquirePageDoc('p3');
+    acquirePageDoc('p4');
+
+    // p1 goes to make room; freeing p2 then makes it the oldest over the limit.
+    expect(evicted).toEqual(['p1', 'p2']);
+    expect(residentPageDoc('p3')).toBeDefined();
+    expect(residentPageDoc('p4')).toBeDefined();
+  });
+
   it('keeps every page when there is nowhere to reload one from', () => {
     closePageDocs();
     openPageDocs({

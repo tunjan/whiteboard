@@ -1,0 +1,130 @@
+/* The tutor's dashboard: the canvas library and the attendance register.
+ *
+ * A porcelain tray with one white sheet on it — the whiteboard itself, seen
+ * from across the room. Ink is a marker black with a trace of blue; each
+ * student gets one marker colour of their own, and green only ever means
+ * "someone is on a canvas right now".
+ *
+ * Tokens live on :root and .dark (not on a wrapper) because the theme class
+ * is only ever set on <html>. */
+
+@font-face {
+  font-family: 'Bricolage Grotesque Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 200 800;
+  src: url('@fontsource-variable/bricolage-grotesque/files/bricolage-grotesque-latin-wght-normal.woff2')
+    format('woff2-variations');
+}
+
+:root {
+  --d-tray: #eceff3;
+  --d-sheet: #ffffff;
+  --d-well: #f5f7f9;
+  --d-ink: #151a23;
+  --d-graphite: #5f6878;
+  /* Muted text still clears 4.5:1 on the sheet and the well. */
+  --d-pencil: #666e7e;
+  --d-rule: #e2e6eb;
+  --d-rule-soft: #eef1f4;
+  --d-dot: #cdd3db;
+  --d-hover: color-mix(in srgb, var(--d-ink) 4.5%, transparent);
+  --d-press: color-mix(in srgb, var(--d-ink) 8%, transparent);
+  --d-blue: #2451e0;
+  --d-blue-wash: #eaf0ff;
+  --d-live: #087a4b;
+  --d-live-wash: #ecf8f1;
+  --d-danger: #c93a32;
+  --d-star: #e2a300;
+  --d-lift: 0 1px 2px rgb(21 26 35 / 0.04), 0 8px 24px -12px rgb(21 26 35 / 0.12);
+
+  /* Marker inks, one per student. Tuned to read on white and on the well.
+   * No blue and no green: blue is the tutor, green is "live". */
+  --d-m0: #cf3f37;
+  --d-m1: #6d4fd1;
+  --d-m2: #d06d12;
+  --d-m3: #0f7f90;
+  --d-m4: #b83a86;
+
+  /* The type scale. Every size on these pages is one of these steps. */
+  --d-fs-caption: 12px;
+  --d-fs-meta: 13px;
+  --d-fs-body: 14px;
+  --d-fs-lead: 15px;
+  --d-fs-title: 22px;
+  --d-fs-display: 34px;
+  --d-fs-page: 44px;
+}
+
+.dark {
+  --d-tray: #0b0d10;
+  --d-sheet: #14171c;
+  --d-well: #1a1e24;
+  --d-ink: #eceff4;
+  --d-graphite: #a2aab7;
+  --d-pencil: #8b93a3;
+  --d-rule: #262b33;
+  --d-rule-soft: #1e2229;
+  --d-dot: #333a44;
+  --d-blue: #7c9bff;
+  --d-blue-wash: #1b2440;
+  --d-live: #38d494;
+  --d-live-wash: #10281e;
+  --d-danger: #ff7a70;
+  --d-star: #ffc53d;
+  --d-lift: 0 1px 2px rgb(0 0 0 / 0.3), 0 12px 32px -16px rgb(0 0 0 / 0.6);
+
+  --d-m0: #ff7d72;
+  --d-m1: #a992ff;
+  --d-m2: #ffab5c;
+  --d-m3: #4fc9d9;
+  --d-m4: #f28ac6;
+}
+
+.d-display {
+  font-family: 'Bricolage Grotesque Variable', var(--font-sans);
+  font-variation-settings: 'opsz' 96;
+  letter-spacing: -0.025em;
+}
+
+.d-hand {
+  font-family: 'Caveat Variable', cursive;
+}
+
+/* The board's own dot lattice, printed faintly on each canvas card. */
+.d-dots {
+  background-color: var(--d-well);
+  background-image: radial-gradient(var(--d-dot) 1px, transparent 1.2px);
+  background-size: 14px 14px;
+  background-position: 7px 7px;
+}
+
+/* Someone is on this canvas now: the one thing on the page that moves. */
+.d-pulse {
+  position: relative;
+}
+.d-pulse::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: currentColor;
+  animation: d-pulse 2s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+@keyframes d-pulse {
+  0% {
+    transform: scale(1);
+    opacity: 0.55;
+  }
+  80%,
+  100% {
+    transform: scale(3);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .d-pulse::after {
+    animation: none;
+  }
+}

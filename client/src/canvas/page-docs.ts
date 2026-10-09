@@ -5,6 +5,7 @@ import {
   HocuspocusProviderWebsocket,
 } from '@hocuspocus/provider';
 import { pageDocumentName } from '@whiteboard/shared';
+import { boardHeaders, boardKey } from '@/board/board-access';
 
 /**
  * The board's pages as separate CRDT documents, loaded on demand.
@@ -102,17 +103,24 @@ function tearDown(page: Resident, clearLocalCache = false): void {
  */
 function evictExcess(): void {
   if (!config || (!config.persist && !config.socket)) return;
+  // Re-counted after every eviction: tearing a page down can release pins it
+  // held on others (see `onEvict`), which changes what is over the limit.
+  for (let victim = excessPage(); victim; victim = excessPage()) {
+    resident.delete(victim.pageId);
+    tearDown(victim);
+  }
+}
+
+/** The least recently used unpinned page, when there are more than allowed. */
+function excessPage(): Resident | undefined {
   let removable = 0;
-  for (const pageId of resident.keys()) {
-    if (!pins.get(pageId)) removable++;
-  }
+  let oldest: Resident | undefined;
   for (const [pageId, page] of resident) {
-    if (removable <= MAX_RESIDENT_PAGES) break;
     if (pins.get(pageId)) continue;
-    resident.delete(pageId);
-    tearDown(page);
-    removable--;
+    removable++;
+    oldest ??= page;
   }
+  return removable > MAX_RESIDENT_PAGES ? oldest : undefined;
 }
 
 /**
@@ -157,6 +165,7 @@ export function acquirePageDoc(pageId: string): PageDoc {
         // Presence is board-level and rides the board document's provider; a
         // page provider carries document updates only.
         awareness: null,
+        token: boardKey(),
       })
     : null;
   // Sharing a socket means attaching to it explicitly: a provider only does it
@@ -227,6 +236,6 @@ export function destroyPageDoc(pageId: string): void {
 export function deleteStoredPage(boardId: string, pageId: string): void {
   void fetch(
     `/api/pages/${encodeURIComponent(boardId)}/${encodeURIComponent(pageId)}`,
-    { method: 'DELETE', credentials: 'include' },
+    { method: 'DELETE', credentials: 'include', headers: boardHeaders() },
   ).catch(() => {});
 }

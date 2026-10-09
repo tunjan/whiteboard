@@ -1,5 +1,6 @@
 import type { ComponentType } from 'react';
 import { genId, type ArrowProps, type LineProps, type Shape } from '@whiteboard/shared';
+import { constructionSnapTargets } from '../construction-snap';
 import { getTopIndex } from '../order';
 import {
   bindingForPoint,
@@ -21,8 +22,14 @@ interface LineToolOptions {
   id: string;
   type: 'line' | 'arrow';
   label: string;
-  hotkey: string;
+  hotkey?: string;
   icon: ComponentType<{ className?: string }>;
+  /**
+   * Straightedge mode: endpoints also snap to where outlines cross, whatever
+   * the snapping preference, and the tool stays active without selecting what
+   * it drew, like the compass.
+   */
+  construction?: boolean;
 }
 
 /** Drag-to-create tool shared by line and arrow (two-point polylines). */
@@ -76,6 +83,7 @@ export function createLineTool(opts: LineToolOptions): Tool {
     }
     // Discard a zero-length click — an empty line/arrow is useless.
     if (len < CLICK_SCREEN_THRESHOLD / z) ctx.editor.deleteShapes([id]);
+    else if (opts.construction) return;
     else useSelectionStore.getState().setSelection([id]);
     ctx.complete();
   }
@@ -91,21 +99,23 @@ export function createLineTool(opts: LineToolOptions): Tool {
       if (info.button !== 0) return;
       const util = shapeRegistry.get(opts.type);
       if (!util) return;
-      snapTargets = snapTargetShapes(
-        ctx.editor,
-        new Set(),
-        // The line is created at the page root, so that is the snap scope.
-        null,
-        snapRegion(ctx, {
-          minX: info.point.x,
-          minY: info.point.y,
-          maxX: info.point.x,
-          maxY: info.point.y,
-        }),
-      ).flatMap((target) => {
-        const geometry = shapeSnapGeometry(target);
-        return geometry ? [{ ...geometry, shapeId: target.id }] : [];
-      });
+      snapTargets = opts.construction
+        ? constructionSnapTargets(ctx, info.point)
+        : snapTargetShapes(
+            ctx.editor,
+            new Set(),
+            // The line is created at the page root, so that is the snap scope.
+            null,
+            snapRegion(ctx, {
+              minX: info.point.x,
+              minY: info.point.y,
+              maxX: info.point.x,
+              maxY: info.point.y,
+            }),
+          ).flatMap((target) => {
+            const geometry = shapeSnapGeometry(target);
+            return geometry ? [{ ...geometry, shapeId: target.id }] : [];
+          });
       start = snapEndpoint(info.point, info);
       const id = genId();
       creatingId = id;
@@ -143,7 +153,12 @@ export function createLineTool(opts: LineToolOptions): Tool {
                 bindings: {},
                 label: '',
               }
-            : { spline: connector.lineSpline ?? 'linear', label: '' }),
+            : {
+                spline: opts.construction
+                  ? 'linear'
+                  : (connector.lineSpline ?? 'linear'),
+                label: '',
+              }),
           points: [
             { x: 0, y: 0 },
             { x: 0, y: 0 },

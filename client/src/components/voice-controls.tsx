@@ -1,11 +1,12 @@
 import { memo, useEffect, useId, useRef, useState } from 'react';
-import type { ReactNode } from 'react';
+import { Slider as SliderPrimitive } from '@base-ui/react/slider';
 import {
   AudioLines,
   LoaderCircle,
   Mic,
   MicOff,
   PhoneOff,
+  TriangleAlert,
 } from 'lucide-react';
 import { textOnColor, type Identity } from '@/collab/identity';
 import {
@@ -23,33 +24,28 @@ import {
   type VoiceStatus,
   useVoiceStore,
 } from '@/collab/voice/use-voice-store';
-import {
-  playVoiceSound,
-  primeVoiceSounds,
-} from '@/collab/voice/voice-sounds';
+import { playVoiceSound, primeVoiceSounds } from '@/collab/voice/voice-sounds';
 import {
   type PeerPresence,
   type VoicePresence,
   usePresenceStore,
 } from '@/collab/use-presence-store';
 import { Button, buttonVariants } from '@/components/ui/button';
+import { LevelMeter } from '@/components/ui/level-meter';
 import {
   Popover,
   PopoverContent,
-  PopoverHeader,
   PopoverTitle,
   PopoverTrigger,
 } from '@/components/ui/popover';
-import { CHROME_CONTROLS } from '@/components/ui/surface';
+import { CHROME_CONTROLS, HOVER_REVEAL } from '@/components/ui/surface';
 import { Switch } from '@/components/ui/switch';
-import { Slider } from '@/components/ui/slider';
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-import { Toggle } from '@/components/ui/toggle';
 import {
   MAX_VOICE_LEVEL_DB,
   MIN_VOICE_LEVEL_DB,
@@ -71,80 +67,68 @@ interface VoiceCallPeer {
 }
 
 /**
- * Every state in this panel resolves to one of four tones, and a tone is the
- * only thing that carries colour. Muted is the sole condition that costs you
- * something if you miss it, so it is the sole condition that gets `danger` —
- * the same rule the trigger button follows.
+ * What a person's row has to report, if anything.
+ *
+ * `listening` is the null state and it is the state nearly every row is in
+ * nearly all of the time — so it is drawn as nothing at all. A column of four
+ * rows each saying "Listening" is four lines of text carrying no information,
+ * and it buries the one row that does. Silence means fine; ink means
+ * something to know.
  */
-type StatusTone = 'idle' | 'pending' | 'active' | 'danger';
+type ParticipantState =
+  'listening' | 'speaking' | 'muted' | 'pending' | 'failed';
 
-interface StatusInfo {
-  tone: StatusTone;
-  label: string;
-}
-
-const STATUS_DOT: Record<StatusTone, string> = {
-  idle: 'bg-border-strong',
-  pending: 'bg-border-strong',
-  active: 'bg-fg',
-  danger: 'bg-danger',
-};
-
-const STATUS_TEXT: Record<StatusTone, string> = {
-  idle: 'text-fg-muted',
-  pending: 'text-fg-muted',
-  active: 'text-fg',
-  danger: 'text-danger',
-};
-
-/** Shared by your own row, every peer row, and the header — one rule, one wording. */
-function participantStatus(
+/** Shared by your own row and every peer row — one rule, one wording. */
+function participantState(
   muted: boolean,
   speaking: boolean,
   connection?: VoicePeerStatus,
-): StatusInfo {
-  if (connection === 'failed') return { tone: 'danger', label: 'Failed' };
+): { state: ParticipantState; label: string } {
+  if (connection === 'failed') return { state: 'failed', label: 'Failed' };
   if (connection === 'disconnected')
-    return { tone: 'pending', label: 'Reconnecting' };
+    return { state: 'pending', label: 'Reconnecting' };
   if (connection === 'connecting')
-    return { tone: 'pending', label: 'Connecting' };
-  if (muted) return { tone: 'danger', label: 'Muted' };
+    return { state: 'pending', label: 'Connecting' };
+  if (muted) return { state: 'muted', label: 'Muted' };
   return speaking
-    ? { tone: 'active', label: 'Speaking' }
-    : { tone: 'idle', label: 'Listening' };
+    ? { state: 'speaking', label: 'Speaking' }
+    : { state: 'listening', label: 'Listening' };
 }
 
 /**
- * The header reports the *session*, never your microphone. Voice activity
- * already has two homes — your row in the list and the input meter — and
- * printing "Speaking" twice, 90px apart, was the panel's loudest redundancy.
- * So each tier says one thing: header = connection, rows = people, meter =
- * signal.
+ * The session in one phrase, for the live region only.
+ *
+ * It used to be printed across the top of the panel. Every one of its states
+ * has a better home now — "Joining" belongs on the key you pressed to join,
+ * "3 in call" is the list of three people directly below it, "Not connected"
+ * is the Join key being the only thing on offer — so on screen the header was
+ * a tier restating its own contents. A screen reader has no such layout, so
+ * the sentence stays, unseen and polite.
  */
-function sessionStatus(
-  status: VoiceStatus,
-  peopleInCall: number,
-): StatusInfo {
+function sessionStatus(status: VoiceStatus, peopleInCall: number): string {
   switch (status) {
     case 'connecting':
-      return { tone: 'pending', label: 'Joining' };
+      return 'Joining voice chat';
     case 'test-connecting':
-      return { tone: 'pending', label: 'Starting test' };
+      return 'Starting microphone test';
     case 'testing':
-      return { tone: 'active', label: 'Mic test' };
+      return 'Microphone test running';
     case 'joined':
-      return {
-        tone: 'active',
-        label: peopleInCall === 1 ? 'Just you' : `${peopleInCall} in call`,
-      };
+      return peopleInCall === 1
+        ? 'In voice chat, just you'
+        : `In voice chat, ${peopleInCall} people`;
     default:
-      return { tone: 'idle', label: 'Not connected' };
+      return 'Not in voice chat';
   }
 }
 
 let cachedCallPeers: VoiceCallPeer[] = [];
 
-function selectCallPeers({ peers }: { peers: PeerPresence[] }): VoiceCallPeer[] {
+function selectCallPeers({
+  peers,
+}: {
+  peers: PeerPresence[];
+}): VoiceCallPeer[] {
   const next = peers
     .filter(
       (peer): peer is PeerPresence & { voice: VoicePresence } =>
@@ -174,19 +158,34 @@ function selectCallPeers({ peers }: { peers: PeerPresence[] }): VoiceCallPeer[] 
   return next;
 }
 
+/**
+ * Voice chat.
+ *
+ * Two zones, the same grammar the music panel uses, so the board's popovers
+ * read alike:
+ *
+ *   above the hairline   the call — who is in it, and getting in or out
+ *   below it, on panel   your microphone — its level, its gate, its filter
+ *
+ * The split is what makes the panel small. Everything below the line is set
+ * once and then never thought about again, so it stops competing with the two
+ * controls that are actually pressed in a call: mute, and leave.
+ *
+ * Mute is the loudest thing on the panel because it is the one control people
+ * hit mid-sentence, and because talking into a dead microphone is the only
+ * mistake here that wastes somebody else's time. Leaving is neither urgent nor
+ * ambiguous, so it is a key beside it rather than a peer of it.
+ */
 export const VoiceControls = memo(function VoiceControls({
   identity,
   showLabel = false,
   toolbarItem = false,
 }: VoiceControlsProps) {
   const noiseCancellationId = useId();
-  const gateThresholdLabelId = useId();
-  const gateThresholdHintId = useId();
   const [open, setOpen] = useState(false);
   const status = useVoiceStore((state) => state.status);
   const muted = useVoiceStore((state) => state.muted);
   const speaking = useVoiceStore((state) => state.speaking);
-  const gateThresholdDb = useVoiceStore((state) => state.gateThresholdDb);
   const noiseCancellation = useVoiceStore((state) => state.noiseCancellation);
   const error = useVoiceStore((state) => state.error);
   const peerStatuses = useVoiceStore((state) => state.peerStatuses);
@@ -196,15 +195,18 @@ export const VoiceControls = memo(function VoiceControls({
     (peerStatus) => peerStatus === 'failed',
   );
   const engaged = status === 'joined' || status === 'testing';
-  const session = sessionStatus(status, callPeers.length + 1);
+  const joining = status === 'connecting';
+  const testing = status === 'testing';
+  const testStarting = status === 'test-connecting';
+  const sessionLabel = sessionStatus(status, callPeers.length + 1);
   // The trigger is the only voice affordance visible with the panel closed, so
   // its label stays about your microphone rather than about the session.
   const triggerLabel =
     status === 'idle'
       ? 'Voice chat'
       : status === 'joined'
-        ? `Voice chat: ${participantStatus(muted, speaking).label}`
-        : `Voice chat: ${session.label}`;
+        ? `Voice chat: ${participantState(muted, speaking).label}`
+        : `Voice chat: ${sessionLabel}`;
 
   useEffect(() => {
     const previous = previousFeedbackState.current;
@@ -233,12 +235,7 @@ export const VoiceControls = memo(function VoiceControls({
       onOpenChange={(nextOpen) => {
         setOpen(nextOpen);
         if (nextOpen) primeVoiceSounds();
-        if (
-          !nextOpen &&
-          (status === 'test-connecting' || status === 'testing')
-        ) {
-          stopVoiceTest();
-        }
+        if (!nextOpen && (testStarting || testing)) stopVoiceTest();
       }}
     >
       <TooltipProvider delay={300}>
@@ -267,16 +264,17 @@ export const VoiceControls = memo(function VoiceControls({
               />
             }
           >
-            {status === 'connecting' || status === 'test-connecting' ? (
+            {joining || testStarting ? (
               <LoaderCircle aria-hidden="true" className="animate-spin" />
-            ) : status === 'testing' ? (
+            ) : testing ? (
               <AudioLines aria-hidden="true" />
             ) : status === 'joined' && muted ? (
               <MicOff aria-hidden="true" className="text-danger" />
             ) : status === 'joined' && speaking ? (
-              // No pulse: the icon swap already says "live", and a throbbing
-              // control in permanent chrome is the opposite of calm.
-              <AudioLines aria-hidden="true" />
+              // The board's one mark for "audio is happening here, now" — the
+              // same figure the music rail uses, and the same one the talking
+              // person's row carries inside the panel.
+              <LevelMeter className="size-4" />
             ) : (
               <Mic aria-hidden="true" />
             )}
@@ -292,33 +290,19 @@ export const VoiceControls = memo(function VoiceControls({
         sideOffset={10}
         className={cn(
           CHROME_CONTROLS,
-          'w-[min(20rem,calc(100vw-2rem))] gap-6 p-4',
+          'w-[min(20rem,calc(100vw-2rem))] gap-0 overflow-hidden p-0',
         )}
       >
-        {/*
-          One status readout, fixed in the header, for every state. The body
-          below then only ever holds controls, so switching state swaps a
-          button row rather than reflowing the whole panel.
-        */}
-        <PopoverHeader className="flex-row items-center justify-between gap-3">
-          <PopoverTitle>Voice chat</PopoverTitle>
-          <span
-            role="status"
-            aria-live="polite"
-            className="flex shrink-0 items-center gap-2 text-xs"
-          >
-            <StatusDot tone={session.tone} />
-            <span className={STATUS_TEXT[session.tone]}>{session.label}</span>
-          </span>
-        </PopoverHeader>
+        {/* The key that opened this says "Voice chat"; repeating it in a
+            heading spends a tier on a word already on screen. Kept for the
+            accessible name, which has no such context, and with it the running
+            commentary the deleted header used to carry. */}
+        <PopoverTitle className="sr-only">Voice chat</PopoverTitle>
+        <span role="status" aria-live="polite" className="sr-only">
+          {sessionLabel}
+        </span>
 
-        {/*
-          With no rules to divide them, the tiers are held apart by gap alone:
-          24px between them, 12px inside this one, 16px inside the settings
-          block. The steps have to stay clearly unequal or the panel flattens
-          back into one undifferentiated list.
-        */}
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-3 p-3">
           {error ? (
             <div
               role="alert"
@@ -346,6 +330,7 @@ export const VoiceControls = memo(function VoiceControls({
               <VoiceParticipant
                 name={`${identity.name} (you)`}
                 color={identity.color}
+                local
                 muted={muted}
                 speaking={speaking}
               />
@@ -362,129 +347,138 @@ export const VoiceControls = memo(function VoiceControls({
             </ul>
           ) : null}
 
-          {status === 'connecting' || status === 'test-connecting' ? (
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              className="h-9"
-              onClick={status === 'connecting' ? leaveVoice : stopVoiceTest}
-            >
-              {status === 'connecting' ? 'Cancel' : 'Cancel test'}
-            </Button>
-          ) : status === 'joined' ? (
-            <div className="flex items-center gap-2.5">
-              <Toggle
-                pressed={!muted}
-                onPressedChange={() => setMuted(!muted)}
+          {status === 'joined' ? (
+            <div className="flex items-center gap-2">
+              {/* Full width, and the only filled key in the panel. Colour says
+                  which way it is pointing: muted is the state that costs you
+                  something, so it is the state that is marked. */}
+              <Button
+                type="button"
                 variant="outline"
-                size="sm"
+                aria-pressed={muted}
+                aria-label={
+                  muted
+                    ? 'Unmute microphone, currently muted'
+                    : 'Mute microphone'
+                }
                 className={cn(
-                  'h-9 flex-1',
-                  muted && 'border-danger-border bg-danger-bg text-danger',
+                  'h-10 flex-1 text-sm',
+                  muted &&
+                    'border-danger-border bg-danger-bg text-danger hover:bg-danger-bg',
                 )}
-                aria-label={muted ? 'Unmute microphone' : 'Mute microphone'}
+                onClick={() => setMuted(!muted)}
               >
                 {muted ? (
-                  <MicOff aria-hidden="true" data-icon="inline-start" />
+                  <MicOff aria-hidden="true" />
                 ) : (
-                  <Mic aria-hidden="true" data-icon="inline-start" />
+                  <Mic aria-hidden="true" />
                 )}
                 {muted ? 'Unmute' : 'Mute'}
-              </Toggle>
-              {/* Leaving a call is routine and reversible, so it stays neutral.
-                  Red in this panel means "muted" and nothing else. */}
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="h-9"
-                onClick={leaveVoice}
-              >
-                <PhoneOff aria-hidden="true" data-icon="inline-start" />
-                Leave
               </Button>
+              {/* Leaving is routine and reversible, so it is a key beside the
+                  one you actually press rather than a second half of the row. */}
+              <TooltipProvider delay={300}>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        className="size-10"
+                        aria-label="Leave voice chat"
+                        onClick={leaveVoice}
+                      />
+                    }
+                  >
+                    <PhoneOff aria-hidden="true" />
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">Leave</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
             </div>
           ) : (
-            <div className="grid grid-cols-2 gap-2.5">
-              {/* "Join muted" states the behaviour instead of describing it in
-                  a sentence above the button. */}
+            <div className="flex flex-col gap-1.5">
+              {/* Every transient state is reported by the key that caused it,
+                  which is why there is no status line above. */}
               <Button
                 type="button"
-                size="sm"
-                className="h-9"
+                className="h-10 w-full text-sm"
+                disabled={joining}
                 onClick={() => void joinVoice()}
               >
-                <Mic aria-hidden="true" data-icon="inline-start" />
-                {error ? 'Try again' : 'Join muted'}
+                {joining ? (
+                  <LoaderCircle aria-hidden="true" className="animate-spin" />
+                ) : (
+                  <Mic aria-hidden="true" />
+                )}
+                {joining
+                  ? 'Joining'
+                  : error
+                    ? 'Try again'
+                    : // States the behaviour rather than describing it in a
+                      // sentence above the key.
+                      'Join muted'}
               </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="h-9"
-                onClick={
-                  status === 'testing'
-                    ? stopVoiceTest
-                    : () => void startVoiceTest()
-                }
-              >
-                <AudioLines aria-hidden="true" data-icon="inline-start" />
-                {status === 'testing' ? 'Stop test' : 'Test mic'}
-              </Button>
+              {joining ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="w-full text-fg-muted"
+                  onClick={leaveVoice}
+                >
+                  Cancel
+                </Button>
+              ) : (
+                // Testing has a visible result now: the meter below wakes up.
+                // So the key only has to start it.
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="w-full text-fg-muted"
+                  disabled={testStarting}
+                  onClick={
+                    testing ? stopVoiceTest : () => void startVoiceTest()
+                  }
+                >
+                  {testStarting ? (
+                    <LoaderCircle aria-hidden="true" className="animate-spin" />
+                  ) : (
+                    <AudioLines aria-hidden="true" />
+                  )}
+                  {testStarting
+                    ? 'Starting test'
+                    : testing
+                      ? 'Stop mic test'
+                      : 'Test microphone'}
+                </Button>
+              )}
             </div>
           )}
         </div>
 
-        <div className="flex flex-col gap-4">
-
-          <SettingRow
-            label="Noise cancellation"
-            hint="Filters steady background hum"
+        {/* Below the line: your microphone. Nobody else is affected by
+            anything here, and nothing here changes during a call — which is
+            exactly why it can sit at the bottom on its own ground instead of
+            taking two tiers out of the middle of the panel. */}
+        <div className="group/chrome flex flex-col border-t border-border-subtle bg-panel px-3 py-1.5 [--chrome-hover:var(--color-surface)]">
+          <MicRail />
+          <label
             htmlFor={noiseCancellationId}
-            trailing={
-              <Switch
-                id={noiseCancellationId}
-                checked={noiseCancellation}
-                onCheckedChange={setNoiseCancellation}
-              />
-            }
-          />
-
-          <SettingRow
-            label="Voice activation"
-            hint="Your mic opens above this level"
-            labelId={gateThresholdLabelId}
-            hintId={gateThresholdHintId}
-            trailing={
-              <output className="shrink-0 font-mono text-xs tabular-nums text-fg-muted">
-                {formatDb(gateThresholdDb)}
-              </output>
-            }
+            className="flex h-8 items-center justify-between gap-3"
           >
-            {/*
-              Meter and slider share one axis: the slider uses edge thumb
-              alignment, so the thumb sits exactly under the point on the meter
-              where the gate opens. The filled slider track is the blocked
-              range — sound passes when the bar above overruns it.
-            */}
-            <div className="flex flex-col gap-2">
-              <VoiceInputMeter />
-              <Slider
-                aria-labelledby={gateThresholdLabelId}
-                aria-describedby={gateThresholdHintId}
-                min={MIN_VOICE_LEVEL_DB}
-                max={MAX_VOICE_LEVEL_DB}
-                step={1}
-                value={gateThresholdDb}
-                onValueChange={(nextValue) =>
-                  setGateThreshold(
-                    Array.isArray(nextValue) ? nextValue[0]! : nextValue,
-                  )
-                }
-              />
-            </div>
-          </SettingRow>
+            <span className="text-xs text-fg-secondary">
+              Noise cancellation
+            </span>
+            <Switch
+              id={noiseCancellationId}
+              size="sm"
+              checked={noiseCancellation}
+              onCheckedChange={setNoiseCancellation}
+            />
+          </label>
         </div>
       </PopoverContent>
     </Popover>
@@ -492,115 +486,117 @@ export const VoiceControls = memo(function VoiceControls({
 });
 
 /**
+ * Your microphone, as one object.
+ *
+ * The bar is the live input level and the mark standing in it is the level
+ * your voice has to clear before anything is transmitted. They were two
+ * stacked controls that merely lined up; making them one thing means they
+ * cannot stop lining up, and it means the gate — an expert setting almost
+ * nobody should ever touch — costs no height at all, because it rides on a
+ * meter you want anyway.
+ *
+ * The reading in decibels is the only jargon in the panel, so it stays out of
+ * sight until you reach for the bar.
+ */
+function MicRail() {
+  const status = useVoiceStore((state) => state.status);
+  const inputLevelDb = useVoiceStore((state) => state.inputLevelDb);
+  const speaking = useVoiceStore((state) => state.speaking);
+  const gateThresholdDb = useVoiceStore((state) => state.gateThresholdDb);
+  const live = status === 'joined' || status === 'testing';
+
+  return (
+    <div className="flex h-8 items-center gap-2">
+      <span
+        aria-hidden="true"
+        className={cn(
+          'flex size-3.5 shrink-0 items-center justify-center',
+          live ? 'text-fg-muted' : 'text-fg-subtle',
+        )}
+      >
+        <Mic className="size-3.5" />
+      </span>
+
+      <SliderPrimitive.Root
+        // Centre alignment: the mark's middle is the threshold, and the fill
+        // behind it is a percentage of the same track, so a voice that reaches
+        // the mark is a voice that opens the gate. Nothing to keep in step.
+        thumbAlignment="center"
+        min={MIN_VOICE_LEVEL_DB}
+        max={MAX_VOICE_LEVEL_DB}
+        step={1}
+        value={gateThresholdDb}
+        aria-label="Voice activation level"
+        aria-valuetext={`${formatDb(gateThresholdDb)}, microphone ${
+          speaking ? 'open' : 'closed'
+        }`}
+        onValueChange={(nextValue) =>
+          setGateThreshold(Array.isArray(nextValue) ? nextValue[0]! : nextValue)
+        }
+        className="min-w-0 flex-1"
+      >
+        <SliderPrimitive.Control className="relative flex h-6 w-full touch-none items-center select-none">
+          <SliderPrimitive.Track className="relative h-2 w-full grow overflow-hidden rounded-full bg-sunken select-none">
+            <span
+              aria-hidden="true"
+              style={{
+                width: `${live ? voiceLevelPercent(inputLevelDb) : 0}%`,
+              }}
+              className={cn(
+                'block h-full rounded-full',
+                'transition-[width] duration-75 motion-reduce:transition-none',
+                speaking ? 'bg-check' : 'bg-border-strong',
+              )}
+            />
+          </SliderPrimitive.Track>
+          {/* A hairline mark, in a hit area wide enough to grab. Nothing is
+              lifted: on this board a mark is a change of fill. */}
+          <SliderPrimitive.Thumb className="flex h-6 w-4 items-center justify-center rounded-compact ring-focus/50 select-none has-[:focus-visible]:ring-4">
+            <span
+              aria-hidden="true"
+              className="h-3.5 w-0.5 rounded-full bg-fg"
+            />
+          </SliderPrimitive.Thumb>
+        </SliderPrimitive.Control>
+      </SliderPrimitive.Root>
+
+      <span
+        aria-hidden="true"
+        className={cn(
+          HOVER_REVEAL,
+          'w-12 shrink-0 text-right font-mono text-2xs tabular-nums text-fg-subtle',
+        )}
+      >
+        {formatDb(gateThresholdDb)}
+      </span>
+    </div>
+  );
+}
+
+/**
  * Typographic minus, and a thin space before the unit — a mono space between
  * number and unit is nearly a full character wide and pulls the two apart.
  */
 function formatDb(db: number) {
-  return `${db.toString().replace('-', '−')} dB`;
-}
-
-/**
- * Fixed-size so a tone change never nudges the label beside it, including the
- * swap to the spinner.
- */
-function StatusDot({ tone }: { tone: StatusTone }) {
-  return (
-    <span
-      aria-hidden="true"
-      className="flex size-3 shrink-0 items-center justify-center"
-    >
-      {tone === 'pending' ? (
-        <LoaderCircle className="size-3 animate-spin text-fg-muted motion-reduce:animate-none" />
-      ) : (
-        <span className={cn('size-1.5 rounded-full', STATUS_DOT[tone])} />
-      )}
-    </span>
-  );
-}
-
-/** Both device settings use this one row, so they cannot drift apart. */
-function SettingRow({
-  label,
-  hint,
-  labelId,
-  hintId,
-  htmlFor,
-  trailing,
-  children,
-}: {
-  label: string;
-  hint: string;
-  labelId?: string;
-  hintId?: string;
-  htmlFor?: string;
-  trailing: ReactNode;
-  children?: ReactNode;
-}) {
-  return (
-    <div className="flex flex-col gap-3">
-      <div className="flex items-start justify-between gap-4">
-        <span className="flex min-w-0 flex-col gap-1">
-          <label
-            id={labelId}
-            htmlFor={htmlFor}
-            className="text-sm font-medium text-fg"
-          >
-            {label}
-          </label>
-          <span id={hintId} className="text-xs text-fg-muted">
-            {hint}
-          </span>
-        </span>
-        {trailing}
-      </div>
-      {children}
-    </div>
-  );
-}
-
-function VoiceInputMeter() {
-  const inputLevelDb = useVoiceStore((state) => state.inputLevelDb);
-  const speaking = useVoiceStore((state) => state.speaking);
-  const inputLevelPercent = voiceLevelPercent(inputLevelDb);
-
-  return (
-    <div
-      role="meter"
-      aria-label="Microphone input level"
-      aria-valuemin={MIN_VOICE_LEVEL_DB}
-      aria-valuemax={MAX_VOICE_LEVEL_DB}
-      aria-valuenow={Math.round(inputLevelDb)}
-      aria-valuetext={`${Math.round(inputLevelDb)} decibels, ${
-        speaking ? 'voice active' : 'gate closed'
-      }`}
-      className="h-1.5 overflow-hidden rounded-full bg-panel"
-    >
-      <span
-        aria-hidden="true"
-        className={cn(
-          'block h-full transition-[width] duration-75 motion-reduce:transition-none',
-          speaking ? 'bg-fg' : 'bg-border-strong',
-        )}
-        style={{ width: `${inputLevelPercent}%` }}
-      />
-    </div>
-  );
+  return `${db.toString().replace('-', '−')} dB`;
 }
 
 function VoiceParticipant({
   name,
   color,
+  local = false,
   muted,
   speaking,
   connectionStatus,
 }: {
   name: string;
   color: string;
+  local?: boolean;
   muted: boolean;
   speaking: boolean;
   connectionStatus?: VoicePeerStatus;
 }) {
-  const { tone, label } = participantStatus(muted, speaking, connectionStatus);
+  const { state, label } = participantState(muted, speaking, connectionStatus);
   return (
     <li className="flex h-9 items-center gap-2.5">
       <span
@@ -610,16 +606,37 @@ function VoiceParticipant({
       >
         {name.trim().charAt(0).toUpperCase() || '?'}
       </span>
-      <span className="min-w-0 flex-1 truncate text-sm text-fg">{name}</span>
-      {/*
-        Fixed width, not shrink-to-fit: the labels differ in length, so a
-        right-aligned group scatters the dots across ~60px and the list stops
-        reading as a column. 104px = the 12px dot, the 8px gap, and the longest
-        label ("Reconnecting", 78px at 12px Inter) with room for a fallback face.
-      */}
-      <span className="flex w-26 shrink-0 items-center gap-2 text-xs">
-        <StatusDot tone={tone} />
-        <span className={cn('truncate', STATUS_TEXT[tone])}>{label}</span>
+      <span
+        className={cn(
+          'min-w-0 flex-1 truncate text-sm',
+          state === 'speaking' ? 'font-medium text-fg' : 'text-fg-secondary',
+        )}
+      >
+        {name}
+      </span>
+      {/* The word is always there for a screen reader; on screen only the
+          states worth a glance draw anything. */}
+      <span className="sr-only">{label}</span>
+      <span
+        aria-hidden="true"
+        className="flex shrink-0 items-center justify-end gap-1.5"
+      >
+        {state === 'speaking' ? (
+          <LevelMeter className="text-fg" />
+        ) : state === 'muted' ? (
+          // Your own dead microphone is worth colour; somebody else's is
+          // simply a fact about them.
+          <MicOff
+            className={cn('size-3.5', local ? 'text-danger' : 'text-fg-subtle')}
+          />
+        ) : state === 'pending' ? (
+          <LoaderCircle className="size-3.5 animate-spin text-fg-muted motion-reduce:animate-none" />
+        ) : state === 'failed' ? (
+          <span className="flex items-center gap-1.5 text-xs text-danger">
+            <TriangleAlert className="size-3.5" />
+            {label}
+          </span>
+        ) : null}
       </span>
     </li>
   );

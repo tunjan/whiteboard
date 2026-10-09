@@ -1,111 +1,29 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Compass, Lock, Minus, Plus, RefreshCw, Unlock } from 'lucide-react';
+import { Compass, Lock, RotateCcw, Unlock } from 'lucide-react';
 import type { GraphViewport } from '@whiteboard/shared';
 import { Button } from '@/components/ui/button';
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-} from '@/components/ui/input-group';
+import { Input } from '@/components/ui/input';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import {
   Tooltip,
   TooltipContent,
-  TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { DEFAULT_GRAPH_VIEWPORT } from '@/canvas/graph-defaults';
 import { GRAPH_VIEWPORT_PRESETS } from '@/canvas/graph-presets';
 import { cn } from '@/lib/utils';
+import {
+  MATH_SYMBOL,
+  NUMBER_FIELD,
+  SEGMENTED_ITEM,
+  SEGMENTED_TRACK,
+} from './graph-panel-styles';
 import { formatNumber } from './graph-panel-utils';
-
-/* ─── Precision Viewport with Quick Framing Presets & 1:1 Aspect Lock ──────── */
 
 const VIEW_RANGE_AXES = [
   { label: 'X axis', symbol: 'x', minKey: 'xMin', maxKey: 'xMax' },
   { label: 'Y axis', symbol: 'y', minKey: 'yMin', maxKey: 'yMax' },
 ] as const;
-
-function RangeStepper({
-  id,
-  label,
-  value,
-  onValueChange,
-  onCommit,
-  onNudge,
-  className,
-}: {
-  id: string;
-  label: string;
-  value: string;
-  onValueChange: (value: string) => void;
-  onCommit: () => void;
-  onNudge: (delta: number) => void;
-  className?: string;
-}) {
-  return (
-    <InputGroup
-      className={cn(
-        'h-8 overflow-hidden rounded-md shadow-e1 focus-within:ring-0 focus-within:border-border-strong',
-        className,
-      )}
-    >
-      <InputGroupAddon
-        align="inline-start"
-        className="h-full border-r border-border p-0 m-0 has-[>button]:ml-0 shrink-0"
-      >
-        <Button
-          type="button"
-          variant="ghost"
-          aria-label={`Decrease ${label.toLowerCase()}`}
-          onClick={() => onNudge(-1)}
-          className="h-full w-6.5 rounded-none text-fg-secondary hover:bg-surface-hover hover:text-fg focus-visible:relative focus-visible:z-1 focus-visible:ring-0 focus-visible:outline-none"
-        >
-          <Minus
-            className="size-3"
-            data-icon="inline-start"
-            aria-hidden="true"
-          />
-        </Button>
-      </InputGroupAddon>
-      <InputGroupInput
-        id={id}
-        type="number"
-        step="any"
-        inputMode="decimal"
-        aria-label={label}
-        value={value}
-        onChange={(event) => onValueChange(event.target.value)}
-        onBlur={onCommit}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter') {
-            event.preventDefault();
-            onCommit();
-            event.currentTarget.blur();
-          }
-        }}
-        className="h-full !px-1 text-center font-mono text-xs font-medium tabular-nums shadow-none outline-none ring-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-      />
-      <InputGroupAddon
-        align="inline-end"
-        className="h-full border-l border-border p-0 m-0 has-[>button]:mr-0 shrink-0"
-      >
-        <Button
-          type="button"
-          variant="ghost"
-          aria-label={`Increase ${label.toLowerCase()}`}
-          onClick={() => onNudge(1)}
-          className="h-full w-6.5 rounded-none text-fg-secondary hover:bg-surface-hover hover:text-fg focus-visible:relative focus-visible:z-1 focus-visible:ring-0 focus-visible:outline-none"
-        >
-          <Plus
-            className="size-3"
-            data-icon="inline-start"
-            aria-hidden="true"
-          />
-        </Button>
-      </InputGroupAddon>
-    </InputGroup>
-  );
-}
 
 function PresetIcon({ name, className }: { name: string; className?: string }) {
   switch (name) {
@@ -319,12 +237,6 @@ export function ViewRange({
     setDraft((current) => ({ ...current, [key]: formatNumber(viewport[key]) }));
   };
 
-  const nudge = (key: keyof GraphViewport, delta: number) => {
-    const drafted = Number(draft[key]);
-    const value = Number.isFinite(drafted) ? drafted : viewport[key];
-    commit(key, formatNumber(value + delta));
-  };
-
   const activePreset = GRAPH_VIEWPORT_PRESETS.find((preset) => {
     const targetVp = aspectLocked
       ? applyIsotropicY(preset.viewport)
@@ -352,162 +264,109 @@ export function ViewRange({
     onChange(aspectLocked ? applyIsotropicY(nextViewport) : nextViewport);
   };
 
+  const bound = (key: keyof GraphViewport, label: string) => (
+    <Input
+      type="number"
+      step="any"
+      inputMode="decimal"
+      aria-label={label}
+      value={draft[key]}
+      onChange={(event) =>
+        setDraft((current) => ({ ...current, [key]: event.target.value }))
+      }
+      onBlur={() => commit(key, draft[key])}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') event.currentTarget.blur();
+      }}
+      className={cn(NUMBER_FIELD, 'min-w-0 flex-1')}
+    />
+  );
+
   return (
     <div className="flex flex-col gap-2">
-      {/* ── Quick Range Presets & Viewport Actions ── */}
-      <TooltipProvider delay={200}>
-        <div className="flex w-full items-center gap-1">
-          <div
-            role="group"
-            aria-label="Quick range presets"
-            className="flex min-w-0 grow items-center divide-x divide-border overflow-hidden rounded-lg border border-border bg-surface shadow-e1"
-          >
-            {GRAPH_VIEWPORT_PRESETS.map((preset) => {
-              const isActive = activePreset?.name === preset.name;
-              return (
-                <Tooltip key={preset.name}>
-                  <TooltipTrigger
-                    render={
-                      <button
-                        type="button"
-                        aria-pressed={isActive}
-                        aria-label={`${preset.name}: ${preset.label}`}
-                        onClick={() => applyPreset(preset.name)}
-                        className={cn(
-                          'flex h-8 min-w-0 grow basis-0 items-center justify-center transition-colors duration-instant select-none outline-none focus-visible:relative focus-visible:z-10 focus-visible:ring-2 focus-visible:ring-focus',
-                          isActive
-                            ? 'bg-panel text-fg shadow-2xs'
-                            : 'text-fg-secondary hover:bg-surface-hover hover:text-fg',
-                        )}
-                      >
-                        <PresetIcon name={preset.name} />
-                      </button>
-                    }
+      <div className="flex items-center gap-1">
+        <ToggleGroup
+          aria-label="Window"
+          value={activePreset ? [activePreset.name] : []}
+          onValueChange={(value) => {
+            if (value[0]) applyPreset(value[0]);
+          }}
+          className={SEGMENTED_TRACK}
+        >
+          {GRAPH_VIEWPORT_PRESETS.map((preset) => (
+            <Tooltip key={preset.name}>
+              <TooltipTrigger
+                render={
+                  <ToggleGroupItem
+                    value={preset.name}
+                    aria-label={`${preset.name}, ${preset.label}`}
+                    className={SEGMENTED_ITEM}
                   />
-                  <TooltipContent
-                    side="top"
-                    className="flex flex-col gap-0.5 text-center"
-                  >
-                    <span className="font-semibold text-xs">{preset.name}</span>
-                    <span className="font-mono text-2xs text-fg-subtle">
-                      {preset.label} · {preset.description}
-                    </span>
-                  </TooltipContent>
-                </Tooltip>
-              );
-            })}
-          </div>
-
-          <div className="flex items-center gap-0.5 shrink-0">
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    type="button"
-                    variant={aspectLocked ? 'subtle' : 'ghost'}
-                    size="icon-sm"
-                    aria-label={
-                      aspectLocked
-                        ? 'Unlock 1:1 aspect ratio'
-                        : 'Lock 1:1 aspect ratio'
-                    }
-                    aria-pressed={aspectLocked}
-                    onClick={toggleAspectLock}
-                    className={cn(
-                      'size-8 rounded-lg text-fg-secondary hover:text-fg border border-transparent',
-                      aspectLocked &&
-                        'border-border bg-panel text-fg font-semibold shadow-2xs',
-                    )}
-                  >
-                    {aspectLocked ? (
-                      <Lock
-                        className="size-3.5"
-                        data-icon="inline-start"
-                        aria-hidden="true"
-                      />
-                    ) : (
-                      <Unlock
-                        className="size-3.5"
-                        data-icon="inline-start"
-                        aria-hidden="true"
-                      />
-                    )}
-                  </Button>
                 }
-              />
-              <TooltipContent side="top">
-                {aspectLocked ? 'Unlock 1:1 aspect' : 'Lock 1:1 aspect'}
-              </TooltipContent>
+              >
+                <PresetIcon name={preset.name} />
+              </TooltipTrigger>
+              <TooltipContent side="top">{preset.name}</TooltipContent>
             </Tooltip>
+          ))}
+        </ToggleGroup>
 
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label="Reset to standard [-10, 10]"
-                    onClick={() => {
-                      const next = { ...DEFAULT_GRAPH_VIEWPORT };
-                      onChange(aspectLocked ? applyIsotropicY(next) : next);
-                    }}
-                    className="size-8 rounded-lg text-fg-secondary hover:text-fg"
-                  >
-                    <RefreshCw
-                      className="size-3.5"
-                      data-icon="inline-start"
-                      aria-hidden="true"
-                    />
-                  </Button>
-                }
-              />
-              <TooltipContent side="top">Reset (Standard)</TooltipContent>
-            </Tooltip>
-          </div>
-        </div>
-      </TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Lock 1:1 scale"
+                aria-pressed={aspectLocked}
+                onClick={toggleAspectLock}
+                className="text-fg-subtle aria-pressed:bg-tb-sel-bg aria-pressed:text-tb-sel-fg"
+              >
+                {aspectLocked ? (
+                  <Lock className="size-4" aria-hidden="true" />
+                ) : (
+                  <Unlock className="size-4" aria-hidden="true" />
+                )}
+              </Button>
+            }
+          />
+          <TooltipContent side="top">1:1 scale</TooltipContent>
+        </Tooltip>
 
-      {/* ── Axis Coordinate Range Steppers ── */}
-      <div className="flex flex-col gap-1.5">
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Reset view"
+                onClick={() => {
+                  const next = { ...DEFAULT_GRAPH_VIEWPORT };
+                  onChange(aspectLocked ? applyIsotropicY(next) : next);
+                }}
+                className="text-fg-subtle"
+              >
+                <RotateCcw className="size-4" aria-hidden="true" />
+              </Button>
+            }
+          />
+          <TooltipContent side="top">Reset</TooltipContent>
+        </Tooltip>
+      </div>
+
+      <div className="flex items-center gap-4">
         {VIEW_RANGE_AXES.map(({ label, symbol, minKey, maxKey }) => (
-          <div key={label} className="flex items-center gap-2">
-            <span
-              className="grid size-7 shrink-0 place-items-center rounded-md border border-border/70 bg-panel font-mono text-xs font-semibold text-fg-secondary select-none"
-              aria-hidden="true"
-            >
+          <div key={label} className="flex min-w-0 flex-1 items-center gap-1.5">
+            <span aria-hidden="true" className={cn(MATH_SYMBOL, 'w-3 text-sm')}>
               {symbol}
             </span>
-
-            <div className="flex min-w-0 flex-1 items-center gap-1.5">
-              <label htmlFor={`graph-range-${minKey}`} className="sr-only">
-                {label} minimum
-              </label>
-              <RangeStepper
-                id={`graph-range-${minKey}`}
-                label={`${label} minimum`}
-                value={draft[minKey]}
-                onValueChange={(value) =>
-                  setDraft((current) => ({ ...current, [minKey]: value }))
-                }
-                onCommit={() => commit(minKey, draft[minKey])}
-                onNudge={(delta) => nudge(minKey, delta)}
-              />
-
-              <label htmlFor={`graph-range-${maxKey}`} className="sr-only">
-                {label} maximum
-              </label>
-              <RangeStepper
-                id={`graph-range-${maxKey}`}
-                label={`${label} maximum`}
-                value={draft[maxKey]}
-                onValueChange={(value) =>
-                  setDraft((current) => ({ ...current, [maxKey]: value }))
-                }
-                onCommit={() => commit(maxKey, draft[maxKey])}
-                onNudge={(delta) => nudge(maxKey, delta)}
-              />
-            </div>
+            {bound(minKey, `${label} minimum`)}
+            <span aria-hidden="true" className="text-xs text-fg-subtle">
+              –
+            </span>
+            {bound(maxKey, `${label} maximum`)}
           </div>
         ))}
       </div>

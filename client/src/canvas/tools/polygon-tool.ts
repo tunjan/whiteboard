@@ -24,6 +24,28 @@ export function createPolygonTool(): Tool {
   let start = { x: 0, y: 0 };
   let snapTargets: Bounds[] = [];
 
+  // Finish the in-flight shape, keeping it. Shared by pointer-up (normal
+  // finish) and commit (OS reclaimed the pointer mid-create — keep what was
+  // drawn rather than discarding via onCancel).
+  function finalize(ctx: ToolContext): void {
+    const id = creatingId;
+    creatingId = null;
+    snapTargets = [];
+    useSelectionStore.getState().setSnapGuides([]);
+    if (!id) return;
+    const shape = ctx.editor.getShape(id);
+    if (shape?.type !== 'polygon') return;
+    if (shape.props.w < CLICK_THRESHOLD && shape.props.h < CLICK_THRESHOLD) {
+      ctx.editor.updateShape(id, {
+        x: start.x - DEFAULT_SIZE / 2,
+        y: start.y - DEFAULT_SIZE / 2,
+        props: { w: DEFAULT_SIZE, h: DEFAULT_SIZE },
+      });
+    }
+    useSelectionStore.getState().setSelection([id]);
+    ctx.complete();
+  }
+
   return {
     id: 'polygon',
     label: 'Polygon',
@@ -73,22 +95,13 @@ export function createPolygonTool(): Tool {
     },
 
     onPointerUp(_info: ToolPointerInfo, ctx: ToolContext) {
-      const id = creatingId;
-      creatingId = null;
-      snapTargets = [];
-      useSelectionStore.getState().setSnapGuides([]);
-      if (!id) return;
-      const shape = ctx.editor.getShape(id);
-      if (shape?.type !== 'polygon') return;
-      if (shape.props.w < CLICK_THRESHOLD && shape.props.h < CLICK_THRESHOLD) {
-        ctx.editor.updateShape(id, {
-          x: start.x - DEFAULT_SIZE / 2,
-          y: start.y - DEFAULT_SIZE / 2,
-          props: { w: DEFAULT_SIZE, h: DEFAULT_SIZE },
-        });
-      }
-      useSelectionStore.getState().setSelection([id]);
-      ctx.complete();
+      finalize(ctx);
+    },
+
+    // The OS reclaimed the pointer mid-create (spurious pointercancel /
+    // lostpointercapture). Keep the shape drawn so far rather than discarding it.
+    onCommit(ctx: ToolContext) {
+      finalize(ctx);
     },
 
     // Pinch-to-zoom mid-create: drop the in-flight shape, stay in the tool.

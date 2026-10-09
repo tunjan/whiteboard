@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { IMAGE_THUMB_PX } from '../board/blobs';
 import { LOD_ZOOM_THRESHOLD, type Camera } from './camera';
 import { useCameraStore } from './use-camera-store';
 
@@ -28,6 +29,13 @@ export interface LodState {
    *  sub-pixel on screen; 0 renders the exact geometry. See
    *  {@link inkErrorLimit}. */
   inkErrorLimit: number;
+  /** World-unit footprint at or below which a shape covers too few pixels for
+   *  its own geometry to read, and is painted as a coverage-weighted box
+   *  instead; 0 keeps every shape's geometry. See {@link impostorCutoff}. */
+  impostorCutoff: number;
+  /** World-unit long side at or below which an image is drawn from its
+   *  thumbnail; 0 draws every original. See {@link imageThumbCutoff}. */
+  imageThumbCutoff: number;
 }
 
 /** Zoom below which a zero-length dot is too small for the browser to draw. */
@@ -38,6 +46,19 @@ const SOLID_LOD_ZOOM = 0.5;
 
 /** On-screen stroke width, in CSS pixels, below which a pattern stops reading. */
 const SOLID_LOD_SCREEN_WIDTH = 1.5;
+
+/**
+ * On-screen footprint, in CSS pixels, below which a shape's own geometry stops
+ * reading and a box of the same weight is indistinguishable from it.
+ *
+ * Larger than {@link SOLID_LOD_SCREEN_WIDTH} because it is a bound on the whole
+ * shape rather than on one stroke's width: at four pixels across, a squiggle,
+ * a loop and a letter are the same grey smudge, and which one it is survives
+ * only in how much of the box the ink fills — which is what the impostor
+ * carries. Below about two the shape is a single pixel and this could be
+ * larger; above about six the silhouette starts to read and it must not be.
+ */
+const IMPOSTOR_SCREEN_PX = 4;
 
 /**
  * The stroke size, in world units, at which sub-pixel detail stops reading at
@@ -124,12 +145,67 @@ export function inkErrorLimit(zoom: number): number {
   );
 }
 
+/**
+ * The world-unit footprint at `zoom` below which a shape is painted as a box.
+ *
+ * The whole-shape counterpart to {@link patternCutoff}: that one asks whether a
+ * stroke is too fine for its pattern to read, this one whether the shape is too
+ * small for its silhouette to. A stroke whose entire bounding box lands on four
+ * pixels contributes a smudge, and the several hundred path commands it is
+ * carrying all land on those same four pixels. Filling one box of the same
+ * weight is the same picture for a fraction of the fill.
+ *
+ * Quantized to zoom octaves rather than to whole world units, and this is the
+ * one place the two quantizers differ in kind. `patternCutoff` compares against
+ * a stroke *width*, which is a handful of small integers, so whole units are
+ * already coarse relative to the thing being tested. A footprint is any size at
+ * all, so whole units would step through dozens of values across a zoom-out —
+ * and each step is a store publish that every mounted shape pays for. Six
+ * octaves cover the same range. See {@link inkErrorLimit}, quantized the same
+ * way and for the same reason.
+ *
+ * The band's *upper* zoom edge sets the cutoff, so a shape is impostored only
+ * once it is comfortably under {@link IMPOSTOR_SCREEN_PX} rather than at the
+ * moment it crosses — the conservative direction, matching `inkErrorLimit`.
+ *
+ * It starts at {@link SOLID_LOD_ZOOM} for the reason the others do: above it a
+ * user is looking at shapes, not at a page of them, and a deliberately small
+ * dot examined up close is exactly the detail they zoomed in for. Returning 0
+ * there also leaves PNG export at full fidelity, which renders from the initial
+ * camera (see the note on the hooks in `lod.ts`).
+ */
+export function impostorCutoff(zoom: number): number {
+  if (!Number.isFinite(zoom) || zoom <= 0 || zoom >= SOLID_LOD_ZOOM) return 0;
+  return IMPOSTOR_SCREEN_PX / 2 ** Math.ceil(Math.log2(zoom));
+}
+
+/**
+ * The world-unit long side at `zoom` at or below which an image's thumbnail
+ * (`IMAGE_THUMB_PX`) still covers it: half the thumbnail's pixels in CSS
+ * pixels, so it stays sharp on a 2x display.
+ *
+ * Quantized to zoom octaves like {@link impostorCutoff}, using the band's upper
+ * edge so the on-screen size never exceeds the bound, and zero from the same
+ * {@link SOLID_LOD_ZOOM} up so an ordinary pinch publishes nothing new. Little
+ * is lost above it: at 0.5 a PDF page is ~400 CSS px, past the thumbnail's
+ * range anyway, and a screen holds too few images to reach the decode cliff.
+ * The zero also keeps thumbnails out of PNG export: `renderToStaticMarkup`
+ * reads this store's initial state, taken at the default zoom of 1, and an
+ * export — or the handwriting recognizer's raster — wants the original.
+ */
+export function imageThumbCutoff(zoom: number): number {
+  if (!Number.isFinite(zoom) || zoom <= 0 || zoom >= SOLID_LOD_ZOOM) return 0;
+  return IMAGE_THUMB_PX / 2 / 2 ** Math.ceil(Math.log2(zoom));
+}
+
 function lodFor(camera: Camera): LodState {
   return {
     patternCutoff: patternCutoff(camera.z),
     detail: camera.z >= LOD_ZOOM_THRESHOLD ? 'high' : 'low',
     dotLength: camera.z < DOT_ZOOM_THRESHOLD ? 9 : 0,
     inkErrorLimit: inkErrorLimit(camera.z),
+    impostorCutoff: impostorCutoff(camera.z),
+    imageThumbCutoff: imageThumbCutoff(camera.z),
   };
 }
 
@@ -154,7 +230,9 @@ useCameraStore.subscribe((state) => {
     next.patternCutoff === last.patternCutoff &&
     next.detail === last.detail &&
     next.dotLength === last.dotLength &&
-    next.inkErrorLimit === last.inkErrorLimit
+    next.inkErrorLimit === last.inkErrorLimit &&
+    next.impostorCutoff === last.impostorCutoff &&
+    next.imageThumbCutoff === last.imageThumbCutoff
   )
     return;
   last = next;

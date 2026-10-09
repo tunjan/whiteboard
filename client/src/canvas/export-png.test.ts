@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { EquationShape, Shape } from '@whiteboard/shared';
 import { typesetEquation } from './equation-render';
-import { countInvalidEquations, isExportable, rasterSize } from './export-png';
+import {
+  countInvalidEquations,
+  exportImageUrls,
+  isExportable,
+  rasterSize,
+} from './export-png';
 
 function equation(latex: string): EquationShape {
   return {
@@ -105,5 +110,34 @@ describe('raster sizing', () => {
     const { outW, outH } = rasterSize(10000, 0.01, 1);
     expect(outW).toBeGreaterThan(0);
     expect(outH).toBeGreaterThan(0);
+  });
+});
+
+describe('export image inlining', () => {
+  const stored = `/api/blobs/${'a1'.repeat(32)}.png`;
+
+  it('finds stored blob urls', () => {
+    expect(exportImageUrls(`<image href="${stored}"/>`)).toEqual([stored]);
+  });
+
+  // The regression: `imageHref` serves an object URL for every image this
+  // client placed, so a just-pasted image exported as an empty outline.
+  it('finds the object url of a locally placed image', () => {
+    const local = 'blob:http://localhost:5173/9a4f-1b2c';
+
+    expect(exportImageUrls(`<image href="${local}"/>`)).toEqual([local]);
+  });
+
+  it('deduplicates and keeps both forms', () => {
+    const local = 'blob:http://localhost:5173/9a4f-1b2c';
+    const svg = `<image href="${stored}"/><image href="${local}"/><image href="${local}"/>`;
+
+    expect(exportImageUrls(svg)).toEqual([stored, local]);
+  });
+
+  it('leaves an already-inlined image alone', () => {
+    expect(exportImageUrls('<image href="data:image/png;base64,AAAA"/>')).toEqual(
+      [],
+    );
   });
 });

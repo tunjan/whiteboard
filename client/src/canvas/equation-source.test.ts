@@ -210,7 +210,7 @@ describe('finding an unbalanced brace before a typeset fails', () => {
   });
 });
 
-describe('finding an unclosed \left', () => {
+describe('finding an unclosed \\left', () => {
   it('says nothing about a pair that matches', () => {
     expect(unbalancedDelimiter(String.raw`\left( x \right)`)).toBeNull();
     expect(unbalancedDelimiter('(x)')).toBeNull();
@@ -238,7 +238,7 @@ describe('finding an unclosed \left', () => {
     });
   });
 
-  it('reads a line break as an escape rather than a \left', () => {
+  it('reads a line break as an escape rather than a \\left', () => {
     // `\\left` is a row break followed by the letters "left", not a delimiter.
     expect(unbalancedDelimiter(String.raw`a \\left( b \right)`)).toMatchObject({
       action: 'Remove it',
@@ -271,7 +271,7 @@ describe('finding an environment that never ends', () => {
     );
   });
 
-  it('renames an \end whose environment disagrees with its \begin', () => {
+  it('renames an \\end whose environment disagrees with its \begin', () => {
     const problem = unclosedEnvironment(
       String.raw`\begin{aligned} x \end{align}`,
     );
@@ -283,7 +283,7 @@ describe('finding an environment that never ends', () => {
     );
   });
 
-  it('drops an \end that closes nothing', () => {
+  it('drops an \\end that closes nothing', () => {
     expect(unclosedEnvironment(String.raw`x \end{cases}`)).toMatchObject({
       action: 'Remove it',
       fix: { value: 'x ', caret: 2 },
@@ -355,7 +355,7 @@ describe('choosing which fault to report', () => {
   });
 });
 
-describe('locating a \left failure MathJax reported', () => {
+describe('locating a \\left failure MathJax reported', () => {
   it('points at the opener it never closed', () => {
     expect(
       locateLatexError(String.raw`\left( x`, 'Missing \\right. inserted'),

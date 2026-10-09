@@ -52,7 +52,7 @@ describe('isPrivateAddress', () => {
 
 describe('parseIpv6', () => {
   it('expands compressed forms to 16 bytes', () => {
-    expect(parseIpv6('::1')).toEqual([...new Array(15).fill(0), 1]);
+    expect(parseIpv6('::1')).toEqual([...Array.from<number>({ length: 15 }).fill(0), 1]);
     expect(parseIpv6('2001:db8::1')).toEqual([
       0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
     ]);

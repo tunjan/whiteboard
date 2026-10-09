@@ -5,6 +5,8 @@ export interface DocumentChanges {
   /** null is a full reset (page switch, load, or geometry metric change). */
   ids: ReadonlySet<string> | null;
   contentIds?: ReadonlySet<string> | null;
+  /** What each changed id held in `shapeStore` before this publish wrote it. */
+  previous: ReadonlyMap<string, Shape | undefined>;
 }
 const listeners = new Set<(change: DocumentChanges) => void>();
 export function subscribeDocumentChanges(

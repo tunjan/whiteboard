@@ -1,5 +1,4 @@
 import type { ReactNode } from 'react';
-import { renderToStaticMarkup } from 'react-dom/server';
 import { type Bounds, type Shape, unionBounds } from '@whiteboard/shared';
 import { descendantsOf } from './hierarchy';
 import { getEquationRender, typesetEquation } from './equation-render';
@@ -373,6 +372,9 @@ async function renderPngBlob(
   // a different size depending on the monitor it happened to be opened on.
   const { outW, outH, scale } = rasterSize(w, h, requestedScale ?? exportScale());
 
+  // Loaded on demand: the server renderer is ~500 KB of source that every board
+  // open would otherwise download for a feature used only on export.
+  const { renderToStaticMarkup } = await import('react-dom/server');
   const shapeMarkup = resolveCssVars(renderToStaticMarkup(tree));
   const inlined = await inlineBlobImages(shapeMarkup);
   const bg = resolveCssVars('var(--color-background)') || '#ffffff';
@@ -492,15 +494,31 @@ export function renderTree(renderSet?: Set<string>, rootFrameId?: string): React
   return <>{topLevel.map((shape) => render(shape, false))}{overlays}</>;
 }
 
-/** Fetch each `/api/blobs/...` image and inline it as a data URL (canvas taint). */
-async function inlineBlobImages(svg: string): Promise<string> {
-  const urls = [
+/**
+ * Every image URL the markup references, deduplicated.
+ *
+ * Two forms reach it, and both have to be inlined. `/api/blobs/...` is where a
+ * stored image lives. A `blob:` object URL is what `imageHref` hands back
+ * for an image *this* client placed, and it keeps handing it back for the rest
+ * of the session — so the just-pasted image is exactly the one the export sees
+ * as an object URL. Neither loads from inside the export: the SVG is rasterized
+ * through an `<img>`, which resolves no external resources at all.
+ */
+export function exportImageUrls(svg: string): string[] {
+  return [
     ...new Set(
       [
-        ...svg.matchAll(/\/api\/blobs\/[a-f0-9]{64}\.(?:png|jpg|webp|gif)/g),
+        ...svg.matchAll(
+          /\/api\/blobs\/[a-f0-9]{64}\.(?:png|jpg|webp|gif)|blob:[^"'\s]+/g,
+        ),
       ].map((m) => m[0]),
     ),
   ];
+}
+
+/** Fetch each image the markup references and inline it as a data URL (canvas taint). */
+async function inlineBlobImages(svg: string): Promise<string> {
+  const urls = exportImageUrls(svg);
   let out = svg;
   for (const url of urls) {
     try {

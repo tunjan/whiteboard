@@ -32,6 +32,9 @@ function enabledItems(root: HTMLElement): HTMLElement[] {
     (item) =>
       !item.hasAttribute('disabled') &&
       item.getAttribute('aria-disabled') !== 'true' &&
+      // A folded slot keeps its box while it animates shut, so a rect alone
+      // does not mean the key is reachable.
+      !item.closest('[inert]') &&
       item.getClientRects().length > 0,
   );
 }
@@ -71,7 +74,7 @@ export function useRovingToolbar<T extends HTMLElement>() {
       attributes: true,
       childList: true,
       subtree: true,
-      attributeFilter: ['aria-current', 'aria-disabled', 'aria-pressed', 'class', 'disabled'],
+      attributeFilter: ['aria-current', 'aria-disabled', 'aria-pressed', 'class', 'disabled', 'inert'],
     });
     window.addEventListener('resize', sync);
     return () => {

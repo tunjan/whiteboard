@@ -27,6 +27,34 @@ export function createFrameTool(): Tool {
   let start = { x: 0, y: 0 };
   let snapTargets: Bounds[] = [];
 
+  // Finish the in-flight frame, keeping it. Shared by pointer-up (normal
+  // finish) and commit (OS reclaimed the pointer mid-create — keep what was
+  // drawn rather than discarding via onCancel).
+  function finalize(ctx: ToolContext): void {
+    const id = creatingId;
+    creatingId = null;
+    snapTargets = [];
+    useSelectionStore.getState().setSnapGuides([]);
+    if (!id) return;
+    const frame = ctx.editor.getShape(id);
+    if (!frame || frame.type !== 'frame') return;
+
+    if (frame.props.w < CLICK_THRESHOLD && frame.props.h < CLICK_THRESHOLD) {
+      ctx.editor.updateShape(id, {
+        x: start.x,
+        y: start.y,
+        props: { w: DEFAULT_W, h: DEFAULT_H },
+      });
+    }
+
+    // Capture every unlocked sibling root completely enclosed by the final
+    // viewport, including groups and existing frames (nested frames).
+    captureEnclosedShapes(ctx.editor, id);
+
+    useSelectionStore.getState().setSelection([id]);
+    ctx.complete();
+  }
+
   return {
     id: 'frame',
     label: 'Frame',
@@ -84,28 +112,13 @@ export function createFrameTool(): Tool {
     },
 
     onPointerUp(_info: ToolPointerInfo, ctx: ToolContext) {
-      const id = creatingId;
-      creatingId = null;
-      snapTargets = [];
-      useSelectionStore.getState().setSnapGuides([]);
-      if (!id) return;
-      const frame = ctx.editor.getShape(id);
-      if (!frame || frame.type !== 'frame') return;
+      finalize(ctx);
+    },
 
-      if (frame.props.w < CLICK_THRESHOLD && frame.props.h < CLICK_THRESHOLD) {
-        ctx.editor.updateShape(id, {
-          x: start.x,
-          y: start.y,
-          props: { w: DEFAULT_W, h: DEFAULT_H },
-        });
-      }
-
-      // Capture every unlocked sibling root completely enclosed by the final
-      // viewport, including groups and existing frames (nested frames).
-      captureEnclosedShapes(ctx.editor, id);
-
-      useSelectionStore.getState().setSelection([id]);
-      ctx.complete();
+    // The OS reclaimed the pointer mid-create (spurious pointercancel /
+    // lostpointercapture). Keep the frame drawn so far rather than discarding it.
+    onCommit(ctx: ToolContext) {
+      finalize(ctx);
     },
 
     // Pinch-to-zoom mid-create: drop the in-flight frame, stay in the tool.

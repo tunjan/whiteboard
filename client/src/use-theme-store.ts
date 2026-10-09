@@ -3,9 +3,22 @@ import { persist } from 'zustand/middleware';
 
 export type Theme = 'light' | 'dark';
 
+/**
+ * `--bg-canvas` per theme. Safari tints the iPad tab bar, and the status bar of
+ * a Home Screen install, with `theme-color`; the app picks its theme itself
+ * rather than following the OS, so the meta has to follow the app.
+ */
+const THEME_COLOR: Record<Theme, string> = {
+  light: '#fafafa',
+  dark: '#0a0a0a',
+};
+
 /** Toggle the `.dark` class that drives the CSS-variable theme. */
 export function applyTheme(theme: Theme): void {
   document.documentElement.classList.toggle('dark', theme === 'dark');
+  for (const meta of document.querySelectorAll('meta[name="theme-color"]')) {
+    meta.setAttribute('content', THEME_COLOR[theme]);
+  }
 }
 
 interface ThemeStore {

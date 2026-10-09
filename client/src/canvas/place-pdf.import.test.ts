@@ -43,6 +43,7 @@ vi.mock('./pdf-render', () => ({
 
 vi.mock('../board/blobs', () => ({
   uploadImageBlob: async () => `blob-${h.rendered.length}`,
+  uploadImageThumb: async () => undefined,
 }));
 
 vi.mock('@/components/ui/toast', () => ({

@@ -179,7 +179,7 @@ describe('voice awareness ownership', () => {
 
   it('nulls voice presence that predates the camera and screen fields', () => {
     const { source, document } = room();
-    const { camera, screen, ...legacy } = voice(SOURCE_SESSION);
+    const { camera: _camera, screen: _screen, ...legacy } = voice(SOURCE_SESSION);
     const states = new Map<number, Record<string, unknown>>([
       [1, { voice: legacy }],
     ]);

@@ -15,7 +15,7 @@ import { ChevronRightIcon, CheckIcon } from 'lucide-react';
  * sits concentric inside the menu rather than fighting its corner.
  */
 const MENU_ROW =
-  "relative flex cursor-default items-center gap-2 rounded-control px-2 py-1.5 text-sm font-medium text-fg-secondary outline-hidden select-none focus:bg-panel focus:text-fg data-inset:pl-8 data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5";
+  "relative flex cursor-default items-center gap-2 rounded-md min-h-8 px-2 py-1.5 text-sm font-medium text-fg outline-hidden select-none focus:bg-surface-hover data-inset:pl-8 data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5";
 
 /**
  * Overlay shell shared by menus and popovers: a hairline border plus one
@@ -23,7 +23,7 @@ const MENU_ROW =
  * read as two different tiers of surface for the same job.
  */
 const OVERLAY_SHELL =
-  'rounded-overlay border border-border bg-surface shadow-overlay';
+  'rounded-overlay border border-border bg-popup-surface shadow-overlay';
 
 function DropdownMenu({ ...props }: MenuPrimitive.Root.Props) {
   return <MenuPrimitive.Root data-slot="dropdown-menu" {...props} />;
@@ -88,9 +88,8 @@ function DropdownMenuLabel({
     <MenuPrimitive.GroupLabel
       data-slot="dropdown-menu-label"
       data-inset={inset}
-      // Section header, not a row: rows are now 12px medium, so a label at the
-      // same size read as an unclickable item. 11px uppercase separates by
-      // kind instead of by weight, matching the popover section headers.
+      // Section header, not a row: DESIGN.md's menu section label — 12px
+      // medium in the muted grey under 14px rows, sentence case.
       className={cn(
         'type-overline px-2 pt-1.5 pb-1 text-fg-muted data-inset:pl-8',
         className,
@@ -143,7 +142,7 @@ function DropdownMenuSubTrigger({
       data-inset={inset}
       className={cn(
         MENU_ROW,
-        'data-open:bg-panel data-open:text-fg data-popup-open:bg-panel data-popup-open:text-fg',
+        'data-open:bg-surface-hover data-popup-open:bg-surface-hover',
         className,
       )}
       {...props}

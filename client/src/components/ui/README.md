@@ -3,8 +3,9 @@
 The design system lives in [`src/index.css`](../../index.css), in six numbered
 sections:
 
-1. **Fonts** — Geist for product UI, Inter for measured canvas text, Geist Mono
-   for values/shortcuts, and Caveat for handwriting.
+1. **Fonts** — the operating system's UI face for chrome (what Firefox's own
+   chrome uses), Inter for measured canvas text, Geist Mono for values and
+   shortcuts, and Caveat for handwriting. Chrome loads no webfont.
 2. **Primitives** — `:root` and `.dark`. The only place a literal colour or
    shadow value appears.
 3. **Theme** — `@theme`. The public API: every name here becomes a Tailwind
@@ -29,20 +30,20 @@ the whole app. Do not add `focus-visible:ring-*` to a component, and do not add
 `outline-none` to an interactive control — either one silently removes the only
 focus indicator that control has. Popup _containers_ (dialog, popover, menu
 positioners) and menu _items_ are the exceptions: they suppress the outline
-because a background highlight already signals focus. `input-group.tsx` is
-the third: the group draws the outline around the whole field when its control
-is focused, so the control drops its own.
+because a background highlight already signals focus. Text fields (`input`,
+`textarea`, `input-group`) are the third: they swap the outline for a blue
+border plus `shadow-focus` halo.
 
 ## Token vocabulary
 
 | group     | names                                                                                      |
 | --------- | ------------------------------------------------------------------------------------------ |
-| surfaces  | `canvas` `panel` `surface` `surface-hover` `sunken` `inverse` `inverse-hover` `scrim`      |
+| surfaces  | `canvas` `panel` `surface` `surface-hover` `popup-surface` `sunken` `inverse` `inverse-hover` `scrim` |
 | lines     | `border` `border-strong` `border-subtle` `control-border` `focus`                          |
 | ink       | `fg` `fg-secondary` `fg-muted` `fg-subtle` `fg-inverse`                                    |
 | status    | `danger` `success` `warning` `info` `neutral` `inactive`, each as `-fg` `-bg` `-border`    |
 | action    | `primary` `action` `action-hover` `action-active` `link` `focus` (one blue accent)         |
-| radii     | `compact` 4 · `control` 8 · `overlay` 12 · `panel` 16 · `full`                             |
+| radii     | `compact` 2 · `control` 4 · `overlay` 8 · `panel` 8 · `full` (the Proton scale)            |
 | elevation | `control` `panel` `overlay`                                                                |
 | motion    | `duration-instant` `-fast` `-base` `-slow` `-slower`; `ease-out-quart` `ease-in-out-quart` |
 
@@ -51,8 +52,19 @@ bare `danger` / `success` aliases resolve, but `neutral` and `inactive` have no
 bare form, so the suffixed spelling is the one that works across the whole set.
 
 `scrim` is the modal backdrop; pick the opacity per overlay (`bg-scrim/35` for
-dialogs, `bg-scrim/25` for the sheet). `inverse` remains the neutral selected
-tool state; primary actions use the blue `action` role.
+dialogs, `bg-scrim/25` for the sheet).
+
+**A control that is on wears the accent, not a black plate.** `tb-sel-bg` as
+the wash and `tb-sel-fg` as the ink is what a pressed toggle, a selected tab, a
+chosen tool and a lit menu key all say; a checkbox, a switch, a slider and a
+progress bar fill with `action`. `inverse` is a surface role for genuinely
+inverted chrome (the selection bar on the home screen), not a selected state.
+
+**A popup and a dialog do not share a ground.** Menus, popovers, tooltips and
+toasts stand on `popup-surface`; dialogs and cards stand on `surface`. They are
+the same white in light theme and deliberately different in dark, which is how
+Firefox separates a panel from in-content UI. Reaching for `bg-surface` on a
+menu makes it read as a dialog the moment the theme flips.
 
 Board chrome uses `Surface` systematically: `mode="docked" chrome` for
 viewport-edge controls and `mode="floating" chrome` for the central tool rail.
@@ -75,7 +87,7 @@ Two deliberate conventions keep shadcn components and board chrome aligned:
 Those aliases are a **landing pad, not a destination.** A component pasted in by
 `shadcn add` renders correctly on day one, but before it ships its classes get
 rewritten onto the names in the table above — `text-muted-foreground` →
-`text-fg-muted`, `bg-popover` → `bg-surface`, `text-destructive` →
+`text-fg-muted`, `bg-popover` → `bg-popup-surface`, `text-destructive` →
 `text-danger-fg`. Two spellings for one colour is how a folder ends up with
 three vocabularies and no way to grep for anything.
 

@@ -1,7 +1,11 @@
+import { sql } from 'drizzle-orm';
 import {
   bigserial,
+  boolean,
   customType,
   index,
+  integer,
+  jsonb,
   pgTable,
   primaryKey,
   text,
@@ -35,6 +39,16 @@ export const boards = pgTable('boards', {
   lastOpenedAt: timestamp('last_opened_at', { withTimezone: true })
     .notNull()
     .defaultNow(),
+  // Pinned in the tutor's library. Server-side so every device agrees.
+  favorite: boolean('favorite').notNull().default(false),
+  // The secret in a student's link (`?k=`). Rotating it is how a tutor revokes
+  // every link handed out so far. `gen_random_uuid` draws from the server's
+  // strong random source and needs no extension.
+  shareKey: text('share_key')
+    .notNull()
+    .default(sql`replace(gen_random_uuid()::text, '-', '')`),
+  // What that link grants: 'edit', 'view' or 'off' (see boards/access.ts).
+  shareMode: text('share_mode').notNull().default('edit'),
 });
 
 /**
@@ -115,4 +129,51 @@ export const boardSessionNotes = pgTable(
       .defaultNow(),
   },
   (table) => [primaryKey({ columns: [table.boardId, table.date] })],
+);
+
+/**
+ * One row per connection to a board's collaboration room: who joined, when, and
+ * how long they stayed. The only record of app usage — everything else stored
+ * is board *content*, which says nothing about who turned up or when.
+ *
+ * Written by `session-tracking.ts` off the Hocuspocus connection hooks, not by
+ * the client, so a student cannot inflate or suppress their own row. `name` and
+ * `color` are the identity that client published over awareness (see
+ * `identity.ts`): self-entered, never verified — treat them as a label, not a
+ * credential. `isTutor` is the one identity fact the server decides for itself,
+ * from the session cookie on the upgrade request.
+ *
+ * Only the board document is tracked. A client opens a provider per resident
+ * page over the same socket, and counting those would turn "opened three pages"
+ * into three sessions.
+ */
+export const boardSessions = pgTable(
+  'board_sessions',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    boardId: text('board_id').notNull(),
+    name: text('name').notNull().default(''),
+    color: text('color'),
+    isTutor: boolean('is_tutor').notNull().default(false),
+    startedAt: timestamp('started_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    // Bumped while the connection lives, so an abandoned row left by a crashed
+    // process still bounds the session rather than running to the end of time.
+    lastSeenAt: timestamp('last_seen_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    // Document updates received from this connection — the difference between
+    // sitting on a board and working on one.
+    edits: integer('edits').notNull().default(0),
+    // Shapes this connection added. An edit is a sync message, and one stroke
+    // streams dozens; a drawing is what the tutor would count on the page.
+    drawings: integer('drawings').notNull().default(0),
+    // Stretches with no input from this connection past the AFK grace, as
+    // [startMs, endMs] pairs — a tab left open is not time spent on the board.
+    afk: jsonb('afk').$type<[number, number][]>().notNull().default([]),
+  },
+  (table) => [
+    index('board_sessions_board_idx').on(table.boardId, table.startedAt),
+  ],
 );

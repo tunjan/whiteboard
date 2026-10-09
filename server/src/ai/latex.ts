@@ -154,3 +154,49 @@ export function extractLatex(raw: string): LatexExtraction {
   if (text.length > MAX_LATEX_CHARS) return { reason: 'too-long' };
   return { latex: text };
 }
+
+/**
+ * Ink → graph rows. Same transcription rule as the LaTeX prompt — the user
+ * drew a function and wants *that* function plotted — but the output is the
+ * graph parser's plain-text syntax, one row per line, so the client can drop
+ * each line straight into a `GraphExpression` without a LaTeX converter.
+ */
+export const GRAPH_SYSTEM_PROMPT = [
+  'You read the plottable mathematics in an image and rewrite it as input for a 2D graphing calculator. It may be handwritten, printed or photographed.',
+
+  'OUTPUT',
+  'Reply with one expression per line and nothing else: no LaTeX, no code fences, no numbering, no prose.',
+  'Syntax: plain ASCII maths with * / ^ and parentheses, e.g. y=x^2-3*x+1, y=sin(2*x), x^2+y^2=9, (1,2), (cos(t),sin(t)), f(x)=e^(-x).',
+  'Functions available: sin cos tan sec csc cot asin acos atan sinh cosh tanh sqrt cbrt abs sign log ln exp min max floor ceil round. Constants: pi, e.',
+  'A point is (a,b). A parametric curve is (x(t),y(t)) in the variable t. Implicit relations in x and y are allowed.',
+  'Other single letters (a, b, k...) are kept as written; they become sliders.',
+
+  'READING THE PAGE',
+  'Transcribe what is written. Never solve, simplify, differentiate or invent a function that is not there.',
+  'Write each distinct function, relation or point once, in the order it appears. Skip working, labels and anything struck through.',
+  'A bare expression in x such as x^2+1 is written as y=x^2+1.',
+
+  'WHEN TO REFUSE',
+  `Reply with exactly ${LATEX_UNREADABLE}, and nothing else, when the image holds nothing that can be plotted.`,
+].join('\n');
+
+/** Most rows a single conversion may create; past this the model is rambling. */
+const MAX_GRAPH_LINES = 10;
+
+export type GraphExtraction =
+  | { expressions: string[] }
+  | { expressions?: never; reason: 'empty' | 'unreadable' | 'too-long' };
+
+/** Split a chat reply into graph rows. Validation is the client's parser's job. */
+export function extractGraphExpressions(raw: string): GraphExtraction {
+  const text = stripCodeFence(raw.trim());
+  if (text === LATEX_UNREADABLE) return { reason: 'unreadable' };
+  if (text.length > MAX_LATEX_CHARS) return { reason: 'too-long' };
+  const expressions = text
+    .split('\n')
+    .map((line) => stripDelimiters(line.trim()))
+    .filter(Boolean);
+  if (expressions.length === 0) return { reason: 'empty' };
+  if (expressions.length > MAX_GRAPH_LINES) return { reason: 'too-long' };
+  return { expressions };
+}

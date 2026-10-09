@@ -19,6 +19,8 @@ import {
 } from './minimap-geometry';
 import { useCameraStore } from './use-camera-store';
 import { spatialIndex, useDocumentStore } from './use-document-store';
+import { shapeStore } from './engine/shape-store';
+import { subscribeShapes } from './use-shapes';
 import { useHiddenStore } from './use-hidden-store';
 import { useSelectionStore } from './use-selection-store';
 
@@ -39,6 +41,7 @@ interface MinimapColors {
   shape: string;
   selected: string;
   viewport: string;
+  viewportBorder: string;
 }
 
 interface CursorDot {
@@ -175,8 +178,9 @@ export class MinimapManager {
       () => observer.disconnect(),
       this.watchDpr(),
       useCameraStore.subscribe(syncCamera),
+      subscribeShapes(() => this.geometryEpoch.update((n) => n + 1)),
       useDocumentStore.subscribe((next, prev) => {
-        if (next.shapes !== prev.shapes || next.currentPageId !== prev.currentPageId) {
+        if (next.currentPageId !== prev.currentPageId) {
           this.geometryEpoch.update((n) => n + 1);
         }
       }),
@@ -229,6 +233,7 @@ export class MinimapManager {
       shape: read('--minimap-shape'),
       selected: read('--minimap-selected'),
       viewport: read('--minimap-viewport'),
+      viewportBorder: read('--minimap-viewport-border'),
     };
   }
 
@@ -303,9 +308,9 @@ export class MinimapManager {
   private getShapePaths = computed('minimap shape paths', () => {
     this.geometryEpoch.get();
     const selectedIds = new Set(this.selectedIds.get());
-    const { shapes, shapesById } = useDocumentStore.getState();
+    const shapes = shapeStore.sorted.get();
     const locallyHidden = useHiddenStore.getState().hidden;
-    const getShape = (id: string) => shapesById.get(id);
+    const getShape = (id: string) => shapeStore.peek(id);
 
     const shapesPath = new Path2D();
     const selectedPath = new Path2D();
@@ -426,6 +431,12 @@ export class MinimapManager {
     }
     ctx.fillStyle = this.colors.viewport;
     ctx.fill();
+    // Drawn, not just tinted. The shape extents behind it fill as one path and
+    // flatten to a slab, so a tint alone leaves nothing to aim at; the outline
+    // is what makes the rectangle a handle. One device pixel at any zoom.
+    ctx.lineWidth = 1 / (dpr * zoom);
+    ctx.strokeStyle = this.colors.viewportBorder;
+    ctx.stroke();
 
     const dotRadius = CURSOR_DOT_SCREEN_RADIUS / zoom;
     for (const dot of this.getCursorDots.get()) {

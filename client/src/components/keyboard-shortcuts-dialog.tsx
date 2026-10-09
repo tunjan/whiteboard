@@ -40,6 +40,18 @@ const ARRANGE_SHORTCUTS = [
   { label: 'Flip selection top to bottom', keys: ['Shift', 'V'] },
 ] as const;
 
+/**
+ * The modifiers a resize or rotation drag reads. Nothing on screen announces
+ * them, and a handle looks the same whether or not one is held.
+ */
+const SELECTION_BOX_SHORTCUTS = [
+  { label: 'Resize from the centre', keys: ['Alt', 'Drag a handle'] },
+  { label: 'Resize keeping the proportions', keys: ['Shift', 'Drag a handle'] },
+  { label: 'Mirror the shape', keys: ['Drag a handle past the far side'] },
+  { label: 'Suspend snapping while resizing', keys: ['⌘/Ctrl', 'Drag a handle'] },
+  { label: 'Rotate in 15° steps', keys: ['Shift', 'Drag past a corner'] },
+] as const;
+
 const VIEW_SHORTCUTS = [
   { label: 'Zoom in', keys: ['⌘/Ctrl', '+'] },
   { label: 'Zoom out', keys: ['⌘/Ctrl', '−'] },
@@ -130,7 +142,7 @@ function ShortcutSection({
     >
       <h3
         id={id}
-        className="text-xs font-medium tracking-wide text-fg-muted uppercase"
+        className="text-xs font-medium text-fg-muted"
       >
         {title}
       </h3>
@@ -153,7 +165,7 @@ export function KeyboardShortcutsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      {/* Six sections, fifty-five rows: in one 32rem column that was three
+      {/* Seven sections, sixty rows: in one 32rem column that was three
           screens of scrolling behind a full-height scrollbar. Reference sheets
           are read by scanning, not by scrolling, so the sections flow into
           balanced columns as the viewport allows — two from `sm`, three from
@@ -181,6 +193,11 @@ export function KeyboardShortcutsDialog({
             id="arrange-shortcuts-heading"
             title="Arrange"
             items={ARRANGE_SHORTCUTS}
+          />
+          <ShortcutSection
+            id="selection-box-shortcuts-heading"
+            title="Selection box"
+            items={SELECTION_BOX_SHORTCUTS}
           />
           <ShortcutSection
             id="equation-shortcuts-heading"

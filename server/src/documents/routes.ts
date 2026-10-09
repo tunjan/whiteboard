@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 import {
   DOCUMENT_MIME,
   INLINE_DOCUMENT_EXTS,
@@ -6,12 +7,16 @@ import {
   MAX_DOCUMENT_NAME_LENGTH,
 } from '@whiteboard/shared';
 import { extForDocId, isValidDocId, readDoc, saveDoc } from './store';
+import { clientIp, uploadBudget } from '../rate-limit';
+import { StorageFullError } from '../storage-quota';
+import { requireBoardEdit } from '../boards/access';
 
 // Board document repository bytes. Like the image blob store, uploads are open
-// — anyone with a board's capability URL can add files. Safety comes from the
+// to anyone who may edit a board. Safety comes from the
 // strict extension allow-list (no HTML/SVG), the size cap, content-addressed
-// ids that can't be guessed or used for path traversal, and serving anything
-// that isn't a safe inline type as a download.
+// ids that can't be guessed or used for path traversal, serving anything that
+// isn't a safe inline type as a download, a per-client upload budget and a
+// disk quota.
 //
 // The list of documents on a board lives in the Yjs doc, not here: this module
 // only stores and serves bytes. There is deliberately no delete endpoint —
@@ -19,19 +24,33 @@ import { extForDocId, isValidDocId, readDoc, saveDoc } from './store';
 // board.
 export const documentRoutes = new Hono();
 
-documentRoutes.post('/', async (c) => {
-  const ext = (c.req.query('ext') ?? '').toLowerCase();
-  if (!DOCUMENT_MIME[ext]) {
-    return c.json({ error: 'Unsupported file type' }, 415);
-  }
-  const body = await c.req.arrayBuffer();
-  if (body.byteLength === 0) return c.json({ error: 'Empty body' }, 400);
-  if (body.byteLength > MAX_DOCUMENT_BYTES) {
-    return c.json({ error: 'File too large' }, 413);
-  }
-  const storageId = await saveDoc(Buffer.from(body), ext);
-  return c.json({ storageId });
-});
+documentRoutes.post(
+  '/',
+  requireBoardEdit,
+  bodyLimit({
+    maxSize: MAX_DOCUMENT_BYTES,
+    onError: (c) => c.json({ error: 'File too large' }, 413),
+  }),
+  async (c) => {
+    const ext = (c.req.query('ext') ?? '').toLowerCase();
+    if (!DOCUMENT_MIME[ext]) {
+      return c.json({ error: 'Unsupported file type' }, 415);
+    }
+    const body = await c.req.arrayBuffer();
+    if (body.byteLength === 0) return c.json({ error: 'Empty body' }, 400);
+    if (!uploadBudget(clientIp(c), body.byteLength)) {
+      return c.json({ error: 'Too many uploads' }, 429);
+    }
+    try {
+      return c.json({ storageId: await saveDoc(Buffer.from(body), ext) });
+    } catch (error) {
+      if (error instanceof StorageFullError) {
+        return c.json({ error: 'Storage full' }, 507);
+      }
+      throw error;
+    }
+  },
+);
 
 documentRoutes.get('/:storageId', async (c) => {
   const storageId = c.req.param('storageId');
@@ -56,6 +75,7 @@ documentRoutes.get('/:storageId', async (c) => {
 });
 
 /** Control chars (header injection) plus quotes and slashes (header/path escape). */
+// eslint-disable-next-line no-control-regex
 const UNSAFE_NAME_RE = /[\u0000-\u001f\u007f-\u009f"\\/]/g;
 
 /**

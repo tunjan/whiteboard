@@ -199,6 +199,8 @@ export function leaveVoice(): void {
   joinGeneration += 1;
 
   for (const peer of peerConnections.values()) peer.sendBye();
+  // Snapshot: removePeer mutates the map.
+  // oxlint-disable-next-line unicorn/no-useless-spread
   for (const peerClientId of [...peerConnections.keys()]) {
     removePeer(peerClientId);
   }

@@ -11,8 +11,9 @@
  * The window between a graph appearing and the chunk arriving draws the card,
  * its grid and its axes with no curves on them.
  */
-import { useCallback, useEffect, useSyncExternalStore } from 'react';
+import { useEffect, useSyncExternalStore } from 'react';
 import type { MathNode, parse } from 'mathjs/number';
+import { ensureGraphWasm } from './graph-wasm';
 
 export type { MathNode } from 'mathjs/number';
 
@@ -28,10 +29,15 @@ const listeners = new Set<() => void>();
  */
 export function ensureGraphMath(): Promise<void> {
   if (parseImpl) return Promise.resolve();
-  pending ??= import('mathjs/number').then(({ parse }) => {
-    parseImpl = parse;
-    for (const listener of listeners) listener();
-  });
+  // The Rust evaluator loads alongside; parsing doesn't wait on it, but
+  // callers that await this get it.
+  pending ??= Promise.all([
+    import('mathjs/number').then(({ parse }) => {
+      parseImpl = parse;
+      for (const listener of listeners) listener();
+    }),
+    ensureGraphWasm(),
+  ]).then(() => {});
   return pending;
 }
 
@@ -65,7 +71,7 @@ function subscribe(onChange: () => void): () => void {
  */
 export function useGraphMathReady(): boolean {
   const ready = useSyncExternalStore(
-    useCallback(subscribe, []),
+    subscribe,
     graphMathReady,
     graphMathReady,
   );

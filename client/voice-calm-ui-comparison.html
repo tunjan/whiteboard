@@ -1,0 +1,1125 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Calm UI — Voice Chat Redesign: 3 Design Alternatives</title>
+  <!-- Tailwind CSS Play CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            canvas: '#EDECEA',
+            paper: '#FBFBF9',
+            ink: {
+              DEFAULT: '#141414',
+              soft: '#4A4A4F',
+              mute: '#A09D97',
+            },
+            wash: '#F1F1F2',
+            line: '#E5E3DD',
+            moss: {
+              DEFAULT: '#27604A',
+              wash: '#E0EFE5',
+            },
+            night: {
+              DEFAULT: '#17171A',
+              line: '#2A2A2F',
+              mute: '#97979E',
+              wash: '#242429',
+              paper: '#1F1F24',
+            },
+            danger: {
+              wash: '#FDEBEC',
+              ink: '#9F2F2D',
+            }
+          },
+          borderRadius: {
+            ctrl: '10px',
+            bar: '14px',
+            panel: '18px',
+          },
+          boxShadow: {
+            float: '0 1px 2px rgb(0 0 0 / .05), 0 14px 34px rgb(0 0 0 / .10)',
+            card: '0 1px 2px rgb(0 0 0 / .04), 0 8px 22px rgb(0 0 0 / .07)',
+            press: 'inset 0 1px 2px rgb(0 0 0 / .12)',
+          },
+          transitionTimingFunction: {
+            calm: 'cubic-bezier(0.16, 1, 0.3, 1)',
+          }
+        }
+      }
+    };
+  </script>
+  <style>
+    /* CSS Tokens based on Calm UI Brief */
+    :root {
+      --color-canvas:     #EDECEA;
+      --color-paper:      #FBFBF9;
+      --color-ink:        #141414;
+      --color-ink-soft:   #4A4A4F;
+      --color-ink-mute:   #A09D97;
+      --color-wash:       #F1F1F2;
+      --color-line:       #E5E3DD;
+      --color-moss:       #27604A;
+      --color-moss-wash:  #E0EFE5;
+      --color-night:      #17171A;
+      --color-night-line: #2A2A2F;
+      --color-night-mute: #97979E;
+
+      --radius-ctrl:  10px;
+      --radius-bar:   14px;
+      --radius-panel: 18px;
+    }
+
+    body {
+      background-color: var(--color-canvas);
+      color: var(--color-ink);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Geist", "Segoe UI", Roboto, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    /* Acoustic bar animation */
+    @keyframes wave-pulse {
+      0%, 100% { height: 4px; }
+      50% { height: 16px; }
+    }
+    .wave-bar-1 { animation: wave-pulse 1.1s ease-in-out infinite 0.1s; }
+    .wave-bar-2 { animation: wave-pulse 1.1s ease-in-out infinite 0.3s; }
+    .wave-bar-3 { animation: wave-pulse 1.1s ease-in-out infinite 0.5s; }
+    .wave-bar-4 { animation: wave-pulse 1.1s ease-in-out infinite 0.2s; }
+
+    /* Dot pulse animation */
+    @keyframes calm-pulse {
+      0%, 100% { opacity: 0.35; transform: scale(0.85); }
+      50% { opacity: 1; transform: scale(1.15); }
+    }
+    .pulse-dot-1 { animation: calm-pulse 1.3s ease-in-out infinite 0s; }
+    .pulse-dot-2 { animation: calm-pulse 1.3s ease-in-out infinite 0.25s; }
+    .pulse-dot-3 { animation: calm-pulse 1.3s ease-in-out infinite 0.5s; }
+
+    /* Canvas dot background */
+    .canvas-dots {
+      background-image: radial-gradient(rgba(20, 20, 20, 0.08) 1px, transparent 1px);
+      background-size: 24px 24px;
+    }
+    .dark .canvas-dots {
+      background-image: radial-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1px);
+    }
+  </style>
+</head>
+<body class="canvas-dots min-h-full flex flex-col selection:bg-[#E0EFE5] selection:text-[#27604A]">
+
+  <!-- TOP HEADER & CONTROLLER (STATIONARY DESK) -->
+  <header class="sticky top-0 z-50 bg-[#FBFBF9]/90 dark:bg-[#17171A]/90 backdrop-blur-md border-b border-[#E5E3DD] dark:border-[#2A2A2F] px-4 py-3">
+    <div class="max-w-7xl mx-auto flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+      
+      <!-- Brand & Title -->
+      <div class="flex items-center gap-3">
+        <span class="size-3 rounded-full bg-[#27604A] shrink-0" aria-hidden="true"></span>
+        <div>
+          <div class="flex items-center gap-2">
+            <h1 class="text-sm font-semibold tracking-tight text-[#141414] dark:text-[#FBFBF9]">Calm UI · Voice Chat Redesign</h1>
+            <span class="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded-[6px] bg-[#E0EFE5] text-[#27604A] font-semibold">3 Alternatives</span>
+          </div>
+          <p class="text-xs text-[#A09D97] dark:text-[#97979E]">Zero peer dividers · Spacing is the only structure · 4px rhythm · 40px targets</p>
+        </div>
+      </div>
+
+      <!-- Controls: Alternative Switcher + State Simulator + Theme Toggle -->
+      <div class="flex flex-wrap items-center gap-2.5">
+        
+        <!-- View Switcher (Alternative 1 / 2 / 3 / Side-by-Side) -->
+        <div role="tablist" aria-label="Alternative views" class="flex p-0.5 rounded-[10px] bg-[#EDECEA] dark:bg-[#2A2A2F] text-xs font-medium text-[#4A4A4F] dark:text-[#97979E]">
+          <button type="button" role="tab" id="view-tab-all" onclick="setViewMode('all')" class="px-2.5 py-1.5 rounded-[8px] transition-all bg-[#FBFBF9] dark:bg-[#17171A] text-[#141414] dark:text-[#FBFBF9] shadow-sm font-semibold">
+            All 3 Side-by-Side
+          </button>
+          <button type="button" role="tab" id="view-tab-alt1" onclick="setViewMode('alt1')" class="px-2.5 py-1.5 rounded-[8px] transition-all hover:text-[#141414] dark:hover:text-[#FBFBF9]">
+            Alt 1: Floating Island
+          </button>
+          <button type="button" role="tab" id="view-tab-alt2" onclick="setViewMode('alt2')" class="px-2.5 py-1.5 rounded-[8px] transition-all hover:text-[#141414] dark:hover:text-[#FBFBF9]">
+            Alt 2: Monolith Popover
+          </button>
+          <button type="button" role="tab" id="view-tab-alt3" onclick="setViewMode('alt3')" class="px-2.5 py-1.5 rounded-[8px] transition-all hover:text-[#141414] dark:hover:text-[#FBFBF9]">
+            Alt 3: Perimeter Rail
+          </button>
+        </div>
+
+        <!-- Global State Simulator -->
+        <div class="flex items-center gap-1 bg-[#EDECEA] dark:bg-[#2A2A2F] p-0.5 rounded-[10px]">
+          <span class="text-[10px] font-mono uppercase text-[#A09D97] px-2">State:</span>
+          <select id="global-state-select" onchange="applyGlobalState(this.value)" class="text-xs font-medium bg-[#FBFBF9] dark:bg-[#17171A] text-[#141414] dark:text-[#FBFBF9] px-2 py-1 rounded-[8px] border-0 cursor-pointer focus:ring-1 focus:ring-[#27604A] outline-none">
+            <option value="incall-speaking">In Call: Elena Speaking</option>
+            <option value="incall-you-speaking">In Call: You Speaking</option>
+            <option value="incall-muted">In Call: You Muted</option>
+            <option value="idle">Idle / Disconnected</option>
+            <option value="joining">Joining / Connecting</option>
+            <option value="testing">Mic Loopback Test</option>
+            <option value="error">Error / Permission Denied</option>
+          </select>
+        </div>
+
+        <!-- Dark / Light Mode Toggle -->
+        <button type="button" onclick="toggleTheme()" aria-label="Toggle Theme" class="size-9 rounded-[10px] flex items-center justify-center text-[#4A4A4F] dark:text-[#97979E] hover:bg-[#EDECEA] dark:hover:bg-[#2A2A2F] hover:text-[#141414] dark:hover:text-[#FBFBF9] transition-colors" title="Toggle Light / Dark Mode">
+          <svg class="size-4 block dark:hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>
+          </svg>
+          <svg class="size-4 hidden dark:block" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/>
+          </svg>
+        </button>
+
+      </div>
+    </div>
+  </header>
+
+  <!-- MAIN COMPARISON STAGE -->
+  <main class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 flex flex-col gap-8">
+
+    <!-- BRIEF COMPLIANCE BADGE STRIP -->
+    <div class="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 rounded-[14px] bg-[#FBFBF9] dark:bg-[#17171A] border border-[#E5E3DD] dark:border-[#2A2A2F] text-xs text-[#4A4A4F] dark:text-[#97979E]">
+      <div class="flex items-center gap-4 flex-wrap">
+        <span class="flex items-center gap-1.5 font-medium text-[#141414] dark:text-[#FBFBF9]">
+          <span class="size-2 rounded-full bg-[#27604A]"></span> Calm UI Rules:
+        </span>
+        <span>• Structure via spacing only (zero peer dividers)</span>
+        <span>• Single accent: <code class="font-mono text-[#27604A] font-semibold">#27604A moss</code></span>
+        <span>• Targets &ge; 40px, Glyphs 20px (stroke 1.7)</span>
+        <span>• Motion 150ms ease-out (no layout jump)</span>
+      </div>
+      <span class="text-[11px] font-mono text-[#A09D97] dark:text-[#97979E]">Canvas: #EDECEA / #17171A</span>
+    </div>
+
+    <!-- ALTERNATIVES WRAPPER -->
+    <div id="alternatives-grid" class="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+
+      <!-- ========================================================================= -->
+      <!-- ALTERNATIVE 1: THE FLOATING AUDIO ISLAND                                  -->
+      <!-- ========================================================================= -->
+      <section id="col-alt1" class="flex flex-col gap-4">
+        <!-- Card Header -->
+        <div class="flex flex-col gap-1">
+          <div class="flex items-center justify-between">
+            <span class="text-[11px] font-semibold uppercase tracking-wider text-[#A09D97]">Alternative 1</span>
+            <span class="text-[10px] font-mono px-2 py-0.5 rounded-full bg-[#E0EFE5] text-[#27604A] font-medium">Persistent Dock</span>
+          </div>
+          <h2 class="text-base font-semibold text-[#141414] dark:text-[#FBFBF9] tracking-tight">The Floating Audio Island</h2>
+          <p class="text-xs text-[#4A4A4F] dark:text-[#97979E] leading-relaxed">
+            Persistent horizontal dock on the canvas bottom. Keeps instant mute &amp; acoustic awareness visible without covering drawing space. Flyout micro-panel expands upwards for roster &amp; mic calibration.
+          </p>
+        </div>
+
+        <!-- Interactive Sandbox Canvas Box -->
+        <div class="relative min-h-[520px] rounded-[18px] bg-[#EDECEA] dark:bg-[#17171A] border border-[#E5E3DD] dark:border-[#2A2A2F] p-4 flex flex-col justify-between overflow-hidden shadow-inner">
+          
+          <!-- Mock Whiteboard Canvas Elements -->
+          <div class="absolute inset-0 p-6 pointer-events-none opacity-25 flex flex-col justify-between select-none">
+            <div class="flex gap-4">
+              <div class="w-24 h-16 rounded-[10px] border border-[#141414]/30 dark:border-[#FBFBF9]/30"></div>
+              <div class="w-36 h-20 rounded-[10px] border border-[#141414]/30 dark:border-[#FBFBF9]/30"></div>
+            </div>
+            <div class="text-[11px] font-mono text-[#4A4A4F]">Canvas Area (1920 × 1080)</div>
+          </div>
+
+          <!-- Top Flyout Micro-Panel (Expands above the dock) -->
+          <div id="alt1-flyout" class="relative z-20 mx-auto w-full max-w-[340px] rounded-[18px] bg-[#FBFBF9] dark:bg-[#1F1F24] border border-[#E5E3DD] dark:border-[#2A2A2F] p-3.5 shadow-float flex flex-col gap-3.5 text-[#141414] dark:text-[#FBFBF9] transition-all duration-150">
+            
+            <!-- Flyout Header -->
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <span class="size-2 rounded-full bg-[#27604A]" aria-hidden="true"></span>
+                <span class="text-xs font-semibold tracking-tight">Voice Room</span>
+                <span class="text-[11px] text-[#A09D97]">· 3 in call</span>
+              </div>
+              <button type="button" onclick="toggleAlt1Flyout()" class="size-6 rounded-[8px] flex items-center justify-center text-[#4A4A4F] dark:text-[#97979E] hover:bg-[#F1F1F2] dark:hover:bg-[#2A2A2F]" aria-label="Close panel">
+                <svg class="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
+            </div>
+
+            <!-- Participant Roster (Zero lines, pure 4px rhythm) -->
+            <div class="flex flex-col gap-1" role="list">
+              <!-- You -->
+              <div class="flex items-center justify-between px-2 py-1.5 rounded-[10px] hover:bg-[#F1F1F2] dark:hover:bg-[#2A2A2F] transition-colors">
+                <div class="flex items-center gap-2 min-w-0">
+                  <div class="size-6 rounded-full bg-[#141414] text-[#FBFBF9] text-[10px] font-semibold flex items-center justify-center">AL</div>
+                  <span class="text-xs font-medium truncate">Alberto (You)</span>
+                </div>
+                <div id="alt1-you-status" class="flex items-center gap-1.5 text-[11px]">
+                  <span class="text-[#27604A] font-medium">Speaking</span>
+                  <div class="flex items-center gap-0.5 h-3">
+                    <span class="w-[2px] h-2 bg-[#27604A] rounded-full wave-bar-1"></span>
+                    <span class="w-[2px] h-3 bg-[#27604A] rounded-full wave-bar-2"></span>
+                    <span class="w-[2px] h-2 bg-[#27604A] rounded-full wave-bar-3"></span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Elena -->
+              <div class="flex items-center justify-between px-2 py-1.5 rounded-[10px] hover:bg-[#F1F1F2] dark:hover:bg-[#2A2A2F] transition-colors">
+                <div class="flex items-center gap-2 min-w-0">
+                  <div class="size-6 rounded-full bg-[#E0EFE5] text-[#27604A] text-[10px] font-semibold flex items-center justify-center">ER</div>
+                  <span class="text-xs font-medium truncate">Elena Rostova</span>
+                </div>
+                <div id="alt1-elena-status" class="flex items-center gap-1.5 text-[11px]">
+                  <span class="text-[#A09D97]">Listening</span>
+                </div>
+              </div>
+
+              <!-- Marcus -->
+              <div class="flex items-center justify-between px-2 py-1.5 rounded-[10px] hover:bg-[#F1F1F2] dark:hover:bg-[#2A2A2F] transition-colors">
+                <div class="flex items-center gap-2 min-w-0">
+                  <div class="size-6 rounded-full bg-[#F1F1F2] dark:bg-[#2A2A2F] text-[#4A4A4F] text-[10px] font-semibold flex items-center justify-center">MC</div>
+                  <span class="text-xs text-[#4A4A4F] dark:text-[#97979E] truncate">Marcus Chen</span>
+                </div>
+                <div class="flex items-center text-[#A09D97]">
+                  <svg class="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><line x1="2" x2="22" y1="2" y2="22"/><path d="M18.89 13.23A7.12 7.12 0 0 0 19 12v-2"/><path d="M5 10v2a7 7 0 0 0 12 5"/><path d="M15 9.34V5a3 3 0 0 0-5.68-1.33"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
+                </div>
+              </div>
+            </div>
+
+            <!-- Calibration & Acoustics Section (Macro gap-3.5, NO dividing line) -->
+            <div class="flex flex-col gap-2 pt-1">
+              <div class="flex items-center justify-between text-xs">
+                <span class="text-[#4A4A4F] dark:text-[#97979E]">Gate Threshold</span>
+                <span id="alt1-db-readout" class="font-mono text-[11px] tabular-nums text-[#141414] dark:text-[#FBFBF9] font-medium">−36 dB</span>
+              </div>
+              
+              <!-- Draggable Gate Slider Track with Fill -->
+              <div class="relative h-6 flex items-center select-none cursor-pointer" onclick="handleSliderClick(event, 'alt1')">
+                <div class="relative h-1.5 w-full rounded-full bg-[#EDECEA] dark:bg-[#2A2A2F] overflow-hidden">
+                  <div id="alt1-slider-fill" style="width: 60%;" class="h-full rounded-full bg-[#27604A] transition-all duration-75"></div>
+                </div>
+                <div id="alt1-slider-thumb" style="left: 45%;" class="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 h-3.5 w-1 rounded-full bg-[#141414] dark:bg-[#FBFBF9] ring-2 ring-[#FBFBF9] dark:ring-[#17171A]"></div>
+              </div>
+
+              <!-- Noise Cancellation Switch -->
+              <label class="flex items-center justify-between cursor-pointer pt-1">
+                <span class="text-xs text-[#4A4A4F] dark:text-[#97979E]">Noise cancellation</span>
+                <button type="button" role="switch" id="alt1-noise-switch" aria-checked="true" onclick="toggleNoise('alt1')" class="relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full p-0.5 transition-colors duration-150 bg-[#27604A]">
+                  <span id="alt1-noise-thumb" class="pointer-events-none block size-4 rounded-full bg-[#FBFBF9] shadow-sm transform translate-x-4 transition-transform duration-150"></span>
+                </button>
+              </label>
+            </div>
+
+          </div>
+
+          <!-- Bottom Persistent Floating Dock (The Anchor Bar) -->
+          <div class="relative z-30 mx-auto w-fit">
+            <div 
+              id="alt1-dock-bar" 
+              role="toolbar" 
+              aria-label="Floating voice chat dock"
+              class="flex items-center gap-2.5 rounded-bar bg-[#FBFBF9] dark:bg-[#1F1F24] p-1.5 shadow-float border border-[#E5E3DD] dark:border-[#2A2A2F] select-none"
+            >
+              
+              <!-- Group 1: Presence & Wave (gap-0.5 inside group) -->
+              <div class="flex items-center gap-0.5">
+                <button 
+                  type="button" 
+                  onclick="toggleAlt1Flyout()"
+                  aria-expanded="true"
+                  aria-label="Toggle voice room details"
+                  class="h-10 px-2.5 rounded-ctrl flex items-center gap-2 text-[#141414] dark:text-[#FBFBF9] hover:bg-[#F1F1F2] dark:hover:bg-[#2A2A2F] active:scale-[0.98] transition-all"
+                >
+                  <!-- Dynamic Wave Indicator -->
+                  <div id="alt1-dock-wave" class="flex items-center gap-[2.5px] h-4" aria-hidden="true">
+                    <span class="w-[2.5px] h-2 bg-[#27604A] rounded-full wave-bar-1"></span>
+                    <span class="w-[2.5px] h-3.5 bg-[#27604A] rounded-full wave-bar-2"></span>
+                    <span class="w-[2.5px] h-4 bg-[#27604A] rounded-full wave-bar-3"></span>
+                    <span class="w-[2.5px] h-2 bg-[#27604A] rounded-full wave-bar-4"></span>
+                  </div>
+                  <div class="flex flex-col text-left leading-none">
+                    <span id="alt1-dock-speaker" class="text-xs font-semibold text-[#141414] dark:text-[#FBFBF9]">Elena</span>
+                    <span id="alt1-dock-subtext" class="text-[10px] text-[#A09D97]">speaking</span>
+                  </div>
+                </button>
+
+                <!-- Peer Avatar Pips -->
+                <div class="flex items-center gap-0.5 pl-1">
+                  <div class="size-7 rounded-full bg-[#E0EFE5] text-[#27604A] text-[10px] font-semibold flex items-center justify-center ring-2 ring-[#27604A] ring-offset-1 ring-offset-[#FBFBF9] dark:ring-offset-[#1F1F24]" title="Elena (Speaking)">ER</div>
+                  <div class="size-7 rounded-full bg-[#F1F1F2] dark:bg-[#2A2A2F] text-[#4A4A4F] text-[10px] font-semibold flex items-center justify-center" title="Marcus (Muted)">MC</div>
+                </div>
+              </div>
+
+              <!-- Group 2: Core Mic Control (size-10, gap-0.5) -->
+              <div class="flex items-center gap-0.5">
+                <button 
+                  id="alt1-btn-mute"
+                  type="button" 
+                  aria-pressed="false"
+                  onclick="toggleGlobalMute()"
+                  class="size-10 rounded-ctrl flex items-center justify-center bg-[#E0EFE5] text-[#27604A] hover:bg-[#d5e8dc] active:scale-[0.98] transition-all focus-visible:outline-2 focus-visible:outline-[#27604A]"
+                  aria-label="Mute microphone"
+                >
+                  <svg id="alt1-icon-mute" class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
+                    <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                    <line x1="12" x2="12" y1="19" y2="22"/>
+                  </svg>
+                </button>
+              </div>
+
+              <!-- Group 3: Settings Flyout Trigger (size-10) -->
+              <div class="flex items-center gap-0.5">
+                <button 
+                  type="button" 
+                  onclick="toggleAlt1Flyout()"
+                  class="size-10 rounded-ctrl flex items-center justify-center text-[#4A4A4F] dark:text-[#97979E] hover:bg-[#F1F1F2] dark:hover:bg-[#2A2A2F] hover:text-[#141414] dark:hover:text-[#FBFBF9] active:scale-[0.98] transition-all"
+                  aria-label="Voice settings"
+                  title="Acoustic Settings & Roster"
+                >
+                  <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="4" x2="20" y1="21" y2="21"/><line x1="4" x2="20" y1="14" y2="14"/><line x1="4" x2="20" y1="7" y2="7"/><circle cx="8" cy="21" r="2"/><circle cx="16" cy="14" r="2"/><circle cx="10" cy="7" r="2"/>
+                  </svg>
+                </button>
+              </div>
+
+              <!-- Group 4: Leave Call Action (size-10) -->
+              <div class="flex items-center gap-0.5">
+                <button 
+                  type="button" 
+                  onclick="applyGlobalState('idle')"
+                  class="size-10 rounded-ctrl flex items-center justify-center text-[#4A4A4F] dark:text-[#97979E] hover:bg-[#FDEBEC] dark:hover:bg-[#2A2A2F] hover:text-[#9F2F2D] active:scale-[0.98] transition-all"
+                  aria-label="Leave voice call"
+                  title="Leave Call"
+                >
+                  <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.33-2.67m-2.67-3.34a19.79 19.79 0 0 1-3.07-8.63A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91"/>
+                    <line x1="22" x2="2" y1="2" y2="22"/>
+                  </svg>
+                </button>
+              </div>
+
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Design Attributes -->
+        <div class="text-xs text-[#4A4A4F] dark:text-[#97979E] space-y-1 bg-[#FBFBF9] dark:bg-[#17171A] p-3 rounded-[10px] border border-[#E5E3DD] dark:border-[#2A2A2F]">
+          <div class="font-medium text-[#141414] dark:text-[#FBFBF9]">Strengths:</div>
+          <div>• <strong>Zero canvas distraction</strong>: 48px height dock floats at bottom perimeter.</div>
+          <div>• <strong>Instant Mute Access</strong>: One touch without opening any popover.</div>
+          <div>• <strong>Immediate speaker visibility</strong>: Elena's pulse is legible while sketching.</div>
+        </div>
+      </section>
+
+      <!-- ========================================================================= -->
+      <!-- ALTERNATIVE 2: THE MONOLITH CALM POPOVER                                  -->
+      <!-- ========================================================================= -->
+      <section id="col-alt2" class="flex flex-col gap-4">
+        <!-- Card Header -->
+        <div class="flex flex-col gap-1">
+          <div class="flex items-center justify-between">
+            <span class="text-[11px] font-semibold uppercase tracking-wider text-[#A09D97]">Alternative 2</span>
+            <span class="text-[10px] font-mono px-2 py-0.5 rounded-full bg-[#E0EFE5] text-[#27604A] font-medium">Toolbar Popover</span>
+          </div>
+          <h2 class="text-base font-semibold text-[#141414] dark:text-[#FBFBF9] tracking-tight">The Monolith Calm Popover</h2>
+          <p class="text-xs text-[#4A4A4F] dark:text-[#97979E] leading-relaxed">
+            Direct evolution of the canvas toolbar popover. Replaces boxy border dividers with 10–14px macro-spacing across 3 natural clusters: Roster, Primary Deck, and Acoustics.
+          </p>
+        </div>
+
+        <!-- Interactive Sandbox Canvas Box -->
+        <div class="relative min-h-[520px] rounded-[18px] bg-[#EDECEA] dark:bg-[#17171A] border border-[#E5E3DD] dark:border-[#2A2A2F] p-4 flex flex-col items-center justify-start overflow-hidden shadow-inner">
+          
+          <!-- Mock Whiteboard Canvas Header & Toolbar -->
+          <div class="w-full flex items-center justify-between pb-3 select-none">
+            <div class="text-xs font-medium text-[#4A4A4F] dark:text-[#97979E]">Whiteboard Canvas #1</div>
+            
+            <!-- Toolbar Trigger Button -->
+            <button 
+              id="alt2-trigger-btn"
+              type="button" 
+              onclick="toggleAlt2Panel()"
+              aria-haspopup="dialog" 
+              aria-expanded="true" 
+              class="h-10 px-3.5 rounded-[10px] bg-[#FBFBF9] dark:bg-[#1F1F24] border border-[#E5E3DD] dark:border-[#2A2A2F] shadow-card text-[#141414] dark:text-[#FBFBF9] hover:bg-[#F1F1F2] dark:hover:bg-[#2A2A2F] flex items-center gap-2 text-xs font-medium transition-colors select-none"
+            >
+              <span id="alt2-trigger-icon" class="text-[#27604A]">
+                <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
+                  <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                  <line x1="12" x2="12" y1="19" y2="22"/>
+                </svg>
+              </span>
+              <span>Voice</span>
+              <span id="alt2-trigger-count" class="font-mono text-[10px] tabular-nums text-[#4A4A4F] bg-[#EDECEA] dark:bg-[#2A2A2F] px-1.5 py-0.5 rounded-[4px]">3</span>
+            </button>
+          </div>
+
+          <!-- Monolith Popover Panel (Anchored below toolbar) -->
+          <div 
+            id="alt2-panel" 
+            role="dialog" 
+            aria-label="Voice chat panel"
+            class="w-full max-w-[320px] rounded-[18px] bg-[#FBFBF9] dark:bg-[#1F1F24] p-3.5 shadow-float border border-[#E5E3DD] dark:border-[#2A2A2F] flex flex-col gap-3.5 text-[#141414] dark:text-[#FBFBF9] select-none transition-all duration-150"
+          >
+            
+            <!-- CLUSTER 1: Roster & Status -->
+            <div class="flex flex-col gap-1">
+              <div class="flex items-center justify-between text-xs text-[#A09D97] px-1">
+                <span>Voice chat</span>
+                <span id="alt2-session-info" class="font-mono text-[11px] tabular-nums">3 in call</span>
+              </div>
+
+              <!-- Error Banner (shows when state === 'error') -->
+              <div id="alt2-error-banner" class="hidden rounded-[10px] bg-[#FDEBEC] p-2.5 flex items-center justify-between text-xs text-[#9F2F2D]">
+                <span>Mic permission denied</span>
+                <button type="button" onclick="applyGlobalState('incall-speaking')" class="px-2 py-0.5 rounded-[6px] bg-[#141414] text-[#FBFBF9] text-[11px] font-medium">Retry</button>
+              </div>
+
+              <!-- Roster List -->
+              <ul class="flex flex-col gap-0.5 pt-1">
+                <!-- You -->
+                <li class="flex h-9 items-center justify-between px-2 rounded-[8px] hover:bg-[#F1F1F2] dark:hover:bg-[#2A2A2F] transition-colors">
+                  <div class="flex items-center gap-2 min-w-0">
+                    <span class="size-6 shrink-0 rounded-full bg-[#EDECEA] dark:bg-[#2A2A2F] text-[#141414] dark:text-[#FBFBF9] font-medium text-[10px] flex items-center justify-center">A</span>
+                    <span class="text-xs font-medium truncate">Alberto (You)</span>
+                  </div>
+                  <div id="alt2-you-status" class="flex items-center justify-end text-xs">
+                    <!-- Dynamic state icon -->
+                    <span class="text-[#27604A] flex items-center gap-0.5 h-3">
+                      <span class="w-[2px] h-2 bg-current rounded-full wave-bar-1"></span>
+                      <span class="w-[2px] h-3 bg-current rounded-full wave-bar-2"></span>
+                    </span>
+                  </div>
+                </li>
+
+                <!-- Elena -->
+                <li class="flex h-9 items-center justify-between px-2 rounded-[8px] hover:bg-[#F1F1F2] dark:hover:bg-[#2A2A2F] transition-colors">
+                  <div class="flex items-center gap-2 min-w-0">
+                    <span class="size-6 shrink-0 rounded-full bg-[#E0EFE5] text-[#27604A] font-medium text-[10px] flex items-center justify-center">E</span>
+                    <span class="text-xs font-medium truncate">Elena Rostova</span>
+                  </div>
+                  <div id="alt2-elena-status" class="flex items-center justify-end">
+                    <span class="text-[11px] text-[#A09D97]">Listening</span>
+                  </div>
+                </li>
+
+                <!-- Marcus -->
+                <li class="flex h-9 items-center justify-between px-2 rounded-[8px] hover:bg-[#F1F1F2] dark:hover:bg-[#2A2A2F] transition-colors">
+                  <div class="flex items-center gap-2 min-w-0">
+                    <span class="size-6 shrink-0 rounded-full bg-[#EDECEA] dark:bg-[#2A2A2F] text-[#4A4A4F] text-[10px] font-medium flex items-center justify-center">M</span>
+                    <span class="text-xs text-[#4A4A4F] dark:text-[#97979E] truncate">Marcus Chen</span>
+                  </div>
+                  <div class="flex items-center text-[#A09D97]">
+                    <svg class="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><line x1="2" x2="22" y1="2" y2="22"/><path d="M18.89 13.23A7.12 7.12 0 0 0 19 12v-2"/><path d="M5 10v2a7 7 0 0 0 12 5"/><path d="M15 9.34V5a3 3 0 0 0-5.68-1.33"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
+                  </div>
+                </li>
+              </ul>
+            </div>
+
+            <!-- CLUSTER 2: Primary Control Deck (Macro gap-2.5, ZERO dividers) -->
+            <div id="alt2-controls-connected" class="flex items-center gap-2">
+              <button 
+                id="alt2-btn-mute"
+                type="button" 
+                aria-pressed="false"
+                onclick="toggleGlobalMute()"
+                class="h-10 flex-1 rounded-[10px] px-3 text-xs font-medium flex items-center justify-center gap-2 transition-colors cursor-pointer select-none text-[#141414] dark:text-[#FBFBF9] hover:bg-[#F1F1F2] dark:hover:bg-[#2A2A2F]"
+              >
+                <svg id="alt2-mute-icon" class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
+                  <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                  <line x1="12" x2="12" y1="19" y2="22"/>
+                </svg>
+                <span id="alt2-mute-text">Mute</span>
+              </button>
+
+              <button 
+                type="button" 
+                aria-label="Leave voice chat"
+                onclick="applyGlobalState('idle')"
+                class="size-10 shrink-0 rounded-[10px] flex items-center justify-center text-[#4A4A4F] dark:text-[#97979E] hover:bg-[#FDEBEC] hover:text-[#9F2F2D] transition-colors"
+              >
+                <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.33-2.67m-2.67-3.34a19.79 19.79 0 0 1-3.07-8.63A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91"/>
+                  <line x1="22" x2="2" y1="2" y2="22"/>
+                </svg>
+              </button>
+            </div>
+
+            <!-- Alternative 2 Idle Action Deck (hidden when in call) -->
+            <div id="alt2-controls-idle" class="hidden flex-col gap-1.5">
+              <button 
+                type="button"
+                onclick="applyGlobalState('incall-speaking')"
+                class="h-10 w-full rounded-[10px] bg-[#141414] dark:bg-[#FBFBF9] text-[#FBFBF9] dark:text-[#141414] hover:opacity-90 flex items-center justify-center gap-2 text-xs font-medium transition-all"
+              >
+                <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
+                <span>Join voice</span>
+              </button>
+              <button 
+                type="button"
+                onclick="applyGlobalState('testing')"
+                class="h-8 w-full rounded-[10px] text-[#4A4A4F] dark:text-[#97979E] hover:bg-[#F1F1F2] dark:hover:bg-[#2A2A2F] flex items-center justify-center gap-1.5 text-xs transition-colors"
+              >
+                <span>Test microphone</span>
+              </button>
+            </div>
+
+            <!-- CLUSTER 3: Integrated Calibration Rail (No border-t, macro spacing) -->
+            <div class="flex flex-col gap-2 pt-0.5">
+              <div class="flex h-7 items-center gap-2">
+                <span class="text-[#4A4A4F] dark:text-[#97979E] shrink-0">
+                  <svg class="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
+                </span>
+                
+                <!-- Track & Threshold Marker -->
+                <div class="relative flex-1 h-6 flex items-center cursor-pointer select-none" onclick="handleSliderClick(event, 'alt2')">
+                  <div class="relative h-1.5 w-full rounded-full bg-[#EDECEA] dark:bg-[#2A2A2F] overflow-hidden">
+                    <div id="alt2-slider-fill" style="width: 58%;" class="h-full rounded-full bg-[#27604A] transition-all duration-75"></div>
+                  </div>
+                  <div id="alt2-slider-thumb" style="left: 45%;" class="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 h-3.5 w-1 rounded-full bg-[#141414] dark:bg-[#FBFBF9] ring-2 ring-[#FBFBF9] dark:ring-[#1F1F24]"></div>
+                </div>
+
+                <span id="alt2-db-readout" class="w-12 shrink-0 text-right font-mono text-[10px] tabular-nums text-[#A09D97] dark:text-[#97979E]">−34 dB</span>
+              </div>
+
+              <!-- Noise switch -->
+              <label class="flex items-center justify-between cursor-pointer">
+                <span class="text-xs text-[#4A4A4F] dark:text-[#97979E]">Noise cancellation</span>
+                <button type="button" role="switch" id="alt2-noise-switch" aria-checked="true" onclick="toggleNoise('alt2')" class="relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full p-0.5 transition-colors duration-150 bg-[#27604A]">
+                  <span id="alt2-noise-thumb" class="pointer-events-none block size-4 rounded-full bg-[#FBFBF9] shadow-sm transform translate-x-4 transition-transform duration-150"></span>
+                </button>
+              </label>
+            </div>
+
+          </div>
+
+        </div>
+
+        <!-- Design Attributes -->
+        <div class="text-xs text-[#4A4A4F] dark:text-[#97979E] space-y-1 bg-[#FBFBF9] dark:bg-[#17171A] p-3 rounded-[10px] border border-[#E5E3DD] dark:border-[#2A2A2F]">
+          <div class="font-medium text-[#141414] dark:text-[#FBFBF9]">Strengths:</div>
+          <div>• <strong>Direct Drop-in Replacement</strong>: Fits exact placement of the existing popover.</div>
+          <div>• <strong>Zero Border Philosophy</strong>: Replaces messy horizontal borders with pure macro-spacing.</div>
+          <div>• <strong>Familiar mental model</strong>: Toolbar popover opens on click, closes when clicking outside.</div>
+        </div>
+      </section>
+
+      <!-- ========================================================================= -->
+      <!-- ALTERNATIVE 3: THE AMBIENT PERIMETER RAIL                                 -->
+      <!-- ========================================================================= -->
+      <section id="col-alt3" class="flex flex-col gap-4">
+        <!-- Card Header -->
+        <div class="flex flex-col gap-1">
+          <div class="flex items-center justify-between">
+            <span class="text-[11px] font-semibold uppercase tracking-wider text-[#A09D97]">Alternative 3</span>
+            <span class="text-[10px] font-mono px-2 py-0.5 rounded-full bg-[#E0EFE5] text-[#27604A] font-medium">Perimeter Drawer</span>
+          </div>
+          <h2 class="text-base font-semibold text-[#141414] dark:text-[#FBFBF9] tracking-tight">The Ambient Perimeter Rail</h2>
+          <p class="text-xs text-[#4A4A4F] dark:text-[#97979E] leading-relaxed">
+            Vertical side rail docked to the canvas perimeter. Perfect for multi-person collaborative drawing where voice room members and activity dots stay visible along the screen edge.
+          </p>
+        </div>
+
+        <!-- Interactive Sandbox Canvas Box -->
+        <div class="relative min-h-[520px] rounded-[18px] bg-[#EDECEA] dark:bg-[#17171A] border border-[#E5E3DD] dark:border-[#2A2A2F] p-3 flex justify-end overflow-hidden shadow-inner">
+          
+          <!-- Mock Whiteboard Canvas Elements -->
+          <div class="absolute inset-0 p-6 pointer-events-none opacity-20 flex flex-col justify-between select-none">
+            <div class="w-48 h-32 rounded-[14px] border-2 border-dashed border-[#141414] dark:border-[#FBFBF9]"></div>
+            <div class="text-[11px] font-mono text-[#4A4A4F]">Active Canvas Grid Area</div>
+          </div>
+
+          <!-- Perimeter Rail Aside Container -->
+          <aside 
+            class="relative z-20 w-72 rounded-[18px] bg-[#FBFBF9] dark:bg-[#1F1F24] p-3 shadow-float border border-[#E5E3DD] dark:border-[#2A2A2F] flex flex-col justify-between gap-3 select-none transition-all duration-150"
+            role="region"
+            aria-label="Voice Chat Perimeter Rail"
+          >
+            <!-- Top Section -->
+            <div class="flex flex-col gap-2.5">
+              
+              <!-- 1. Room Header -->
+              <div class="flex items-center justify-between px-1 py-0.5">
+                <div class="flex items-center gap-2">
+                  <span class="size-2 rounded-full bg-[#27604A] shrink-0" aria-hidden="true"></span>
+                  <div class="flex items-baseline gap-1.5">
+                    <span class="text-xs font-semibold text-[#141414] dark:text-[#FBFBF9] tracking-tight">Voice Room</span>
+                    <span class="text-[11px] text-[#A09D97]">· 3 active</span>
+                  </div>
+                </div>
+                <!-- One-touch collapse button -->
+                <button 
+                  type="button"
+                  class="size-6 rounded-[8px] flex items-center justify-center text-[#4A4A4F] dark:text-[#97979E] hover:bg-[#F1F1F2] dark:hover:bg-[#2A2A2F] transition-colors"
+                  aria-label="Collapse Voice Rail"
+                  title="Collapse Rail"
+                >
+                  <svg class="size-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="9 18 15 12 9 6"></polyline>
+                  </svg>
+                </button>
+              </div>
+
+              <!-- 2. Live Participant Roster (Zero dividers, 2px gap-0.5) -->
+              <div class="flex flex-col gap-0.5" role="list" aria-label="Room participants">
+                
+                <!-- Alberto (Local User) -->
+                <div class="flex items-center justify-between px-2 py-1.5 rounded-[10px] hover:bg-[#F1F1F2] dark:hover:bg-[#2A2A2F] transition-colors">
+                  <div class="flex items-center gap-2 min-w-0">
+                    <div class="relative size-7 rounded-full bg-[#141414] text-[#FBFBF9] flex items-center justify-center text-[10px] font-medium shrink-0">
+                      <span>AL</span>
+                      <span id="alt3-you-pip" class="absolute -bottom-0.5 -right-0.5 size-2 rounded-full bg-[#27604A] ring-1 ring-[#FBFBF9] dark:ring-[#1F1F24]" aria-hidden="true"></span>
+                    </div>
+                    <div class="flex flex-col min-w-0 leading-tight">
+                      <span class="text-xs font-medium text-[#141414] dark:text-[#FBFBF9] truncate">Alberto (You)</span>
+                      <span id="alt3-you-label" class="text-[10px] text-[#27604A] font-normal">Speaking</span>
+                    </div>
+                  </div>
+                  <!-- Subtle Audio Activity Dots -->
+                  <div id="alt3-you-dots" class="flex items-center gap-1 shrink-0">
+                    <span class="size-1.5 rounded-full bg-[#27604A] pulse-dot-1"></span>
+                    <span class="size-1.5 rounded-full bg-[#27604A] pulse-dot-2"></span>
+                    <span class="size-1.5 rounded-full bg-[#27604A] pulse-dot-3"></span>
+                  </div>
+                </div>
+
+                <!-- Elena Rostova -->
+                <div class="flex items-center justify-between px-2 py-1.5 rounded-[10px] hover:bg-[#F1F1F2] dark:hover:bg-[#2A2A2F] transition-colors">
+                  <div class="flex items-center gap-2 min-w-0">
+                    <div class="relative size-7 rounded-full bg-[#E0EFE5] text-[#27604A] flex items-center justify-center text-[10px] font-medium shrink-0">
+                      <span>ER</span>
+                    </div>
+                    <div class="flex flex-col min-w-0 leading-tight">
+                      <span class="text-xs font-medium text-[#141414] dark:text-[#FBFBF9] truncate">Elena Rostova</span>
+                      <span id="alt3-elena-label" class="text-[10px] text-[#A09D97] font-normal">Listening</span>
+                    </div>
+                  </div>
+                  <div id="alt3-elena-dots" class="flex items-center gap-1 shrink-0 opacity-25">
+                    <span class="size-1.5 rounded-full bg-[#A09D97]"></span>
+                    <span class="size-1.5 rounded-full bg-[#A09D97]"></span>
+                    <span class="size-1.5 rounded-full bg-[#A09D97]"></span>
+                  </div>
+                </div>
+
+                <!-- Marcus Vance -->
+                <div class="flex items-center justify-between px-2 py-1.5 rounded-[10px] hover:bg-[#F1F1F2] dark:hover:bg-[#2A2A2F] transition-colors">
+                  <div class="flex items-center gap-2 min-w-0">
+                    <div class="relative size-7 rounded-full bg-[#F1F1F2] dark:bg-[#2A2A2F] text-[#4A4A4F] flex items-center justify-center text-[10px] font-medium shrink-0">
+                      <span>MV</span>
+                    </div>
+                    <div class="flex flex-col min-w-0 leading-tight">
+                      <span class="text-xs font-medium text-[#141414] dark:text-[#FBFBF9] truncate">Marcus Vance</span>
+                      <span class="text-[10px] text-[#A09D97] font-normal">Muted</span>
+                    </div>
+                  </div>
+                  <div class="size-5 flex items-center justify-center text-[#A09D97]">
+                    <svg class="size-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><line x1="2" x2="22" y1="2" y2="22"/><path d="M18.89 13.23A7.12 7.12 0 0 0 19 12v-2"/><path d="M5 10v2a7 7 0 0 0 12 5"/><path d="M15 9.34V5a3 3 0 0 0-5.68-1.33"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
+                  </div>
+                </div>
+
+              </div>
+
+              <!-- 3. Mic Calibration Disclosure -->
+              <div id="alt3-calibration-drawer" class="bg-[#F1F1F2] dark:bg-[#2A2A2F] rounded-[10px] p-2.5 flex flex-col gap-2 transition-all">
+                <div class="flex items-center justify-between">
+                  <span class="text-xs font-semibold text-[#141414] dark:text-[#FBFBF9]">Mic Sensitivity</span>
+                  <span id="alt3-db-readout" class="text-[10px] text-[#A09D97] font-mono">−42 dB</span>
+                </div>
+
+                <div class="relative h-6 flex items-center cursor-pointer select-none" onclick="handleSliderClick(event, 'alt3')">
+                  <div class="relative h-1.5 w-full bg-[#E5E3DD] dark:bg-[#17171A] rounded-full overflow-hidden">
+                    <div id="alt3-slider-fill" style="width: 70%;" class="h-full bg-[#27604A] rounded-full transition-all duration-75"></div>
+                  </div>
+                  <div id="alt3-slider-thumb" style="left: 60%;" class="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 h-3.5 w-1 rounded-full bg-[#141414] dark:bg-[#FBFBF9]"></div>
+                </div>
+
+                <label class="flex items-center justify-between pt-1 cursor-pointer">
+                  <span class="text-xs text-[#4A4A4F] dark:text-[#97979E]">Noise suppression</span>
+                  <button type="button" role="switch" id="alt3-noise-switch" aria-checked="true" onclick="toggleNoise('alt3')" class="relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full p-0.5 bg-[#27604A]">
+                    <span id="alt3-noise-thumb" class="pointer-events-none block size-4 rounded-full bg-[#FBFBF9] shadow-sm transform translate-x-4 transition-transform duration-150"></span>
+                  </button>
+                </label>
+              </div>
+
+            </div>
+
+            <!-- 4. Bottom Control Dock (No dividers, gap-1 inside bar) -->
+            <div class="flex items-center justify-between gap-1 p-1 bg-[#F1F1F2] dark:bg-[#2A2A2F] rounded-[14px]">
+              
+              <!-- Push-to-Talk / Mute Toggle Button -->
+              <button 
+                id="alt3-btn-mute"
+                type="button"
+                onclick="toggleGlobalMute()"
+                class="flex-1 h-10 px-3 rounded-[10px] bg-[#141414] text-[#FBFBF9] hover:bg-[#2A2A2F] transition-all flex items-center justify-center gap-2 group cursor-pointer"
+                aria-pressed="false"
+                aria-label="Toggle mute"
+              >
+                <svg id="alt3-mute-icon" class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/>
+                </svg>
+                <span id="alt3-mute-label" class="text-xs font-medium">Mute</span>
+              </button>
+
+              <!-- Calibration Toggle Button -->
+              <button 
+                type="button"
+                onclick="toggleAlt3Drawer()"
+                class="size-10 rounded-[10px] flex items-center justify-center text-[#4A4A4F] dark:text-[#97979E] hover:bg-[#FBFBF9] dark:hover:bg-[#1F1F24] hover:text-[#141414] dark:hover:text-[#FBFBF9] transition-all"
+                aria-label="Toggle calibration settings"
+                title="Calibration Settings"
+              >
+                <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><line x1="4" x2="4" y1="21" y2="14"/><line x1="4" x2="4" y1="10" y2="3"/><line x1="12" x2="12" y1="21" y2="12"/><line x1="12" x2="12" y1="8" y2="3"/><line x1="20" x2="20" y1="21" y2="16"/><line x1="20" x2="20" y1="12" y2="3"/><line x1="1" x2="7" y1="14" y2="14"/><line x1="9" x2="15" y1="8" y2="8"/><line x1="17" x2="23" y1="16" y2="16"/></svg>
+              </button>
+
+              <!-- Leave Call -->
+              <button 
+                type="button"
+                onclick="applyGlobalState('idle')"
+                class="size-10 rounded-[10px] flex items-center justify-center text-[#4A4A4F] dark:text-[#97979E] hover:bg-[#FDEBEC] hover:text-[#9F2F2D] transition-all"
+                aria-label="Disconnect from voice room"
+                title="Disconnect"
+              >
+                <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.33-2.67m-2.67-3.34a19.79 19.79 0 0 1-3.07-8.63A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91"/><line x1="22" x2="2" y1="2" y2="22"/></svg>
+              </button>
+
+            </div>
+
+          </aside>
+
+        </div>
+
+        <!-- Design Attributes -->
+        <div class="text-xs text-[#4A4A4F] dark:text-[#97979E] space-y-1 bg-[#FBFBF9] dark:bg-[#17171A] p-3 rounded-[10px] border border-[#E5E3DD] dark:border-[#2A2A2F]">
+          <div class="font-medium text-[#141414] dark:text-[#FBFBF9]">Strengths:</div>
+          <div>• <strong>Persistent Side Presence</strong>: Never blocks the vertical center of the whiteboard.</div>
+          <div>• <strong>Always-visible Roster</strong>: Perfect for active collaborative workshops.</div>
+          <div>• <strong>Collapsible</strong>: One-touch collapse button shrinks into compact edge pill.</div>
+        </div>
+      </section>
+
+    </div>
+
+    <!-- COMPARISON MATRIX & DECISION GUIDE -->
+    <section class="mt-4 p-5 rounded-[18px] bg-[#FBFBF9] dark:bg-[#17171A] border border-[#E5E3DD] dark:border-[#2A2A2F] flex flex-col gap-4">
+      <div>
+        <h3 class="text-sm font-semibold text-[#141414] dark:text-[#FBFBF9] tracking-tight">Design Architecture Comparison Matrix</h3>
+        <p class="text-xs text-[#A09D97] dark:text-[#97979E]">Evaluate the trade-offs of each Calm UI architecture for Best Whiteboard.</p>
+      </div>
+
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-xs text-[#4A4A4F] dark:text-[#97979E] border-collapse">
+          <thead>
+            <tr class="text-[#141414] dark:text-[#FBFBF9] font-medium border-b border-[#E5E3DD] dark:border-[#2A2A2F]">
+              <th class="py-2.5 pr-4">Dimension</th>
+              <th class="py-2.5 px-4 text-[#27604A]">Alternative 1: Floating Island</th>
+              <th class="py-2.5 px-4">Alternative 2: Monolith Popover</th>
+              <th class="py-2.5 pl-4">Alternative 3: Perimeter Rail</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-[#E5E3DD]/50 dark:divide-[#2A2A2F]/50">
+            <tr>
+              <td class="py-2.5 pr-4 font-medium text-[#141414] dark:text-[#FBFBF9]">Screen Footprint</td>
+              <td class="py-2.5 px-4 text-[#141414] dark:text-[#FBFBF9]">Minimal (48px height dock at bottom)</td>
+              <td class="py-2.5 px-4">Zero when closed (pops open on demand)</td>
+              <td class="py-2.5 pl-4">288px width on right perimeter</td>
+            </tr>
+            <tr>
+              <td class="py-2.5 pr-4 font-medium text-[#141414] dark:text-[#FBFBF9]">Mute Ergonomics</td>
+              <td class="py-2.5 px-4 font-semibold text-[#27604A]">Instant 1-Click Always Accessible</td>
+              <td class="py-2.5 px-4">2 Clicks (open popover &rarr; click mute)</td>
+              <td class="py-2.5 pl-4">Instant 1-Click Always Accessible</td>
+            </tr>
+            <tr>
+              <td class="py-2.5 pr-4 font-medium text-[#141414] dark:text-[#FBFBF9]">Active Speaker Feedback</td>
+              <td class="py-2.5 px-4">Dynamic acoustic wave pill on dock</td>
+              <td class="py-2.5 px-4">Icon pulse on toolbar trigger</td>
+              <td class="py-2.5 pl-4">Subtle pulse dots beside participant names</td>
+            </tr>
+            <tr>
+              <td class="py-2.5 pr-4 font-medium text-[#141414] dark:text-[#FBFBF9]">Whiteboard Canvas Fit</td>
+              <td class="py-2.5 px-4">Excellent (sits alongside zoom/tool docks)</td>
+              <td class="py-2.5 px-4">Classic (familiar popover paradigm)</td>
+              <td class="py-2.5 pl-4">Best for long workshops / team brainstorms</td>
+            </tr>
+            <tr>
+              <td class="py-2.5 pr-4 font-medium text-[#141414] dark:text-[#FBFBF9]">Calm UI Discipline</td>
+              <td class="py-2.5 px-4">100% token strict, zero internal lines</td>
+              <td class="py-2.5 px-4">100% token strict, zero internal lines</td>
+              <td class="py-2.5 pl-4">100% token strict, zero internal lines</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- JAVASCRIPT STATE ENGINE -->
+  <script>
+    let currentGlobalState = 'incall-speaking';
+    let globalIsMuted = false;
+    let globalNoise = { alt1: true, alt2: true, alt3: true };
+    let alt1FlyoutOpen = true;
+    let alt2PanelOpen = true;
+    let alt3DrawerOpen = true;
+
+    function applyGlobalState(state) {
+      currentGlobalState = state;
+      document.getElementById('global-state-select').value = state;
+
+      // Update Mute flag
+      if (state === 'incall-muted') {
+        globalIsMuted = true;
+      } else if (state === 'incall-speaking' || state === 'incall-you-speaking') {
+        globalIsMuted = false;
+      }
+
+      // Sync across all 3 alternatives
+      syncAlt1(state);
+      syncAlt2(state);
+      syncAlt3(state);
+    }
+
+    function toggleGlobalMute() {
+      globalIsMuted = !globalIsMuted;
+      if (globalIsMuted) {
+        applyGlobalState('incall-muted');
+      } else {
+        applyGlobalState('incall-you-speaking');
+      }
+    }
+
+    // --- ALT 1 SYNC ---
+    function syncAlt1(state) {
+      const dockWave = document.getElementById('alt1-dock-wave');
+      const dockSpeaker = document.getElementById('alt1-dock-speaker');
+      const dockSubtext = document.getElementById('alt1-dock-subtext');
+      const btnMute = document.getElementById('alt1-btn-mute');
+      const sliderFill = document.getElementById('alt1-slider-fill');
+      const youStatus = document.getElementById('alt1-you-status');
+      const elenaStatus = document.getElementById('alt1-elena-status');
+
+      if (state === 'incall-speaking') {
+        dockWave.style.opacity = '1';
+        dockSpeaker.textContent = 'Elena';
+        dockSubtext.textContent = 'speaking';
+        btnMute.className = "size-10 rounded-ctrl flex items-center justify-center bg-[#E0EFE5] text-[#27604A] hover:bg-[#d5e8dc] active:scale-[0.98] transition-all";
+        btnMute.setAttribute('aria-pressed', 'false');
+        sliderFill.style.width = '20%';
+        youStatus.innerHTML = '<span class="text-[#A09D97]">Listening</span>';
+        elenaStatus.innerHTML = '<span class="text-[#27604A] font-medium">Speaking</span><div class="flex items-center gap-0.5 h-3"><span class="w-[2px] h-2 bg-[#27604A] rounded-full wave-bar-1"></span><span class="w-[2px] h-3 bg-[#27604A] rounded-full wave-bar-2"></span></div>';
+      } else if (state === 'incall-you-speaking') {
+        dockWave.style.opacity = '1';
+        dockSpeaker.textContent = 'You';
+        dockSubtext.textContent = 'broadcasting';
+        btnMute.className = "size-10 rounded-ctrl flex items-center justify-center bg-[#E0EFE5] text-[#27604A] hover:bg-[#d5e8dc] active:scale-[0.98] transition-all";
+        btnMute.setAttribute('aria-pressed', 'false');
+        sliderFill.style.width = '75%';
+        youStatus.innerHTML = '<span class="text-[#27604A] font-medium">Speaking</span><div class="flex items-center gap-0.5 h-3"><span class="w-[2px] h-2 bg-[#27604A] rounded-full wave-bar-1"></span><span class="w-[2px] h-3 bg-[#27604A] rounded-full wave-bar-2"></span></div>';
+        elenaStatus.innerHTML = '<span class="text-[#A09D97]">Listening</span>';
+      } else if (state === 'incall-muted') {
+        dockWave.style.opacity = '0.25';
+        dockSpeaker.textContent = 'Muted';
+        dockSubtext.textContent = 'mic off';
+        btnMute.className = "size-10 rounded-ctrl flex items-center justify-center bg-[#141414] dark:bg-[#FBFBF9] text-[#FBFBF9] dark:text-[#141414] active:scale-[0.98] transition-all";
+        btnMute.setAttribute('aria-pressed', 'true');
+        sliderFill.style.width = '0%';
+        youStatus.innerHTML = '<span class="text-[#A09D97]">Muted</span>';
+      } else if (state === 'idle') {
+        dockSpeaker.textContent = 'Voice';
+        dockSubtext.textContent = 'disconnected';
+        sliderFill.style.width = '0%';
+      }
+    }
+
+    // --- ALT 2 SYNC ---
+    function syncAlt2(state) {
+      const btnMute = document.getElementById('alt2-btn-mute');
+      const muteText = document.getElementById('alt2-mute-text');
+      const errorBanner = document.getElementById('alt2-error-banner');
+      const controlsConnected = document.getElementById('alt2-controls-connected');
+      const controlsIdle = document.getElementById('alt2-controls-idle');
+      const sliderFill = document.getElementById('alt2-slider-fill');
+      const youStatus = document.getElementById('alt2-you-status');
+      const elenaStatus = document.getElementById('alt2-elena-status');
+
+      errorBanner.classList.add('hidden');
+      controlsConnected.classList.remove('hidden');
+      controlsIdle.classList.add('hidden');
+
+      if (state === 'incall-speaking') {
+        btnMute.className = "h-10 flex-1 rounded-[10px] px-3 text-xs font-medium flex items-center justify-center gap-2 transition-colors cursor-pointer select-none text-[#141414] dark:text-[#FBFBF9] hover:bg-[#F1F1F2] dark:hover:bg-[#2A2A2F]";
+        btnMute.setAttribute('aria-pressed', 'false');
+        muteText.textContent = "Mute";
+        sliderFill.style.width = '25%';
+        youStatus.innerHTML = '<span class="text-[#A09D97]">Listening</span>';
+        elenaStatus.innerHTML = '<span class="text-[#27604A] font-medium">Speaking</span>';
+      } else if (state === 'incall-you-speaking') {
+        btnMute.className = "h-10 flex-1 rounded-[10px] px-3 text-xs font-medium flex items-center justify-center gap-2 transition-colors cursor-pointer select-none text-[#141414] dark:text-[#FBFBF9] hover:bg-[#F1F1F2] dark:hover:bg-[#2A2A2F]";
+        btnMute.setAttribute('aria-pressed', 'false');
+        muteText.textContent = "Mute";
+        sliderFill.style.width = '68%';
+        youStatus.innerHTML = '<span class="text-[#27604A] font-medium">Speaking</span>';
+        elenaStatus.innerHTML = '<span class="text-[#A09D97]">Listening</span>';
+      } else if (state === 'incall-muted') {
+        btnMute.className = "h-10 flex-1 rounded-[10px] px-3 text-xs font-medium flex items-center justify-center gap-2 transition-colors cursor-pointer select-none bg-[#141414] dark:bg-[#FBFBF9] text-[#FBFBF9] dark:text-[#141414]";
+        btnMute.setAttribute('aria-pressed', 'true');
+        muteText.textContent = "Unmute";
+        sliderFill.style.width = '0%';
+        youStatus.innerHTML = '<span class="text-[#A09D97]">Muted</span>';
+      } else if (state === 'idle') {
+        controlsConnected.classList.add('hidden');
+        controlsIdle.classList.remove('hidden');
+        sliderFill.style.width = '0%';
+      } else if (state === 'error') {
+        errorBanner.classList.remove('hidden');
+      }
+    }
+
+    // --- ALT 3 SYNC ---
+    function syncAlt3(state) {
+      const btnMute = document.getElementById('alt3-btn-mute');
+      const muteLabel = document.getElementById('alt3-mute-label');
+      const youPip = document.getElementById('alt3-you-pip');
+      const youLabel = document.getElementById('alt3-you-label');
+      const youDots = document.getElementById('alt3-you-dots');
+      const elenaLabel = document.getElementById('alt3-elena-label');
+      const elenaDots = document.getElementById('alt3-elena-dots');
+      const sliderFill = document.getElementById('alt3-slider-fill');
+
+      if (state === 'incall-speaking') {
+        btnMute.className = "flex-1 h-10 px-3 rounded-[10px] bg-[#141414] dark:bg-[#FBFBF9] text-[#FBFBF9] dark:text-[#141414] hover:opacity-90 transition-all flex items-center justify-center gap-2";
+        muteLabel.textContent = "Mute";
+        btnMute.setAttribute('aria-pressed', 'false');
+        youPip.className = "absolute -bottom-0.5 -right-0.5 size-2 rounded-full bg-[#A09D97] ring-1 ring-[#FBFBF9]";
+        youLabel.textContent = "Listening";
+        youLabel.className = "text-[10px] text-[#A09D97] font-normal";
+        youDots.classList.add('opacity-20');
+        elenaLabel.textContent = "Speaking";
+        elenaLabel.className = "text-[10px] text-[#27604A] font-medium";
+        elenaDots.classList.remove('opacity-25');
+        sliderFill.style.width = '30%';
+      } else if (state === 'incall-you-speaking') {
+        btnMute.className = "flex-1 h-10 px-3 rounded-[10px] bg-[#141414] dark:bg-[#FBFBF9] text-[#FBFBF9] dark:text-[#141414] hover:opacity-90 transition-all flex items-center justify-center gap-2";
+        muteLabel.textContent = "Mute";
+        btnMute.setAttribute('aria-pressed', 'false');
+        youPip.className = "absolute -bottom-0.5 -right-0.5 size-2 rounded-full bg-[#27604A] ring-1 ring-[#FBFBF9]";
+        youLabel.textContent = "Speaking";
+        youLabel.className = "text-[10px] text-[#27604A] font-medium";
+        youDots.classList.remove('opacity-20');
+        elenaLabel.textContent = "Listening";
+        elenaLabel.className = "text-[10px] text-[#A09D97] font-normal";
+        elenaDots.classList.add('opacity-25');
+        sliderFill.style.width = '78%';
+      } else if (state === 'incall-muted') {
+        btnMute.className = "flex-1 h-10 px-3 rounded-[10px] bg-[#EDECEA] dark:bg-[#2A2A2F] text-[#141414] dark:text-[#FBFBF9] hover:opacity-90 transition-all flex items-center justify-center gap-2";
+        muteLabel.textContent = "Unmute";
+        btnMute.setAttribute('aria-pressed', 'true');
+        youPip.className = "absolute -bottom-0.5 -right-0.5 size-2 rounded-full bg-[#A09D97] ring-1 ring-[#FBFBF9]";
+        youLabel.textContent = "Muted";
+        youLabel.className = "text-[10px] text-[#A09D97] font-normal";
+        youDots.classList.add('opacity-20');
+        sliderFill.style.width = '0%';
+      }
+    }
+
+    // Toggle Flyouts & Panels
+    function toggleAlt1Flyout() {
+      alt1FlyoutOpen = !alt1FlyoutOpen;
+      const flyout = document.getElementById('alt1-flyout');
+      if (alt1FlyoutOpen) {
+        flyout.classList.remove('opacity-0', 'pointer-events-none', 'translate-y-2');
+      } else {
+        flyout.classList.add('opacity-0', 'pointer-events-none', 'translate-y-2');
+      }
+    }
+
+    function toggleAlt2Panel() {
+      alt2PanelOpen = !alt2PanelOpen;
+      const panel = document.getElementById('alt2-panel');
+      if (alt2PanelOpen) {
+        panel.classList.remove('opacity-0', 'pointer-events-none');
+      } else {
+        panel.classList.add('opacity-0', 'pointer-events-none');
+      }
+    }
+
+    function toggleAlt3Drawer() {
+      alt3DrawerOpen = !alt3DrawerOpen;
+      const drawer = document.getElementById('alt3-calibration-drawer');
+      if (alt3DrawerOpen) {
+        drawer.classList.remove('hidden');
+      } else {
+        drawer.classList.add('hidden');
+      }
+    }
+
+    // Noise Switch Toggle
+    function toggleNoise(prefix) {
+      globalNoise[prefix] = !globalNoise[prefix];
+      const active = globalNoise[prefix];
+      const sw = document.getElementById(prefix + '-noise-switch');
+      const thumb = document.getElementById(prefix + '-noise-thumb');
+      sw.setAttribute('aria-checked', active ? 'true' : 'false');
+      if (active) {
+        sw.className = "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full p-0.5 transition-colors duration-150 bg-[#27604A]";
+        thumb.className = "pointer-events-none block size-4 rounded-full bg-[#FBFBF9] shadow-sm transform translate-x-4 transition-transform duration-150";
+      } else {
+        sw.className = "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full p-0.5 transition-colors duration-150 bg-[#E5E3DD] dark:bg-[#2A2A2F]";
+        thumb.className = "pointer-events-none block size-4 rounded-full bg-[#FBFBF9] shadow-sm transform translate-x-0 transition-transform duration-150";
+      }
+    }
+
+    // Interactive Slider Click
+    function handleSliderClick(event, prefix) {
+      const rect = event.currentTarget.getBoundingClientRect();
+      const pct = Math.max(0, Math.min(100, Math.round(((event.clientX - rect.left) / rect.width) * 100)));
+      const thumb = document.getElementById(prefix + '-slider-thumb');
+      const dbReadout = document.getElementById(prefix + '-db-readout');
+      thumb.style.left = pct + '%';
+      const dbValue = Math.round(-60 + (pct / 100) * 60);
+      dbReadout.textContent = (dbValue < 0 ? '−' : '') + Math.abs(dbValue) + ' dB';
+    }
+
+    // View Mode Switcher
+    function setViewMode(mode) {
+      ['all', 'alt1', 'alt2', 'alt3'].forEach(m => {
+        const btn = document.getElementById('view-tab-' + m);
+        if (m === mode) {
+          btn.className = "px-2.5 py-1.5 rounded-[8px] transition-all bg-[#FBFBF9] dark:bg-[#17171A] text-[#141414] dark:text-[#FBFBF9] shadow-sm font-semibold";
+        } else {
+          btn.className = "px-2.5 py-1.5 rounded-[8px] transition-all hover:text-[#141414] dark:hover:text-[#FBFBF9]";
+        }
+      });
+
+      const col1 = document.getElementById('col-alt1');
+      const col2 = document.getElementById('col-alt2');
+      const col3 = document.getElementById('col-alt3');
+      const grid = document.getElementById('alternatives-grid');
+
+      if (mode === 'all') {
+        col1.classList.remove('hidden');
+        col2.classList.remove('hidden');
+        col3.classList.remove('hidden');
+        grid.className = "grid grid-cols-1 lg:grid-cols-3 gap-6 items-start";
+      } else {
+        col1.classList.add('hidden');
+        col2.classList.add('hidden');
+        col3.classList.add('hidden');
+        grid.className = "grid grid-cols-1 max-w-lg mx-auto gap-6 items-start";
+        if (mode === 'alt1') col1.classList.remove('hidden');
+        if (mode === 'alt2') col2.classList.remove('hidden');
+        if (mode === 'alt3') col3.classList.remove('hidden');
+      }
+    }
+
+    // Theme Toggle
+    function toggleTheme() {
+      document.documentElement.classList.toggle('dark');
+    }
+
+    // Initialize default state
+    applyGlobalState('incall-speaking');
+  </script>
+</body>
+</html>

@@ -13,7 +13,7 @@ import { cn } from '@/lib/utils';
  * Restating the rule at that call site is how the two drifted apart.
  */
 export const CHROME_CONTROLS =
-  'touch-targets [&_svg:not([data-slot=avatar-fallback]_svg)]:stroke-[1.75]';
+  'touch-targets [&_svg:not([data-slot=avatar-fallback]_svg)]:stroke-[1.5]';
 
 /**
  * Chrome that stays out of the way until it is wanted: invisible at rest,
@@ -29,23 +29,26 @@ export const HOVER_REVEAL =
   'touch-reveal opacity-0 transition-opacity duration-base ease-out-quart group-hover/chrome:opacity-100 group-focus-within/chrome:opacity-100';
 
 /**
- * Chrome laid straight on the board: no fill, no border, and no shadow of its
- * own — a shadow cast by a box with nothing in it draws the outline of the
- * card that was removed. What separates these controls from the drawing under
- * them is on each control instead: the `tb-glyph` halo, and a translucent wash
- * on hover rather than the opaque chip a ghost control takes on a panel.
+ * An instrument: a cluster of controls that floats over the board. The
+ * material is `.wb-instrument` and the resting state is `.wb-chrome-quiet`
+ * (both section 8 of `index.css`); this is the layout that goes on them.
  *
- * Used by the two corner HUDs and the board header. The canvas toolbar and the
- * properties pill left this rule for Liquid Glass (section 9 of `index.css`):
- * they are the layer you hold a pointer over, and a plate that stays put and
- * lets the board through beat a control that disappears into it. Everything
- * still on this rule is chrome you look past rather than aim at.
+ * Quiet is the point. An instrument sits on a wash until you reach for it and
+ * takes its plate on hover, on focus, while a menu it opened is standing, or
+ * while it holds something that is running. An edge on this board still means
+ * "you can press this" — it just stops claiming it at a distance, which is
+ * what let four corners outweigh the drawing between them.
  */
-export const CHROME_ON_BOARD =
-  'border-0 bg-transparent shadow-none [--chrome-hover:var(--color-tb-track)]';
+export const INSTRUMENT =
+  'wb-instrument wb-chrome-quiet flex items-center gap-0.5 p-1';
 
-/** A key inside one: round, and haloed because nothing is under it. */
-export const CHROME_KEY_ON_BOARD = 'tb-glyph rounded-full';
+/**
+ * A key inside one. No halo: a halo is what separates a glyph from a drawing
+ * when nothing is under it, and here the plate already does that — a halo on
+ * top of a plate is a smear around the glyph.
+ */
+export const INSTRUMENT_KEY =
+  'rounded-control [--chrome-hover:var(--color-tb-track)]';
 
 const surfaceVariants = cva(
   'select-none rounded-panel border border-border bg-surface text-fg',

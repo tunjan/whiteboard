@@ -6,9 +6,7 @@ import { shapeRegistry } from '../shapes/shape-registry';
 import { textIndexAtWorldPoint } from '../shapes/text';
 import {
   MIN_TEXT_WIDTH,
-  layoutTextProps,
   resolveLineHeightPx,
-  textAlignOffset,
   textLineHeight,
 } from '../shapes/text-measure';
 import { useCameraStore } from '../use-camera-store';
@@ -65,21 +63,14 @@ export function createTextTool(): Tool {
   }
 
   /**
-   * Top-left corner for a text whose first line should sit on `origin`.
-   * Auto-sized text is also pulled sideways so that `origin` lands on whichever
-   * edge the alignment makes the visually anchored one.
+   * Top-left corner for a text whose first line should sit on `origin`. The
+   * click is always the left edge, whatever the alignment: typing grows the
+   * box rightward from it (see `writeText` in TextEditorOverlay).
    */
-  function placeAt(
-    origin: Point,
-    props: TextProps,
-    width: number | null,
-  ): Point {
+  function placeAt(origin: Point, props: TextProps): Point {
     const halfLine =
       resolveLineHeightPx(props.fontSize, textLineHeight(props)) / 2;
-    let x =
-      width === null
-        ? origin.x + textAlignOffset(layoutTextProps(props).width, props.align)
-        : origin.x;
+    let x = origin.x;
     let y = origin.y - halfLine;
 
     const step = gridStep();
@@ -98,7 +89,7 @@ export function createTextTool(): Tool {
     width: number | null,
   ): string {
     const id = genId();
-    const { x, y } = placeAt(origin, props, width);
+    const { x, y } = placeAt(origin, props);
     ctx.editor.createShape({
       id,
       type: 'text',

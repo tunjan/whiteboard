@@ -1,10 +1,11 @@
-// TEMPORARY perf harness — not part of the app. Delete with ./bench-flags.ts
-// and the `TEMPORARY` markers in Canvas.tsx.
+// TEMPORARY perf harness — not part of the app. Delete with ./bench-flags.ts,
+// ./bench-stats.ts and the `TEMPORARY` markers in Canvas.tsx.
 //
-// Enable with `?zoombench=1200` on a board URL. Seeds N synthetic ink strokes,
-// then drives a scripted camera ramp through the camera store — the same store
-// the trackpad drives — under a matrix of A/B configurations, and reports the
-// frame-time distribution of each.
+// Enable with `?zoombench=1200` on a board URL (`&zoomreps=5` to trade run
+// time for resolution). Seeds N synthetic ink strokes, then drives a scripted
+// camera ramp through the camera store — the same store the trackpad drives —
+// under a matrix of A/B configurations, and reports the frame-time
+// distribution of each.
 //
 // The matrix is the measurement. Frame timings alone say a zoom is slow; they
 // cannot say which of the shape layer, the grid or the frosted chrome is
@@ -12,12 +13,37 @@
 // and re-running the identical ramp does, and it does it without a profiler,
 // which matters because the engine in question is the one whose profiler is
 // least comparable to the other's.
+//
+// Every cell is run `REPS` times, rep-major rather than cell-major, and the
+// table reports the median across repeats with the spread beside it. One run
+// per config cannot distinguish a subsystem that costs 2ms from a machine that
+// got 2ms slower while the matrix was running, and on a laptop under sustained
+// load the second is the more likely of the two.
 import { genId, type Shape } from '@whiteboard/shared';
 import {
   benchCounters,
   resetBenchCounters,
   useBenchFlags,
 } from './bench-flags';
+import {
+  auditRun,
+  type Column,
+  dataLine,
+  engineName,
+  headerLine,
+  machineLine,
+  measureRefreshMs,
+  mean,
+  median,
+  medianFields,
+  quantile,
+  repeatInterleaved,
+  residuals,
+  settle,
+  spread,
+  waitForIdle,
+  whenVisible,
+} from './bench-stats';
 import { applyLowGraphics } from './use-canvas-ui-store';
 import { editor } from './use-document-store';
 import { useCameraStore } from './use-camera-store';
@@ -26,6 +52,10 @@ import { generateKeyBetween } from './order';
 /** Frames per scripted run, past the discarded warm-up. */
 const FRAMES = 160;
 const WARMUP = 20;
+/** Repeats of the whole matrix. */
+const REPS = 3;
+/** A frame this far past the display's interval counts as dropped. */
+const DROP_FACTOR = 1.5;
 
 // ---------------------------------------------------------------------------
 // Seeding
@@ -107,6 +137,11 @@ function run(mode: 'zoom' | 'pan'): Promise<RunResult> {
     let i = 0;
     let last = performance.now();
     const step = (now: number) => {
+      // The subsystem counters are drained here rather than before the run, so
+      // the searches and tree rebuilds they hold cover exactly the frames the
+      // `frames` and `js` arrays cover. Draining before the warm-up mixed 20
+      // unmeasured frames of work into per-frame averages taken over 160.
+      if (i === WARMUP) resetBenchCounters();
       frames.push(now - last);
       last = now;
       const t0 = performance.now();
@@ -138,30 +173,77 @@ function run(mode: 'zoom' | 'pan'): Promise<RunResult> {
 // Reporting
 // ---------------------------------------------------------------------------
 
-const sum = (a: number[]) => a.reduce((x, y) => x + y, 0);
-
-function quantile(sorted: number[], q: number): number {
-  return (
-    sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * q))] ?? 0
-  );
+/** Everything one run of one cell contributes to its row. */
+interface RunStats {
+  fps: number;
+  frameMed: number;
+  frameP95: number;
+  frameMax: number;
+  dropPct: number;
+  jsMed: number;
+  jsP95: number;
+  /** Per-frame `frame - js`: what the browser did after our JS returned. */
+  browserMed: number;
+  cullCalls: number;
+  cullMean: number;
+  treeCalls: number;
+  treeMean: number;
 }
 
-function line(label: string, r: RunResult): string {
-  const f = [...r.frames].sort((a, b) => a - b);
-  const j = [...r.js].sort((a, b) => a - b);
-  const fps = 1000 / (sum(r.frames) / r.frames.length);
-  const slow = f.filter((v) => v > 20).length;
-  return [
-    label.padEnd(22),
-    `fps ${fps.toFixed(0).padStart(3)}`,
-    `med ${quantile(f, 0.5).toFixed(1).padStart(5)}`,
-    `p95 ${quantile(f, 0.95).toFixed(1).padStart(5)}`,
-    `max ${(f[f.length - 1] ?? 0).toFixed(0).padStart(4)}`,
-    `>20ms ${((100 * slow) / f.length).toFixed(0).padStart(3)}%`,
-    `js ${quantile(j, 0.5).toFixed(1)}/${quantile(j, 0.95).toFixed(1)}`,
-    `cull ${r.cull.length}@${(sum(r.cull) / Math.max(1, r.cull.length)).toFixed(1)}`,
-    `tree ${r.tree.length}@${(sum(r.tree) / Math.max(1, r.tree.length)).toFixed(1)}`,
-  ].join('  ');
+function statsOf(r: RunResult, dropMs: number): RunStats {
+  return {
+    fps: 1000 / mean(r.frames),
+    frameMed: median(r.frames),
+    frameP95: quantile(r.frames, 0.95),
+    frameMax: r.frames.length ? Math.max(...r.frames) : 0,
+    dropPct:
+      (100 * r.frames.filter((v) => v > dropMs).length) /
+      Math.max(1, r.frames.length),
+    jsMed: median(r.js),
+    jsP95: quantile(r.js, 0.95),
+    browserMed: median(residuals(r.frames, r.js)),
+    cullCalls: r.cull.length,
+    cullMean: mean(r.cull),
+    treeCalls: r.tree.length,
+    treeMean: mean(r.tree),
+  };
+}
+
+const LABEL_WIDTH = 22;
+
+// One list, used for both the header and every row. `dataLine` throws if a row
+// disagrees with it, which is the only reliable defence against a header that
+// names a column nothing emits.
+const COLUMNS: Column[] = [
+  { head: 'fps', width: 4 },
+  { head: 'frame', width: 6 },
+  { head: 'p95', width: 6 },
+  { head: 'max', width: 5 },
+  { head: 'drop%', width: 5 },
+  { head: 'js', width: 6 },
+  { head: 'jsp95', width: 6 },
+  { head: 'browser', width: 7 },
+  { head: 'rep±', width: 5 },
+  { head: 'cull', width: 11 },
+  { head: 'tree', width: 11 },
+];
+
+function row(label: string, reps: readonly RunStats[]): string {
+  const s = medianFields(reps);
+  const repSpread = spread(reps.map((r) => r.frameMed));
+  return dataLine(label, LABEL_WIDTH, COLUMNS, [
+    s.fps.toFixed(0),
+    s.frameMed.toFixed(1),
+    s.frameP95.toFixed(1),
+    s.frameMax.toFixed(0),
+    s.dropPct.toFixed(0),
+    s.jsMed.toFixed(1),
+    s.jsP95.toFixed(1),
+    s.browserMed.toFixed(1),
+    `${(100 * repSpread).toFixed(0)}%`,
+    `${s.cullCalls.toFixed(0)}@${s.cullMean.toFixed(1)}`,
+    `${s.treeCalls.toFixed(0)}@${s.treeMean.toFixed(1)}`,
+  ]);
 }
 
 // ---------------------------------------------------------------------------
@@ -172,7 +254,7 @@ interface Config {
   name: string;
   noBg?: boolean;
   noShapes?: boolean;
-  /** Turn off the chrome's masked `backdrop-filter`. */
+  /** Turn off the glass layer's ornament — its sheen and bevel planes. */
   lowGraphics?: boolean;
   /** Which ramps to run under this config. */
   modes?: ('zoom' | 'pan')[];
@@ -182,7 +264,7 @@ interface Config {
 // `bare`, which is the floor: what a frame costs when the board draws nothing.
 const CONFIGS: Config[] = [
   { name: 'baseline', modes: ['zoom', 'pan'] },
-  { name: '-chrome blur', lowGraphics: true },
+  { name: '-glass ornament', lowGraphics: true },
   { name: '-background', noBg: true },
   { name: '-shapes', noShapes: true },
   {
@@ -191,7 +273,8 @@ const CONFIGS: Config[] = [
     noShapes: true,
     lowGraphics: true,
   },
-  // Repeat of the first line. The matrix is only readable if these two agree:
+  // Repeat of the first line, run last within every repeat. `auditRun` checks
+  // the two against each other and says so in the table when they disagree —
   // a gap between them is drift in the machine, not a difference between
   // configs, and the whole run has to be thrown away.
   { name: 'baseline#2' },
@@ -205,114 +288,90 @@ function apply(c: Config): void {
   applyLowGraphics(!!c.lowGraphics);
 }
 
-const settle = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-/**
- * Block until the page has been idle for `need` consecutive cheap frames.
- *
- * Seeding writes thousands of shapes through Yjs and into IndexedDB, and that
- * work carries on well after the shapes are on screen. Without this gate the
- * first configs in the matrix were measured against a busy machine and the last
- * ones against a quiet one, which reads exactly like a config difference and is
- * not one. A fixed sleep cannot do the job — how long the writes take depends
- * on the shape count and on whether the profile is warm.
- */
-function waitForIdle(need = 60, timeoutMs = 30000): Promise<boolean> {
-  return new Promise((resolve) => {
-    const deadline = performance.now() + timeoutMs;
-    let run = 0;
-    let last = performance.now();
-    const tick = (now: number) => {
-      const dt = now - last;
-      last = now;
-      run = dt < 18 ? run + 1 : 0;
-      if (run >= need) resolve(true);
-      else if (now > deadline) resolve(false);
-      else requestAnimationFrame(tick);
-    };
-    requestAnimationFrame(tick);
-  });
-}
-
-/**
- * Resolve once the tab is actually on screen.
- *
- * A background tab gets a throttled `requestAnimationFrame`, so a run started
- * in one never finishes — it sits there spinning the ramp at a frame a second,
- * burning a core and poisoning whatever is being measured in the foreground.
- * Waiting is also the only honest thing to do: frame timings from a tab the
- * compositor isn't presenting are not measurements of anything.
- */
-function whenVisible(): Promise<void> {
-  if (!document.hidden) return Promise.resolve();
-  return new Promise((resolve) => {
-    const onChange = () => {
-      if (document.hidden) return;
-      document.removeEventListener('visibilitychange', onChange);
-      resolve();
-    };
-    document.addEventListener('visibilitychange', onChange);
-  });
-}
-
 /** Seed only, and expose the camera store, for driving a board by hand. */
 export function seedOnly(count: number): void {
   seedStrokes(count);
   (globalThis as unknown as { __cam?: unknown }).__cam = useCameraStore;
 }
 
-export async function runZoomBench(count: number): Promise<void> {
+interface Cell {
+  config: Config;
+  mode: 'zoom' | 'pan';
+  label: string;
+}
+
+export async function runZoomBench(count: number, reps = REPS): Promise<void> {
   await whenVisible();
   const box = document.createElement('pre');
   box.style.cssText =
     'position:fixed;left:8px;top:8px;z-index:99999;background:#000;color:#0f0;padding:8px 12px;font:11px/1.45 monospace;white-space:pre;pointer-events:none;max-width:96vw;overflow:hidden';
-  box.textContent = 'seeding…';
+  box.textContent = 'measuring the display…';
   document.body.append(box);
 
+  // Before seeding, while the page is as quiet as it will ever be.
+  const refreshMs = await measureRefreshMs();
+  const dropMs = refreshMs * DROP_FACTOR;
+
+  box.textContent = 'seeding…';
   seedStrokes(count);
   box.textContent = 'seeded — waiting for the machine to go quiet…';
-  const quiet = await waitForIdle();
+  const quiet = await waitForIdle(refreshMs, { need: 60, timeoutMs: 30000 });
 
-  const ua = navigator.userAgent;
-  const engine = ua.includes('Firefox')
-    ? 'Firefox'
-    : ua.includes('Chrome')
-      ? 'Chromium'
-      : 'other';
-  const lines = [
-    `${engine}  shapes ${count}  dpr ${devicePixelRatio}  ${innerWidth}x${innerHeight}${quiet ? '' : '  [NEVER WENT IDLE — SUSPECT]'}`,
-    'config                  fps  med    p95    max  >20ms  js med/p95  captures  cull  tree',
+  const head = [
+    machineLine(refreshMs),
+    `shapes ${count}  reps ${reps}  ${FRAMES} frames/run  ` +
+      `drop > ${dropMs.toFixed(1)}ms${quiet ? '' : '  [NEVER WENT IDLE — SUSPECT]'}`,
+    '',
+    headerLine('config', LABEL_WIDTH, COLUMNS),
   ];
-  box.textContent = lines.join('\n');
+  box.textContent = head.join('\n');
 
   // Every run starts from the same camera, so configs compare like for like.
   const home = useCameraStore.getState().camera;
 
-  for (const config of CONFIGS) {
-    for (const mode of config.modes ?? ['zoom']) {
-      useCameraStore.getState().setCamera(home);
-      apply(config);
-      // Let React commit the flag change and the camera settle out of
-      // `isMoving` before the ramp starts.
-      await settle(400);
-      await waitForIdle(20, 4000);
-      resetBenchCounters();
-      box.textContent = [...lines, `running ${config.name} ${mode}…`].join(
-        '\n',
-      );
-      const result = await run(mode);
-      lines.push(line(`${config.name} ${mode}`, result));
-      box.textContent = lines.join('\n');
-    }
-  }
+  const cells: Cell[] = CONFIGS.flatMap((config) =>
+    (config.modes ?? ['zoom']).map((mode) => ({
+      config,
+      mode,
+      label: `${config.name} ${mode}`,
+    })),
+  );
+
+  const results = await repeatInterleaved(cells, reps, async (cell, rep) => {
+    useCameraStore.getState().setCamera(home);
+    apply(cell.config);
+    // Let React commit the flag change and the camera settle out of
+    // `isMoving` before the ramp starts.
+    await settle(400);
+    await waitForIdle(refreshMs, { need: 20, timeoutMs: 4000 });
+    box.textContent = [
+      ...head,
+      `rep ${rep + 1}/${reps} — running ${cell.label}…`,
+    ].join('\n');
+    return statsOf(await run(cell.mode), dropMs);
+  });
 
   apply({ name: 'reset' });
   useCameraStore.getState().setCamera(home);
 
-  const text = lines.join('\n');
+  const rows = cells.map((cell) => row(cell.label, results.get(cell)!));
+  const warnings = auditRun(
+    cells.map((cell) => ({
+      label: cell.label,
+      repMedians: results.get(cell)!.map((s) => s.frameMed),
+    })),
+    [['baseline zoom', 'baseline#2 zoom']],
+  );
+
+  const text = [
+    ...head,
+    ...rows,
+    ...(warnings.length ? ['', ...warnings] : []),
+  ].join('\n');
+  box.textContent = text;
   (globalThis as unknown as { __bench?: string }).__bench = text;
   void fetch('http://127.0.0.1:8777/result', {
     method: 'POST',
-    body: JSON.stringify({ engine, text }),
+    body: JSON.stringify({ engine: engineName(), text }),
   }).catch(() => {});
 }

@@ -1,0 +1,750 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Voice Chat UI — Alternative 1: Floating Audio Island (CALM UI)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              canvas: '#EDECEA',
+              paper: '#FBFBF9',
+              ink: '#141414',
+              'ink-soft': '#4A4A4F',
+              'ink-mute': '#A09D97',
+              wash: '#F1F1F2',
+              line: '#E5E3DD',
+              moss: '#27604A',
+              'moss-wash': '#E0EFE5',
+              night: '#17171A',
+              'night-line': '#2A2A2F',
+              'night-mute': '#97979E',
+              'danger-wash': '#FDEBEC',
+              'danger-ink': '#9F2F2D',
+            },
+            borderRadius: {
+              ctrl: '10px',
+              bar: '14px',
+              panel: '18px',
+            },
+            boxShadow: {
+              float: '0 1px 2px rgb(0 0 0 / .05), 0 14px 34px rgb(0 0 0 / .10)',
+              card: '0 1px 2px rgb(0 0 0 / .04), 0 8px 22px rgb(0 0 0 / .07)',
+              press: 'inset 0 1px 2px rgb(0 0 0 / .12)',
+            },
+            transitionDuration: {
+              calm: '150ms',
+            },
+          },
+        },
+      };
+    </script>
+    <style>
+      /* CALM UI System Font & Smooth Rendering */
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        background-color: #EDECEA;
+        color: #141414;
+      }
+      @keyframes acoustic-pulse {
+        0%, 100% { height: 6px; }
+        50% { height: 16px; }
+      }
+      .acoustic-bar-1 { animation: acoustic-pulse 1.2s ease-in-out infinite; }
+      .acoustic-bar-2 { animation: acoustic-pulse 1.2s ease-in-out 0.2s infinite; }
+      .acoustic-bar-3 { animation: acoustic-pulse 1.2s ease-in-out 0.4s infinite; }
+      .acoustic-bar-4 { animation: acoustic-pulse 1.2s ease-in-out 0.15s infinite; }
+    </style>
+  </head>
+  <body class="min-h-screen bg-[#EDECEA] text-[#141414] p-4 sm:p-8 flex flex-col justify-between">
+    <!-- Top Interactive State Switcher Header for Demonstration -->
+    <header class="max-w-4xl mx-auto w-full mb-8">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4">
+        <div>
+          <span class="text-[11px] font-semibold uppercase tracking-wider text-[#A09D97]">CALM UI · Design System Alternative 1</span>
+          <h1 class="text-xl sm:text-2xl font-semibold text-[#141414] tracking-tight">The Floating Audio Island / Persistent Call Bar</h1>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="text-xs text-[#A09D97]">Tokens:</span>
+          <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[10px] bg-[#FBFBF9] border border-[#E5E3DD] text-xs font-mono text-[#4A4A4F]">
+            <span class="size-2 rounded-full bg-[#27604A]"></span>#27604A moss
+          </span>
+          <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[10px] bg-[#FBFBF9] border border-[#E5E3DD] text-xs font-mono text-[#4A4A4F]">
+            <span class="size-2 rounded-full bg-[#FBFBF9] border border-[#E5E3DD]"></span>#FBFBF9 paper
+          </span>
+        </div>
+      </div>
+
+      <!-- State Navigation Tabs -->
+      <nav class="flex flex-wrap items-center gap-1.5 p-1.5 rounded-[14px] bg-[#FBFBF9] border border-[#E5E3DD] shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_22px_rgba(0,0,0,0.07)]" aria-label="Demo States">
+        <button onclick="setState('idle')" id="tab-idle" class="state-tab h-9 px-3 rounded-[10px] text-xs font-medium text-[#4A4A4F] hover:bg-[#F1F1F2] hover:text-[#141414] transition-colors duration-150">
+          1. Idle (Disconnected)
+        </button>
+        <button onclick="setState('joining')" id="tab-joining" class="state-tab h-9 px-3 rounded-[10px] text-xs font-medium text-[#4A4A4F] hover:bg-[#F1F1F2] hover:text-[#141414] transition-colors duration-150">
+          2. Joining
+        </button>
+        <button onclick="setState('listening')" id="tab-listening" class="state-tab h-9 px-3 rounded-[10px] text-xs font-medium bg-[#141414] text-[#FBFBF9] transition-colors duration-150">
+          3. Connected (Listening)
+        </button>
+        <button onclick="setState('speaking')" id="tab-speaking" class="state-tab h-9 px-3 rounded-[10px] text-xs font-medium text-[#4A4A4F] hover:bg-[#F1F1F2] hover:text-[#141414] transition-colors duration-150">
+          4. Connected (Speaking)
+        </button>
+        <button onclick="setState('muted')" id="tab-muted" class="state-tab h-9 px-3 rounded-[10px] text-xs font-medium text-[#4A4A4F] hover:bg-[#F1F1F2] hover:text-[#141414] transition-colors duration-150">
+          5. Connected (Muted)
+        </button>
+        <button onclick="setState('error')" id="tab-error" class="state-tab h-9 px-3 rounded-[10px] text-xs font-medium text-[#4A4A4F] hover:bg-[#F1F1F2] hover:text-[#141414] transition-colors duration-150">
+          6. Error / Retry
+        </button>
+      </nav>
+    </header>
+
+    <!-- Canvas Simulation Area -->
+    <main class="flex-1 flex flex-col items-center justify-center relative min-h-[460px] w-full max-w-4xl mx-auto py-12">
+      <!-- Simulated Canvas Objects (Quiet background elements) -->
+      <div class="absolute inset-0 pointer-events-none flex items-center justify-center opacity-40">
+        <div class="w-full max-w-lg h-64 border border-[#E5E3DD] rounded-[18px] p-6 flex flex-col justify-between">
+          <div class="space-y-2">
+            <div class="h-4 w-32 bg-[#E5E3DD] rounded"></div>
+            <div class="h-3 w-48 bg-[#E5E3DD] rounded opacity-60"></div>
+          </div>
+          <div class="flex gap-4">
+            <div class="size-16 rounded-[10px] border border-[#E5E3DD]"></div>
+            <div class="size-16 rounded-[10px] border border-[#E5E3DD]"></div>
+            <div class="size-16 rounded-[10px] border border-[#E5E3DD]"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- THE FLOATING AUDIO ISLAND CONTAINER -->
+      <div id="island-wrapper" class="relative z-30 transition-all duration-200 ease-out">
+        
+        <!-- ============================================================== -->
+        <!-- EXPANDED FLYOUT MICRO-PANEL (Anchored above the Island)        -->
+        <!-- ============================================================== -->
+        <div
+          id="flyout-panel"
+          class="hidden absolute bottom-full mb-2.5 left-1/2 -translate-x-1/2 w-[340px] sm:w-[380px] rounded-[18px] bg-[#FBFBF9] border border-[#E5E3DD] p-4 shadow-[0_1px_2px_rgba(0,0,0,0.05),0_14px_34px_rgba(0,0,0,0.10)] flex-col gap-4 text-[#141414] transition-all duration-150 ease-out animate-in fade-in zoom-in-95"
+          role="dialog"
+          aria-modal="false"
+          aria-labelledby="flyout-heading"
+        >
+          <!-- Section 1: Header / Overview (4px grid: p-0, flex gap-2.5) -->
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <span class="size-2 rounded-full bg-[#27604A]"></span>
+              <h2 id="flyout-heading" class="text-[13px] font-semibold text-[#141414] tracking-tight">Voice Room · Board Review</h2>
+            </div>
+            <div class="flex items-center gap-1.5">
+              <span class="text-[11px] font-medium text-[#27604A] bg-[#E0EFE5] px-2 py-0.5 rounded-full">4 in room</span>
+              <button
+                type="button"
+                onclick="toggleFlyout()"
+                class="size-8 rounded-[8px] flex items-center justify-center text-[#4A4A4F] hover:bg-[#F1F1F2] hover:text-[#141414] transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#27604A]"
+                aria-label="Close voice settings"
+              >
+                <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18"></line>
+                  <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- Section 2: Full Participant Roster (NO dividers, 4px grid spacing) -->
+          <div class="flex flex-col gap-1.5">
+            <div class="flex items-center justify-between px-1">
+              <span class="text-[11px] font-medium uppercase tracking-[0.06em] text-[#A09D97]">Participants</span>
+              <span class="text-[11px] text-[#A09D97] tabular-nums">Spatial 48 kHz</span>
+            </div>
+            
+            <!-- Roster Item: You -->
+            <div class="h-10 px-2 rounded-[10px] flex items-center justify-between hover:bg-[#F1F1F2] transition-colors duration-150">
+              <div class="flex items-center gap-2.5">
+                <div class="size-7 rounded-full bg-[#141414] text-[#FBFBF9] text-[11px] font-medium flex items-center justify-center">
+                  You
+                </div>
+                <div class="flex flex-col">
+                  <span class="text-[13px] font-medium text-[#141414] leading-tight">You (Alberto)</span>
+                  <span id="flyout-user-state" class="text-[11px] text-[#27604A] leading-tight">Speaking</span>
+                </div>
+              </div>
+              <div class="flex items-center gap-1.5">
+                <!-- Acoustic Wave Indicator for You -->
+                <div id="flyout-user-wave" class="flex items-center gap-[2px] h-3 px-1" aria-hidden="true">
+                  <span class="w-[2px] h-2 bg-[#27604A] rounded-full acoustic-bar-1"></span>
+                  <span class="w-[2px] h-3.5 bg-[#27604A] rounded-full acoustic-bar-2"></span>
+                  <span class="w-[2px] h-2.5 bg-[#27604A] rounded-full acoustic-bar-3"></span>
+                </div>
+                <span class="text-[11px] font-mono text-[#A09D97] px-1">Host</span>
+              </div>
+            </div>
+
+            <!-- Roster Item: Elena Rostova (Speaking Peer) -->
+            <div class="h-10 px-2 rounded-[10px] flex items-center justify-between hover:bg-[#F1F1F2] transition-colors duration-150">
+              <div class="flex items-center gap-2.5">
+                <div class="size-7 rounded-full bg-[#E0EFE5] text-[#27604A] text-[11px] font-medium flex items-center justify-center ring-2 ring-[#27604A] ring-offset-1 ring-offset-[#FBFBF9]">
+                  ER
+                </div>
+                <div class="flex flex-col">
+                  <span class="text-[13px] font-medium text-[#141414] leading-tight">Elena Rostova</span>
+                  <span class="text-[11px] text-[#27604A] leading-tight">Speaking</span>
+                </div>
+              </div>
+              <div class="flex items-center gap-[2px] h-3 px-1" aria-label="Elena is speaking">
+                <span class="w-[2px] h-2.5 bg-[#27604A] rounded-full acoustic-bar-3"></span>
+                <span class="w-[2px] h-3.5 bg-[#27604A] rounded-full acoustic-bar-1"></span>
+                <span class="w-[2px] h-2 bg-[#27604A] rounded-full acoustic-bar-2"></span>
+              </div>
+            </div>
+
+            <!-- Roster Item: Marcus Chen (Muted) -->
+            <div class="h-10 px-2 rounded-[10px] flex items-center justify-between hover:bg-[#F1F1F2] transition-colors duration-150">
+              <div class="flex items-center gap-2.5">
+                <div class="size-7 rounded-full bg-[#F1F1F2] text-[#4A4A4F] text-[11px] font-medium flex items-center justify-center">
+                  MC
+                </div>
+                <div class="flex flex-col">
+                  <span class="text-[13px] font-medium text-[#141414] leading-tight">Marcus Chen</span>
+                  <span class="text-[11px] text-[#A09D97] leading-tight">Muted</span>
+                </div>
+              </div>
+              <div class="text-[#A09D97] px-1" aria-label="Marcus is muted">
+                <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="2" x2="22" y1="2" y2="22"></line>
+                  <path d="M18.89 13.23A7.12 7.12 0 0 0 19 12v-2"></path>
+                  <path d="M5 10v2a7 7 0 0 0 12 5"></path>
+                  <path d="M15 9.34V5a3 3 0 0 0-5.68-1.33"></path>
+                  <path d="M9 9v3a3 3 0 0 0 5.12 2.12"></path>
+                  <line x1="12" x2="12" y1="19" y2="22"></line>
+                </svg>
+              </div>
+            </div>
+
+            <!-- Roster Item: Sofia Valdes (Null/Listening state - silence means fine) -->
+            <div class="h-10 px-2 rounded-[10px] flex items-center justify-between hover:bg-[#F1F1F2] transition-colors duration-150">
+              <div class="flex items-center gap-2.5">
+                <div class="size-7 rounded-full bg-[#F1F1F2] text-[#4A4A4F] text-[11px] font-medium flex items-center justify-center">
+                  SV
+                </div>
+                <div class="flex flex-col">
+                  <span class="text-[13px] font-medium text-[#141414] leading-tight">Sofia Valdes</span>
+                  <span class="text-[11px] text-[#A09D97] leading-tight">Listening</span>
+                </div>
+              </div>
+              <div class="flex items-center gap-1 px-1">
+                <span class="size-1.5 rounded-full bg-[#E5E3DD]" title="Connected"></span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Section 3: Audio Level Meter & Gate Slider (4px grid spacing, NO lines) -->
+          <div class="flex flex-col gap-2 pt-1">
+            <div class="flex items-center justify-between px-1">
+              <label for="gate-slider" class="text-[12px] font-medium text-[#141414]">Microphone Gate Threshold</label>
+              <span id="gate-db-val" class="text-[11px] font-mono text-[#A09D97] tabular-nums">-36 dB</span>
+            </div>
+            
+            <!-- Real-time Level Meter & Gate Cut-off Visual -->
+            <div class="relative h-2 rounded-full bg-[#F1F1F2] overflow-hidden" aria-hidden="true">
+              <!-- Live Level Bar (Moss) -->
+              <div id="level-meter-bar" class="h-full bg-[#27604A] rounded-full transition-all duration-75 w-3/5"></div>
+              <!-- Gate Threshold Marker -->
+              <div id="gate-marker" class="absolute top-0 bottom-0 w-[2px] bg-[#141414] left-[35%] z-10"></div>
+            </div>
+
+            <!-- Gate Threshold Range Slider -->
+            <input
+              id="gate-slider"
+              type="range"
+              min="0"
+              max="100"
+              value="35"
+              oninput="updateGate(this.value)"
+              class="w-full h-1.5 bg-[#F1F1F2] rounded-full appearance-none accent-[#27604A] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#27604A]"
+              aria-label="Adjust microphone noise gate threshold"
+            />
+            <p class="text-[11px] text-[#A09D97] px-1 leading-tight">Audio below this threshold is suppressed to stop background noise.</p>
+          </div>
+
+          <!-- Section 4: Noise Cancellation Switch (NO borders, calm toggle) -->
+          <div class="flex items-center justify-between px-1 pt-1">
+            <div class="flex flex-col pr-4">
+              <span id="noise-label" class="text-[13px] font-medium text-[#141414] leading-tight">AI Noise Cancellation</span>
+              <span class="text-[11px] text-[#A09D97] leading-tight">Removes fan hum, keyboard clicks, and echo</span>
+            </div>
+            <button
+              type="button"
+              id="noise-toggle"
+              role="switch"
+              aria-checked="true"
+              aria-labelledby="noise-label"
+              onclick="toggleNoise()"
+              class="w-10 h-6 rounded-full bg-[#27604A] p-0.5 transition-colors duration-150 flex items-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#27604A]"
+            >
+              <span id="noise-knob" class="size-5 rounded-full bg-[#FBFBF9] shadow-sm transform translate-x-4 transition-transform duration-150"></span>
+            </button>
+          </div>
+        </div>
+
+
+        <!-- ============================================================== -->
+        <!-- STATE 1: IDLE / DISCONNECTED (Compact Single-Control Trigger)   -->
+        <!-- ============================================================== -->
+        <div
+          id="state-idle"
+          class="hidden rounded-[14px] bg-[#FBFBF9] p-1.5 border border-[#E5E3DD] shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_22px_rgba(0,0,0,0.07)] items-center gap-2.5 select-none transition-all duration-150 ease-out"
+          role="region"
+          aria-label="Voice chat offline"
+        >
+          <!-- Compact Join Trigger Button -->
+          <button
+            type="button"
+            onclick="setState('joining')"
+            class="h-10 px-3 rounded-[10px] bg-[#141414] text-[#FBFBF9] hover:bg-[#2A2A2F] active:scale-[0.98] flex items-center gap-2 text-[13px] font-medium transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#27604A]"
+            aria-label="Join voice call"
+          >
+            <!-- Headphones / Voice Icon -->
+            <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 18v-6a9 9 0 0 1 18 0v6"></path>
+              <path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"></path>
+            </svg>
+            <span>Join Voice</span>
+          </button>
+
+          <!-- Peer Presence Teaser (Resting pips in room) -->
+          <div class="flex items-center gap-1.5 pr-2">
+            <div class="flex items-center gap-0.5">
+              <span class="size-6 rounded-full bg-[#E0EFE5] text-[#27604A] text-[10px] font-medium flex items-center justify-center" title="Elena in room">ER</span>
+              <span class="size-6 rounded-full bg-[#F1F1F2] text-[#4A4A4F] text-[10px] font-medium flex items-center justify-center" title="Marcus in room">MC</span>
+              <span class="size-6 rounded-full bg-[#F1F1F2] text-[#4A4A4F] text-[10px] font-medium flex items-center justify-center" title="Sofia in room">SV</span>
+            </div>
+            <span class="text-[11px] font-medium text-[#A09D97]">3 here</span>
+          </div>
+        </div>
+
+
+        <!-- ============================================================== -->
+        <!-- STATE 2: JOINING / CONNECTING (Indeterminate Handshake)        -->
+        <!-- ============================================================== -->
+        <div
+          id="state-joining"
+          class="hidden rounded-[14px] bg-[#FBFBF9] p-1.5 border border-[#E5E3DD] shadow-[0_1px_2px_rgba(0,0,0,0.05),0_14px_34px_rgba(0,0,0,0.10)] items-center gap-2.5 select-none transition-all duration-150 ease-out"
+          role="status"
+          aria-live="polite"
+        >
+          <!-- Indeterminate Connecting Indicator -->
+          <div class="h-10 px-3 rounded-[10px] flex items-center gap-2.5 bg-[#F1F1F2]">
+            <span class="size-2 rounded-full bg-[#27604A] animate-ping" aria-hidden="true"></span>
+            <span class="text-[13px] font-medium text-[#141414]">Connecting…</span>
+          </div>
+
+          <!-- Disabled Control Placeholders (opacity-40) -->
+          <div class="flex items-center gap-0.5 opacity-40 pointer-events-none">
+            <div class="size-10 rounded-[10px] flex items-center justify-center text-[#4A4A4F]">
+              <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                <line x1="12" x2="12" y1="19" y2="22"></line>
+              </svg>
+            </div>
+          </div>
+
+          <!-- Cancel Connection Button -->
+          <div class="flex items-center gap-0.5">
+            <button
+              type="button"
+              onclick="setState('idle')"
+              class="size-10 rounded-[10px] flex items-center justify-center text-[#4A4A4F] hover:bg-[#FDEBEC] hover:text-[#9F2F2D] transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#9F2F2D]"
+              aria-label="Cancel joining voice chat"
+            >
+              <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+
+        <!-- ============================================================== -->
+        <!-- STATE 3, 4, 5: ACTIVE CONNECTED BAR (Listening / Speaking / Muted) -->
+        <!-- ============================================================== -->
+        <div
+          id="state-connected"
+          class="flex rounded-[14px] bg-[#FBFBF9] p-1.5 border border-[#E5E3DD] shadow-[0_1px_2px_rgba(0,0,0,0.05),0_14px_34px_rgba(0,0,0,0.10)] items-center gap-2.5 select-none transition-all duration-150 ease-out"
+          role="toolbar"
+          aria-label="Voice call audio island"
+        >
+          <!-- GROUP 1: Room Presence & Speaking Indicator (gap-0.5 inside group) -->
+          <div class="flex items-center gap-0.5">
+            <!-- Acoustic Indicator Pill -->
+            <button
+              type="button"
+              onclick="toggleFlyout()"
+              class="h-10 px-2.5 rounded-[10px] flex items-center gap-2 text-[#141414] hover:bg-[#F1F1F2] transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#27604A]"
+              aria-label="Voice room status, click to open details"
+            >
+              <!-- Acoustic Wave Glyphs -->
+              <div id="bar-acoustic-wave" class="flex items-center gap-[2.5px] h-4 px-0.5" aria-hidden="true">
+                <span class="w-[2.5px] h-2 bg-[#27604A] rounded-full acoustic-bar-1"></span>
+                <span class="w-[2.5px] h-3.5 bg-[#27604A] rounded-full acoustic-bar-2"></span>
+                <span class="w-[2.5px] h-4 bg-[#27604A] rounded-full acoustic-bar-3"></span>
+                <span class="w-[2.5px] h-2 bg-[#27604A] rounded-full acoustic-bar-4"></span>
+              </div>
+              
+              <!-- Speaker Name / Room Name Label -->
+              <div class="flex items-center gap-1.5 text-left">
+                <span id="bar-speaker-label" class="text-[13px] font-medium text-[#141414] tracking-tight">Elena</span>
+                <span id="bar-status-tag" class="text-[11px] text-[#A09D97] hidden sm:inline">speaking</span>
+              </div>
+            </button>
+
+            <!-- Peer Presence Group: Compact Avatar Pips (gap-0.5 inside group) -->
+            <div class="flex items-center gap-0.5 pl-1" aria-label="Participants in call">
+              <!-- Avatar 1: Elena (Active Speaker with Moss Ring) -->
+              <div
+                id="avatar-elena"
+                class="size-7 rounded-full bg-[#E0EFE5] text-[#27604A] text-[10px] font-semibold flex items-center justify-center ring-2 ring-[#27604A] ring-offset-1 ring-offset-[#FBFBF9] transition-all duration-150"
+                title="Elena Rostova (Speaking)"
+              >
+                ER
+              </div>
+              <!-- Avatar 2: Marcus (Muted) -->
+              <div
+                class="size-7 rounded-full bg-[#F1F1F2] text-[#4A4A4F] text-[10px] font-semibold flex items-center justify-center transition-all duration-150"
+                title="Marcus Chen (Muted)"
+              >
+                MC
+              </div>
+              <!-- Avatar 3: Sofia (Listening) -->
+              <div
+                class="size-7 rounded-full bg-[#F1F1F2] text-[#4A4A4F] text-[10px] font-semibold flex items-center justify-center transition-all duration-150"
+                title="Sofia Valdes"
+              >
+                SV
+              </div>
+            </div>
+          </div>
+
+          <!-- GROUP 2: Mic Control (size-10 min, prominent toggle with aria-pressed) -->
+          <div class="flex items-center gap-0.5">
+            <button
+              type="button"
+              id="mic-btn"
+              onclick="toggleMute()"
+              aria-pressed="false"
+              aria-label="Mute microphone"
+              class="size-10 rounded-[10px] flex items-center justify-center bg-[#E0EFE5] text-[#27604A] hover:bg-[#d5e8dc] active:scale-[0.98] transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#27604A]"
+            >
+              <!-- Unmuted Mic Icon -->
+              <svg id="icon-mic-on" class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                <line x1="12" x2="12" y1="19" y2="22"></line>
+              </svg>
+              <!-- Muted MicOff Icon (hidden initially) -->
+              <svg id="icon-mic-off" class="size-5 hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="2" x2="22" y1="2" y2="22"></line>
+                <path d="M18.89 13.23A7.12 7.12 0 0 0 19 12v-2"></path>
+                <path d="M5 10v2a7 7 0 0 0 12 5"></path>
+                <path d="M15 9.34V5a3 3 0 0 0-5.68-1.33"></path>
+                <path d="M9 9v3a3 3 0 0 0 5.12 2.12"></path>
+                <line x1="12" x2="12" y1="19" y2="22"></line>
+              </svg>
+            </button>
+          </div>
+
+          <!-- GROUP 3: Expanded Flyout / Popover Toggle (gap-0.5 inside group) -->
+          <div class="flex items-center gap-0.5">
+            <button
+              type="button"
+              id="flyout-btn"
+              onclick="toggleFlyout()"
+              aria-haspopup="dialog"
+              aria-expanded="false"
+              aria-label="Open voice settings and participants"
+              class="size-10 rounded-[10px] flex items-center justify-center text-[#4A4A4F] hover:bg-[#F1F1F2] hover:text-[#141414] active:scale-[0.98] transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#27604A]"
+            >
+              <!-- Sliders / Audio Settings Glyph -->
+              <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="4" x2="20" y1="21" y2="21"></line>
+                <line x1="4" x2="20" y1="14" y2="14"></line>
+                <line x1="4" x2="20" y1="7" y2="7"></line>
+                <circle cx="8" cy="21" r="2"></circle>
+                <circle cx="16" cy="14" r="2"></circle>
+                <circle cx="10" cy="7" r="2"></circle>
+              </svg>
+            </button>
+          </div>
+
+          <!-- GROUP 4: Leave Call Action (PhoneOff Icon, calm wash hover) -->
+          <div class="flex items-center gap-0.5">
+            <button
+              type="button"
+              onclick="setState('idle')"
+              class="size-10 rounded-[10px] flex items-center justify-center text-[#4A4A4F] hover:bg-[#FDEBEC] hover:text-[#9F2F2D] active:scale-[0.98] transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#9F2F2D]"
+              aria-label="Leave voice call"
+            >
+              <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.33-2.67m-2.67-3.34a19.79 19.79 0 0 1-3.07-8.63A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91"></path>
+                <line x1="22" x2="2" y1="2" y2="22"></line>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+
+        <!-- ============================================================== -->
+        <!-- STATE 6: ERROR / RETRY (Calm, Non-Alarming Recovery State)      -->
+        <!-- ============================================================== -->
+        <div
+          id="state-error"
+          class="hidden rounded-[14px] bg-[#FBFBF9] p-1.5 border border-[#E5E3DD] shadow-[0_1px_2px_rgba(0,0,0,0.05),0_14px_34px_rgba(0,0,0,0.10)] items-center gap-2.5 select-none transition-all duration-150 ease-out"
+          role="alert"
+          aria-live="assertive"
+        >
+          <!-- Warning Icon Pill -->
+          <div class="h-10 px-2.5 rounded-[10px] bg-[#FDEBEC] text-[#9F2F2D] flex items-center gap-2">
+            <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"></circle>
+              <line x1="12" x2="12" y1="8" y2="12"></line>
+              <line x1="12" x2="12.01" y1="16" y2="16"></line>
+            </svg>
+            <span class="text-[13px] font-medium leading-tight">Connection lost</span>
+          </div>
+
+          <!-- Retry Button -->
+          <div class="flex items-center gap-0.5">
+            <button
+              type="button"
+              onclick="setState('joining')"
+              class="h-10 px-3 rounded-[10px] bg-[#141414] text-[#FBFBF9] hover:bg-[#2A2A2F] active:scale-[0.98] flex items-center gap-1.5 text-[13px] font-medium transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#27604A]"
+              aria-label="Retry connecting to voice"
+            >
+              <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 12a9 9 0 0 1 15-6.7L21 8"></path>
+                <path d="M21 3v5h-5"></path>
+                <path d="M21 12a9 9 0 0 1-15 6.7L3 16"></path>
+                <path d="M3 21v-5h5"></path>
+              </svg>
+              <span>Retry</span>
+            </button>
+          </div>
+
+          <!-- Dismiss / Close Action -->
+          <div class="flex items-center gap-0.5">
+            <button
+              type="button"
+              onclick="setState('idle')"
+              class="size-10 rounded-[10px] flex items-center justify-center text-[#4A4A4F] hover:bg-[#F1F1F2] hover:text-[#141414] transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#27604A]"
+              aria-label="Dismiss error and close"
+            >
+              <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+      </div>
+    </main>
+
+    <!-- Bottom Architectural Summary Drawer / Legend -->
+    <footer class="max-w-4xl mx-auto w-full pt-8 text-xs text-[#A09D97] space-y-3">
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 rounded-[14px] bg-[#FBFBF9] border border-[#E5E3DD] shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_22px_rgba(0,0,0,0.07)] text-[#4A4A4F]">
+        <div>
+          <h3 class="font-semibold text-[#141414] mb-1">Spatial Grouping</h3>
+          <p class="leading-relaxed">Strict 4px grid. 2px (<code class="text-ink">gap-0.5</code>) intra-group, 10px (<code class="text-ink">gap-2.5</code>) inter-group. No internal divider lines; spacing alone establishes hierarchy.</p>
+        </div>
+        <div>
+          <h3 class="font-semibold text-[#141414] mb-1">Calm State Feedback</h3>
+          <p class="leading-relaxed">Single accent color (<code class="text-ink">#27604A moss</code>) for speaking/active state. High-contrast ink for muted. Zero loud warning sirens; soft wash for error recovery.</p>
+        </div>
+        <div>
+          <h3 class="font-semibold text-[#141414] mb-1">A11y & Controls</h3>
+          <p class="leading-relaxed">All controls &ge; 40px (<code class="text-ink">size-10</code>). Icons standardized at 20px (<code class="text-ink">size-5</code>) stroke 1.7. Explicit <code class="text-ink">aria-pressed</code>, <code class="text-ink">aria-expanded</code>, and polite live regions.</p>
+        </div>
+      </div>
+    </footer>
+
+    <!-- Interactive Logic Script -->
+    <script>
+      let currentState = 'listening';
+      let isMuted = false;
+      let flyoutOpen = false;
+      let noiseCancellationActive = true;
+
+      const stateElements = {
+        idle: document.getElementById('state-idle'),
+        joining: document.getElementById('state-joining'),
+        connected: document.getElementById('state-connected'),
+        error: document.getElementById('state-error'),
+      };
+
+      const tabs = {
+        idle: document.getElementById('tab-idle'),
+        joining: document.getElementById('tab-joining'),
+        listening: document.getElementById('tab-listening'),
+        speaking: document.getElementById('tab-speaking'),
+        muted: document.getElementById('tab-muted'),
+        error: document.getElementById('tab-error'),
+      };
+
+      const micBtn = document.getElementById('mic-btn');
+      const iconMicOn = document.getElementById('icon-mic-on');
+      const iconMicOff = document.getElementById('icon-mic-off');
+      const barSpeakerLabel = document.getElementById('bar-speaker-label');
+      const barStatusTag = document.getElementById('bar-status-tag');
+      const barAcousticWave = document.getElementById('bar-acoustic-wave');
+      const avatarElena = document.getElementById('avatar-elena');
+      const flyoutPanel = document.getElementById('flyout-panel');
+      const flyoutBtn = document.getElementById('flyout-btn');
+      const flyoutUserState = document.getElementById('flyout-user-state');
+      const flyoutUserWave = document.getElementById('flyout-user-wave');
+      const levelMeterBar = document.getElementById('level-meter-bar');
+
+      function setState(state) {
+        currentState = state;
+        
+        // Update tabs styling
+        Object.keys(tabs).forEach(k => {
+          if (k === state) {
+            tabs[k].className = 'state-tab h-9 px-3 rounded-[10px] text-xs font-medium bg-[#141414] text-[#FBFBF9] transition-colors duration-150';
+          } else {
+            tabs[k].className = 'state-tab h-9 px-3 rounded-[10px] text-xs font-medium text-[#4A4A4F] hover:bg-[#F1F1F2] hover:text-[#141414] transition-colors duration-150';
+          }
+        });
+
+        // Hide all major state containers
+        Object.values(stateElements).forEach(el => el.classList.add('hidden'));
+        Object.values(stateElements).forEach(el => el.classList.remove('flex'));
+
+        if (state === 'idle') {
+          stateElements.idle.classList.remove('hidden');
+          stateElements.idle.classList.add('flex');
+          closeFlyout();
+        } else if (state === 'joining') {
+          stateElements.joining.classList.remove('hidden');
+          stateElements.joining.classList.add('flex');
+          closeFlyout();
+        } else if (state === 'error') {
+          stateElements.error.classList.remove('hidden');
+          stateElements.error.classList.add('flex');
+          closeFlyout();
+        } else {
+          // Connected sub-states: listening, speaking, muted
+          stateElements.connected.classList.remove('hidden');
+          stateElements.connected.classList.add('flex');
+
+          if (state === 'listening') {
+            isMuted = false;
+            applyUnmutedStyle();
+            barSpeakerLabel.textContent = 'Elena';
+            barStatusTag.textContent = 'speaking';
+            barAcousticWave.style.opacity = '1';
+            avatarElena.className = 'size-7 rounded-full bg-[#E0EFE5] text-[#27604A] text-[10px] font-semibold flex items-center justify-center ring-2 ring-[#27604A] ring-offset-1 ring-offset-[#FBFBF9] transition-all duration-150';
+            flyoutUserState.textContent = 'Listening';
+            flyoutUserState.className = 'text-[11px] text-[#A09D97] leading-tight';
+            flyoutUserWave.style.opacity = '0';
+            levelMeterBar.style.width = '12%';
+          } else if (state === 'speaking') {
+            isMuted = false;
+            applyUnmutedStyle();
+            barSpeakerLabel.textContent = 'You';
+            barStatusTag.textContent = 'speaking';
+            barAcousticWave.style.opacity = '1';
+            avatarElena.className = 'size-7 rounded-full bg-[#F1F1F2] text-[#4A4A4F] text-[10px] font-semibold flex items-center justify-center transition-all duration-150';
+            flyoutUserState.textContent = 'Speaking';
+            flyoutUserState.className = 'text-[11px] text-[#27604A] leading-tight';
+            flyoutUserWave.style.opacity = '1';
+            levelMeterBar.style.width = '74%';
+          } else if (state === 'muted') {
+            isMuted = true;
+            applyMutedStyle();
+            barSpeakerLabel.textContent = 'Muted';
+            barStatusTag.textContent = 'mic off';
+            barAcousticWave.style.opacity = '0.25';
+            avatarElena.className = 'size-7 rounded-full bg-[#F1F1F2] text-[#4A4A4F] text-[10px] font-semibold flex items-center justify-center transition-all duration-150';
+            flyoutUserState.textContent = 'Muted';
+            flyoutUserState.className = 'text-[11px] text-[#A09D97] leading-tight';
+            flyoutUserWave.style.opacity = '0';
+            levelMeterBar.style.width = '0%';
+          }
+        }
+      }
+
+      function applyUnmutedStyle() {
+        micBtn.setAttribute('aria-pressed', 'false');
+        micBtn.setAttribute('aria-label', 'Mute microphone');
+        micBtn.className = 'size-10 rounded-[10px] flex items-center justify-center bg-[#E0EFE5] text-[#27604A] hover:bg-[#d5e8dc] active:scale-[0.98] transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#27604A]';
+        iconMicOn.classList.remove('hidden');
+        iconMicOff.classList.add('hidden');
+      }
+
+      function applyMutedStyle() {
+        micBtn.setAttribute('aria-pressed', 'true');
+        micBtn.setAttribute('aria-label', 'Unmute microphone');
+        micBtn.className = 'size-10 rounded-[10px] flex items-center justify-center bg-[#141414] text-[#FBFBF9] hover:bg-[#2A2A2F] active:scale-[0.98] transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#27604A]';
+        iconMicOn.classList.add('hidden');
+        iconMicOff.classList.remove('hidden');
+      }
+
+      function toggleMute() {
+        if (isMuted) {
+          setState('speaking');
+        } else {
+          setState('muted');
+        }
+      }
+
+      function toggleFlyout() {
+        flyoutOpen = !flyoutOpen;
+        if (flyoutOpen) {
+          flyoutPanel.classList.remove('hidden');
+          flyoutPanel.classList.add('flex');
+          flyoutBtn.setAttribute('aria-expanded', 'true');
+          flyoutBtn.classList.add('bg-[#F1F1F2]', 'text-[#141414]');
+        } else {
+          closeFlyout();
+        }
+      }
+
+      function closeFlyout() {
+        flyoutOpen = false;
+        flyoutPanel.classList.add('hidden');
+        flyoutPanel.classList.remove('flex');
+        flyoutBtn.setAttribute('aria-expanded', 'false');
+        flyoutBtn.classList.remove('bg-[#F1F1F2]', 'text-[#141414]');
+      }
+
+      function toggleNoise() {
+        noiseCancellationActive = !noiseCancellationActive;
+        const toggle = document.getElementById('noise-toggle');
+        const knob = document.getElementById('noise-knob');
+        toggle.setAttribute('aria-checked', noiseCancellationActive.toString());
+        if (noiseCancellationActive) {
+          toggle.className = 'w-10 h-6 rounded-full bg-[#27604A] p-0.5 transition-colors duration-150 flex items-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#27604A]';
+          knob.className = 'size-5 rounded-full bg-[#FBFBF9] shadow-sm transform translate-x-4 transition-transform duration-150';
+        } else {
+          toggle.className = 'w-10 h-6 rounded-full bg-[#E5E3DD] p-0.5 transition-colors duration-150 flex items-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#27604A]';
+          knob.className = 'size-5 rounded-full bg-[#FBFBF9] shadow-sm transform translate-x-0 transition-transform duration-150';
+        }
+      }
+
+      function updateGate(val) {
+        document.getElementById('gate-marker').style.left = val + '%';
+        const db = Math.round(-60 + (val / 100) * 60);
+        document.getElementById('gate-db-val').textContent = db + ' dB';
+      }
+
+      // Initialize
+      setState('listening');
+    </script>
+  </body>
+</html>

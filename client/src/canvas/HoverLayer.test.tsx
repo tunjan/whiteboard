@@ -51,7 +51,7 @@ const mount = async (shapes: Shape[]) => {
   await act(() =>
     root.render(
       <StrictMode>
-        <HoverLayer camera={{ x: 0, y: 0, z: 1 }} />
+        <HoverLayer />
       </StrictMode>,
     ),
   );

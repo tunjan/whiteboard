@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect } from 'react';
+import { ErrorBoundary } from '@/components/error-boundary';
 import { paletteColors, useStyleStore } from '@/canvas/use-style-store';
 import { useKeyboardInset } from '@/hooks/use-keyboard-inset';
 import { parseBoardId, usePathname } from '@/router';
@@ -11,13 +12,19 @@ import { applyTheme, useThemeStore } from '@/use-theme-store';
 const Home = lazy(() =>
   import('@/screens/home').then(({ Home }) => ({ default: Home })),
 );
+const Analytics = lazy(() =>
+  import('@/screens/analytics').then(({ Analytics }) => ({
+    default: Analytics,
+  })),
+);
 const BoardView = lazy(() =>
   import('@/screens/board-view').then(({ BoardView }) => ({
     default: BoardView,
   })),
 );
 
-// Router: `/board/:id` opens a board; anything else shows the board list.
+// Router: `/board/:id` opens a board, `/analytics` the attendance register;
+// anything else shows the board list.
 export function App() {
   // Both screens are full-height and never scroll, so neither gets out of an
   // on-screen keyboard's way on its own.
@@ -45,12 +52,13 @@ export function App() {
 
   const path = usePathname();
   const boardId = parseBoardId(path);
+  const isAnalytics = !boardId && path.startsWith('/analytics');
 
   // Opening a board is the near-certain next move from the list, so fetch the
   // editor once the list is interactive rather than on the click. Without this
   // the split would trade a faster first paint for a slower board open.
   useEffect(() => {
-    if (boardId) return;
+    if (boardId || isAnalytics) return;
     const prefetch = () => void import('@/screens/board-view');
     if (!window.requestIdleCallback) {
       const timer = setTimeout(prefetch, 1000);
@@ -58,14 +66,22 @@ export function App() {
     }
     const handle = window.requestIdleCallback(prefetch);
     return () => window.cancelIdleCallback(handle);
-  }, [boardId]);
+  }, [boardId, isAnalytics]);
 
   // No spinner: both chunks are same-origin and land in well under the time a
   // spinner needs to avoid reading as a flash. The body background shows
   // through, so the page is already the right color.
   return (
-    <Suspense fallback={null}>
-      {boardId ? <BoardView boardId={boardId} /> : <Home />}
-    </Suspense>
+    <ErrorBoundary>
+      <Suspense fallback={null}>
+        {boardId ? (
+          <BoardView key={boardId} boardId={boardId} />
+        ) : isAnalytics ? (
+          <Analytics />
+        ) : (
+          <Home />
+        )}
+      </Suspense>
+    </ErrorBoundary>
   );
 }

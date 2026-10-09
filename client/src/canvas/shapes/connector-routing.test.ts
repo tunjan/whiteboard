@@ -172,6 +172,18 @@ describe('syncBoundArrows dirty-set narrowing', () => {
     expect(editor.updated).toEqual([]);
   });
 
+  it('finds dirty arrows through the id index without scanning the page', () => {
+    const editor = recordingEditor();
+    const shapes = scene();
+    const index = new Map(shapes.map((shape) => [shape.id, shape]));
+    // An empty page proves the arrow came from the index, not a scan.
+    syncBoundArrows([], editor, new Set(['box', 'arrow', 'deleted']), index);
+    expect(editor.updated).toEqual(['arrow']);
+    editor.updated.length = 0;
+    syncBoundArrows([], editor, new Set(['unrelated']), index);
+    expect(editor.updated).toEqual([]);
+  });
+
   it('does no work at all for an empty dirty set', () => {
     const editor = recordingEditor();
     syncBoundArrows(scene(), editor, new Set());

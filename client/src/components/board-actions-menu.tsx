@@ -1,17 +1,20 @@
 import { useState } from 'react';
-import type { ReactNode } from 'react';
+import type { ReactElement, ReactNode } from 'react';
 import {
   ClipboardCopy,
   Download,
   EllipsisVertical,
   Eye,
   FileText,
+  Focus,
   Gauge,
   Keyboard,
+  Layers,
   Magnet,
   Moon,
   Mouse,
   NotebookPen,
+  Pencil,
   PenTool,
   Pointer,
   RotateCcw,
@@ -19,6 +22,7 @@ import {
   Volume2,
   Zap,
 } from 'lucide-react';
+import { boardKey } from '@/board/board-access';
 
 import {
   copyBoardToPngClipboard,
@@ -34,7 +38,9 @@ import {
   PDF_PAGE_LIMIT_RANGE,
   PNG_EXPORT_SCALES,
   useCanvasUiStore,
+  type ShapeRendererChoice,
 } from '@/canvas/use-canvas-ui-store';
+import type { RasterCacheMode } from '@/canvas/raster-grid';
 import { isCoarsePointer } from '@/canvas/platform';
 import {
   FINGER_ACTIONS,
@@ -404,6 +410,83 @@ function PenSubmenu() {
   );
 }
 
+/** How each renderer reads on the trigger and in the list. */
+const RENDERER_LABELS: Record<ShapeRendererChoice, string> = {
+  auto: 'Auto',
+  'dom-svg': 'DOM/SVG',
+  'canvas-2d': 'Canvas 2D',
+};
+
+const RASTER_LABELS: Record<RasterCacheMode, string> = {
+  auto: 'Auto',
+  on: 'On',
+  off: 'Off',
+};
+
+/**
+ * Which engine draws the board.
+ *
+ * Here rather than behind a query parameter because the answer is a property of
+ * the machine, not of the board: the Canvas2D layer is the one that holds a
+ * zoom together on a big page, and the DOM/SVG layer is the one to fall back to
+ * if anything on screen looks wrong. Switching remounts the shape layer, which
+ * is a blink and no more — the document is untouched, and nobody else's board
+ * changes.
+ *
+ * The raster cache belongs to the DOM/SVG layer alone, so it goes dim under the
+ * other one rather than disappearing: a row that vanishes reads as a bug, and
+ * the reason it is inert is worth showing.
+ */
+function RenderingSubmenu() {
+  const shapeRenderer = useCanvasUiStore((s) => s.shapeRenderer);
+  const setShapeRenderer = useCanvasUiStore((s) => s.setShapeRenderer);
+  const rasterCache = useCanvasUiStore((s) => s.rasterCache);
+  const setRasterCache = useCanvasUiStore((s) => s.setRasterCache);
+  // Under `auto` the page may be on either layer, so the cache stays live.
+  const svg = shapeRenderer !== 'canvas-2d';
+
+  return (
+    <DropdownMenuSub>
+      <DropdownMenuSubTrigger>
+        <Layers />
+        Rendering
+        <MenuValue>{RENDERER_LABELS[shapeRenderer]}</MenuValue>
+      </DropdownMenuSubTrigger>
+      <DropdownMenuSubContent className="w-48">
+        <DropdownMenuLabel>Engine</DropdownMenuLabel>
+        <DropdownMenuRadioGroup
+          value={shapeRenderer}
+          onValueChange={(value) =>
+            setShapeRenderer(value as ShapeRendererChoice)
+          }
+        >
+          {(
+            Object.keys(RENDERER_LABELS) as ShapeRendererChoice[]
+          ).map((id) => (
+            <DropdownMenuRadioItem key={id} value={id}>
+              {RENDERER_LABELS[id]}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuLabel>
+          Raster cache{svg ? '' : ' (DOM/SVG only)'}
+        </DropdownMenuLabel>
+        <DropdownMenuRadioGroup
+          value={rasterCache}
+          onValueChange={(value) => setRasterCache(value as RasterCacheMode)}
+        >
+          {(Object.keys(RASTER_LABELS) as RasterCacheMode[]).map((mode) => (
+            <DropdownMenuRadioItem key={mode} value={mode} disabled={!svg}>
+              {RASTER_LABELS[mode]}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuSubContent>
+    </DropdownMenuSub>
+  );
+}
+
 function SoundSubmenu() {
   const soundEffectsEnabled = useVoiceStore((s) => s.soundEffectsEnabled);
   const setSoundEffectsEnabled = useVoiceStore((s) => s.setSoundEffectsEnabled);
@@ -496,15 +579,30 @@ function AttentionSubmenu() {
 }
 
 export function BoardActionsMenu({
+  boardId,
   title,
   isTutor,
   onOpenNotes,
   onOpenShortcuts,
+  onRenameTitle,
+  trigger,
+  triggerContent,
 }: {
+  boardId: string;
   title: string;
   isTutor: boolean;
   onOpenNotes: () => void;
   onOpenShortcuts: () => void;
+  /** Tutors only. Present means the menu owns renaming. */
+  onRenameTitle?: () => void;
+  /**
+   * The control that opens the menu, and what goes inside it. The board chrome
+   * passes the board's own name, because these are the board's actions and the
+   * name is the board. Split in two because `render` replaces the element, not
+   * its children — the same shape every other trigger in this codebase uses.
+   */
+  trigger?: ReactElement;
+  triggerContent?: ReactNode;
 }) {
   const [exporting, setExporting] = useState(false);
   const theme = useThemeStore((s) => s.theme);
@@ -518,6 +616,8 @@ export function BoardActionsMenu({
   const debugPerformance = useCanvasUiStore((s) => s.debugPerformance);
   const setDebugPerformance = useCanvasUiStore((s) => s.setDebugPerformance);
   const lowGraphics = useCanvasUiStore((s) => s.lowGraphics);
+  const groundFade = useCanvasUiStore((s) => s.groundFade);
+  const setGroundFade = useCanvasUiStore((s) => s.setGroundFade);
   const setLowGraphics = useCanvasUiStore((s) => s.setLowGraphics);
   const pdfPageLimit = useCanvasUiStore((s) => s.pdfPageLimit);
   const setPdfPageLimit = useCanvasUiStore((s) => s.setPdfPageLimit);
@@ -535,13 +635,21 @@ export function BoardActionsMenu({
     <DropdownMenu>
       <DropdownMenuTrigger
         render={
-          <Button variant="ghost" size="icon-sm" aria-label="Board actions" />
+          trigger ?? (
+            <Button variant="ghost" size="icon-sm" aria-label="Board actions" />
+          )
         }
       >
-        <EllipsisVertical />
+        {triggerContent ?? <EllipsisVertical />}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" sideOffset={8} className="w-60">
         <DropdownMenuGroup>
+          {onRenameTitle && (
+            <DropdownMenuItem onClick={onRenameTitle}>
+              <Pencil />
+              Rename board
+            </DropdownMenuItem>
+          )}
           {isTutor && (
             <DropdownMenuItem onClick={onOpenNotes}>
               <NotebookPen />
@@ -605,6 +713,25 @@ export function BoardActionsMenu({
         <DropdownMenuSeparator />
 
         <DropdownMenuGroup>
+          <DropdownMenuLabel>Board file</DropdownMenuLabel>
+          <DropdownMenuItem
+            // Every page and asset, as the server has them; re-imported from
+            // the home screen as a new board.
+            render={
+              <a
+                href={`/api/boards/${encodeURIComponent(boardId)}/export?k=${encodeURIComponent(boardKey())}`}
+                download
+              />
+            }
+          >
+            <Download />
+            Export .board
+          </DropdownMenuItem>
+        </DropdownMenuGroup>
+
+        <DropdownMenuSeparator />
+
+        <DropdownMenuGroup>
           <DropdownMenuLabel>Preferences</DropdownMenuLabel>
           <DropdownMenuCheckboxItem
             checked={theme === 'dark'}
@@ -612,6 +739,13 @@ export function BoardActionsMenu({
           >
             <Moon />
             Dark mode
+          </DropdownMenuCheckboxItem>
+          <DropdownMenuCheckboxItem
+            checked={groundFade}
+            onCheckedChange={setGroundFade}
+          >
+            <Focus />
+            Fade grid edges
           </DropdownMenuCheckboxItem>
           <DropdownMenuCheckboxItem
             checked={snappingEnabled}
@@ -649,6 +783,7 @@ export function BoardActionsMenu({
               onChange={setPdfPageLimit}
             />
           )}
+          <RenderingSubmenu />
           {/* Sits next to the overlay because the two are used together: you
               turn the counter on to find out whether you want this off. */}
           <DropdownMenuCheckboxItem
@@ -666,6 +801,14 @@ export function BoardActionsMenu({
             Performance overlay
           </DropdownMenuCheckboxItem>
         </DropdownMenuGroup>
+
+        <DropdownMenuSeparator />
+
+        {/* Which build is running, for bug reports. Plain text, not an item:
+            nothing to click, and the arrow keys should skip it. */}
+        <div className="px-2 py-1.5 font-mono text-2xs tabular-nums text-fg-subtle select-text">
+          v{__APP_VERSION__}
+        </div>
       </DropdownMenuContent>
     </DropdownMenu>
   );

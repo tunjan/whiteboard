@@ -43,7 +43,7 @@ function clearHold(): void {
 
 /**
  * Local, transient laser-pointer strokes. Not part of the CRDT — strokes reach
- * peers through awareness (setLocalLaser mirrors every change) and evaporate on
+ * peers as stateless messages (setLocalLaser sends what changed) and evaporate on
  * their own: pointer-up starts an idle hold, the hold expiring marks strokes
  * done, LaserLayer animates the fade, and removal timers drop them for good.
  */

@@ -1,12 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useId, useMemo, useRef, useState } from 'react';
 import type { MathfieldElement } from 'mathlive';
-import { AlertCircle, Check, Eye, EyeOff, Trash2 } from 'lucide-react';
+import { Eye, EyeOff, X } from 'lucide-react';
 import type {
   GraphExpression,
   GraphParametricDomain,
   StrokeDash,
 } from '@whiteboard/shared';
-import { textOnColor } from '@/collab/identity';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { MathField } from '@/components/ui/math-field';
@@ -19,7 +18,6 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import {
   Tooltip,
   TooltipContent,
-  TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { graphColorName, graphColors } from '@/canvas/graph-colors';
@@ -33,10 +31,22 @@ import {
   type GraphFunctionDefinitions,
 } from '@/canvas/graph-parser';
 import { useThemeStore } from '@/use-theme-store';
-import { cn } from '@/lib/utils';
+import { cn, swatchBorder } from '@/lib/utils';
+import {
+  MATH_SYMBOL,
+  QUIET_NUMBER,
+  SEGMENTED_ITEM,
+  SEGMENTED_TRACK,
+} from './graph-panel-styles';
 import { formatNumber, useDebouncedValue } from './graph-panel-utils';
 
 const DASHES: StrokeDash[] = ['solid', 'dashed', 'dotted'];
+const SWATCH_COLUMNS = 6;
+
+/** Row actions stay out of sight until the row is reached; always there on touch. */
+const ROW_REVEAL =
+  'touch-reveal opacity-0 transition-opacity duration-fast group-hover/row:opacity-100 group-focus-within/row:opacity-100 focus-visible:opacity-100';
+
 function useParsedExpression(
   source: string,
   definitions: GraphFunctionDefinitions,
@@ -47,25 +57,27 @@ function useParsedExpression(
   );
 }
 
-/* ─── Dash SVG preview ────────────────────────────────────────────────────── */
+function capitalize(word: string) {
+  return `${word[0]!.toUpperCase()}${word.slice(1)}`;
+}
 
-function DashPreview({
+function LinePreview({
   dash,
-  color = 'currentColor',
-  width = 2.5,
+  color,
+  width = 2.25,
 }: {
   dash: StrokeDash;
-  color?: string;
+  color: string;
   width?: number;
 }) {
   const dasharray =
     dash === 'dashed' ? '5 4' : dash === 'dotted' ? '0.1 4' : undefined;
   return (
-    <svg width={24} height={12} viewBox="0 0 24 12" aria-hidden="true">
+    <svg width={28} height={12} viewBox="0 0 28 12" aria-hidden="true">
       <line
-        x1={2}
+        x1={3}
         y1={6}
-        x2={22}
+        x2={25}
         y2={6}
         stroke={color}
         strokeWidth={width}
@@ -76,88 +88,9 @@ function DashPreview({
   );
 }
 
-/* ─── Accessible Color Radiogroup with Roving Tabindex ─────────────────────── */
+/* ─── Curve style: the swatch opens colour, line and weight ─────────────── */
 
-function ColorRadioGroup({
-  value,
-  onChange,
-  label = 'Color',
-}: {
-  value: string;
-  onChange: (color: string) => void;
-  label?: string;
-}) {
-  const theme = useThemeStore((s) => s.theme);
-  const colors = graphColors(theme);
-  const buttonRefs = useRef<(HTMLButtonElement | null)[]>([]);
-
-  const handleKeyDown = (e: React.KeyboardEvent, index: number) => {
-    let nextIndex = index;
-    if (e.key === 'ArrowRight') nextIndex = (index + 1) % colors.length;
-    else if (e.key === 'ArrowLeft')
-      nextIndex = (index - 1 + colors.length) % colors.length;
-    else if (e.key === 'ArrowDown') nextIndex = (index + 4) % colors.length;
-    else if (e.key === 'ArrowUp')
-      nextIndex = (index - 4 + colors.length) % colors.length;
-    else return;
-
-    e.preventDefault();
-    const next = colors[nextIndex]!;
-    onChange(next.value);
-    buttonRefs.current[nextIndex]?.focus();
-  };
-
-  return (
-    <div
-      role="radiogroup"
-      aria-label={label}
-      className="grid grid-cols-4 gap-1.5"
-    >
-      {colors.map((paletteColor, index) => {
-        const active = value === paletteColor.value;
-        return (
-          <button
-            key={paletteColor.value}
-            ref={(el) => {
-              buttonRefs.current[index] = el;
-            }}
-            type="button"
-            role="radio"
-            aria-checked={active}
-            tabIndex={active ? 0 : -1}
-            aria-label={paletteColor.name}
-            title={paletteColor.name}
-            onKeyDown={(e) => handleKeyDown(e, index)}
-            onClick={() => onChange(paletteColor.value)}
-            className={cn(
-              'relative grid size-8 place-items-center rounded-md border transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-1',
-              active
-                ? 'border-primary ring-2 ring-focus ring-offset-1 bg-surface'
-                : 'border-border/60 hover:border-border-strong hover:bg-panel/80',
-            )}
-          >
-            <span
-              className="size-4 rounded-full shadow-inner"
-              style={{ background: paletteColor.value }}
-            />
-            {active && (
-              <span
-                className="absolute inset-0 grid place-items-center"
-                style={{ color: textOnColor(paletteColor.value) }}
-              >
-                <Check className="size-2.5 stroke-[3]" />
-              </span>
-            )}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-/* ─── Curve style popover ────────────────────────────────────────────────── */
-
-function CurveStylePopover({
+function CurveStyle({
   expression,
   onPatch,
 }: {
@@ -165,19 +98,39 @@ function CurveStylePopover({
   onPatch: (patch: Partial<GraphExpression>) => void;
 }) {
   const theme = useThemeStore((s) => s.theme);
+  const colors = graphColors(theme);
+  const swatchRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const width = expression.width ?? DEFAULT_GRAPH_CURVE_WIDTH;
+
+  const moveSwatch = (event: React.KeyboardEvent, index: number) => {
+    const step =
+      event.key === 'ArrowRight'
+        ? 1
+        : event.key === 'ArrowLeft'
+          ? -1
+          : event.key === 'ArrowDown'
+            ? SWATCH_COLUMNS
+            : event.key === 'ArrowUp'
+              ? -SWATCH_COLUMNS
+              : 0;
+    if (!step) return;
+    event.preventDefault();
+    const next = (index + step + colors.length) % colors.length;
+    onPatch({ color: colors[next]!.value });
+    swatchRefs.current[next]?.focus();
+  };
+
   return (
     <Popover>
       <PopoverTrigger
-        aria-label={`Curve style: ${graphColorName(expression.color, theme)}, ${expression.dash} line`}
-        title="Color & style"
-        className="group/swatch relative grid size-8 place-items-center rounded-lg transition-all hover:bg-panel focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-1"
+        aria-label={`Style: ${graphColorName(expression.color, theme)}, ${expression.dash}`}
+        className="grid size-8 shrink-0 place-items-center rounded-control transition-colors duration-fast hover:bg-tb-track focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
       >
         <span
-          className="size-5 rounded-full ring-1 ring-border-strong shadow-xs transition-transform duration-instant group-hover/swatch:scale-110"
+          className="size-3.5 rounded-full border-2 transition-colors duration-fast"
           style={{
-            background: expression.visible ? expression.color : 'transparent',
             borderColor: expression.color,
-            borderWidth: expression.visible ? 0 : 2,
+            background: expression.visible ? expression.color : 'transparent',
           }}
         />
       </PopoverTrigger>
@@ -186,13 +139,46 @@ function CurveStylePopover({
         side="left"
         align="start"
         sideOffset={8}
-        className="w-52 gap-2.5 p-2.5 shadow-e3"
+        className="w-56 gap-2 p-2"
       >
-        <ColorRadioGroup
-          value={expression.color}
-          onChange={(color) => onPatch({ color })}
-          label="Color"
-        />
+        <div
+          role="radiogroup"
+          aria-label="Color"
+          className="grid grid-cols-6 gap-0.5"
+        >
+          {colors.map((paletteColor, index) => {
+            const active = expression.color === paletteColor.value;
+            return (
+              <button
+                key={paletteColor.value}
+                ref={(el) => {
+                  swatchRefs.current[index] = el;
+                }}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                aria-label={paletteColor.name}
+                title={paletteColor.name}
+                tabIndex={active ? 0 : -1}
+                onKeyDown={(e) => moveSwatch(e, index)}
+                onClick={() => onPatch({ color: paletteColor.value })}
+                className="grid h-8 place-items-center rounded-control transition-colors duration-fast hover:bg-tb-track focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+              >
+                <span
+                  className={cn(
+                    'size-4.5 rounded-full border',
+                    active &&
+                      'ring-2 ring-ring ring-offset-2 ring-offset-popup-surface',
+                  )}
+                  style={{
+                    backgroundColor: paletteColor.value,
+                    borderColor: swatchBorder(paletteColor.value),
+                  }}
+                />
+              </button>
+            );
+          })}
+        </div>
 
         <ToggleGroup
           aria-label="Line style"
@@ -201,43 +187,39 @@ function CurveStylePopover({
             const dash = value[0] as StrokeDash | undefined;
             if (dash) onPatch({ dash });
           }}
-          className="w-full pt-1"
+          className={cn(SEGMENTED_TRACK, 'w-full')}
         >
           {DASHES.map((dash) => (
             <ToggleGroupItem
               key={dash}
               value={dash}
-              title={`${dash[0]!.toUpperCase()}${dash.slice(1)} line`}
-              aria-label={`${dash[0]!.toUpperCase()}${dash.slice(1)} line`}
-              className="grow basis-0"
+              aria-label={capitalize(dash)}
+              title={capitalize(dash)}
+              className={SEGMENTED_ITEM}
             >
-              <DashPreview dash={dash} color={expression.color} />
+              <LinePreview dash={dash} color="currentColor" />
             </ToggleGroupItem>
           ))}
         </ToggleGroup>
 
         <ToggleGroup
-          aria-label="Line thickness"
-          value={[String(expression.width ?? DEFAULT_GRAPH_CURVE_WIDTH)]}
+          aria-label="Line weight"
+          value={[String(width)]}
           onValueChange={(value) => {
-            const width = Number(value[0]);
-            if (Number.isFinite(width)) onPatch({ width });
+            const next = Number(value[0]);
+            if (Number.isFinite(next)) onPatch({ width: next });
           }}
-          className="w-full"
+          className={cn(SEGMENTED_TRACK, 'w-full')}
         >
-          {GRAPH_CURVE_WIDTHS.map((width) => (
+          {GRAPH_CURVE_WIDTHS.map((w) => (
             <ToggleGroupItem
-              key={width}
-              value={String(width)}
-              title={`${width}px line`}
-              aria-label={`${width} pixel line`}
-              className="grow basis-0"
+              key={w}
+              value={String(w)}
+              aria-label={`${w} pixels`}
+              title={`${w}px`}
+              className={SEGMENTED_ITEM}
             >
-              <DashPreview
-                dash={expression.dash}
-                color={expression.color}
-                width={width}
-              />
+              <LinePreview dash="solid" color="currentColor" width={w} />
             </ToggleGroupItem>
           ))}
         </ToggleGroup>
@@ -246,7 +228,7 @@ function CurveStylePopover({
   );
 }
 
-/* ─── Parametric t-domain row ────────────────────────────────────────────── */
+/* ─── Parametric t-domain ───────────────────────────────────────────────── */
 
 function DomainRow({
   domain,
@@ -255,68 +237,55 @@ function DomainRow({
   domain: GraphParametricDomain;
   onChange: (domain: GraphParametricDomain) => void;
 }) {
-  const [minDraft, setMinDraft] = useState(formatNumber(domain.min));
-  const [maxDraft, setMaxDraft] = useState(formatNumber(domain.max));
+  const [draft, setDraft] = useState({
+    min: formatNumber(domain.min),
+    max: formatNumber(domain.max),
+  });
 
-  useEffect(() => setMinDraft(formatNumber(domain.min)), [domain.min]);
-  useEffect(() => setMaxDraft(formatNumber(domain.max)), [domain.max]);
+  // A domain changed elsewhere replaces the draft during render, not an
+  // effect later, so the row never paints a frame of stale bounds.
+  const [synced, setSynced] = useState(domain);
+  if (synced.min !== domain.min || synced.max !== domain.max) {
+    setSynced(domain);
+    setDraft({ min: formatNumber(domain.min), max: formatNumber(domain.max) });
+  }
 
-  const commit = (bound: 'min' | 'max', raw: string) => {
-    const value = Number(raw);
+  const commit = (bound: 'min' | 'max') => {
+    const text = draft[bound].trim();
+    // `Number('')` is 0: a cleared field reverts rather than committing 0.
+    const value = text === '' ? NaN : Number(text);
     const next = { ...domain, [bound]: value };
     if (Number.isFinite(value) && next.min < next.max) onChange(next);
-    else if (bound === 'min') setMinDraft(formatNumber(domain.min));
-    else setMaxDraft(formatNumber(domain.max));
+    else setDraft((d) => ({ ...d, [bound]: formatNumber(domain[bound]) }));
   };
 
-  const inputClass =
-    "h-5.5 w-11 !rounded-none !border-0 !bg-transparent px-0.5 text-center font-['KaTeX_Main',serif] text-xs font-normal tabular-nums text-fg-secondary hover:text-fg !shadow-none focus:!bg-panel/60 focus:text-fg focus:!outline-none focus:!ring-0 focus-visible:!outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none";
+  const field = (bound: 'min' | 'max') => (
+    <Input
+      type="number"
+      step="any"
+      inputMode="decimal"
+      aria-label={`t ${bound === 'min' ? 'minimum' : 'maximum'}`}
+      value={draft[bound]}
+      onChange={(e) => setDraft((d) => ({ ...d, [bound]: e.target.value }))}
+      onBlur={() => commit(bound)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') e.currentTarget.blur();
+      }}
+      className={QUIET_NUMBER}
+    />
+  );
 
-  // pl-12 clears the index + swatch gutter, so this lines up with the field.
+  // Indented to the formula, so it reads as belonging to it.
   return (
-    <div className="flex items-center gap-1 pb-1.5 pl-12 text-xs text-fg-subtle">
-      <Input
-        type="number"
-        step="any"
-        inputMode="decimal"
-        aria-label="t minimum"
-        value={minDraft}
-        onChange={(e) => setMinDraft(e.target.value)}
-        onBlur={(e) => commit('min', e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') {
-            e.preventDefault();
-            commit('min', minDraft);
-            e.currentTarget.blur();
-          }
-        }}
-        className={inputClass}
-      />
-      <span className="font-['KaTeX_Math','KaTeX_Main',serif] italic select-none">
-        ≤ t ≤
-      </span>
-      <Input
-        type="number"
-        step="any"
-        inputMode="decimal"
-        aria-label="t maximum"
-        value={maxDraft}
-        onChange={(e) => setMaxDraft(e.target.value)}
-        onBlur={(e) => commit('max', e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') {
-            e.preventDefault();
-            commit('max', maxDraft);
-            e.currentTarget.blur();
-          }
-        }}
-        className={inputClass}
-      />
+    <div className="flex items-center gap-1 pb-1.5 pl-10 text-xs text-fg-subtle">
+      {field('min')}
+      <span className={cn(MATH_SYMBOL, 'text-xs text-fg-subtle')}>≤ t ≤</span>
+      {field('max')}
     </div>
   );
 }
 
-/* ─── Expression row with Zero-CLS Error Badge ───────────────────────────── */
+/* ─── Expression row ────────────────────────────────────────────────────── */
 
 export function ExpressionRow({
   expression,
@@ -341,9 +310,10 @@ export function ExpressionRow({
   registerField: (el: MathfieldElement | null) => void;
   definitions: GraphFunctionDefinitions;
 }) {
+  const errorId = useId();
   const settled = useDebouncedValue(expression.expression, 400);
-  // One parse serves both the error badge and the parametric domain row; the
-  // badge additionally waits for typing to settle so it doesn't flash on every
+  // One parse serves both the error line and the parametric domain row; the
+  // error additionally waits for typing to settle so it doesn't flash on every
   // keystroke.
   const parsed = useParsedExpression(settled, definitions);
   const error =
@@ -355,39 +325,41 @@ export function ExpressionRow({
   const fieldRef = useRef<MathfieldElement | null>(null);
 
   // The math column reads as one text field, so a press that lands on the
-  // column but misses the mathfield (the gap beside the error badge, the strip
-  // above/below a short formula) still opens the expression for editing, with
-  // the caret at the end.
+  // column but misses the mathfield still opens the expression for editing,
+  // with the caret at the end.
   const editOnColumnPress = (event: React.PointerEvent<HTMLDivElement>) => {
     const field = fieldRef.current;
     if (!field || event.target === field) return;
-    if ((event.target as HTMLElement).closest('button')) return;
     event.preventDefault();
     field.focus();
     field.executeCommand('moveToMathfieldEnd');
   };
 
-  return (
-    <div className="group/row relative flex min-h-16 flex-col px-3 py-2.5 transition-colors duration-instant hover:bg-panel/40 focus-within:bg-panel/60">
-      <div className="flex flex-1 items-center gap-2">
-        {/* Left gutter: Index + Swatch */}
-        <div className="flex shrink-0 items-center gap-2">
-          <span className="w-4 text-right text-base font-medium text-fg-muted select-none">
-            {index + 1}
-          </span>
-          <CurveStylePopover expression={expression} onPatch={onPatch} />
-        </div>
+  const label = `Expression ${index + 1}`;
 
-        {/* Math field container */}
+  return (
+    <div className="group/row relative px-2 transition-colors duration-fast hover:bg-surface-hover/60 focus-within:bg-surface-hover">
+      {/* The accent edge marks the row being edited. */}
+      <span
+        aria-hidden="true"
+        className="absolute inset-y-1.5 left-0 w-0.5 rounded-full bg-check opacity-0 transition-opacity duration-fast group-focus-within/row:opacity-100"
+      />
+      <div className="flex items-center gap-1">
+        <CurveStyle expression={expression} onPatch={onPatch} />
+
         <div
-          className="flex min-w-0 flex-1 cursor-text items-center gap-1"
+          className={cn(
+            'min-w-0 flex-1 cursor-text transition-opacity duration-fast',
+            !expression.visible && 'opacity-45',
+          )}
           onPointerDown={editOnColumnPress}
         >
           <MathField
             id={`graph-expression-${expression.id}`}
-            aria-label={`Expression ${index + 1}`}
+            aria-label={label}
             aria-invalid={error ? true : undefined}
-            className="graph-expression-field w-full self-stretch"
+            aria-describedby={error ? errorId : undefined}
+            className="graph-expression-field w-full"
             value={expression.expression}
             placeholder="y = sin(x)"
             elementRef={(el) => {
@@ -400,73 +372,67 @@ export function ExpressionRow({
             onMoveOut={onMoveOut}
             onEscape={onEscape}
           />
-
-          {/* Zero-CLS Error Indicator with accessible tooltip */}
-          {error ? (
-            <TooltipProvider delay={0}>
-              <Tooltip>
-                <TooltipTrigger
-                  type="button"
-                  aria-label={`Syntax error: ${error}`}
-                  className="grid size-5.5 shrink-0 place-items-center rounded text-danger hover:bg-danger-bg focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-danger"
-                >
-                  <AlertCircle className="size-3.5" />
-                </TooltipTrigger>
-                <TooltipContent
-                  side="top"
-                  className="bg-inverse text-fg-inverse text-xs px-2.5 py-1 max-w-xs shadow-e3 border-none rounded-md"
-                >
-                  <span>{error}</span>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          ) : null}
         </div>
 
-        {/* Row Actions */}
-        <div className="flex shrink-0 items-center gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            size="icon-md"
-            aria-label={
-              expression.visible
-                ? `Hide curve ${index + 1}`
-                : `Show curve ${index + 1}`
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-pressed={!expression.visible}
+                aria-label={`Hide ${label.toLowerCase()}`}
+                onClick={() => onPatch({ visible: !expression.visible })}
+                className={cn(
+                  'text-fg-subtle',
+                  expression.visible && ROW_REVEAL,
+                )}
+              >
+                {expression.visible ? (
+                  <Eye aria-hidden="true" strokeWidth={1.5} />
+                ) : (
+                  <EyeOff aria-hidden="true" strokeWidth={1.5} />
+                )}
+              </Button>
             }
-            title={expression.visible ? 'Hide' : 'Show'}
-            onClick={() => onPatch({ visible: !expression.visible })}
-          >
-            {expression.visible ? (
-              <Eye
-                data-icon="inline-start"
-                aria-hidden="true"
-                strokeWidth={1.75}
-              />
-            ) : (
-              <EyeOff
-                data-icon="inline-start"
-                aria-hidden="true"
-                strokeWidth={1.75}
-              />
-            )}
-          </Button>
-          <Button
-            type="button"
-            variant="destructive"
-            size="icon-md"
-            aria-label={`Delete curve ${index + 1}`}
-            title="Delete"
-            onClick={onDelete}
-          >
-            <Trash2
-              data-icon="inline-start"
-              aria-hidden="true"
-              strokeWidth={1.75}
-            />
-          </Button>
-        </div>
+          />
+          <TooltipContent side="top">
+            {expression.visible ? 'Hide' : 'Show'}
+          </TooltipContent>
+        </Tooltip>
+
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label={`Remove ${label.toLowerCase()}`}
+                onClick={onDelete}
+                className={cn(
+                  'text-fg-subtle hover:bg-danger-bg hover:text-danger',
+                  ROW_REVEAL,
+                )}
+              >
+                <X aria-hidden="true" strokeWidth={1.5} />
+              </Button>
+            }
+          />
+          <TooltipContent side="top">Remove</TooltipContent>
+        </Tooltip>
       </div>
+
+      {error ? (
+        <p
+          id={errorId}
+          role="status"
+          className="pb-2 pl-10 text-xs text-danger"
+        >
+          {error}
+        </p>
+      ) : null}
 
       {parametric ? (
         <DomainRow

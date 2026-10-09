@@ -1,9 +1,19 @@
-import { memo } from 'react';
+import { memo, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Camera } from './camera';
+import { useCameraInteraction } from './use-camera-interaction';
+import { useCanvasUiStore } from './use-canvas-ui-store';
+import { rasterZoom } from './raster-grid';
+import {
+  backgroundLevel,
+  backgroundRasterTransform,
+  paintBackgroundRaster,
+  type BackgroundRaster,
+} from './background-raster';
 import {
   type BackgroundType,
   formatAxisLabel,
   getDotGridLayers,
+  GROUND_FADE_MASK,
   getGridLevels,
   pmod,
   tickValues,
@@ -20,7 +30,8 @@ interface BackgroundProps {
 // and high-contrast in both modes.
 const MINOR = 'var(--grid-minor)';
 const MAJOR = 'var(--grid-major)';
-const DOT = 'var(--grid-dot)';
+const DOT = 'var(--grid-dot-ink)';
+const DOT_ALPHA = 'var(--grid-dot-alpha)';
 const AXIS = 'var(--grid-axis)';
 const LABEL = 'var(--color-fg-secondary)';
 
@@ -33,7 +44,123 @@ const LABEL = 'var(--color-fg-secondary)';
 // peer-cursor update, but the grid only depends on these props. `camera` is a
 // stable reference except during an actual pan/zoom (where the grid genuinely
 // must redraw), so a shallow prop check skips all the unrelated re-renders.
-export const Background = memo(function Background({
+export const Background = memo(function Background(props: BackgroundProps) {
+  if (props.type === 'blank' || props.width <= 0 || props.height <= 0)
+    return null;
+  return <CachedBackground {...props} />;
+});
+
+function CachedBackground({ type, camera, width, height }: BackgroundProps) {
+  const moving = useCameraInteraction((s) => s.isMoving);
+  const groundFade = useCanvasUiStore((s) => s.groundFade);
+  const canvas = useRef<HTMLCanvasElement>(null);
+  const vector = useRef<HTMLDivElement>(null);
+  const cached = useRef<BackgroundRaster | null>(null);
+  const [ready, setReady] = useState(false);
+  const [theme, setTheme] = useState(0);
+  const previous = useRef({ width, height, type, theme, moving });
+  // Keep React out of the SVG pattern tree during movement. Coordinate labels
+  // below remain live because they are screen-sized and clamp to the viewport.
+  const frozen = moving && ready;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const gridCamera = useMemo(() => camera, [frozen, frozen ? null : camera]);
+
+  useLayoutEffect(() => {
+    const observer = new MutationObserver(() => setTheme((n) => n + 1));
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['class'],
+    });
+    return () => observer.disconnect();
+  }, []);
+
+  useLayoutEffect(() => {
+    const before = previous.current;
+    let raster = cached.current;
+    if (
+      !raster ||
+      before.width !== width ||
+      before.height !== height ||
+      before.type !== type ||
+      before.theme !== theme ||
+      raster.band !== rasterZoom(camera.z) ||
+      raster.level !== backgroundLevel(type, camera) ||
+      raster.ratio !== Math.min(window.devicePixelRatio || 1, 2) ||
+      (!moving && (before.moving || raster.zoom !== camera.z))
+    ) {
+      try {
+        raster = paintBackgroundRaster(
+          canvas.current!,
+          type,
+          camera,
+          width,
+          height,
+        );
+      } catch {
+        raster = null;
+      }
+      cached.current = raster;
+      setReady(raster !== null);
+    }
+    previous.current = { width, height, type, theme, moving };
+    if (raster)
+      canvas.current!.style.transform = backgroundRasterTransform(
+        raster,
+        camera,
+      );
+    canvas.current!.style.display = moving && raster ? 'block' : 'none';
+    vector.current!.style.display = moving && raster ? 'none' : '';
+  }, [camera, width, height, type, theme, moving]);
+
+  return (
+    <>
+      {/* One box for both grid paths so the fade masks them identically. The
+          axes stay outside it: their labels clamp to the edges to stay
+          readable, which is exactly where the fade would hide them. */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 z-[var(--z-canvas-background)]"
+        style={
+          groundFade
+            ? { maskImage: GROUND_FADE_MASK, WebkitMaskImage: GROUND_FADE_MASK }
+            : undefined
+        }
+      >
+        <div
+          data-background-cache
+          className="pointer-events-none absolute inset-0 z-[var(--z-canvas-background)] overflow-hidden [contain:strict]"
+        >
+          <canvas
+            ref={canvas}
+            style={{
+              position: 'absolute',
+              transformOrigin: '0 0',
+              display: 'none',
+            }}
+          />
+        </div>
+        <div ref={vector}>
+          <VectorBackground
+            type={type}
+            camera={gridCamera}
+            width={width}
+            height={height}
+          />
+        </div>
+      </div>
+      {type === 'coordinate' && (
+        <svg
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 z-[var(--z-canvas-background)] h-full w-full"
+        >
+          <CoordinateAxes camera={camera} width={width} height={height} />
+        </svg>
+      )}
+    </>
+  );
+}
+
+const VectorBackground = memo(function VectorBackground({
   type,
   camera,
   width,
@@ -44,7 +171,9 @@ export const Background = memo(function Background({
   const g = getGridLevels(camera);
   const dotLayers =
     type === 'dot'
-      ? getDotGridLayers(camera).filter((layer) => layer.opacity > 0.01)
+      ? getDotGridLayers(camera, window.devicePixelRatio || 1).filter(
+          (layer) => layer.opacity > 0.01,
+        )
       : [];
   const minorPhase = `translate(${pmod(g.originX, g.minorScreen)} ${pmod(g.originY, g.minorScreen)})`;
   const majorPhase = `translate(${pmod(g.originX, g.majorScreen)} ${pmod(g.originY, g.majorScreen)})`;
@@ -65,10 +194,13 @@ export const Background = memo(function Background({
               width={layer.screenStep}
               height={layer.screenStep}
               patternUnits="userSpaceOnUse"
+              // The dot sits mid-tile and the tile moves, so the tile edge
+              // never clips it the way a phased circle would be.
+              patternTransform={`translate(${layer.offsetX - layer.screenStep / 2} ${layer.offsetY - layer.screenStep / 2})`}
             >
               <circle
-                cx={layer.offsetX}
-                cy={layer.offsetY}
+                cx={layer.screenStep / 2}
+                cy={layer.screenStep / 2}
                 r={layer.radius}
                 fill={DOT}
               />
@@ -109,24 +241,24 @@ export const Background = memo(function Background({
       </defs>
 
       {type === 'dot' ? (
-        dotLayers.map((layer) => (
-          <rect
-            key={layer.id}
-            width="100%"
-            height="100%"
-            fill={`url(#bg-${layer.id})`}
-            opacity={layer.opacity}
-          />
-        ))
+        // Opaque ink inside, alpha once outside: a dot shared by two lattices
+        // is no darker than any other.
+        <g style={{ opacity: DOT_ALPHA }}>
+          {dotLayers.map((layer) => (
+            <rect
+              key={layer.id}
+              width="100%"
+              height="100%"
+              fill={`url(#bg-${layer.id})`}
+              opacity={layer.opacity}
+            />
+          ))}
+        </g>
       ) : (
         <>
           <rect width="100%" height="100%" fill="url(#bg-minor)" />
           <rect width="100%" height="100%" fill="url(#bg-major)" />
         </>
-      )}
-
-      {type === 'coordinate' && (
-        <CoordinateAxes camera={camera} width={width} height={height} />
       )}
     </svg>
   );

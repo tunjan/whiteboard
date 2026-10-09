@@ -4,11 +4,11 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Shape } from '@whiteboard/shared';
 
 // Zustand v5 serves `getInitialState()` to server renders, so the layer cannot
-// see a store mutated from the test. Both stores are read-only here — the
+// see a selection store mutated from the test. It is read-only here — the
 // layer never writes — so a fixed snapshot behind the same selector call is
-// the whole of what it needs.
+// the whole of what it needs. Shapes are read from `shapeStore`, whose atoms a
+// server render reads directly, so the test publishes into it.
 const state = vi.hoisted(() => ({
-  shapes: [] as Shape[],
   selectedIds: [] as string[],
 }));
 
@@ -22,16 +22,8 @@ vi.mock('./use-selection-store', () => ({
     }),
 }));
 
-vi.mock('./use-document-store', () => ({
-  useDocumentStore: (selector: (s: unknown) => unknown) =>
-    selector({
-      shapes: state.shapes,
-      shapesById: new Map(state.shapes.map((s) => [s.id, s])),
-    }),
-}));
-
+const { shapeStore } = await import('./engine/shape-store');
 const { SelectionLayer } = await import('./SelectionLayer');
-const { DEFAULT_CAMERA } = await import('./camera');
 const { lineUtil } = await import('./shapes/line');
 const { rectangleUtil } = await import('./shapes/rectangle');
 await import('./shapes/register');
@@ -64,11 +56,9 @@ const box: Shape = {
 };
 
 function markupFor(shapes: Shape[], selectedIds: string[]): string {
-  state.shapes = shapes;
+  shapeStore.publish(new Map(shapes.map((s) => [s.id, s])), null, shapes);
   state.selectedIds = selectedIds;
-  return renderToStaticMarkup(
-    createElement(SelectionLayer, { camera: DEFAULT_CAMERA }),
-  );
+  return renderToStaticMarkup(createElement(SelectionLayer));
 }
 
 const TRACE = 'M 0 0 L 100 0 L 100 80';

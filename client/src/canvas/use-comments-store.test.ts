@@ -1,18 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import * as Y from 'yjs';
 import {
   addComment,
   addCommentReply,
+  bindBoardRecords,
   deleteCommentThread,
-  loadBoard,
   setThreadResolved,
-} from './use-document-store';
+} from './board-records';
 import { useCommentsStore } from './use-comments-store';
 
 const author = { name: 'Ada', color: '#ff0000' };
 
 let dispose: () => void;
 beforeEach(() => {
-  dispose = loadBoard('test-comments-store', { persist: false, collab: false });
+  dispose = bindBoardRecords(new Y.Doc());
 });
 afterEach(() => dispose());
 

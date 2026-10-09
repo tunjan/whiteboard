@@ -1,15 +1,14 @@
 import { useEffect, useRef } from 'react';
 import type { TextShape } from '@whiteboard/shared';
 import { setLocalTextSelection } from '@/collab/presence';
-import type { Camera } from './camera';
 import { worldToScreen } from './camera';
+import { useCameraFollow } from './use-camera-interaction';
 import { deleteShapesWithCleanup } from './commands';
 import { inkPaint } from './ink-color';
 import {
   fontStack,
   fontWeight,
   layoutTextProps,
-  stabilizeTextPosition,
   textInkMargin,
 } from './shapes/text-measure';
 import { editor } from './use-document-store';
@@ -22,13 +21,8 @@ import { useToolStore } from './use-tool-store';
  * removed while this textarea is mounted, so browsers own caret movement,
  * selections, clipboard behavior, spellcheck, undo, and IME composition.
  */
-export function TextEditorOverlay({
-  shape,
-  camera,
-}: {
-  shape: TextShape;
-  camera: Camera;
-}) {
+export function TextEditorOverlay({ shape }: { shape: TextShape }) {
+  const [camera, follow] = useCameraFollow<HTMLDivElement>();
   const ref = useRef<HTMLTextAreaElement>(null);
   const mountedAt = useRef(0);
   const composing = useRef(false);
@@ -88,13 +82,12 @@ export function TextEditorOverlay({
   }, [shape.props.text]);
 
   /**
-   * Write new text, moving the box so that the edge the alignment anchors to
-   * stays put. Without this, every keystroke in a centred or right-aligned
-   * auto-sizing text would slide the whole line sideways.
+   * Write new text. The box's left edge stays where the user started writing
+   * and it grows rightward, whatever the alignment; alignment only lines the
+   * lines up against each other inside the box.
    */
   const writeText = (value: string) => {
-    const { x, y } = stabilizeTextPosition(shape, { ...shape.props, text: value });
-    editor.updateShape(shape.id, { x, y, props: { text: value } });
+    editor.updateShape(shape.id, { props: { text: value } });
   };
 
   const commit = () => {
@@ -124,76 +117,80 @@ export function TextEditorOverlay({
   const ink = fixed ? 0 : textInkMargin(fontSize);
 
   return (
-    <textarea
-      ref={ref}
-      data-ui-layer
-      aria-label="Edit text"
-      defaultValue={shape.props.text}
-      wrap={fixed ? 'soft' : 'off'}
-      spellCheck
-      autoCapitalize="sentences"
-      onInput={(event) => {
-        writeText(event.currentTarget.value.replace(/\r\n?/g, '\n'));
-        publishSelection(event.currentTarget);
-      }}
-      onSelect={(event) => publishSelection(event.currentTarget)}
-      onCompositionStart={() => {
-        composing.current = true;
-      }}
-      onCompositionEnd={(event) => {
-        composing.current = false;
-        writeText(event.currentTarget.value.replace(/\r\n?/g, '\n'));
-        publishSelection(event.currentTarget);
-      }}
-      onBlur={() => {
-        // Focus juggling around the creating click can emit one immediate blur.
-        if (Date.now() - mountedAt.current < 180) {
-          requestAnimationFrame(() => ref.current?.focus({ preventScroll: true }));
-          return;
-        }
-        commit();
-      }}
-      onKeyDown={(event) => {
-        event.stopPropagation();
-        if (event.key === 'Escape') {
-          event.preventDefault();
+    // The follower is a stacking context, so it carries the z-index.
+    <div ref={follow} className="absolute top-0 left-0 z-[var(--z-canvas-front)]">
+      <textarea
+        ref={ref}
+        data-ui-layer
+        aria-label="Edit text"
+        data-exact-size
+        defaultValue={shape.props.text}
+        wrap={fixed ? 'soft' : 'off'}
+        spellCheck
+        autoCapitalize="sentences"
+        onInput={(event) => {
+          writeText(event.currentTarget.value.replace(/\r\n?/g, '\n'));
+          publishSelection(event.currentTarget);
+        }}
+        onSelect={(event) => publishSelection(event.currentTarget)}
+        onCompositionStart={() => {
+          composing.current = true;
+        }}
+        onCompositionEnd={(event) => {
+          composing.current = false;
+          writeText(event.currentTarget.value.replace(/\r\n?/g, '\n'));
+          publishSelection(event.currentTarget);
+        }}
+        onBlur={() => {
+          // Focus juggling around the creating click can emit one immediate blur.
+          if (Date.now() - mountedAt.current < 180) {
+            requestAnimationFrame(() => ref.current?.focus({ preventScroll: true }));
+            return;
+          }
           commit();
-        }
-      }}
-      onPointerDown={(event) => event.stopPropagation()}
-      className="absolute z-[var(--z-canvas-front)] m-0 block resize-none overflow-hidden border-0 bg-transparent outline-none"
-      style={{
-        left: screen.x - ink,
-        top: screen.y - ink,
-        width: layout.width * zoom + ink * 2,
-        height: layout.height * zoom + ink * 2,
-        minWidth: layout.width * zoom + ink * 2,
-        minHeight: layout.height * zoom + ink * 2,
-        padding: ink,
-        boxSizing: 'border-box',
-        fontFamily: fontStack(shape.props.fontFamily),
-        fontWeight: fontWeight(shape.props.fontWeight),
-        fontSize,
-        // The engine has already quantized this; re-deriving it from the
-        // multiplier here would let the two representations round apart.
-        lineHeight: `${layout.lineHeight * zoom}px`,
-        textAlign:
-          shape.props.align === 'middle'
-            ? 'center'
-            : shape.props.align === 'end'
-              ? 'right'
-              : 'left',
-        whiteSpace: fixed ? 'pre-wrap' : 'pre',
-        overflowWrap: fixed ? 'anywhere' : 'normal',
-        color: inkPaint(shape.props.color),
-        caretColor: 'currentColor',
-        transform: shape.rotation ? `rotate(${shape.rotation}rad)` : undefined,
-        transformOrigin: 'center center',
-        boxShadow: fixed
-          ? 'inset 0 0 0 1px var(--action-solid, #3b82f6)'
-          : undefined,
-        opacity: shape.opacity ?? 1,
-      }}
-    />
+        }}
+        onKeyDown={(event) => {
+          event.stopPropagation();
+          if (event.key === 'Escape') {
+            event.preventDefault();
+            commit();
+          }
+        }}
+        onPointerDown={(event) => event.stopPropagation()}
+        className="absolute m-0 block resize-none overflow-hidden border-0 bg-transparent outline-none"
+        style={{
+          left: screen.x - ink,
+          top: screen.y - ink,
+          width: layout.width * zoom + ink * 2,
+          height: layout.height * zoom + ink * 2,
+          minWidth: layout.width * zoom + ink * 2,
+          minHeight: layout.height * zoom + ink * 2,
+          padding: ink,
+          boxSizing: 'border-box',
+          fontFamily: fontStack(shape.props.fontFamily),
+          fontWeight: fontWeight(shape.props.fontWeight),
+          fontSize,
+          // The engine has already quantized this; re-deriving it from the
+          // multiplier here would let the two representations round apart.
+          lineHeight: `${layout.lineHeight * zoom}px`,
+          textAlign:
+            shape.props.align === 'middle'
+              ? 'center'
+              : shape.props.align === 'end'
+                ? 'right'
+                : 'left',
+          whiteSpace: fixed ? 'pre-wrap' : 'pre',
+          overflowWrap: fixed ? 'anywhere' : 'normal',
+          color: inkPaint(shape.props.color),
+          caretColor: 'currentColor',
+          transform: shape.rotation ? `rotate(${shape.rotation}rad)` : undefined,
+          transformOrigin: 'center center',
+          boxShadow: fixed
+            ? 'inset 0 0 0 1px var(--link, #2563eb)'
+            : undefined,
+          opacity: shape.opacity ?? 1,
+        }}
+      />
+    </div>
   );
 }

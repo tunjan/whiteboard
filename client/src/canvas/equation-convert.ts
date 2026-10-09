@@ -68,12 +68,37 @@ function exLengthToPixels(value: unknown, attribute: string): number {
  * have been written by any collaborator on the board — the rendered SVG is
  * untrusted content, not something this client authored.
  *
- * None of these appear in a self-contained MathJax path render: `fontCache:
- * 'none'` emits no `<use>` references for an `id` to target, and the only
+ * The one exception is MathJax's own glyph cache: `fontCache: 'local'` defines
+ * each glyph once as `<path id="MJX-…">` and draws it with `<use
+ * xlink:href="#MJX-…">`, which `isGlyphReference` lets through. The only
  * `style` MathJax produces is a `vertical-align` hint that neither consumer
  * uses (SVG has no inline layout, and the panel preview sets `display: block`).
  */
 const UNSAFE_ATTRIBUTES = new Set(['href', 'xlink:href', 'style', 'id']);
+
+/**
+ * MathJax glyph ids are `MJX-<n>-<font>-<variant>-<codepoint>`, so the same id
+ * always names the same glyph. That is what makes ids repeated across the many
+ * formulas in one page harmless: whichever definition `#MJX-…` resolves to
+ * draws the same outline. Nothing a collaborator types can produce one — the
+ * `html` package that could set `id` is excluded — and this pattern keeps it
+ * that way: no other id, and no reference that leaves the document.
+ */
+const GLYPH_ID = /^MJX-[\w-]+$/;
+
+function isGlyphReference(
+  element: string,
+  attribute: string,
+  value: string,
+): boolean {
+  if (attribute === 'id') return element === 'path' && GLYPH_ID.test(value);
+  if (attribute !== 'href' && attribute !== 'xlink:href') return false;
+  return (
+    element === 'use' &&
+    value.startsWith('#') &&
+    GLYPH_ID.test(value.slice(1))
+  );
+}
 
 /** SVG elements that execute, animate, or embed foreign content. */
 const UNSAFE_ELEMENTS = new Set([
@@ -97,9 +122,14 @@ const UNSAFE_ELEMENTS = new Set([
  * attacker wants it to.
  */
 function sanitizeRenderTree(adaptor: LiteAdaptor, node: LiteElement): void {
-  for (const { name } of adaptor.allAttributes(node)) {
+  const element = adaptor.kind(node).toLowerCase();
+  for (const { name, value } of adaptor.allAttributes(node)) {
     const lower = name.toLowerCase();
-    if (UNSAFE_ATTRIBUTES.has(lower) || lower.startsWith('on')) {
+    if (
+      lower.startsWith('on') ||
+      (UNSAFE_ATTRIBUTES.has(lower) &&
+        !isGlyphReference(element, lower, value))
+    ) {
       adaptor.removeAttribute(node, name);
     }
   }
@@ -184,7 +214,10 @@ async function loadMathJax(): Promise<void> {
       throw error;
     },
   });
-  const output = new SVG({ fontCache: 'none' });
+  // `local` defines each glyph once per formula and reuses it with `<use>`: a
+  // 30×30 matrix is 0.5 MB of markup instead of 2.1 MB, ordinary formulas ~10%
+  // smaller. Each render stays self-contained, so export needs no extra defs.
+  const output = new SVG({ fontCache: 'local' });
   const document = mathjax.document('', {
     InputJax: input,
     OutputJax: output,

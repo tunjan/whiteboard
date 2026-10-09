@@ -2,14 +2,18 @@ import { useEffect, useRef, useState } from 'react';
 import { Check, Send, Trash2, X } from 'lucide-react';
 import type { Camera } from '@/canvas/camera';
 import { worldToScreen } from '@/canvas/camera';
+import {
+  useCameraFollow,
+  useCameraPlacement,
+} from '@/canvas/use-camera-interaction';
 import { getLocalUser } from '@/collab/presence';
 import {
   addComment,
   addCommentReply,
   deleteCommentThread,
   setThreadResolved,
-  useDocumentStore,
-} from '@/canvas/use-document-store';
+} from '@/canvas/board-records';
+import { useDocumentStore } from '@/canvas/use-document-store';
 import {
   type CommentMessage,
   useCommentsStore,
@@ -191,15 +195,34 @@ function CommentComposer({
 function ThreadPopup({
   root,
   replies,
-  screen,
+  point,
   onClose,
 }: {
   root: CommentMessage;
   replies: CommentMessage[];
-  screen: { x: number; y: number };
+  point: { x: number; y: number };
   onClose: () => void;
 }) {
   const [reply, setReply] = useState('');
+  // Clamped to the window, so where it sits depends on the real camera, not
+  // just the zoom, and it cannot ride the pins' follower. Placed against the
+  // live camera directly instead, so a pan still moves it without a render.
+  const place = useCameraPlacement<HTMLDivElement>((element, camera) => {
+    const screen = worldToScreen(point, camera);
+    const left = Math.min(
+      Math.max(screen.x + 20, 8),
+      window.innerWidth - POPUP_WIDTH - 8,
+    );
+    const top = Math.max(
+      Math.min(
+        Math.max(screen.y - 12, 8),
+        window.innerHeight - POPUP_MAX_HEIGHT,
+      ),
+      8,
+    );
+    element.style.left = `${left}px`;
+    element.style.top = `${top}px`;
+  });
 
   const submitReply = () => {
     const trimmed = reply.trim();
@@ -208,23 +231,12 @@ function ThreadPopup({
     setReply('');
   };
 
-  const left = Math.min(
-    Math.max(screen.x + 20, 8),
-    window.innerWidth - POPUP_WIDTH - 8,
-  );
-  const top = Math.max(
-    Math.min(
-      Math.max(screen.y - 12, 8),
-      window.innerHeight - POPUP_MAX_HEIGHT,
-    ),
-    8,
-  );
-
   return (
     <div
+      ref={place}
       data-ui-layer
       className="pointer-events-auto absolute z-[var(--z-canvas-front)] flex origin-top-left flex-col overflow-hidden rounded-panel border border-border bg-surface shadow-hover ease-[var(--ease-out-expo)] motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95 motion-safe:duration-200"
-      style={{ left, top, width: POPUP_WIDTH }}
+      style={{ width: POPUP_WIDTH }}
       onPointerDown={(e) => e.stopPropagation()}
       onKeyDown={(e) => {
         e.stopPropagation();
@@ -322,14 +334,16 @@ function ThreadPopup({
 }
 
 /**
- * Miro-style comment pins + thread popups. Modeled on CursorsLayer: pins are
- * anchored at a world position but positioned in screen space via
- * `worldToScreen`, so they pan/zoom with the canvas at constant screen size.
+ * Miro-style comment pins + thread popups. Pins are anchored at a world
+ * position and placed with `worldToScreen` against the zoom inside a camera
+ * follower (`useCameraFollow`), so they keep a constant screen size and a pan
+ * moves them without re-rendering.
  * Comments live in the Yjs doc (see use-document-store.ts) and are mirrored
  * into useCommentsStore; this layer only reads that store and calls the
  * mutation functions — it never touches the doc directly.
  */
-export function CommentsLayer({ camera }: { camera: Camera }) {
+export function CommentsLayer() {
+  const [camera, follow] = useCameraFollow<HTMLDivElement>();
   const messages = useCommentsStore((s) => s.messages);
   const openThreadId = useCommentsStore((s) => s.openThreadId);
   const setOpenThreadId = useCommentsStore((s) => s.setOpenThreadId);
@@ -350,29 +364,31 @@ export function CommentsLayer({ camera }: { camera: Camera }) {
 
   return (
     <div className="pointer-events-none absolute inset-0 z-[var(--z-canvas-front)] overflow-hidden">
-      {roots.map((root) => (
-        <CommentPin
-          key={root.id}
-          message={root}
-          screen={worldToScreen({ x: root.x ?? 0, y: root.y ?? 0 }, camera)}
-          open={openThreadId === root.id}
-          onToggle={() =>
-            setOpenThreadId(openThreadId === root.id ? null : root.id)
-          }
-        />
-      ))}
+      <div ref={follow} className="absolute top-0 left-0">
+        {roots.map((root) => (
+          <CommentPin
+            key={root.id}
+            message={root}
+            screen={worldToScreen({ x: root.x ?? 0, y: root.y ?? 0 }, camera)}
+            open={openThreadId === root.id}
+            onToggle={() =>
+              setOpenThreadId(openThreadId === root.id ? null : root.id)
+            }
+          />
+        ))}
 
-      {draft && (
-        <CommentComposer
-          // World-coord key: remounts (replaying the entrance) when a new spot
-          // is clicked, but is untouched by camera pan/zoom.
-          key={`${draft.x},${draft.y}`}
-          point={draft}
-          camera={camera}
-          pageId={currentPageId}
-          onDone={() => setDraft(null)}
-        />
-      )}
+        {draft && (
+          <CommentComposer
+            // World-coord key: remounts (replaying the entrance) when a new
+            // spot is clicked, but is untouched by camera pan/zoom.
+            key={`${draft.x},${draft.y}`}
+            point={draft}
+            camera={camera}
+            pageId={currentPageId}
+            onDone={() => setDraft(null)}
+          />
+        )}
+      </div>
 
       {openRoot && (
         <ThreadPopup
@@ -380,10 +396,7 @@ export function CommentsLayer({ camera }: { camera: Camera }) {
           key={openRoot.id}
           root={openRoot}
           replies={openReplies}
-          screen={worldToScreen(
-            { x: openRoot.x ?? 0, y: openRoot.y ?? 0 },
-            camera,
-          )}
+          point={{ x: openRoot.x ?? 0, y: openRoot.y ?? 0 }}
           onClose={() => setOpenThreadId(null)}
         />
       )}

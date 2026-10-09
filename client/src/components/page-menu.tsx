@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import {
   ArrowDown,
   ArrowUp,
+  ChevronDown,
   Copy,
   EllipsisVertical,
   GripVertical,
@@ -57,6 +58,7 @@ import {
 } from '@/components/ui/popover';
 import { CHROME_CONTROLS } from '@/components/ui/surface';
 import { cn } from '@/lib/utils';
+import { useBoardAccessStore } from '@/board/board-access';
 
 const PAGE_ROW_HEIGHT = 40;
 /** Coarse pointers grow controls to 44px, so rows need extra room to not touch. */
@@ -137,7 +139,7 @@ function useCoarsePointer(): boolean {
  * Page switcher for a board, docked in the top-left chrome. Page state lives in
  * the shared Yjs document, so changes appear immediately for every collaborator.
  */
-export function PageMenu() {
+export function PageMenu({ className }: { className?: string }) {
   const boardId = useDocumentStore((state) => state.boardId);
   const pages = useDocumentStore((state) => state.doc.pages);
   const pageOrder = useDocumentStore((state) => state.doc.pageOrder);
@@ -161,6 +163,8 @@ export function PageMenu() {
   const pageToDelete = deleteId ? pages[deleteId] : undefined;
   const rowHeight = coarsePointer ? PAGE_ROW_HEIGHT_COARSE : PAGE_ROW_HEIGHT;
   const formOpen = creating || Boolean(editingId && pages[editingId]);
+  // A view-only link can move between pages but not change them.
+  const viewOnly = useBoardAccessStore((s) => s.access === 'view');
   const listMaxHeight = Math.max(
     rowHeight + LIST_VERTICAL_PADDING,
     Math.min(PAGE_LIST_MAX_HEIGHT, viewportHeight * 0.62) -
@@ -226,11 +230,16 @@ export function PageMenu() {
               variant="ghost"
               size="sm"
               aria-label={`Pages, current page: ${current?.name ?? 'Page 1'}`}
-              className="max-w-[clamp(4.5rem,18vw,11.25rem)] px-2 font-medium text-fg rounded-md"
+              className={cn(
+                'max-w-[clamp(4.5rem,18vw,11.25rem)] rounded-control px-2 text-fg-secondary',
+                className,
+              )}
             />
           }
         >
           <span className="truncate">{current?.name ?? 'Page 1'}</span>
+          {/* Says "this opens a list", which a bare page name did not. */}
+          <ChevronDown aria-hidden="true" className="-mr-0.5 size-3.5 text-fg-muted" />
         </PopoverTrigger>
 
         <PopoverContent
@@ -242,7 +251,7 @@ export function PageMenu() {
           )}
         >
           <div className="flex items-center justify-between gap-2 px-3 pt-2.5 pb-1.5">
-            <PopoverTitle className="text-xs font-medium tracking-wide text-fg-muted uppercase">
+            <PopoverTitle className="text-xs font-medium text-fg-muted">
               Pages
             </PopoverTitle>
             <span className="text-xs text-fg-muted tabular-nums">
@@ -257,7 +266,7 @@ export function PageMenu() {
             label="Board pages"
             revealId={currentPageId}
             getItemLabel={(page) => page.name}
-            disabled={formOpen}
+            disabled={formOpen || viewOnly}
             onReorder={movePageToIndex}
           >
             {(page, index, dragHandleProps, dragging) => {
@@ -276,7 +285,7 @@ export function PageMenu() {
                     aria-hidden="true"
                     className={cn(
                       'h-5 w-[3px] shrink-0 rounded-full transition-colors',
-                      active ? 'bg-fg' : 'bg-transparent',
+                      active ? 'bg-selected' : 'bg-transparent',
                     )}
                   />
                   {renaming ? (
@@ -296,7 +305,7 @@ export function PageMenu() {
                     <>
                       <PageDragHandle
                         dragHandleProps={dragHandleProps}
-                        disabled={formOpen}
+                        disabled={formOpen || viewOnly}
                       />
                       <Button
                         variant={active ? 'secondary' : 'ghost'}
@@ -304,6 +313,7 @@ export function PageMenu() {
                         aria-current={active ? 'page' : undefined}
                         onClick={() => setCurrentPage(page.id)}
                         onDoubleClick={() => {
+                          if (viewOnly) return;
                           setCreating(false);
                           setEditingId(page.id);
                         }}
@@ -314,30 +324,32 @@ export function PageMenu() {
                       >
                         <span className="truncate">{page.name}</span>
                       </Button>
-                      <PageActions
-                        pageName={page.name}
-                        canMoveUp={index > 0}
-                        canMoveDown={index < ordered.length - 1}
-                        canDelete={ordered.length > 1}
-                        onRename={() => {
-                          setCreating(false);
-                          // Let the menu finish closing first. It restores
-                          // focus on the way out, which would otherwise blur
-                          // the editor the moment the row swaps it in.
-                          window.setTimeout(() => setEditingId(page.id), 0);
-                        }}
-                        // Duplicating waits on the source page's document when
-                        // it is not the page on screen; nothing here depends on
-                        // the result, and the switch to the copy is what shows.
-                        onDuplicate={() => void duplicatePage(page.id)}
-                        onMoveUp={() => movePage(page.id, 'up')}
-                        onMoveDown={() => movePage(page.id, 'down')}
-                        onDelete={() => {
-                          setOpen(false);
-                          setReopenAfterDelete(true);
-                          setDeleteId(page.id);
-                        }}
-                      />
+                      {viewOnly ? null : (
+                        <PageActions
+                          pageName={page.name}
+                          canMoveUp={index > 0}
+                          canMoveDown={index < ordered.length - 1}
+                          canDelete={ordered.length > 1}
+                          onRename={() => {
+                            setCreating(false);
+                            // Let the menu finish closing first. It restores
+                            // focus on the way out, which would otherwise blur
+                            // the editor the moment the row swaps it in.
+                            window.setTimeout(() => setEditingId(page.id), 0);
+                          }}
+                          // Duplicating waits on the source page's document when
+                          // it is not the page on screen; nothing here depends on
+                          // the result, and the switch to the copy is what shows.
+                          onDuplicate={() => void duplicatePage(page.id)}
+                          onMoveUp={() => movePage(page.id, 'up')}
+                          onMoveDown={() => movePage(page.id, 'down')}
+                          onDelete={() => {
+                            setOpen(false);
+                            setReopenAfterDelete(true);
+                            setDeleteId(page.id);
+                          }}
+                        />
+                      )}
                     </>
                   )}
                 </div>
@@ -353,7 +365,7 @@ export function PageMenu() {
             onReset={() => setUserListHeight(null)}
           />
 
-          <div className="px-1 pb-1">
+          <div className={cn('px-1 pb-1', viewOnly && 'hidden')}>
             {creating ? (
               <PageNameForm
                 key={`create-${ordered.length}`}
@@ -655,13 +667,13 @@ function PageInlineRename({
       autoComplete="off"
       // Sized and padded like the row's name button so the label is edited in
       // place. The app-wide focus outline is traded for a border and a soft
-      // halo: a caret in a field this small needs no 2px ring around it. Both
-      // resolve through the neutral ring token, so the field focuses the same
-      // colour as everything else rather than introducing a lone blue.
+      // halo — a caret in a field this small needs no 2px ring around it —
+      // but both are the accent, because that is what focus is everywhere
+      // else in this chrome and a field is not the place to invent a second.
       className={cn(
         'h-8 min-w-0 flex-1 rounded-md border-transparent bg-panel px-3 font-medium text-fg',
         'text-base sm:text-sm [@media(pointer:coarse)]:h-11',
-        'focus:border-strong focus:bg-surface focus:ring-2 focus:ring-ring/15',
+        'focus:border-focus focus:bg-surface focus:shadow-focus',
         'focus-visible:outline-none',
       )}
       onChange={(event) => setValue(event.target.value)}

@@ -1,13 +1,15 @@
+import { useEffect, useState } from 'react';
 import { imageHref } from '../../board/blobs';
-import { useLodDetail } from '../lod';
+import { useImageThumb, useLodDetail } from '../lod';
 import { boxBounds, boxHitTest, rotationTransform } from './box-geometry';
 import { mergedRectPath, useMergedCorners } from './image-merge';
+import { PaintedShadow } from './painted-shadow';
 import { MEDIA_CORNER_RADIUS } from './style';
 import type { ShapeUtil } from './types';
 
 const IMAGE_SHADOW_BLUR = 1;
 const IMAGE_SHADOW_DY = 1;
-const IMAGE_SHADOW_MARGIN = 16;
+const IMAGE_SHADOW_OPACITY = 0.08;
 
 export const imageUtil: ShapeUtil<'image'> = {
   type: 'image',
@@ -37,10 +39,13 @@ export const imageUtil: ShapeUtil<'image'> = {
   }),
 
   Component: ({ shape }) => {
-    const { blobId, w, h, crop } = shape.props;
+    const { blobId, thumbBlobId, w, h, crop } = shape.props;
     const detail = useLodDetail();
     const squared = useMergedCorners(shape);
-    const href = imageHref(shape.id, blobId);
+    const thumb = useImageThumb(shape.props);
+    const href = useLoadedHref(
+      imageHref(shape.id, thumb && thumbBlobId ? thumbBlobId : blobId),
+    );
     // With a crop, draw the full source scaled so the crop sub-rect fills the
     // box; the clipPath below keeps only the box region visible.
     const fullW = crop ? w / crop.w : w;
@@ -48,7 +53,6 @@ export const imageUtil: ShapeUtil<'image'> = {
     const imgX = crop ? shape.x - crop.x * fullW : shape.x;
     const imgY = crop ? shape.y - crop.y * fullH : shape.y;
     const clipId = `image-clip-${shape.id}`;
-    const shadowId = `image-shadow-${shape.id}`;
     const radius = Math.min(MEDIA_CORNER_RADIUS, w / 4, h / 4);
     // Where a neighbouring image is flush against an edge, the corners on it are
     // squared so the pair reads as one block instead of leaving a notch.
@@ -67,7 +71,7 @@ export const imageUtil: ShapeUtil<'image'> = {
         </g>
       );
     }
-    // Zoomed far out the drop shadow is sub-pixel; skip it (and its filter).
+    // Zoomed far out the drop shadow is sub-pixel; skip it.
     const shadow = detail === 'high';
     return (
       <g transform={rotationTransform(shape.x, shape.y, w, h, shape.rotation)}>
@@ -75,36 +79,24 @@ export const imageUtil: ShapeUtil<'image'> = {
           <clipPath id={clipId}>
             <path d={outline} />
           </clipPath>
-          {shadow && (
-            <filter
-              id={shadowId}
-              x={shape.x - IMAGE_SHADOW_MARGIN}
-              y={shape.y - IMAGE_SHADOW_MARGIN}
-              width={w + IMAGE_SHADOW_MARGIN * 2}
-              height={h + IMAGE_SHADOW_MARGIN * 2}
-              filterUnits="userSpaceOnUse"
-            >
-              <feDropShadow
-                dx={0}
-                dy={IMAGE_SHADOW_DY}
-                stdDeviation={IMAGE_SHADOW_BLUR}
-                floodColor="#000000"
-                floodOpacity={0.08}
-              />
-            </filter>
-          )}
         </defs>
-        <g filter={shadow ? `url(#${shadowId})` : undefined}>
-          <image
-            href={href}
-            x={imgX}
-            y={imgY}
-            width={fullW}
-            height={fullH}
-            preserveAspectRatio="none"
-            clipPath={`url(#${clipId})`}
+        {shadow && (
+          <PaintedShadow
+            d={outline}
+            dy={IMAGE_SHADOW_DY}
+            blur={IMAGE_SHADOW_BLUR}
+            opacity={IMAGE_SHADOW_OPACITY}
           />
-        </g>
+        )}
+        <image
+          href={href}
+          x={imgX}
+          y={imgY}
+          width={fullW}
+          height={fullH}
+          preserveAspectRatio="none"
+          clipPath={`url(#${clipId})`}
+        />
         <path
           d={outline}
           fill="none"
@@ -118,3 +110,35 @@ export const imageUtil: ShapeUtil<'image'> = {
     );
   },
 };
+
+/**
+ * `href`, but a change of it only shows once the new source has loaded.
+ *
+ * Crossing the thumbnail threshold swaps one copy of the picture for another;
+ * pointing the `<image>` straight at the new URL would blank it for the length
+ * of the download. Until the new source is ready the previous one stays up.
+ */
+function useLoadedHref(href: string | null): string | null {
+  const [shown, setShown] = useState(href);
+  useEffect(() => {
+    if (href === shown) return;
+    if (!href || !shown) {
+      setShown(href);
+      return;
+    }
+    // `load`, not `decode()`: the decode promise can sit unresolved in a
+    // backgrounded page, and a loaded source is decoded on first paint anyway.
+    // A failed load still switches — holding the old copy forever would hide
+    // the failure behind a picture that no longer matches the zoom.
+    const next = new Image();
+    const show = () => setShown(href);
+    next.addEventListener('load', show);
+    next.addEventListener('error', show);
+    next.src = href;
+    return () => {
+      next.removeEventListener('load', show);
+      next.removeEventListener('error', show);
+    };
+  }, [href, shown]);
+  return shown;
+}

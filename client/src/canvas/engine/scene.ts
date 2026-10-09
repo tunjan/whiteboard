@@ -8,7 +8,8 @@ import { resolveOpacity } from '../opacity';
 import { shapeRegistry } from '../shapes/shape-registry';
 import { arrowPoints, curvePoints } from '../shapes/line-geometry';
 import type { SpatialIndex } from '../spatial-index';
-import { paintOrder } from './paint-order';
+import { ShapeStore } from './shape-store';
+import { groupByParent, paintOrderOf } from './paint-order';
 import { intersectConvexPolygons, polygonCss } from './clipping';
 import {
   inverse,
@@ -24,6 +25,27 @@ function shallowEqual(a: object, b: object) {
   return (
     keys.length === Object.keys(b).length &&
     keys.every((key) => Object.is(a[key], b[key]))
+  );
+}
+
+function setEqual(a: ReadonlySet<string>, b: ReadonlySet<string>) {
+  if (a === b) return true;
+  if (a.size !== b.size) return false;
+  for (const id of a) if (!b.has(id)) return false;
+  return true;
+}
+
+/** Whether a record's spatial footprint could have changed. Reordering,
+ * reparenting, opacity and hiding cannot move a shape, so they must not re-cut
+ * the cull — `visible` is a single observer over the whole page. */
+function moved(a: Shape | undefined, b: Shape | undefined): boolean {
+  if (a === b) return false;
+  if (!a || !b) return true;
+  return (
+    a.x !== b.x ||
+    a.y !== b.y ||
+    a.rotation !== b.rotation ||
+    !shallowEqual(a.props, b.props)
   );
 }
 
@@ -103,20 +125,72 @@ const EMPTY_UI: SceneUi = {
   pinned: new Set(),
 };
 
+/**
+ * What a shape inherits from the frames and groups above it: whether an
+ * ancestor hides it, and the page-space polygon its frames clip it to.
+ *
+ * Both renderers need this and neither can afford a second ancestor walk to get
+ * it — the DOM layer turns the mask into a CSS `clip-path` in the shape's own
+ * coordinates, the Canvas2D one clips the context with it in page space.
+ *
+ * `null` means no mask; `[]` means fully clipped, and must never be read as an
+ * absent one.
+ */
+export function ancestorState(
+  shape: Shape,
+  getShape: (id: string) => Shape | undefined,
+  hiddenIds: Record<string, boolean>,
+): { hidden: boolean; mask: Point[] | null } {
+  let mask: Point[] | null = null;
+  let hidden = !!hiddenIds[shape.id] || !!shape.hidden;
+  const seen = new Set([shape.id]);
+  let parentId = shape.parentId;
+  while (parentId && !seen.has(parentId)) {
+    seen.add(parentId);
+    const parent = getShape(parentId);
+    if (!parent) break;
+    hidden ||= !!hiddenIds[parent.id] || !!parent.hidden;
+    // Existing connectors deliberately escape frame masks.
+    if (parent.type === 'frame' && shape.type !== 'arrow') {
+      const polygon = framePolygon(parent);
+      mask = mask === null ? polygon : intersectConvexPolygons(mask, polygon);
+    }
+    parentId = parent.parentId;
+  }
+  return { hidden, mask };
+}
+
+/**
+ * Every shape has a node (sync writes `z` and `contentRevision` for all of
+ * them), but only rendered ones read `content` and `presentation`. The
+ * computeds are built on first read: ~0.65 KB a shape that a 12k-stroke page
+ * would otherwise hold for strokes nobody has looked at.
+ */
 export class SceneNode {
   readonly shape: Atom<Shape | undefined>;
-  readonly content;
-  readonly presentation;
   readonly z = atom('shape z', 0);
   readonly contentRevision = atom('content revision', 0);
+  private contentSignal?: ReturnType<SceneNode['buildContent']>;
+  private presentationSignal?: ReturnType<SceneNode['buildPresentation']>;
   constructor(
     readonly scene: CanvasScene,
     readonly id: string,
-    shape?: Shape,
   ) {
-    this.shape = atom<Shape | undefined>(`shape:${id}`, shape);
-    this.content = computed(
-      `content:${id}`,
+    // The store's own atom — the scene holds no copy of the document.
+    this.shape = scene.store.record(id);
+  }
+
+  get content() {
+    return (this.contentSignal ??= this.buildContent());
+  }
+
+  get presentation() {
+    return (this.presentationSignal ??= this.buildPresentation());
+  }
+
+  private buildContent() {
+    return computed(
+      'content',
       () => {
         const s = this.shape.get();
         return s
@@ -131,16 +205,20 @@ export class SceneNode {
       },
       { isEqual: contentEqual },
     );
+  }
+
+  private buildPresentation() {
+    const scene = this.scene;
     const center = computed(
-      `center:${id}`,
+      'center',
       () => {
         const s = this.content.get();
         return s ? shapeCenter(s) : { x: 0, y: 0 };
       },
       { isEqual: shallowEqual },
     );
-    this.presentation = computed(
-      `presentation:${id}`,
+    return computed(
+      'presentation',
       () => {
         const s = this.shape.get();
         if (!s)
@@ -150,25 +228,10 @@ export class SceneNode {
             opacity: '0',
             visibility: 'hidden',
           };
-        const ui = scene.ui.get();
+        const hiddenIds = scene.hidden.get();
+        const erasingIds = scene.erasing.get();
         const getShape = (id: string) => scene.record(id).shape.get();
-        let mask: Point[] | null = null;
-        let hidden = !!ui.hidden[s.id] || !!s.hidden;
-        const seen = new Set([s.id]);
-        let parentId = s.parentId;
-        while (parentId && !seen.has(parentId)) {
-          seen.add(parentId);
-          const parent = getShape(parentId);
-          if (!parent) break;
-          hidden ||= !!ui.hidden[parent.id] || !!parent.hidden;
-          // Existing connectors deliberately escape frame masks.
-          if (parent.type === 'frame' && s.type !== 'arrow') {
-            const polygon = framePolygon(parent);
-            mask =
-              mask === null ? polygon : intersectConvexPolygons(mask, polygon);
-          }
-          parentId = parent.parentId;
-        }
+        const { hidden, mask } = ancestorState(s, getShape, hiddenIds);
         const pivot = s.rotation ? center.get() : { x: 0, y: 0 };
         const matrix = rotationAt(s.x, s.y, s.rotation, pivot.x, pivot.y);
         const inverted = mask === null ? null : inverse(matrix);
@@ -178,9 +241,10 @@ export class SceneNode {
           transform: matrixCss(matrix),
           clipPath: polygonCss(localMask),
           opacity: String(
-            resolveOpacity(s, getShape, (id) => !!ui.erasing[id]),
+            resolveOpacity(s, getShape, (id) => !!erasingIds[id]),
           ),
-          visibility: hidden || ui.suppressed.has(s.id) ? 'hidden' : 'visible',
+          visibility:
+            hidden || scene.suppressed.get().has(s.id) ? 'hidden' : 'visible',
         };
       },
       { isEqual: shallowEqual },
@@ -195,15 +259,45 @@ export class CanvasScene {
   readonly ids = atom<readonly string[]>('render ids', []);
   readonly camera = atom<Camera>('camera', DEFAULT_CAMERA);
   readonly viewport = atom('viewport', { width: 0, height: 0 });
+  /** Bumped only when a shape's footprint could have changed; see `moved`. */
   readonly boundsEpoch = atom('bounds epoch', 0);
+  /** Bumped by every published change, for consumers that cache a whole frame. */
+  readonly documentEpoch = atom('document epoch', 0);
   private readonly children = atom(
     'scene children',
     new Map<string, string[]>(),
   );
-  readonly ui = atom<SceneUi>('scene ui', EMPTY_UI);
+  /** One atom per UI concern, not one `SceneUi`. `presentation` is mounted once
+   * per shape and reads the first three; a combined atom made every selection
+   * change invalidate every node on the page (~25ms at 10k shapes). Only
+   * `pinned` is selection-driven, and only `visible` — a single observer —
+   * reads it. Write through `setUi`, which holds the equality. */
+  readonly hidden = atom<Record<string, boolean>>('ui hidden', EMPTY_UI.hidden);
+  readonly erasing = atom<Record<string, boolean>>(
+    'ui erasing',
+    EMPTY_UI.erasing,
+  );
+  readonly suppressed = atom<ReadonlySet<string>>(
+    'ui suppressed',
+    EMPTY_UI.suppressed,
+  );
+  readonly pinned = atom<ReadonlySet<string>>('ui pinned', EMPTY_UI.pinned);
+  /** Identity token for renderers that invalidate a cached frame on any UI
+   * change, now that there is no single `ui` reference to compare. */
+  readonly uiEpoch = atom('ui epoch', 0);
+  /** Ids whose shape is highlighter ink, which renders in a second pass. */
+  readonly highlightIds = atom<readonly string[]>('highlight ids', []);
+  private readonly highlights = new Set<string>();
   readonly visible;
 
-  constructor(readonly index: SpatialIndex) {
+  /**
+   * `store` is the document's published shapes. A scene given none owns a
+   * private one and `apply` writes it — the standalone form tests use.
+   */
+  constructor(
+    readonly index: SpatialIndex,
+    readonly store: ShapeStore = new ShapeStore(),
+  ) {
     const region = computed(
       'cull region',
       () => {
@@ -215,11 +309,10 @@ export class CanvasScene {
     this.visible = computed('visible shapes', () => {
       this.boundsEpoch.get();
       const { width, height } = this.viewport.get();
-      const ui = this.ui.get();
       if (!width || !height) return new Set(this.ids.get());
       const ids = new Set(index.search(region.get()));
       const children = this.children.get();
-      const stack = [...ui.pinned],
+      const stack = [...this.pinned.get()],
         pinned = new Set<string>();
       while (stack.length) {
         const id = stack.pop()!;
@@ -232,6 +325,31 @@ export class CanvasScene {
     });
   }
 
+  /** Publish the UI overlays, skipping the atoms whose value is unchanged so a
+   * selection change does not reach `presentation`. */
+  setUi(next: SceneUi): void {
+    transact(() => {
+      let changed = false;
+      if (this.hidden.get() !== next.hidden) {
+        this.hidden.set(next.hidden);
+        changed = true;
+      }
+      if (this.erasing.get() !== next.erasing) {
+        this.erasing.set(next.erasing);
+        changed = true;
+      }
+      if (!setEqual(this.suppressed.get(), next.suppressed)) {
+        this.suppressed.set(next.suppressed);
+        changed = true;
+      }
+      if (!setEqual(this.pinned.get(), next.pinned)) {
+        this.pinned.set(next.pinned);
+        changed = true;
+      }
+      if (changed) this.uiEpoch.update((n) => n + 1);
+    });
+  }
+
   record(id: string): SceneNode {
     let node = this.records.get(id);
     if (!node) {
@@ -241,29 +359,64 @@ export class CanvasScene {
     return node;
   }
 
+  /** Write `shapes` into this scene's store, then {@link sync} against it. */
   apply(
     shapes: ReadonlyMap<string, Shape>,
     changed: ReadonlySet<string> | null,
     contentIds?: ReadonlySet<string> | null,
   ): void {
+    transact(() =>
+      this.sync(
+        shapes,
+        changed,
+        contentIds,
+        this.store.publish(shapes, changed),
+      ),
+    );
+  }
+
+  /**
+   * Bring the derived state — membership, paint order, highlight ids, epochs —
+   * up to a publish the store has already taken. `previous` is what each
+   * changed id held before it; the store's atoms already hold `shapes`.
+   */
+  sync(
+    shapes: ReadonlyMap<string, Shape>,
+    changed: ReadonlySet<string> | null,
+    contentIds: ReadonlySet<string> | null | undefined,
+    previous: ReadonlyMap<string, Shape | undefined>,
+  ): void {
     transact(() => {
       const ids =
         changed ?? new Set([...this.records.keys(), ...shapes.keys()]);
-      let topologyChanged = changed === null;
+      let orderChanged = changed === null;
+      let parentageChanged = changed === null;
       let membershipChanged = changed === null;
+      let geometryChanged = changed === null;
+      let highlightsChanged = false;
+      let removed = false;
       for (const id of ids) {
         const node = this.record(id);
-        const prev = node.shape.get(),
+        const prev = previous.get(id),
           next = shapes.get(id);
         membershipChanged ||= !!prev !== !!next || prev?.type !== next?.type;
-        topologyChanged ||=
-          !prev ||
-          !next ||
-          prev.index !== next.index ||
-          prev.parentId !== next.parentId;
-        node.shape.set(next);
-        if (changed === null || contentIds?.has(id))
+        removed ||= !!prev && !next;
+        if (!prev || !next || prev.parentId !== next.parentId) {
+          orderChanged = true;
+          parentageChanged = true;
+        } else if (prev.index !== next.index) orderChanged = true;
+        geometryChanged ||= moved(prev, next);
+        const highlight =
+          next?.type === 'draw' && next.props.inkKind === 'highlight';
+        if (highlight !== this.highlights.has(id)) {
+          if (highlight) this.highlights.add(id);
+          else this.highlights.delete(id);
+          highlightsChanged = true;
+        }
+        if (changed === null || contentIds?.has(id)) {
           node.contentRevision.update((n) => n + 1);
+          geometryChanged = true;
+        }
       }
       if (membershipChanged) {
         const nextIds = [...shapes.values()]
@@ -277,21 +430,50 @@ export class CanvasScene {
         )
           this.ids.set(nextIds);
       }
-      if (topologyChanged) this.updateOrder(shapes);
-      this.boundsEpoch.update((n) => n + 1);
+      if (highlightsChanged) this.highlightIds.set([...this.highlights].sort());
+      if (orderChanged) this.updateOrder(shapes, parentageChanged);
+      // Reparenting can orphan a node retained by the rule in `prune`, and the
+      // size check keeps the scan off the common path: a record exists for
+      // every live shape, so an equal count means there is nothing dead.
+      if ((removed || parentageChanged) && this.records.size > shapes.size)
+        this.prune(shapes);
+      if (geometryChanged) this.boundsEpoch.update((n) => n + 1);
+      this.documentEpoch.update((n) => n + 1);
     });
   }
 
-  private updateOrder(shapes: ReadonlyMap<string, Shape>) {
-    const children = new Map<string, string[]>();
-    for (const shape of shapes.values())
-      if (shape.parentId) {
-        const bucket = children.get(shape.parentId) ?? [];
-        bucket.push(shape.id);
-        children.set(shape.parentId, bucket);
-      }
-    this.children.set(children);
+  private updateOrder(
+    shapes: ReadonlyMap<string, Shape>,
+    rebuildChildren: boolean,
+  ) {
+    const buckets = groupByParent(shapes);
+    // Pure reorders leave parenting alone, and `children` is only the pin
+    // closure's adjacency — republishing it there would re-cut the cull.
+    if (rebuildChildren) {
+      const children = new Map<string, string[]>();
+      for (const [parent, bucket] of buckets)
+        if (parent !== null)
+          children.set(
+            parent,
+            bucket.map((s) => s.id),
+          );
+      this.children.set(children);
+    }
     let z = 0;
-    for (const shape of paintOrder(shapes)) this.record(shape.id).z.set(++z);
+    for (const shape of paintOrderOf(shapes, buckets))
+      this.record(shape.id).z.set(++z);
+  }
+
+  /** Drop records for shapes that are gone. A node still named as someone's
+   * parent is kept — including by a shape whose parent no longer exists, which
+   * `children` resolves away: descendant `presentation` computeds capture the
+   * ancestor's atom, and recreating that id (undo) would otherwise hand them a
+   * node no one writes to. Runs only when something was actually removed. */
+  private prune(shapes: ReadonlyMap<string, Shape>) {
+    const named = new Set<string>();
+    for (const shape of shapes.values())
+      if (shape.parentId) named.add(shape.parentId);
+    for (const [id, node] of this.records)
+      if (!node.shape.get() && !named.has(id)) this.records.delete(id);
   }
 }

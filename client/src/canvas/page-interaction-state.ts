@@ -3,6 +3,7 @@ import { setLocalTextSelection } from '@/collab/presence';
 import { useCommentsStore } from './use-comments-store';
 import { useEnteredGroupStore } from './use-entered-group-store';
 import { useEraserStore } from './use-eraser-store';
+import { useFrameEditingStore } from './use-frame-editing-store';
 import { useImageCroppingStore } from './use-image-cropping-store';
 import { useLaserStore } from './use-laser-store';
 import { useSelectionStore } from './use-selection-store';
@@ -20,6 +21,25 @@ interface PageInteractionState {
 }
 
 const pageStates = new Map<string, PageInteractionState>();
+
+/**
+ * Drop everything that points at a shape on the page being left: leaving a
+ * page and leaving a board clear exactly the same things.
+ */
+function clearPageBoundInteraction(): void {
+  const selection = useSelectionStore.getState();
+  selection.clear();
+  selection.setMarquee(null);
+  selection.setSnapGuides([]);
+  useEnteredGroupStore.getState().exit();
+  useTextEditingStore.getState().stop();
+  useFrameEditingStore.getState().stop();
+  useImageCroppingStore.getState().stop();
+  useVideoPlayingStore.getState().stop();
+  useEraserStore.getState().clear();
+  const laser = useLaserStore.getState();
+  for (const stroke of laser.strokes) laser.discard(stroke.id);
+}
 
 /** Save the durable interaction context, then clear state that cannot cross pages. */
 export function leavePageInteractionState(pageId: string): void {
@@ -39,18 +59,8 @@ export function leavePageInteractionState(pageId: string): void {
       : null,
   });
 
-  selection.clear();
-  selection.setMarquee(null);
-  selection.setSnapGuides([]);
-  useEnteredGroupStore.getState().exit();
-  useTextEditingStore.getState().stop();
+  clearPageBoundInteraction();
   setLocalTextSelection(null);
-  useImageCroppingStore.getState().stop();
-  useVideoPlayingStore.getState().stop();
-  useEraserStore.getState().clear();
-
-  const laser = useLaserStore.getState();
-  for (const stroke of laser.strokes) laser.discard(stroke.id);
 
   const comments = useCommentsStore.getState();
   comments.setOpenThreadId(null);
@@ -97,14 +107,5 @@ export function deletePageInteractionState(pageId: string): void {
 /** Board sessions never share local interaction state. */
 export function resetPageInteractionStates(): void {
   pageStates.clear();
-  useSelectionStore.getState().clear();
-  useSelectionStore.getState().setMarquee(null);
-  useSelectionStore.getState().setSnapGuides([]);
-  useEnteredGroupStore.getState().exit();
-  useTextEditingStore.getState().stop();
-  useImageCroppingStore.getState().stop();
-  useVideoPlayingStore.getState().stop();
-  useEraserStore.getState().clear();
-  const laser = useLaserStore.getState();
-  for (const stroke of laser.strokes) laser.discard(stroke.id);
+  clearPageBoundInteraction();
 }

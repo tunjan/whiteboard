@@ -1,6 +1,6 @@
 import { useMemo, useRef } from 'react';
 import type { MathfieldElement } from 'mathlive';
-import { ChevronDown, Plus, Sparkles } from 'lucide-react';
+import { ChevronDown, Plus } from 'lucide-react';
 import type {
   GraphExpression,
   GraphProps,
@@ -10,11 +10,16 @@ import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Surface } from '@/components/ui/surface';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import { createGraphExpression } from '@/canvas/graph-defaults';
 import {
   graphParametersEqual,
@@ -22,17 +27,17 @@ import {
 } from '@/canvas/graph-parameters';
 import { createGraphFunctionDefinitions } from '@/canvas/graph-parser';
 import { GRAPH_MATH_PRESETS } from '@/canvas/graph-presets';
-import { editor, useDocumentStore } from '@/canvas/use-document-store';
+import { editor } from '@/canvas/use-document-store';
+import { useShape } from '@/canvas/use-shapes';
 import { useSelectionStore } from '@/canvas/use-selection-store';
 import { ToolPanelPresence } from '@/components/tool-panel-presence';
 import { DisplaySettings } from './graph-display-settings';
 import { ExpressionRow } from './graph-expression-row';
+import { SECTION } from './graph-panel-styles';
 import { SliderRow } from './graph-slider-row';
 import { ViewRange } from './graph-view-range';
 
-/* ─── Main panel content ─────────────────────────────────────────────────── */
-
-function GraphPanelContent({ shape }: { shape: GraphShape }) {
+export function GraphPanelContent({ shape }: { shape: GraphShape }) {
   const fieldRefs = useRef(new Map<string, MathfieldElement>());
 
   const focusField = (id: string, tries = 5) => {
@@ -47,7 +52,6 @@ function GraphPanelContent({ shape }: { shape: GraphShape }) {
   };
 
   const props = shape.props;
-  const showAxisLabels = props.showAxisLabels !== false;
   const functionDefinitions = useMemo(
     () => createGraphFunctionDefinitions(props.expressions),
     [props.expressions],
@@ -80,15 +84,9 @@ function GraphPanelContent({ shape }: { shape: GraphShape }) {
     );
   };
 
-  const addExpression = () => {
+  const addExpression = (latex?: string) => {
     const created = createGraphExpression(props.expressions.length);
-    updateExpressions([...props.expressions, created]);
-    focusField(created.id);
-  };
-
-  const addExpressionWithPreset = (latex: string) => {
-    const created = createGraphExpression(props.expressions.length);
-    created.expression = latex;
+    if (latex !== undefined) created.expression = latex;
     updateExpressions([...props.expressions, created]);
     focusField(created.id);
   };
@@ -127,149 +125,129 @@ function GraphPanelContent({ shape }: { shape: GraphShape }) {
     a.localeCompare(b),
   );
 
-  const expressionCount = props.expressions.length;
-  const functionMenu = (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        render={
-          <Button
-            variant="outline"
-            className="h-9.5 shrink-0 gap-1.5 rounded-lg px-3"
-            aria-label="Curve presets"
-            title="Curve presets"
-          >
-            <Sparkles className="size-4" data-icon="inline-start" aria-hidden="true" />
-            <ChevronDown className="size-3.5 opacity-60" data-icon="inline-end" aria-hidden="true" />
-          </Button>
-        }
-      />
-      <DropdownMenuContent align="start" className="w-44 p-1 shadow-e3">
-        <DropdownMenuGroup>
-          {GRAPH_MATH_PRESETS.map((preset) => (
-            <DropdownMenuItem
-              key={preset.name}
-              onClick={() => addExpressionWithPreset(preset.expression)}
-            >
-              {preset.name}
-            </DropdownMenuItem>
-          ))}
-        </DropdownMenuGroup>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-  // A tinted tray holding one inset white card, with the display toggles left
-  // on the tray itself — so the controls read as one object docked to the
-  // graph rather than as a stack of floating cards. `--anchor-max-h` is the
-  // room `useShapeAnchor` measured between the viewport edges; the fallback
-  // covers the frame before it has measured.
+  // One surface, top to bottom in the order you reach for things: what is
+  // plotted, what moves it, where you are looking, how it is drawn. Groups
+  // are ruled off by hairlines, never boxed.
   return (
-    <Surface
-      role="region"
-      aria-labelledby="graph-panel-title"
-      mode="docked"
-      className="flex max-h-[var(--anchor-max-h,calc(100dvh-2rem))] w-[min(24rem,calc(100vw-2rem))] flex-col overflow-hidden p-1 shadow-e3"
-    >
-      <h2 id="graph-panel-title" className="sr-only">
-        Graph
-      </h2>
-      <p className="sr-only">
-        {expressionCount} {expressionCount === 1 ? 'curve' : 'curves'}
-      </p>
-
-      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto overscroll-contain rounded-overlay border border-border bg-surface p-3 shadow-e1 [--chrome-hover:var(--color-panel)]">
-        {/* ─── Expressions Card ──────────────────────────────────────────────── */}
-        <section aria-label="Expressions" className="flex flex-col gap-2">
-          <div className="flex flex-col divide-y divide-border/60">
+    <TooltipProvider delay={300}>
+      <Surface
+        role="region"
+        aria-label="Graph"
+        className="touch-targets flex max-h-[var(--anchor-max-h,calc(100dvh-2rem))] w-[min(22rem,calc(100vw-2rem))] flex-col overflow-hidden p-0 [--chrome-hover:var(--color-tb-track)]"
+      >
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">
+          <ul aria-label="Expressions" className="flex flex-col py-1">
             {props.expressions.map((expression, index) => (
-              <ExpressionRow
-                key={expression.id}
-                expression={expression}
-                index={index}
-                onPatch={(patch) => patchExpression(expression.id, patch)}
-                onDelete={() => deleteExpression(expression.id)}
-                onEnter={() => insertExpressionAfter(expression.id)}
-                onBackspaceEmpty={() => deleteEmptyExpression(expression.id)}
-                onMoveOut={(direction) => moveFocus(expression.id, direction)}
-                onEscape={releaseFocus}
-                registerField={(el) => {
-                  if (el) fieldRefs.current.set(expression.id, el);
-                  else fieldRefs.current.delete(expression.id);
-                }}
-                definitions={functionDefinitions}
-              />
+              <li key={expression.id}>
+                <ExpressionRow
+                  expression={expression}
+                  index={index}
+                  onPatch={(patch) => patchExpression(expression.id, patch)}
+                  onDelete={() => deleteExpression(expression.id)}
+                  onEnter={() => insertExpressionAfter(expression.id)}
+                  onBackspaceEmpty={() => deleteEmptyExpression(expression.id)}
+                  onMoveOut={(direction) => moveFocus(expression.id, direction)}
+                  onEscape={releaseFocus}
+                  registerField={(el) => {
+                    if (el) fieldRefs.current.set(expression.id, el);
+                    else fieldRefs.current.delete(expression.id);
+                  }}
+                  definitions={functionDefinitions}
+                />
+              </li>
             ))}
-          </div>
-          <div className="flex items-center gap-2">
-            {functionMenu}
+          </ul>
+
+          {/* Adding sits where the next row would be. */}
+          <div className="flex items-center gap-1 px-2 pb-2">
             <Button
               type="button"
-              variant="outline"
-              aria-label="Add expression"
-              title="Add expression"
-              onClick={addExpression}
-              className="h-9.5 flex-1 justify-center gap-2 rounded-lg text-sm font-medium"
+              variant="ghost"
+              onClick={() => addExpression()}
+              className="h-8 flex-1 justify-start gap-2 px-2 text-sm font-normal text-fg-muted"
             >
-              <Plus className="size-4" data-icon="inline-start" aria-hidden="true" />
-              <span>Add Curve</span>
+              <Plus className="size-4" aria-hidden="true" />
+              Add expression
             </Button>
+            <DropdownMenu>
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <DropdownMenuTrigger
+                      render={
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          aria-label="Examples"
+                          className="text-fg-muted"
+                        >
+                          <ChevronDown className="size-4" aria-hidden="true" />
+                        </Button>
+                      }
+                    />
+                  }
+                />
+                <TooltipContent side="top">Examples</TooltipContent>
+              </Tooltip>
+              <DropdownMenuContent align="end" className="w-56 p-1">
+                {GRAPH_MATH_PRESETS.map((preset) => (
+                  <DropdownMenuItem
+                    key={preset.name}
+                    onClick={() => addExpression(preset.expression)}
+                    className="flex items-center justify-between gap-3"
+                  >
+                    <span>{preset.name}</span>
+                    <span className="truncate font-mono text-2xs text-fg-subtle">
+                      {preset.expression}
+                    </span>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
-        </section>
 
-        {/* ─── Parameters / Sliders ──────────────────────────────────────────── */}
-        {parameterNames.length > 0 && (
-          <section aria-label="Sliders" className="flex flex-col gap-2">
-            <div className="flex flex-col divide-y divide-border/60 border-t border-border/60 pt-2">
-              {parameterNames.map((name) => {
-                const parameter = props.parameters[name]!;
-                return (
+          {parameterNames.length > 0 && (
+            <ul aria-label="Sliders" className={SECTION}>
+              {parameterNames.map((name) => (
+                <li key={name}>
                   <SliderRow
-                    key={name}
                     shapeId={shape.id}
                     name={name}
-                    parameter={parameter}
+                    parameter={props.parameters[name]!}
                     onChange={(next) =>
                       updateGraph({
                         parameters: { ...props.parameters, [name]: next },
                       })
                     }
                   />
-                );
-              })}
-            </div>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <section aria-label="View" className={SECTION}>
+            <ViewRange
+              viewport={props.viewport}
+              shapeProps={{ w: props.w, h: props.h }}
+              onChange={(viewport) => updateGraph({ viewport })}
+            />
           </section>
-        )}
+        </div>
 
-        {/* ─── Viewport & Framing ────────────────────────────────────────────── */}
-        <section aria-label="Viewport framing" className="flex flex-col gap-1.5">
-          <ViewRange
-            viewport={props.viewport}
-            shapeProps={{ w: props.w, h: props.h }}
-            onChange={(viewport) => updateGraph({ viewport })}
-          />
-        </section>
-
-      </div>
-
-      {/* ─── Display Settings, on the tray below the inset card ─────────────── */}
-      <section aria-label="Display toggles" className="shrink-0 px-2 py-1.5">
         <DisplaySettings
-          showAxisLabels={showAxisLabels}
+          showAxisLabels={props.showAxisLabels !== false}
           showIntersections={props.showIntersections === true}
           onPatch={updateGraph}
         />
-      </section>
-    </Surface>
+      </Surface>
+    </TooltipProvider>
   );
 }
-
-/* ─── Public export ──────────────────────────────────────────────────────── */
 
 export function GraphPanel() {
   const selectedIds = useSelectionStore((s) => s.selectedIds);
   const selectedId = selectedIds.length === 1 ? selectedIds[0] : null;
-  const selectedShape = useDocumentStore((s) =>
-    selectedId ? s.shapesById.get(selectedId) : undefined,
-  );
+  const selectedShape = useShape(selectedId);
   const graphShape =
     selectedShape?.type === 'graph' ? selectedShape : undefined;
   const panelVisible = Boolean(graphShape);

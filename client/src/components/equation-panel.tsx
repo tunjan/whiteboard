@@ -6,7 +6,9 @@ import {
   Copy,
   CornerDownLeft,
   Loader2,
+  Mic,
   Sparkles,
+  Square,
 } from 'lucide-react';
 import {
   genId,
@@ -14,7 +16,11 @@ import {
   type EquationShape,
   type Shape,
 } from '@whiteboard/shared';
-import { aiLatexEnabled, latexFromPrompt } from '@/board/latex-ai';
+import {
+  aiLatexEnabled,
+  latexFromPrompt,
+  transcribeAudio,
+} from '@/board/latex-ai';
 import {
   applyLatexCompletion,
   latexTokenAt,
@@ -56,7 +62,8 @@ import {
   EQUATION_DEFAULT_SIZE,
   EQUATION_SETTLE_MS,
 } from '@/canvas/shapes/equation';
-import { editor, useDocumentStore } from '@/canvas/use-document-store';
+import { editor } from '@/canvas/use-document-store';
+import { useShape } from '@/canvas/use-shapes';
 import { useSelectionStore } from '@/canvas/use-selection-store';
 import { paletteColors } from '@/canvas/use-style-store';
 import { ToolPanelPresence } from '@/components/tool-panel-presence';
@@ -103,18 +110,37 @@ const STYLES = [
 
 /**
  * A row of mutually exclusive choices — size, style — as a recess with the
- * chosen segment filled back in to white. The same track and the same flat
- * chip the toolbar marks a selected key with, so "this one is chosen" looks
- * the same wherever the board says it. Radii are concentric: 12px track less
- * its own 2px padding leaves 10px on the segment.
+ * chosen segment tinted with the accent, exactly the way the toolbar marks a
+ * selected key: accent as a wash, accent as the ink, no filled-in white chip.
+ * A white chip is a platform switch; this is chrome, and chrome states which
+ * of its keys is on with the one accent. Radii are concentric: the 4px track
+ * less its own 2px padding leaves 2px on the segment.
  */
-const SEGMENTED_TRACK = 'w-full rounded-xl bg-tb-track p-0.5';
+/**
+ * A segmented control: size, style.
+ *
+ * No groove under it. A sunken track with a recessed segment on top is two
+ * greys a step apart and the choice stops reading; a sunken track with an
+ * inverted segment on top is a slab of solid ink halfway down a settings panel,
+ * which is the loudest thing on the surface for the least important decision on
+ * it. The segments sit on the panel's own ground and the chosen one takes the
+ * recess — the same mark the style bar's weight switch uses, so a value chosen
+ * from a run looks the same everywhere in the app.
+ */
+const SEGMENTED_TRACK = 'w-full';
 
 const SEGMENTED_ITEM =
-  'h-8 grow basis-0 rounded-[10px] px-2.5 text-xs font-medium text-fg-muted ' +
-  'hover:bg-tb-accent/60 hover:text-fg ' +
-  'data-[state=on]:bg-tb-accent data-[state=on]:text-tb-accent-fg ' +
-  'aria-pressed:bg-tb-accent aria-pressed:text-tb-accent-fg';
+  'h-8 grow basis-0 px-2.5 text-xs font-medium';
+
+/**
+ * A labelled row, the way about:preferences states a setting: the name in a
+ * fixed left column, the control it names filling the rest, and a full-bleed
+ * hairline to the next one. The left column is the width of the longest label
+ * here, so the three controls all start on the same vertical.
+ */
+const PANEL_ROW = 'flex gap-3 px-3 py-2.5';
+
+const ROW_LABEL = 'w-10 shrink-0 text-xs font-medium text-fg-secondary';
 
 /**
  * Space between one line of a derivation and the next, as a fraction of the
@@ -122,6 +148,13 @@ const SEGMENTED_ITEM =
  * rather than like a 16pt one that happens to be bigger.
  */
 const LINE_GAP_EM = 0.5;
+
+/**
+ * The tallest the preview draws a formula, in pixels. A `\sum` with limits or
+ * a pmatrix is several lines tall at the base size; past this it is scaled
+ * down to fit rather than allowed to push the source field off the panel.
+ */
+const PREVIEW_MAX_H = 96;
 
 /** Completions the list shows at once, before the caret has to do the work. */
 const SUGGESTION_LIMIT = 7;
@@ -201,6 +234,16 @@ function centeredMove(
 }
 
 /**
+ * The box the preview draws the formula in, from the size the renderer
+ * measured — scaled down as one piece when the formula is taller than the
+ * preview allows, so it shrinks rather than clips.
+ */
+function previewBox(render: TypesetRender): { width: number; height: number } {
+  const scale = Math.min(1, PREVIEW_MAX_H / render.height);
+  return { width: render.width * scale, height: render.height * scale };
+}
+
+/**
  * Commit whichever props produced `render`, together with the size it measures.
  *
  * The two travel as one update because the box is a cache of the render: a
@@ -264,7 +307,7 @@ function writeThroughUndoStack(
   return field.value === value;
 }
 
-function EquationPanelContent({ shape }: { shape: EquationShape }) {
+export function EquationPanelContent({ shape }: { shape: EquationShape }) {
   const shapeId = shape.id;
   const inline = shape.props.inline ?? false;
   const sourceRef = useRef<HTMLTextAreaElement | null>(null);
@@ -281,6 +324,11 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
   const [aiEnabled, setAiEnabled] = useState(false);
   const [prompt, setPrompt] = useState('');
   const [generating, setGenerating] = useState(false);
+  const [recorder, setRecorder] = useState<MediaRecorder | null>(null);
+  const discardRecording = useRef(false);
+  // The live recorder for the unmount cleanup, which must not re-run (and
+  // flag the recording as discarded) every time `recorder` changes.
+  const recorderRef = useRef<MediaRecorder | null>(null);
   const theme = useThemeStore((state) => state.theme);
 
   useEffect(() => {
@@ -389,6 +437,9 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
   const listId = `equation-completions-${shape.id}`;
   const titleId = `equation-panel-title-${shape.id}`;
   const sourceId = `equation-source-${shape.id}`;
+  const colorLabelId = `equation-color-${shape.id}`;
+  const sizeLabelId = `equation-size-${shape.id}`;
+  const styleLabelId = `equation-style-${shape.id}`;
   const currentKey = shape.props.latex.trim();
   const currentRender = useEquationRender(currentKey, inline);
 
@@ -583,8 +634,8 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
    * through the source field's own undo stack, which only works while that
    * field already has focus — here it's the prompt field that does.
    */
-  const generateFromPrompt = async () => {
-    const text = prompt.trim();
+  const generateFromPrompt = async (spoken?: string) => {
+    const text = (spoken ?? prompt).trim();
     if (!text || generating) return;
     setGenerating(true);
     try {
@@ -601,6 +652,62 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
       setGenerating(false);
     }
   };
+
+  /**
+   * Dictate the description: first press records, second press stops. The
+   * transcript lands in the description field — so the student sees what was
+   * heard — and is generated from straight away.
+   */
+  const toggleDictation = async () => {
+    if (recorder) {
+      recorder.stop();
+      return;
+    }
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch {
+      toast.add({ title: 'Microphone unavailable', type: 'error' });
+      return;
+    }
+    const next = new MediaRecorder(stream);
+    const chunks: Blob[] = [];
+    next.ondataavailable = (event) => chunks.push(event.data);
+    next.onstop = async () => {
+      stream.getTracks().forEach((track) => track.stop());
+      recorderRef.current = null;
+      setRecorder(null);
+      if (discardRecording.current) return;
+      setGenerating(true);
+      try {
+        const text = await transcribeAudio(
+          new Blob(chunks, { type: next.mimeType }),
+        );
+        setPrompt(text);
+        setGenerating(false);
+        await generateFromPrompt(text);
+      } catch (err) {
+        toast.add({
+          title: err instanceof Error ? err.message : 'Transcription failed',
+          type: 'error',
+        });
+        setGenerating(false);
+      }
+    };
+    discardRecording.current = false;
+    next.start();
+    recorderRef.current = next;
+    setRecorder(next);
+  };
+
+  // Closing the panel mid-recording releases the mic without transcribing.
+  useEffect(
+    () => () => {
+      discardRecording.current = true;
+      if (recorderRef.current?.state === 'recording') recorderRef.current.stop();
+    },
+    [],
+  );
 
   const acceptSuggestion = (completion: LatexCompletion) => {
     const target = sourceRef.current;
@@ -757,136 +864,127 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
     });
   };
 
-  // A tinted tray holding two inset white cards: the equation itself above,
-  // and how it is set below. Same construction as the graph panel, so the two
-  // contextual panels read as one family — and so each group of controls is
-  // stated by a card it stands in rather than by the gap above it.
+  // One panel, one material. Firefox's Proton panels name themselves in a
+  // header, rule their groups off with full-bleed hairlines, and put the
+  // auxiliary action in a dimmed footer — they never nest a card inside a
+  // card, which is what the old tray-of-cards construction was doing. The
+  // order is the object first: the rendered equation is pinned under the
+  // header so it never scrolls out from under the field that changes it.
   return (
     <TooltipProvider delay={300}>
       <Surface
         role="region"
         aria-labelledby={titleId}
-        mode="docked"
-        className="touch-targets flex max-h-[calc(100dvh-7rem-env(safe-area-inset-top))] w-[min(23rem,calc(100vw-2rem))] flex-col gap-1 overflow-hidden p-1 shadow-e2 sm:max-h-[calc(100dvh-6.25rem-env(safe-area-inset-top))]"
+        className="touch-targets flex max-h-[calc(100dvh-7rem-env(safe-area-inset-top))] w-[min(23rem,calc(100vw-2rem))] flex-col overflow-hidden p-0 [--chrome-hover:var(--color-tb-track)] sm:max-h-[calc(100dvh-6.25rem-env(safe-area-inset-top))]"
       >
-        {/* On the tray, above both cards: what this panel is, and the two
-            actions that are about the equation as a whole rather than about
-            anything inside one card. */}
-        <h2 id={titleId} className="sr-only">
-          Equation
-        </h2>
-        <header className="flex shrink-0 items-center justify-end gap-0.5 px-2 pt-0.5">
-          <div className="flex items-center gap-0.5">
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label="Add equation below"
-                    disabled={!currentKey}
-                    onClick={addEquationBelow}
-                    className="rounded-lg disabled:opacity-40"
-                  />
-                }
-              >
-                <CornerDownLeft className="size-4" aria-hidden="true" />
-              </TooltipTrigger>
-              <TooltipContent side="top">
-                Add equation below (⌘/Ctrl + Enter)
-              </TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label={copied ? 'LaTeX copied' : 'Copy LaTeX'}
-                    disabled={!currentKey}
-                    onClick={(event) => void copyLatex(event.altKey)}
-                    className="rounded-lg disabled:opacity-40"
-                  />
-                }
-              >
-                {copied ? (
-                  <Check className="size-4 text-success" aria-hidden="true" />
-                ) : (
-                  <Copy className="size-4" aria-hidden="true" />
-                )}
-              </TooltipTrigger>
-              <TooltipContent side="top">
-                Copy as {inline ? 'inline' : 'display'} math (Alt: body only)
-              </TooltipContent>
-            </Tooltip>
-          </div>
+        {/* The panel says what it is, and carries the two actions that are
+            about the equation as a whole rather than about any one setting. */}
+        <header className="flex h-10 shrink-0 items-center gap-0.5 border-b border-border pr-1 pl-3">
+          <h2
+            id={titleId}
+            className="flex-1 truncate text-sm font-semibold text-fg"
+          >
+            Equation
+          </h2>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Add equation below"
+                  disabled={!currentKey}
+                  onClick={addEquationBelow}
+                  className="disabled:opacity-40"
+                />
+              }
+            >
+              <CornerDownLeft className="size-4" aria-hidden="true" />
+            </TooltipTrigger>
+            <TooltipContent side="top">
+              Add equation below (⌘/Ctrl + Enter)
+            </TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={copied ? 'LaTeX copied' : 'Copy LaTeX'}
+                  disabled={!currentKey}
+                  onClick={(event) => void copyLatex(event.altKey)}
+                  className="disabled:opacity-40"
+                />
+              }
+            >
+              {copied ? (
+                <Check className="size-4 text-success" aria-hidden="true" />
+              ) : (
+                <Copy className="size-4" aria-hidden="true" />
+              )}
+            </TooltipTrigger>
+            <TooltipContent side="top">
+              Copy as {inline ? 'inline' : 'display'} math (Alt: body only)
+            </TooltipContent>
+          </Tooltip>
         </header>
 
-        {/* Card one: the equation. Source in, preview out, and anything wrong
-            with it named in between. This is the only part that scrolls. */}
-        <div className="flex min-h-0 flex-1 flex-col divide-y divide-border/60 overflow-y-auto overscroll-contain rounded-overlay border border-border bg-surface shadow-e1 [--chrome-hover:var(--color-panel)]">
-          {/* Plain-language description → LaTeX, via the model. Only shown where
-              the server is actually configured to answer it. */}
-          {aiEnabled ? (
-            <section
-              aria-label="Generate from a description"
-              className="p-3"
-            >
-              <div className="flex items-start gap-1.5">
-                <Textarea
-                  aria-label="Describe an equation to generate its LaTeX"
-                  value={prompt}
-                  onChange={(event) => setPrompt(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key !== 'Enter' || event.shiftKey) return;
-                    event.preventDefault();
-                    void generateFromPrompt();
-                  }}
-                  placeholder="Describe an equation… “quadratic equation”"
-                  rows={1}
-                  disabled={generating}
-                  className="min-h-9 flex-1 resize-none rounded-lg py-2 text-sm text-fg"
-                />
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <Button
-                        variant="outline"
-                        size="icon-sm"
-                        aria-label="Generate LaTeX"
-                        disabled={!prompt.trim() || generating}
-                        onClick={() => void generateFromPrompt()}
-                        className="mt-0.5 size-9 shrink-0 rounded-lg"
-                      />
-                    }
-                  >
-                    {generating ? (
-                      <Loader2
-                        className="size-4 animate-spin"
-                        aria-hidden="true"
-                      />
-                    ) : (
-                      <Sparkles className="size-4" aria-hidden="true" />
-                    )}
-                  </TooltipTrigger>
-                  <TooltipContent side="top">
-                    Generate from description
-                  </TooltipContent>
-                </Tooltip>
-              </div>
-            </section>
-          ) : null}
-
-          {/* Source field, with the completion list hanging off its bottom edge. */}
-          <section
-            aria-label="LaTeX source"
-            className="p-3"
+        {/* Live canvas preview, on the dimmed ground a Proton panel gives the
+            content it is previewing rather than the controls around it. */}
+        <section
+          aria-label="Preview"
+          className="shrink-0 border-b border-border bg-panel"
+        >
+          <div
+            ref={previewRef}
+            data-overflow={previewOverflowing ? true : undefined}
+            aria-busy={previewStale || undefined}
+            className="equation-fade-end equation-preview-box scrollbar-none flex min-h-20 items-center justify-center overflow-x-auto px-3 py-3 text-center"
           >
+            {!ready && !loadError ? (
+              <span role="status" className="text-xs text-fg-muted">
+                Preparing renderer — what you type is saved.
+              </span>
+            ) : !currentKey ? (
+              <span role="status" className="text-xs text-fg-muted">
+                Start typing to preview the equation.
+              </span>
+            ) : previewRender ? (
+              <div
+                role="img"
+                aria-label={`Preview of equation: ${currentKey}`}
+                className={cn(
+                  'equation-output-preview',
+                  previewStale && 'opacity-60',
+                )}
+                style={{
+                  color: shape.props.color,
+                  ...previewBox(previewRender),
+                }}
+                dangerouslySetInnerHTML={{ __html: previewRender.svg }}
+              />
+            ) : (
+              <span role="status" className="text-xs text-fg-muted">
+                Rendering…
+              </span>
+            )}
+          </div>
+        </section>
+
+        {/* Source, and anything wrong with it. The only part that scrolls. */}
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">
+          <div className="px-3 py-2.5">
+            <label
+              htmlFor={sourceId}
+              className="mb-1.5 block text-xs font-medium text-fg-secondary"
+            >
+              LaTeX
+            </label>
             <div className="relative">
               <Textarea
                 ref={sourceRef}
                 id={sourceId}
-                aria-label="LaTeX source"
                 aria-invalid={error ? true : undefined}
                 aria-describedby={messageId}
                 aria-autocomplete="list"
@@ -923,15 +1021,19 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
                 placeholder={String.raw`\frac{a}{b}`}
                 spellCheck={false}
                 rows={3}
-                className="min-h-24 w-full resize-y rounded-lg font-mono text-sm leading-5 text-fg"
+                className="min-h-20 w-full resize-y rounded-control px-2.5 py-2 font-mono text-sm leading-5 text-fg"
               />
 
+              {/* The urlbar's own autocomplete: a popup on the popup surface,
+                  4px padding, and the active row washed with `currentColor`
+                  rather than tinted with the accent — the accent on this panel
+                  means "this setting is on", not "the caret is here". */}
               {suggestions.length ? (
                 <ul
                   id={listId}
                   role="listbox"
                   aria-label="LaTeX commands"
-                  className="absolute inset-x-0 top-full z-10 mt-1 overflow-hidden rounded-overlay border border-border bg-surface p-1 shadow-e3"
+                  className="absolute inset-x-0 top-full z-10 mt-1 overflow-hidden rounded-overlay border border-border bg-popup-surface p-1 shadow-overlay"
                 >
                   {suggestions.map((completion, index) => (
                     <li
@@ -945,8 +1047,8 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
                       onPointerEnter={() => setActiveSuggestion(index)}
                       onClick={() => acceptSuggestion(completion)}
                       className={cn(
-                        'flex cursor-pointer items-baseline justify-between gap-3 rounded-md px-2 py-1.5',
-                        index === activeSuggestion && 'bg-panel',
+                        'flex cursor-pointer items-baseline justify-between gap-3 rounded-control px-2 py-1.5',
+                        index === activeSuggestion && 'bg-tb-track',
                       )}
                     >
                       <code className="truncate font-mono text-xs text-fg">
@@ -960,62 +1062,29 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
                 </ul>
               ) : null}
             </div>
-          </section>
+          </div>
 
-          {/* Live canvas preview. */}
-          <section aria-label="Preview" className="p-3">
-            <div
-              ref={previewRef}
-              data-overflow={previewOverflowing ? true : undefined}
-              aria-busy={previewStale || undefined}
-              className="equation-fade-end equation-preview-box scrollbar-none flex min-h-16 items-center justify-center overflow-x-auto rounded-lg bg-panel p-3 text-center"
-            >
-              {!ready && !loadError ? (
-                <span role="status" className="text-xs text-fg-muted">
-                  Preparing renderer — what you type is saved.
-                </span>
-              ) : !currentKey ? (
-                <span role="status" className="text-xs text-fg-muted">
-                  Start typing to preview the equation.
-                </span>
-              ) : previewRender ? (
-                <div
-                  role="img"
-                  aria-label={`Preview of equation: ${currentKey}`}
-                  className={cn(
-                    'equation-output-preview',
-                    previewStale && 'opacity-60',
-                  )}
-                  style={{ color: shape.props.color }}
-                  dangerouslySetInnerHTML={{ __html: previewRender.svg }}
-                />
-              ) : (
-                <span role="status" className="text-xs text-fg-muted">
-                  Rendering…
-                </span>
-              )}
-            </div>
-          </section>
-
+          {/* Firefox states a problem with a full-bleed notification bar, not
+              with a bordered box floating in the padding: the strip spans the
+              panel, the icon sizes to the text, and the repair is a text
+              button on the same line rather than a second block. */}
           {error ? (
-            <div className="p-3">
-              <div
-                id={errorId}
-                role="alert"
-                className="flex flex-col gap-1.5 rounded-lg border border-danger-border bg-danger-bg p-2.5 text-xs"
-              >
-                <div className="flex items-start gap-1.5">
-                  <AlertCircle
-                    className="mt-0.5 size-3.5 shrink-0 text-danger"
-                    aria-hidden="true"
-                  />
-                  <span className="min-w-0 text-danger">{error}</span>
-                </div>
+            <div
+              id={errorId}
+              role="alert"
+              className="flex shrink-0 items-start gap-2 border-t border-danger-border bg-danger-bg px-3 py-2 text-xs text-danger"
+            >
+              <AlertCircle
+                className="mt-0.5 size-3.5 shrink-0"
+                aria-hidden="true"
+              />
+              <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+                <span className="min-w-0">{error}</span>
                 {errorExcerpt ? (
                   <button
                     type="button"
                     onClick={() => errorSpan && focusInput(errorSpan)}
-                    className="min-w-0 truncate rounded-md border border-danger-border/50 bg-surface/90 px-1.5 py-1 text-left font-mono text-2xs text-danger"
+                    className="min-w-0 truncate rounded-control border border-danger-border/60 bg-surface/80 px-1.5 py-1 text-left font-mono text-2xs"
                   >
                     {errorExcerpt.clippedStart ? '…' : null}
                     {errorExcerpt.before}
@@ -1031,29 +1100,25 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
           ) : null}
 
           {/* A fault in the source, named while it is still being written.
-              Suppressed once MathJax has failed: the block above is then saying
+              Suppressed once MathJax has failed: the bar above is then saying
               the same thing with the renderer's own words. */}
           {!error && problem && problemExcerpt ? (
-            <div className="p-3">
-              <div
-                id={problemId}
-                role="status"
-                className="flex flex-col gap-1.5 rounded-lg border border-warning-border bg-warning-bg p-2.5 text-xs"
-              >
-                <div className="flex items-start gap-1.5">
-                  <AlertCircle
-                    className="mt-0.5 size-3.5 shrink-0 text-warning"
-                    aria-hidden="true"
-                  />
-                  <span className="min-w-0 text-warning">
-                    {problem.message}
-                  </span>
-                </div>
+            <div
+              id={problemId}
+              role="status"
+              className="flex shrink-0 items-start gap-2 border-t border-warning-border bg-warning-bg px-3 py-2 text-xs text-warning"
+            >
+              <AlertCircle
+                className="mt-0.5 size-3.5 shrink-0"
+                aria-hidden="true"
+              />
+              <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+                <span className="min-w-0">{problem.message}</span>
                 <div className="flex items-center gap-1.5">
                   <button
                     type="button"
                     onClick={() => focusInput(problem.span)}
-                    className="min-w-0 flex-1 truncate rounded-md border border-warning-border/60 bg-surface/90 px-1.5 py-1 text-left font-mono text-2xs text-warning"
+                    className="min-w-0 flex-1 truncate rounded-control border border-warning-border/70 bg-surface/80 px-1.5 py-1 text-left font-mono text-2xs"
                   >
                     {problemExcerpt.clippedStart ? '…' : null}
                     {problemExcerpt.before}
@@ -1065,13 +1130,13 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
                   </button>
                   <Button
                     variant="ghost"
-                    size="sm"
+                    size="xs"
                     // Keep the caret in the field: the repair is written through
                     // the field's own insertion path, which needs it focused to
                     // land on the undo stack.
                     onPointerDown={(event) => event.preventDefault()}
                     onClick={() => applyEdit(problem.fix)}
-                    className="h-6 shrink-0 rounded-md px-2 text-2xs font-medium text-warning hover:bg-warning/10"
+                    className="shrink-0 text-warning hover:bg-warning/10 hover:text-warning"
                   >
                     {problem.action}
                   </Button>
@@ -1081,18 +1146,19 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
           ) : null}
         </div>
 
-        {/* Card two: colour, size and style — the only things about an equation
-            that aren't in its source, and so the only controls left. Each is a
-            labelled row, ruled off from the next. */}
-        <div className="flex shrink-0 flex-col divide-y divide-border/60 rounded-overlay border border-border bg-surface shadow-e1 [--chrome-hover:var(--color-panel)]">
-          <section
-            aria-label="Color"
-            className="p-2.5"
-          >
+        {/* Colour, size and style — the only things about an equation that
+            aren't in its source. Laid out the way about:preferences lays out a
+            setting: its name in a fixed left column, the control it names
+            filling the rest, one hairline between rows. */}
+        <div className="shrink-0 divide-y divide-border border-t border-border">
+          <div className={cn(PANEL_ROW, 'items-start')}>
+            <span id={colorLabelId} className={cn(ROW_LABEL, 'pt-2')}>
+              Color
+            </span>
             <div
               role="radiogroup"
-              aria-label="Equation color"
-              className="grid grid-cols-4 gap-1.5"
+              aria-labelledby={colorLabelId}
+              className="grid flex-1 grid-cols-6 gap-0.5"
             >
               {swatches.map((paletteColor, index) => {
                 const active = shape.props.color === paletteColor.value;
@@ -1123,13 +1189,13 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
                             event.preventDefault();
                             moveSwatchFocus(index, delta);
                           }}
-                          className="flex h-8 w-full items-center justify-center rounded-md transition-colors duration-150 ease-out hover:bg-panel active:scale-[0.98] motion-reduce:transition-none"
+                          className="flex h-8 w-full items-center justify-center rounded-control transition-colors duration-fast ease-out hover:bg-tb-track active:scale-[0.98] motion-reduce:transition-none"
                         />
                       }
                     >
                       <span
                         className={cn(
-                          'size-5 rounded-full border',
+                          'size-4.5 rounded-full border',
                           active &&
                             'ring-2 ring-ring ring-offset-2 ring-offset-surface',
                         )}
@@ -1146,16 +1212,15 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
                 );
               })}
             </div>
-          </section>
+          </div>
 
-          <section
-            aria-label="Size"
-            className="flex items-center p-2.5"
-          >
+          <div className={cn(PANEL_ROW, 'items-center')}>
+            <span id={sizeLabelId} className={ROW_LABEL}>
+              Size
+            </span>
             <ToggleGroup
               className={SEGMENTED_TRACK}
-              spacing={0.5}
-              aria-label="Equation size"
+              aria-labelledby={sizeLabelId}
               value={[String(Math.round(shape.props.fontSize))]}
               onValueChange={(values) => {
                 const next = values[0];
@@ -1179,19 +1244,18 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
                 </Tooltip>
               ))}
             </ToggleGroup>
-          </section>
+          </div>
 
           {/* Display or text style. Not a property of the source — the same
               LaTeX is valid in both — so it belongs beside colour and size
               rather than in the field. */}
-          <section
-            aria-label="Style"
-            className="flex items-center p-2.5"
-          >
+          <div className={cn(PANEL_ROW, 'items-center')}>
+            <span id={styleLabelId} className={ROW_LABEL}>
+              Style
+            </span>
             <ToggleGroup
               className={SEGMENTED_TRACK}
-              spacing={0.5}
-              aria-label="Equation style"
+              aria-labelledby={styleLabelId}
               value={[inline ? 'inline' : 'display']}
               onValueChange={(values) => {
                 const next = values[0];
@@ -1215,8 +1279,59 @@ function EquationPanelContent({ shape }: { shape: EquationShape }) {
                 </Tooltip>
               ))}
             </ToggleGroup>
-          </section>
+          </div>
         </div>
+
+        {/* Plain-language description → LaTeX, via the model. In the dimmed
+            footer a Proton panel keeps for the action that is offered rather
+            than the one you came for — and out of the way of the field that
+            is. Only shown where the server is configured to answer it. */}
+        {aiEnabled ? (
+          <footer className="flex shrink-0 items-center gap-2 border-t border-border bg-panel px-3 py-2.5">
+            <Textarea
+              aria-label="Describe an equation to generate its LaTeX"
+              value={prompt}
+              onChange={(event) => setPrompt(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key !== 'Enter' || event.shiftKey) return;
+                event.preventDefault();
+                void generateFromPrompt();
+              }}
+              placeholder={recorder ? 'Listening…' : 'Describe an equation…'}
+              rows={1}
+              disabled={generating || Boolean(recorder)}
+              className="min-h-8 flex-1 resize-none rounded-control px-2.5 py-1.5 text-sm text-fg"
+            />
+            <Button
+              size="sm"
+              variant={recorder ? 'default' : 'ghost'}
+              aria-label={recorder ? 'Stop dictating' : 'Dictate an equation'}
+              aria-pressed={Boolean(recorder)}
+              disabled={generating}
+              onClick={() => void toggleDictation()}
+              className="shrink-0"
+            >
+              {recorder ? (
+                <Square className="size-3.5" aria-hidden="true" />
+              ) : (
+                <Mic className="size-3.5" aria-hidden="true" />
+              )}
+            </Button>
+            <Button
+              size="sm"
+              disabled={!prompt.trim() || generating || Boolean(recorder)}
+              onClick={() => void generateFromPrompt()}
+              className="shrink-0"
+            >
+              {generating ? (
+                <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+              ) : (
+                <Sparkles className="size-3.5" aria-hidden="true" />
+              )}
+              Generate
+            </Button>
+          </footer>
+        ) : null}
       </Surface>
     </TooltipProvider>
   );
@@ -1227,9 +1342,7 @@ export function EquationPanel() {
   const selectedId = selectedIds.length === 1 ? selectedIds[0] : null;
   // Subscribe to the one selected shape, not the whole page record — see the
   // same note in graph-panel.tsx.
-  const selectedShape = useDocumentStore((state) =>
-    selectedId ? state.shapesById.get(selectedId) : undefined,
-  );
+  const selectedShape = useShape(selectedId);
   const equationShape =
     selectedShape?.type === 'equation' ? selectedShape : undefined;
   const panelVisible = Boolean(equationShape);

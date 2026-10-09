@@ -16,6 +16,15 @@ export const BACKGROUND_LABELS: Record<BackgroundType, string> = {
   coordinate: 'Coordinate plane',
 };
 
+/**
+ * Fades the grid out toward the edges of the screen, so it reads as a sheet of
+ * paper under the chrome rather than a texture running into it. Shared by the
+ * loading veil and the board's own grid (when `groundFade` is on) so the two
+ * are the same sheet at handoff.
+ */
+export const GROUND_FADE_MASK =
+  'radial-gradient(ellipse 62% 58% at 50% 45%, black 20%, transparent 100%)';
+
 export interface GridLevels {
   /** Minor grid step, in world units. */
   minorStep: number;
@@ -38,7 +47,7 @@ export interface DotGridLayer {
   step: number;
   /** Grid step projected to screen px. */
   screenStep: number;
-  /** Dot centre within the pattern tile, phased to world space. */
+  /** Screen phase of the lattice in [0, screenStep), pinned to world space. */
   offsetX: number;
   offsetY: number;
   /** Visibility after zoom-based level-of-detail fading. */
@@ -53,22 +62,24 @@ const TARGET_MINOR_PX = 28;
 
 export const DOT_GRID_BASE_STEP = 8;
 
+/** Dot-grid lattices, in base grid units, coarsest first. */
+const DOT_GRID_STEPS = [64, 16, 4, 1] as const;
+
 /**
- * Dot-grid levels of detail, coarsest first. `step` is a multiple of the base
- * grid unit; a level fades in linearly from zoom `min` to `mid` and stays fully
- * opaque above `mid`, so coarse dots carry the grid when zoomed out and finer
- * ones appear as you zoom in.
+ * Every lattice fades in by the same rule, in two stages on log spacing: up
+ * to `DOT_MINOR_OPACITY` while its dots go from `DOT_FADE_FROM_PX` to
+ * `DOT_MINOR_PX` apart on screen, so dense dots read as a lighter minor grid
+ * under the major one, then on to fully opaque at `DOT_FADE_TO_PX`, where it
+ * takes over as the major grid. The coarsest lattice is always opaque so the
+ * grid never vanishes.
  */
-const DOT_GRID_LEVELS = [
-  { step: 64, min: -1, mid: 0.15 },
-  { step: 16, min: 0.05, mid: 0.375 },
-  { step: 4, min: 0.15, mid: 1 },
-  { step: 1, min: 0.7, mid: 2.5 },
-] as const;
+const DOT_FADE_FROM_PX = 6;
+const DOT_MINOR_PX = 20;
+const DOT_FADE_TO_PX = 32;
+const DOT_MINOR_OPACITY = 0.35;
 
 /** Screen-space dot radius, in px. */
 const DOT_GRID_RADIUS = 1;
-const DOT_GRID_CRISP_OFFSET = 0.5;
 
 /** Snap a raw world distance to the nearest 1-2-5 x 10^n value. */
 export function niceStep(raw: number): number {
@@ -95,22 +106,33 @@ export function getGridLevels(camera: Camera): GridLevels {
   };
 }
 
-function dotLevelOpacity(z: number, min: number, mid: number): number {
-  if (z >= mid) return 1;
-  if (z <= min) return 0;
-  return (z - min) / (mid - min);
+function logRamp(value: number, from: number, to: number): number {
+  const t = Math.log(value / from) / Math.log(to / from);
+  return Math.min(1, Math.max(0, t));
+}
+
+function dotLevelOpacity(screenStep: number): number {
+  return (
+    DOT_MINOR_OPACITY * logRamp(screenStep, DOT_FADE_FROM_PX, DOT_MINOR_PX) +
+    (1 - DOT_MINOR_OPACITY) * logRamp(screenStep, DOT_MINOR_PX, DOT_FADE_TO_PX)
+  );
 }
 
 /**
  * Fixed-world dot-grid layers, 8/32/128/512 world units apart. Each layer is
- * phased with a positive modulo of the camera offset (plus a half-pixel nudge
- * so dots sit on pixel centres), keeping the wallpaper pinned to world
- * coordinates while only rendering viewport-sized patterns.
+ * phased with a positive modulo of the camera offset, keeping the wallpaper
+ * pinned to world coordinates while only rendering viewport-sized patterns.
+ * The offset is rounded to device pixels so a radius-1 dot centres on a pixel
+ * corner (a crisp 2x2 block) whenever the step is whole, as at every zoom
+ * notch.
  */
-export function getDotGridLayers(camera: Camera): DotGridLayer[] {
-  const originX = DOT_GRID_CRISP_OFFSET - camera.x * camera.z;
-  const originY = DOT_GRID_CRISP_OFFSET - camera.y * camera.z;
-  return DOT_GRID_LEVELS.map(({ step, min, mid }) => {
+export function getDotGridLayers(
+  camera: Camera,
+  pixelRatio = 1,
+): DotGridLayer[] {
+  const originX = Math.round(-camera.x * camera.z * pixelRatio) / pixelRatio;
+  const originY = Math.round(-camera.y * camera.z * pixelRatio) / pixelRatio;
+  const layers = DOT_GRID_STEPS.map((step, i) => {
     const worldStep = step * DOT_GRID_BASE_STEP;
     const screenStep = worldStep * camera.z;
     return {
@@ -119,18 +141,39 @@ export function getDotGridLayers(camera: Camera): DotGridLayer[] {
       screenStep,
       offsetX: pmod(originX, screenStep),
       offsetY: pmod(originY, screenStep),
-      opacity: dotLevelOpacity(camera.z, min, mid),
+      opacity: i === 0 ? 1 : dotLevelOpacity(screenStep),
       radius: DOT_GRID_RADIUS,
     };
   });
+  // Every coarser lattice is contained in the finest fully visible lattice, so
+  // stop painting shared dots repeatedly. Renderers draw all layers in one
+  // opaque ink and apply the dot alpha once to the group, so dropping a layer
+  // under an opaque one changes nothing on screen.
+  let first = 0;
+  for (let i = 0; i < layers.length; i++) {
+    if (layers[i]!.opacity === 1) first = i;
+  }
+  return layers.slice(first);
 }
+
+/** Spacing of the fully visible dot lattice at zoom 1, in screen px. */
+export const DOT_GRID_REST_PX = getDotGridLayers({ x: 0, y: 0, z: 1 })[0]!
+  .screenStep;
 
 export function getSnapGridStep(
   background: BackgroundType,
   camera: Camera,
 ): number | null {
   if (background === 'blank') return null;
-  if (background === 'dot') return DOT_GRID_BASE_STEP;
+  if (background === 'dot') {
+    // Snap to the finest lattice that reads as visible, not to dots that are
+    // still a faint haze or packed below a pixel apart.
+    let step = DOT_GRID_BASE_STEP;
+    for (const layer of getDotGridLayers(camera)) {
+      if (layer.opacity >= 0.5) step = layer.step;
+    }
+    return step;
+  }
   return getGridLevels(camera).minorStep;
 }
 

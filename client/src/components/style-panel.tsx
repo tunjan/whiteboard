@@ -209,7 +209,6 @@ export function StylePanel() {
                   {show.fill ? (
                     <ToggleGroup
                       className={TOGGLE_ROW}
-                      spacing={1.5}
                       aria-label="Fill style"
                       value={[fill]}
                       onValueChange={(values) =>
@@ -240,7 +239,6 @@ export function StylePanel() {
                   {show.dash ? (
                     <ToggleGroup
                       className={TOGGLE_ROW}
-                      spacing={1.5}
                       aria-label="Stroke style"
                       value={[dash]}
                       onValueChange={(values) =>
@@ -271,7 +269,6 @@ export function StylePanel() {
                   {show.size ? (
                     <ToggleGroup
                       className={TOGGLE_ROW}
-                      spacing={1.5}
                       aria-label="Stroke weight"
                       value={[String(size)]}
                       onValueChange={(values) =>
@@ -302,7 +299,6 @@ export function StylePanel() {
                   {show.font ? (
                     <ToggleGroup
                       className={TOGGLE_ROW}
-                      spacing={1.5}
                       aria-label="Typeface"
                       value={[fontFamily]}
                       onValueChange={(values) =>
@@ -332,7 +328,6 @@ export function StylePanel() {
                   {show.font ? (
                     <ToggleGroup
                       className={TOGGLE_ROW}
-                      spacing={1.5}
                       aria-label="Font weight"
                       value={[String(fontWeight)]}
                       onValueChange={(values) =>
@@ -368,7 +363,6 @@ export function StylePanel() {
                   {show.align ? (
                     <ToggleGroup
                       className={TOGGLE_ROW}
-                      spacing={1.5}
                       aria-label="Text alignment"
                       value={[align]}
                       onValueChange={(values) =>
@@ -399,7 +393,6 @@ export function StylePanel() {
                   {show.lineOptions ? (
                     <ToggleGroup
                       className={TOGGLE_ROW}
-                      spacing={1.5}
                       aria-label="Line interpolation"
                       value={[lineSpline ?? 'linear']}
                       onValueChange={(values) =>
@@ -419,7 +412,6 @@ export function StylePanel() {
                     <>
                       <ToggleGroup
                         className={TOGGLE_ROW}
-                        spacing={1.5}
                         aria-label="Arrow route"
                         value={[arrowTopology ?? 'straight']}
                         onValueChange={(values) =>
@@ -453,7 +445,6 @@ export function StylePanel() {
                       </ToggleGroup>
                       <ToggleGroup
                         className={TOGGLE_ROW}
-                        spacing={1.5}
                         multiple
                         aria-label="Arrowheads"
                         value={[

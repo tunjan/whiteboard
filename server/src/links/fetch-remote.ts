@@ -93,7 +93,7 @@ function parseIpv6(ip: string): number[] | null {
 
   const gap = 16 - left.length - right.length;
   if (gap < 0) return null;
-  return [...left, ...new Array<number>(gap).fill(0), ...right];
+  return [...left, ...Array.from<number>({ length: gap }).fill(0), ...right];
 }
 
 function isPrivateIpv6(bytes: number[]): boolean {

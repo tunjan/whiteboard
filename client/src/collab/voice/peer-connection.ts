@@ -99,6 +99,9 @@ export class VoicePeerConnection {
     this.onConnectionStateChange = onConnectionStateChange;
     this.connection = new RTCPeerConnection({
       iceServers: ICE_SERVERS,
+      // One transport for audio and both video slots: a third of the ICE
+      // candidates against the server's signal rate limit, and a smaller SDP.
+      bundlePolicy: 'max-bundle',
     });
     this.sender = this.connection.addTrack(
       localTrack,

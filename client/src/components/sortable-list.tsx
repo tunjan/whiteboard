@@ -264,6 +264,7 @@ export function SortableList<T extends { id: string }>({
 
   useEffect(() => {
     if (drag && !items.some((item) => item.id === drag.id)) finishDrag(false);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [drag, items]);
 
   // Reveal the caller's item on mount, so reopening a scrolled list does not
@@ -272,6 +273,7 @@ export function SortableList<T extends { id: string }>({
     const index = items.findIndex((item) => item.id === revealId);
     if (index >= 0) scrollRowIntoView(index);
     syncOverflow();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(syncOverflow, [height, items.length]);

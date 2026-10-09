@@ -3,6 +3,8 @@ import type { LinkUnfurl } from '@whiteboard/shared';
 import { ALLOWED_MIME, saveBlob } from '../blobs/store';
 import { BlockedHostError, fetchPublicUrl } from './fetch-remote';
 import { parseLinkMeta } from './meta';
+import { clientIp, rateLimiter } from '../rate-limit';
+import { requireBoardEdit } from '../boards/access';
 
 /**
  * Link unfurling for pasted URLs. The browser can't read a cross-origin page
@@ -11,7 +13,7 @@ import { parseLinkMeta } from './meta';
  * which keeps third-party origins out of every viewer's browser and lets PNG
  * export inline the image like any other.
  *
- * Open like `/api/blobs`, since boards are shared by capability URL; the safety
+ * Open like `/api/blobs` to anyone who may edit a board; the safety
  * here is in `fetch-remote.ts` (address and protocol restrictions) plus the
  * size, type and time caps below.
  */
@@ -24,6 +26,9 @@ const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 /** How long an unfurl is reused before the page is fetched again. */
 const CACHE_TTL_MS = 60 * 60 * 1000;
 const CACHE_MAX_ENTRIES = 500;
+
+/** Each unfurl fetches up to three remote resources on the client's behalf. */
+const unfurlLimit = rateLimiter(60, 60_000);
 
 const cache = new Map<string, { value: LinkUnfurl; expires: number }>();
 // Collapses the duplicate requests that arrive when several clients paste the
@@ -48,7 +53,7 @@ function cacheSet(url: string, value: LinkUnfurl): void {
   cache.set(url, { value, expires: Date.now() + CACHE_TTL_MS });
 }
 
-linkRoutes.get('/unfurl', async (c) => {
+linkRoutes.get('/unfurl', requireBoardEdit, async (c) => {
   const url = c.req.query('url') ?? '';
   let parsed: URL;
   try {
@@ -62,6 +67,7 @@ linkRoutes.get('/unfurl', async (c) => {
 
   const cached = cacheGet(url);
   if (cached) return c.json(cached);
+  if (!unfurlLimit(clientIp(c))) return c.json({ error: 'Too many requests' }, 429);
 
   const pending = inFlight.get(url) ?? unfurl(url);
   inFlight.set(url, pending);

@@ -1,5 +1,7 @@
-// Coalesces a drag's screen-space pan deltas into one camera write per frame.
+// Coalesces a drag's pan deltas, and a pinch's moves, into one camera write
+// per frame.
 
+import type { Point } from './camera';
 import { useCameraStore } from './use-camera-store';
 
 /**
@@ -70,5 +72,84 @@ export class PanScheduler {
     this.dx = 0;
     this.dy = 0;
     useCameraStore.getState().panByScreen(dx, dy);
+  }
+}
+
+/**
+ * The two-finger pinch's counterpart to {@link PanScheduler}. Each finger
+ * reports on its own, so a 120Hz touchscreen lands up to four camera writes a
+ * frame — each one a full camera publish for a board that is only presented
+ * once.
+ *
+ * The zoom is absolute (derived from finger separation) and the pan relative
+ * (the midpoint's travel since the previous move), so the frame keeps the
+ * latest anchor and zoom and sums the pan. That one write lands exactly where
+ * the sequence would have: in `zoomCameraAtScreenWithPan` each intermediate
+ * anchor cancels against the next move's pan, provided the pan *is* the
+ * midpoint's travel — which holds while `TOUCH_PAN_SPEED` is 1. Zoom limits
+ * clamp the same final value either way.
+ */
+export class PinchScheduler {
+  private pending: {
+    anchor: Point;
+    zoom: number;
+    dx: number;
+    dy: number;
+    time: number;
+  } | null = null;
+  private frame: number | null = null;
+
+  /** @param onCommit Called after each camera write with the timestamp of the
+   *  newest move it applied — the pinch's release-rate tracking reads the
+   *  camera the write produced, so it has to run here, not per event. */
+  constructor(private readonly onCommit: (time: number) => void) {}
+
+  private readonly run = () => {
+    this.frame = null;
+    this.commit();
+  };
+
+  /** Queue one move: where the midpoint is, the zoom it asks for, and how far
+   *  the midpoint travelled since the last move (screen px). */
+  push(anchor: Point, zoom: number, dx: number, dy: number, time: number): void {
+    const pending = this.pending;
+    this.pending = {
+      anchor,
+      zoom,
+      dx: (pending?.dx ?? 0) + dx,
+      dy: (pending?.dy ?? 0) + dy,
+      time,
+    };
+    if (this.frame === null) this.frame = requestAnimationFrame(this.run);
+  }
+
+  /** Apply whatever is queued now — before anything reads the camera the
+   *  pinch has produced, or starts a coast from it (see
+   *  {@link PanScheduler.flush}). A no-op with nothing queued. */
+  flush(): void {
+    this.cancelFrame();
+    this.commit();
+  }
+
+  /** Drop anything queued without applying it. */
+  cancel(): void {
+    this.cancelFrame();
+    this.pending = null;
+  }
+
+  private cancelFrame(): void {
+    if (this.frame === null) return;
+    cancelAnimationFrame(this.frame);
+    this.frame = null;
+  }
+
+  private commit(): void {
+    const pending = this.pending;
+    if (!pending) return;
+    this.pending = null;
+    useCameraStore
+      .getState()
+      .zoomAtScreenWithPan(pending.anchor, pending.zoom, pending.dx, pending.dy);
+    this.onCommit(pending.time);
   }
 }

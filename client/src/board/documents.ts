@@ -5,10 +5,11 @@ import {
   genId,
   type BoardDocumentMeta,
 } from '@whiteboard/shared';
+import { boardHeaders } from '@/board/board-access';
 import {
   addBoardDocument,
   boardDocumentsFull,
-} from '@/canvas/use-document-store';
+} from '@/canvas/board-records';
 import { useDocumentsStore } from '@/canvas/use-documents-store';
 import { markOwnDocument } from './document-notifications';
 
@@ -48,6 +49,9 @@ function uploadBytes(
     pendingRequests.set(uploadId, xhr);
     xhr.open('POST', `/api/docs?ext=${encodeURIComponent(ext)}`);
     xhr.withCredentials = true;
+    for (const [name, value] of Object.entries(boardHeaders())) {
+      xhr.setRequestHeader(name, value);
+    }
     xhr.responseType = 'json';
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) onProgress(e.loaded / e.total);

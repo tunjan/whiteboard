@@ -26,6 +26,9 @@ export async function login(
     });
     if (res.ok) return { ok: true };
     if (res.status === 401) return { ok: false, error: 'Incorrect password' };
+    if (res.status === 429) {
+      return { ok: false, error: 'Too many attempts. Try again in a few minutes.' };
+    }
     return { ok: false, error: 'Login failed' };
   } catch {
     return { ok: false, error: 'Cannot reach the server' };

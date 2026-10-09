@@ -111,6 +111,51 @@ describe('rectangle selection geometry', () => {
     ).toBe(false);
   });
 
+  it('rotates a connector about the pivot its renderer uses', () => {
+    // A straight arrow draws only its endpoints, so it pivots about their
+    // midpoint (50, 0), not the centre of every stored waypoint (50, 50).
+    const shape: Extract<Shape, { type: 'arrow' }> = {
+      id: 'arrow',
+      type: 'arrow',
+      x: 0,
+      y: 0,
+      rotation: Math.PI / 2,
+      index: 'a0',
+      props: {
+        points: [
+          { x: 0, y: 0 },
+          { x: 50, y: 100 },
+          { x: 100, y: 0 },
+        ],
+        color: '#111',
+        size: 2,
+        dash: 'solid',
+        arrowStart: false,
+        arrowEnd: false,
+        bend: 0,
+        topology: 'straight',
+        bindings: {},
+        label: '',
+      },
+    };
+
+    // Rendered: a vertical stroke at x = 50 from y = -50 to 50.
+    expect(
+      matchesMarquee(
+        shape,
+        { minX: 40, minY: -40, maxX: 60, maxY: -10 },
+        'intersect',
+      ),
+    ).toBe(true);
+    expect(
+      matchesMarquee(
+        shape,
+        { minX: 90, minY: 10, maxX: 110, maxY: 90 },
+        'intersect',
+      ),
+    ).toBe(false);
+  });
+
   it('requires complete enclosure for frames in both modes', () => {
     const shape: Extract<Shape, { type: 'frame' }> = {
       id: 'frame',
@@ -140,25 +185,42 @@ describe('rectangle selection geometry', () => {
 });
 
 describe('selection controls', () => {
-  it('places four rotation zones in the quadrant beyond each corner', () => {
+  it('rotates from a knob below the box, never from a corner', () => {
     const shape = rectangle();
-    const info = getSelectionInfo([shape], [shape.id], 2);
+    const info = getSelectionInfo([shape], [shape.id], 2)!;
 
-    // Each zone is a square of half-side `e`, centred `e` diagonally outside
-    // the corner: it fills the quadrant from the corner outwards and stops
-    // there, clear of the corner's own resize target. `e` is screen-constant,
-    // so at zoom 2 it is half its world size at zoom 1.
-    const e = (6 * 1.62) / 2;
-    expect(info?.handles.map((handle) => handle.id)).not.toContain('rotate');
-    expect(info?.rotationHandles).toEqual([
-      { id: 'rotate-nw', point: { x: -e, y: -e }, extent: e },
-      { id: 'rotate-ne', point: { x: 100 + e, y: -e }, extent: e },
-      { id: 'rotate-se', point: { x: 100 + e, y: 60 + e }, extent: e },
-      { id: 'rotate-sw', point: { x: -e, y: 60 + e }, extent: e },
+    // The lane above belongs to the contextual toolbar. The knob sits a
+    // screen-constant 24px out, so at zoom 2 that is 12 world units.
+    expect(info.rotateHandle?.point.x).toBeCloseTo(50);
+    expect(info.rotateHandle?.point.y).toBeCloseTo(60 + 12);
+    // A cursor's grab zone is the other handles' one.
+    expect(info.rotateHandle?.radius).toBeCloseTo(10 / 2);
+    // Every corner is still a resize handle.
+    expect(info.handles.map((handle) => handle.id)).toEqual([
+      'nw',
+      'n',
+      'ne',
+      'e',
+      'se',
+      's',
+      'sw',
+      'w',
     ]);
   });
 
-  it('offers the same oriented rotation controls for frame containers', () => {
+  it('keeps the knob clear of the bottom edge\'s resize target', () => {
+    const shape = rectangle();
+    const info = getSelectionInfo([shape], [shape.id], 1)!;
+    const knob = info.rotateHandle!;
+    const south = info.handles.find((handle) => handle.id === 's')!;
+
+    // Nowhere in the knob's grab zone reaches the edge's target.
+    expect(knob.point.y - knob.radius).toBeGreaterThan(
+      south.point.y + info.hitTarget.y,
+    );
+  });
+
+  it('turns the knob with a rotated frame container', () => {
     const shape: Extract<Shape, { type: 'frame' }> = {
       id: 'frame',
       type: 'frame',
@@ -168,15 +230,13 @@ describe('selection controls', () => {
       index: 'a0',
       props: { w: 120, h: 80, name: 'Frame', color: '#475569' },
     };
-    const info = getSelectionInfo([shape], [shape.id], 1);
+    const info = getSelectionInfo([shape], [shape.id], 1)!;
 
-    expect(info?.rotation).toBeCloseTo(Math.PI / 4);
-    expect(info?.rotationHandles.map((handle) => handle.id)).toEqual([
-      'rotate-nw',
-      'rotate-ne',
-      'rotate-se',
-      'rotate-sw',
-    ]);
+    expect(info.rotation).toBeCloseTo(Math.PI / 4);
+    // In the box's own frame the knob is centred beneath it.
+    const local = rotatePoint(info.rotateHandle!.point, info.center, -Math.PI / 4);
+    expect(local.x).toBeCloseTo(info.center.x);
+    expect(local.y).toBeCloseTo(info.center.y + 40 + 24);
   });
 
   it('culls handles in stages as the box gets smaller', () => {
@@ -228,15 +288,13 @@ describe('selection controls', () => {
     expect(zoomed.hitTarget).toEqual({ x: 2.25, y: 2.25 });
   });
 
-  it('suppresses corner rotation zones once either axis is tiny', () => {
+  it('drops the knob only once both axes are small', () => {
     const base = rectangle();
     const thin = { ...base, props: { ...base.props, w: 100, h: 10 } };
-    expect(getSelectionInfo([thin], [thin.id], 1)?.rotationHandles).toEqual([]);
+    expect(getSelectionInfo([thin], [thin.id], 1)?.rotateHandle).not.toBe(null);
 
-    const roomy = { ...base, props: { ...base.props, w: 100, h: 60 } };
-    expect(getSelectionInfo([roomy], [roomy.id], 1)?.rotationHandles).toHaveLength(
-      4,
-    );
+    const small = { ...base, props: { ...base.props, w: 20, h: 20 } };
+    expect(getSelectionInfo([small], [small.id], 1)?.rotateHandle).toBe(null);
   });
 
   it('grabs a corner over the edge band it overlaps', () => {
@@ -269,17 +327,16 @@ describe('selection controls', () => {
     ).toBe(null);
   });
 
-  it('swaps corner zones for one rotate knob on a coarse pointer', () => {
+  it('keeps the touch knob above the box and drops edge handles', () => {
     const base = rectangle();
     const shape = { ...base, props: { ...base.props, w: 100, h: 60 } };
     const info = getSelectionInfo([shape], [shape.id], 1, undefined, true)!;
 
-    expect(info.rotationHandles).toEqual([]);
-    // Edge handles go too: a fingertip covers an edge it did not aim for.
+    // Edge handles go: a fingertip covers an edge it did not aim for.
     expect(info.handles.map((h) => h.id)).toEqual(['nw', 'ne', 'se', 'sw']);
     // The knob sits above the box by default.
-    expect(info.mobileRotateHandle?.point.x).toBeCloseTo(50);
-    expect(info.mobileRotateHandle!.point.y).toBeLessThan(0);
+    expect(info.rotateHandle?.point.x).toBeCloseTo(50);
+    expect(info.rotateHandle!.point.y).toBeLessThan(0);
 
     // A narrow box puts it out to the left instead.
     const narrow = { ...base, props: { ...base.props, w: 20, h: 60 } };
@@ -290,19 +347,63 @@ describe('selection controls', () => {
       undefined,
       true,
     )!;
-    expect(narrowInfo.mobileRotateHandle!.point.x).toBeLessThan(0);
-    expect(narrowInfo.mobileRotateHandle?.point.y).toBeCloseTo(30);
+    expect(narrowInfo.rotateHandle!.point.x).toBeLessThan(0);
+    expect(narrowInfo.rotateHandle?.point.y).toBeCloseTo(30);
 
     // Small on both axes there is nowhere to put it that is not in the way.
     const small = { ...base, props: { ...base.props, w: 20, h: 20 } };
     expect(
       getSelectionInfo([small], [small.id], 1, undefined, true)
-        ?.mobileRotateHandle,
+        ?.rotateHandle,
     ).toBe(null);
-    // A fine pointer never gets one.
-    expect(getSelectionInfo([shape], [shape.id], 1)?.mobileRotateHandle).toBe(
-      null,
-    );
+  });
+
+  it('keeps a text shape\'s width handles on a coarse pointer', () => {
+    const text: Extract<Shape, { type: 'text' }> = {
+      id: 'text',
+      type: 'text',
+      x: 0,
+      y: 0,
+      rotation: 0,
+      index: 'a0',
+      props: {
+        text: 'one\ntwo',
+        color: '#111111',
+        fontSize: 24,
+        fontFamily: 'sans',
+        fontWeight: 400,
+        sizingMode: 'fixed',
+        width: 200,
+        lineHeight: 1.2,
+        align: 'start',
+      },
+    };
+    const coarse = getSelectionInfo([text], ['text'], 1, undefined, true)!;
+
+    // The top and bottom go the way every coarse edge handle does, but the
+    // wrap-width gesture has no substitute among the corners, so it stays.
+    expect(coarse.handles.map((h) => h.id).sort()).toEqual([
+      'e',
+      'ne',
+      'nw',
+      'se',
+      'sw',
+      'w',
+    ]);
+    // On a cursor the box carries the full set: every handle but `e`/`w` is
+    // aspect-locked, so a vertical drag reads as a type scale.
+    expect(getSelectionInfo([text], ['text'], 1)!.handles).toHaveLength(8);
+  });
+
+  it('paints the touch rotate knob far smaller than it is grabbed by', () => {
+    const base = rectangle();
+    const shape = { ...base, props: { ...base.props, w: 100, h: 60 } };
+    const knob = getSelectionInfo([shape], [shape.id], 1, undefined, true)!
+      .rotateHandle!;
+
+    // A disc of a handle square's area, inside a fingertip-sized target.
+    expect(knob.drawRadius).toBeCloseTo(8 / Math.sqrt(Math.PI));
+    expect(knob.radius).toBe(20);
   });
 
   it('moves the rotate knob off a media shape\'s top edge', () => {
@@ -325,7 +426,7 @@ describe('selection controls', () => {
 
     // A finger on the top edge covers the frame of the picture, so media takes
     // the lane below instead.
-    expect(info.mobileRotateHandle!.point.y).toBeGreaterThan(60);
+    expect(info.rotateHandle!.point.y).toBeGreaterThan(60);
 
     // Turned far enough that "below" has swung back up under the contextual
     // toolbar, it goes back to the box's own top edge. Measured in the box's
@@ -338,7 +439,7 @@ describe('selection controls', () => {
       undefined,
       true,
     )!;
-    const local = rotatePoint(turned.mobileRotateHandle!.point, turned.center, -rotation);
+    const local = rotatePoint(turned.rotateHandle!.point, turned.center, -rotation);
     expect(local.y).toBeLessThan(0);
   });
 
@@ -397,6 +498,6 @@ describe('selection controls', () => {
     expect(info.corners.se.x).toBeCloseTo(200);
     expect(info.corners.se.y).toBeCloseTo(80);
     expect(info.handles).toHaveLength(8);
-    expect(info.rotationHandles).toHaveLength(4);
+    expect(info.rotateHandle).not.toBe(null);
   });
 });

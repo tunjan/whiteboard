@@ -14,7 +14,7 @@ describe('quickSwatches', () => {
   // a colour falls in the ramp, so ink first and then hue order.
   it('offers ink and a hue ramp closed by grey', () => {
     expect(
-      quickSwatches(paletteColors('light'), '#1d1d1d').map((c) => c.name),
+      quickSwatches(paletteColors('light')).map((c) => c.name),
     ).toEqual([
       'Black',
       'Red',
@@ -29,7 +29,7 @@ describe('quickSwatches', () => {
 
   // Held as palette slots, so slot 0 is whichever ink reads on this canvas.
   it('flips the ink swatch with the canvas rather than restating a hex', () => {
-    const dark = quickSwatches(paletteColors('dark'), '#f3f3f3');
+    const dark = quickSwatches(paletteColors('dark'));
     expect(dark[0]!.name).toBe('White');
     expect(dark[0]!.value).toBe(paletteColors('dark')[0]!.value);
     expect(dark.map((c) => c.name).slice(1)).toEqual([
@@ -42,23 +42,6 @@ describe('quickSwatches', () => {
       'Grey',
     ]);
   });
-
-  // A row with nothing selected reads as "no color set", so a color picked in
-  // the full panel joins the row instead of leaving it blank.
-  it('appends a color chosen outside the quick set', () => {
-    // Slot 8, 'Green' — in the palette, but not one of the eight quick hues.
-    const swatches = quickSwatches(paletteColors('light'), '#099268');
-    expect(swatches).toHaveLength(9);
-    expect(swatches[8]).toEqual({ name: 'Current color', value: '#099268' });
-  });
-
-  it('never appends a duplicate of a slot it already holds', () => {
-    for (const color of quickSwatches(paletteColors('light'), '#1d1d1d')) {
-      expect(quickSwatches(paletteColors('light'), color.value)).toHaveLength(
-        8,
-      );
-    }
-  });
 });
 
 describe('ToolPropertiesSatellite', () => {
@@ -68,6 +51,7 @@ describe('ToolPropertiesSatellite', () => {
     expect(html).toContain('aria-label="Color"');
     expect(html).toContain('aria-label="Stroke weight"');
     expect(html).not.toContain('inert=""');
+    expect(html).not.toContain('tbar-sep');
   });
 
   it('carries the same controls for the highlighter', () => {
@@ -82,12 +66,16 @@ describe('ToolPropertiesSatellite', () => {
     expect(html).not.toContain('aria-label="Stroke weight"');
   });
 
+  // Hidden means hidden three ways: out of the accessibility tree, out of the
+  // Tab order, and out of the way of the pointer. The first two are attributes
+  // and the third is `.style-bar-motion[data-visible='false']`, so the flag
+  // those rules key off is what has to be in the markup.
   it('hides itself, inertly, on a tool with no properties to set', () => {
     for (const tool of ['select', 'hand', 'laser', 'graph']) {
       const html = render(tool);
       expect(html).toContain('aria-hidden="true"');
       expect(html).toContain('inert=""');
-      expect(html).toContain('pointer-events-none');
+      expect(html).toContain('data-visible="false"');
     }
   });
 
@@ -101,41 +89,48 @@ describe('ToolPropertiesSatellite', () => {
     expect(html).not.toContain('aria-label="Color"');
     expect(html).not.toContain('aria-label="Stroke weight"');
     // One section, so no rule.
-    expect(html).not.toContain('bg-tb-divider');
+    expect(html).not.toContain('tbar-sep');
   });
 
   it('marks exactly one swatch and one weight as checked', () => {
     expect(render('draw').match(/aria-checked="true"/g)).toHaveLength(2);
   });
 
-  // Four segments, so the sliding chip is a quarter wide — less the inset that
-  // holds it clear of the capsule's rim — and steps by that whole quarter, which
-  // is its own width plus the gap the inset leaves. Both stay percentages of the
-  // capsule, because a coarse pointer grows every key to 44px and a chip sized
-  // in fixed pixels would then sit half a key off. Written as a style rather
-  // than a class because one chip now serves three capsules of three different
-  // lengths — weight, colour, eraser mode — off the same formula.
-  it('sizes the weight indicator in quarters, not pixels', () => {
+  // The sliding chip is placed off the segment count and the chosen index, and
+  // nothing else: four segments and the first one chosen here. Those two
+  // numbers are all the component states, because the same control is laid out
+  // two ways — flush inside this plate, and inset by the padding the wide bar
+  // gives its capsules — and the width and step differ between them. A chip
+  // that wrote its own pixels could only ever be right for one, and one sized
+  // in fixed pixels would sit half a key off as soon as a coarse pointer grew
+  // every key to 44px.
+  it('places the weight indicator from the segment count and index', () => {
     const html = render('draw');
-    expect(html).toContain('width:calc(25% - 6px)');
-    expect(html).toMatch(/translateX\(calc\(\d+ \* \(100% \+ 6px\)\)\)/);
+    expect(html).toContain('--seg-count:4');
+    expect(html).toContain('--seg-index:0');
+    expect(html).not.toMatch(/tb-mark[^>]*width:\s*\d/);
   });
 
-  // The ramp is the one switch here that does *not* take the chip. A chip is a
-  // ground, and a ground behind a swatch is a second colour sitting next to the
-  // colour being chosen — which shifts how every swatch beside it reads. The
-  // chosen colour wears a ring instead: a gap in the plate's own colour, then a
-  // hairline outside it, in box-shadows so the dot never changes size and
+  // The ramp is the one switch here that does *not* take a travelling chip. A
+  // chip is a ground, and a ground behind a swatch is a second colour sitting
+  // next to the colour being chosen — which shifts how every swatch beside it
+  // reads. The chosen colour wears a ring instead (`.tbar-swatch` in section 9
+  // of `index.css`), drawn in box-shadows so the dot never changes size and
   // pushes the ramp along.
   it('marks the chosen colour with a ring, never with a ground', () => {
     const html = render('draw');
-    expect(html).toContain(
-      'box-shadow:0 0 0 2.5px var(--bg-surface), 0 0 0 4px var(--border-strong)',
+    // No chip under the ramp, and the ring is not written per swatch: the only
+    // thing the markup states about a swatch is the colour it actually is.
+    const ramp = html.slice(
+      html.indexOf('aria-label="Color"'),
+      html.indexOf('aria-label="Stroke weight"'),
     );
-    // One ring, on the one chosen swatch.
-    expect(html.match(/0 0 0 2\.5px var\(--bg-surface\)/g)).toHaveLength(1);
-    // And no eighth-width chip travelling under the ramp.
-    expect(html).not.toContain(`width:calc(${100 / 8}% - 6px)`);
+    expect(ramp).not.toContain('tbar-chip');
+    expect(html).not.toContain('box-shadow');
+    // Exactly one swatch is checked, and CSS hangs the ring off that.
+    expect(
+      html.match(/class="tbar-swatch"/g)?.length,
+    ).toBeGreaterThan(1);
   });
 });
 
@@ -176,63 +171,61 @@ describe('ToolPropertiesSatellite as a bar in its own right', () => {
 // carried has to be reachable here — inline where it is reached for constantly,
 // and behind a key that previews its value where it is not.
 describe('ToolPropertiesSatellite as the only style surface', () => {
-  /** The `aria-label`s of the popover keys, in bar order. */
-  const keys = (html: string) =>
-    [...html.matchAll(/aria-label="([^"]+)"/g)]
-      .map((match) => match[1]!)
-      .filter((label) =>
-        ['Fill', 'Stroke style', 'Opacity', 'Text', 'Arrow', 'Line'].includes(
-          label,
-        ),
-      );
+  // Fill, stroke style, opacity, arrow and text options all live in the one
+  // popover behind the Options key, which renders closed here. So the markup
+  // can only say whether the key exists: it does wherever a section applies.
+  const hasOptions = (tool: string) =>
+    render(tool).includes('aria-label="Options"');
 
-  it('offers the pen everything the panel gave it', () => {
-    expect(keys(render('draw'))).toEqual(['Fill', 'Stroke style', 'Opacity']);
-  });
-
-  it('gives the arrow its route, heads and label behind one key', () => {
-    expect(keys(render('arrow'))).toEqual(['Stroke style', 'Opacity', 'Arrow']);
-    expect(keys(render('line'))).toEqual(['Stroke style', 'Opacity', 'Line']);
-  });
-
-  it('gives text its typeface, weight and alignment behind one key', () => {
-    expect(keys(render('text'))).toEqual(['Opacity', 'Text']);
+  it('puts everything beyond colour and weight behind one Options key', () => {
+    for (const tool of ['draw', 'arrow', 'line', 'text']) {
+      expect(hasOptions(tool)).toBe(true);
+    }
   });
 
   // The highlighter fixes its own translucency and takes no dash or fill, so
   // it is the one inking tool that ends up with nothing behind a key at all.
-  it('shows no keys where no key would do anything', () => {
-    expect(keys(render('highlighter'))).toEqual([]);
+  it('shows no key where no key would do anything', () => {
+    expect(hasOptions('highlighter')).toBe(false);
   });
 
-  // Wide subjects can outrun a phone, and the fix has to stay on one axis: a
-  // vertical scroller would open for the 4px the rules bleed into the padding.
-  it('scrolls sideways rather than reaching past a narrow screen', () => {
+  // Wide subjects can outrun a phone. The bar is capped to the viewport here,
+  // and `.tbar-style` takes the sideways scroll under 640px — on one axis, so a
+  // vertical scroller cannot open for the pixel a focus ring bleeds.
+  it('stays inside a narrow screen and scrolls sideways within it', () => {
     const html = render('draw');
     expect(html).toContain('max-w-[calc(100vw-1rem)]');
-    expect(html).toContain('max-sm:overflow-x-auto');
-    expect(html).toContain('max-sm:overflow-y-hidden');
+    expect(html).toContain('tbar-style');
   });
 });
 
-// The bar states its nesting rule in `index.css`: bar 20 - 4 = track 16 - 4 =
-// key 12, each box concentric with the one outside it. The keys stand in a
-// recess that takes no padding, so at that corner the rule reads 16 - 3 = 13,
-// and a key painting its own 12px corner there leaves a crescent of track
-// showing. That is a hairline mistake to make and an obvious one to see.
-describe('ToolPropertiesSatellite corner nesting', () => {
+// One key, one geometry. Every control on this bar — a swatch, a weight, a
+// popover trigger — is a `.tbar-item`, and its size, corner, fill and states
+// are all in section 9 of `index.css`. A key that writes its own is how a row
+// of controls drifts apart, so the markup is checked for the absence of that.
+describe('ToolPropertiesSatellite key geometry', () => {
   const html = render('draw');
 
-  it('insets the key fill instead of rounding the key itself into the track', () => {
-    expect(html).toContain('inset-[3px] rounded-full');
+  it('builds every key from the one shared class', () => {
+    const buttons = html.match(/<button[^>]*>/g) ?? [];
+    expect(buttons.length).toBeGreaterThan(8);
+    for (const button of buttons) {
+      expect(button).toContain('tbar-item');
+    }
   });
 
-  it('uses the same inset and corner as the weight chip beside it', () => {
-    // The weight chip is the bar's other inset layer. Two constructions for one
-    // corner on one bar is how the pair drifts apart. A pill capsule makes the
-    // corner trivial — a concentric inset of a pill is a pill — which is what
-    // the old 16px recess needed a stepped-down 13px radius to fake.
-    expect(html).toContain('inset-y-[3px] left-[3px]');
-    expect(html).not.toContain('rounded-[13px]');
+  it('lets no key state its own size or corner', () => {
+    expect(html).not.toMatch(/class="[^"]*\bsize-\d/);
+    expect(html).not.toMatch(/class="[^"]*\btbar-item[^"]*\brounded-/);
+  });
+
+  // The chip is placed off the segment count and the chosen index, and nothing
+  // else: four segments and the first one chosen here. A chip that wrote its
+  // own pixels would sit half a key off as soon as a coarse pointer grew every
+  // key to 44px.
+  it('places the weight indicator from the segment count and index alone', () => {
+    expect(html).toContain('--seg-count:4');
+    expect(html).toContain('--seg-index:0');
+    expect(html).not.toMatch(/tbar-chip[^>]*width:\s*\d/);
   });
 });

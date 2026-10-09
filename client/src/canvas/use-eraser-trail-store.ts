@@ -49,8 +49,9 @@ function sample(p: Point, pressure = 0.5): DrawPoint {
 }
 
 function publish(scribbles: EraserScribble[]): void {
-  // Awareness owns only the serialized snapshot. The source of truth remains
-  // this local session store and never enters the shared document/undo history.
+  // Peers get only a serialized snapshot, over the collab socket's stateless
+  // channel. The source of truth remains this local session store and never
+  // enters the shared document/undo history.
   setLocalEraserScribbles(scribbles);
 }
 
@@ -61,8 +62,8 @@ function publish(scribbles: EraserScribble[]): void {
  * frames shift its oldest point until only the tip remains. Releasing the
  * pointer moves the ribbon to `stopping`; subsequent frames keep shifting the
  * tail while shrinking its diameter by ten percent, then remove it. Every
- * snapshot is mirrored through awareness so collaborators can render the
- * gesture without receiving the local pending-deletion set.
+ * snapshot is relayed to collaborators so they can render the
+ * gesture; the pending-deletion set travels separately via the eraser store.
  */
 export const useEraserTrailStore = create<EraserTrailStore>((set, get) => ({
   scribbles: [],
