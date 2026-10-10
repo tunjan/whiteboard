@@ -1,6 +1,11 @@
 import 'dotenv/config';
 
+const production = process.env.NODE_ENV === 'production';
+
 function warnDefault(name: string): void {
+  // A dev default in production is a known password or a secret that logs
+  // everyone out on each restart — refuse to boot rather than run like that.
+  if (production) throw new Error(`[server] ${name} must be set in production.`);
   console.warn(
     `[server] ${name} is not set — using an insecure dev default. Set it in server/.env for real use.`,
   );
@@ -11,6 +16,8 @@ if (!tutorPassword) warnDefault('TUTOR_PASSWORD');
 
 const sessionSecret = process.env.SESSION_SECRET;
 if (!sessionSecret) warnDefault('SESSION_SECRET');
+
+if (production && !process.env.DATABASE_URL) warnDefault('DATABASE_URL');
 
 export const env = {
   port: Number(process.env.PORT ?? 3001),

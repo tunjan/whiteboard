@@ -169,3 +169,19 @@ export function removeClient(boardId: string, clientId: number): boolean {
   connection.webSocket.close(4001, 'removed');
   return true;
 }
+
+/**
+ * Save every open document before the process exits. Closing the connections
+ * unloads documents with nothing pending; the rest have their debounced store
+ * (up to 10s away) run now. Resolves with how many documents were still in
+ * memory when it gave up — 0 means everything reached the database.
+ */
+export async function drainCollab(timeoutMs = 15_000): Promise<number> {
+  hocuspocus.closeConnections();
+  hocuspocus.flushPendingStores();
+  const deadline = Date.now() + timeoutMs;
+  while (hocuspocus.getDocumentsCount() > 0 && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  return hocuspocus.getDocumentsCount();
+}

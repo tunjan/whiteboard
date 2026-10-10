@@ -22,6 +22,8 @@
     "db:up": "docker compose up -d",
     "db:down": "docker compose down",
     "db:push": "npm run db:push -w server",
+    "db:generate": "npm run db:generate -w server",
+    "db:migrate": "npm run db:migrate -w server",
     "lint": "oxlint client/src server/src shared/src"
   },
   "devDependencies": {

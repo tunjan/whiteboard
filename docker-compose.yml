@@ -12,5 +12,23 @@ services:
     volumes:
       - whiteboard_pg:/var/lib/postgresql/data
 
+  # The production image, run locally: `docker compose --profile app up --build`.
+  # Behind a profile so `npm run db:up` still starts Postgres alone.
+  app:
+    profiles: [app]
+    build: .
+    restart: unless-stopped
+    depends_on: [postgres]
+    env_file: server/.env
+    environment:
+      DATABASE_URL: postgres://whiteboard:whiteboard@postgres:5432/whiteboard
+    ports:
+      - '3001:3001'
+    volumes:
+      - whiteboard_data:/app/server/data
+    # Room for the shutdown drain (15s) before Docker sends SIGKILL.
+    stop_grace_period: 30s
+
 volumes:
   whiteboard_pg:
+  whiteboard_data:

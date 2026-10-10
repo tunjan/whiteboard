@@ -14,7 +14,9 @@ import { authRoutes } from './auth/routes';
 import { blobRoutes } from './blobs/routes';
 import { boardRoutes } from './boards/routes';
 import { documentRoutes } from './documents/routes';
-import { hocuspocus } from './collab/hocuspocus';
+import { drainCollab, hocuspocus } from './collab/hocuspocus';
+import { closeDb, db } from './db/client';
+import { sql } from 'drizzle-orm';
 import { linkRoutes } from './links/routes';
 import { musicRoutes } from './music/routes';
 import { pageRoutes } from './collab/page-routes';
@@ -81,7 +83,16 @@ app.use('*', async (c, next) => {
   }
 });
 
-app.get('/health', (c) => c.json({ status: 'ok' }));
+// Checks Postgres too: without it boards can't load or save, so a monitor or
+// load balancer should see the server as down.
+app.get('/health', async (c) => {
+  try {
+    await db.execute(sql`select 1`);
+    return c.json({ status: 'ok' });
+  } catch {
+    return c.json({ status: 'database unreachable' }, 503);
+  }
+});
 app.route('/api/ai', aiRoutes);
 app.route('/api/analytics', analyticsRoutes);
 app.route('/api/auth', authRoutes);
@@ -150,7 +161,15 @@ const wss = new WebSocketServer({
   // leaves the small per-frame ink and cursor messages uncompressed.
   perMessageDeflate: true,
 });
+let shuttingDown = false;
+
 server.on('upgrade', (request, socket, head) => {
+  // A provider dropped by the shutdown drain reconnects at once; letting it
+  // back in would reload the document the drain is waiting to unload.
+  if (shuttingDown) {
+    socket.destroy();
+    return;
+  }
   wss.handleUpgrade(request, socket, head, (ws) => {
     // `ws` emits receiver errors (including payload-limit violations) on the
     // individual socket. Always handle them so one bad peer cannot terminate
@@ -170,3 +189,22 @@ server.on('upgrade', (request, socket, head) => {
     });
   });
 });
+
+/**
+ * Stop without losing edits: Hocuspocus holds each document's last 2-10s of
+ * changes in memory before storing them, so a plain kill on deploy or restart
+ * would drop them from every open board.
+ */
+async function shutdown(signal: string): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[server] ${signal}: saving open boards before exit`);
+  server.close();
+  const unsaved = await drainCollab();
+  if (unsaved > 0) console.error(`[server] ${unsaved} documents unsaved at exit`);
+  for (const ws of wss.clients) ws.terminate();
+  await closeDb();
+  process.exit(unsaved > 0 ? 1 : 0);
+}
+process.on('SIGTERM', () => void shutdown('SIGTERM'));
+process.on('SIGINT', () => void shutdown('SIGINT'));

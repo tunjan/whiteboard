@@ -8,3 +8,6 @@ import * as schema from './schema';
 const pool = new pg.Pool({ connectionString: env.databaseUrl });
 
 export const db = drizzle(pool, { schema });
+
+/** Close the pool's connections, for a clean exit. */
+export const closeDb = () => pool.end();

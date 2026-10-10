@@ -10,6 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "db:push": "drizzle-kit push",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx src/scripts/migrate.ts",
     "migrate:ink": "tsx src/scripts/migrate-ink.ts",
     "migrate:shapes": "tsx src/scripts/migrate-ink.ts"
   },
@@ -22,6 +24,7 @@
     "hono": "^4.12.25",
     "jose": "^6.2.3",
     "pg": "^8.21.0",
+    "tsx": "^4.19.2",
     "ws": "^8.21.0"
   },
   "devDependencies": {
@@ -29,7 +32,6 @@
     "@types/pg": "^8.20.0",
     "@types/ws": "^8.18.1",
     "drizzle-kit": "^0.31.10",
-    "tsx": "^4.19.2",
     "vitest": "^4.1.9"
   }
 }

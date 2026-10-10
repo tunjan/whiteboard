@@ -1,132 +1,201 @@
 # Whiteboard
 
 A self-hostable, real-time collaborative whiteboard for 1-on-1 and small-group
-tutoring. Infinite canvas, freehand drawing, shapes, and multiplayer cursors —
-built from the ground up.
+tutoring. The tutor signs in with a password and shares each board with
+students through a link. Students need no account.
 
-> **Status:** under active construction, phase by phase.
+## Features
 
-## Requirements
+- **Infinite canvas** with pages, frames, groups and a minimap
+- **Ink** for pen and finger, plus a highlighter, eraser, lasso selection, compass and laser pointer
+- **Shapes**: rectangles, ellipses, polygons, lines, arrows and connectors, text, and stickers
+- **Maths**: typeset equations (MathLive/MathJax) and function graphs. Optional
+  AI turns handwriting or a description into LaTeX.
+- **Media**: images, PDFs and worksheets, YouTube videos, link previews
+- **Live session**: cursors, follow mode, comments, voice, camera and screen
+  share, and a shared music player
+- **For the tutor**: share links that can be edit, view-only or off; removing a
+  student; attendance and per-session notes; PNG and board export
+- **Offline**: boards cache locally and sync when the connection comes back
 
-- Node.js 22+ (see `.nvmrc`)
-- npm 10+ (workspaces)
-- PostgreSQL 16+ — only needed for server-backed persistence and collaboration. Docker is **optional**; native Postgres (e.g. via Homebrew) or managed cloud Postgres (Neon, Supabase) are fully supported.
+## Quick start
 
-## Setup
+Requirements: Node.js 22+ (see `.nvmrc`), npm 10+, and PostgreSQL 16+.
 
 ```bash
 npm install
-cp server/.env.example server/.env   # set TUTOR_PASSWORD, SESSION_SECRET, and DATABASE_URL
+cp server/.env.example server/.env   # set TUTOR_PASSWORD and SESSION_SECRET
 ```
 
-For server-backed board content (collaboration), start Postgres and apply the schema:
-
-**Option A: Native macOS Postgres (Lightweight, no Docker)**
+Start Postgres, using **either** Homebrew:
 
 ```bash
-brew install postgresql@16
-brew services start postgresql@16
+brew install postgresql@16 && brew services start postgresql@16
 createdb whiteboard
-# in server/.env: DATABASE_URL=postgres://localhost:5432/whiteboard
-npm run db:push
+# server/.env: DATABASE_URL=postgres://localhost:5432/whiteboard
 ```
 
-**Option B: Docker Compose**
+**or** Docker, which runs on port 5433 and matches the default `DATABASE_URL`:
 
 ```bash
-npm run db:up      # start Postgres via docker-compose on port 5433
-# in server/.env: DATABASE_URL=postgres://whiteboard:whiteboard@localhost:5433/whiteboard
-npm run db:push    # create the schema (boards, board_documents)
+npm run db:up
 ```
 
-## Develop
+Then create the schema and start developing:
 
 ```bash
+npm run db:migrate
 npm run dev
 ```
 
-This starts both workspaces concurrently:
+- Client (Vite, hot reload): http://localhost:5173
+- Server (API + collaboration socket): http://localhost:3001. Vite proxies
+  `/api` and `/collab` to it.
 
-- **client** — Vite dev server at http://localhost:5173
-- **server** — Hono HTTP API (tutor auth) + Hocuspocus collaboration server at
-  http://localhost:3001
+The server boots without Postgres, so sign-in works, but boards only load and
+save once the database is up.
 
-Local music files can be placed under `server/data/music`. First-level folders
-become playlists, and supported audio files (`.mp3`, `.m4a`, `.wav`, `.ogg`,
-`.oga`, `.aac`, `.flac`, `.webm`) appear in the whiteboard music player.
+## Teaching from your laptop
 
-The server boots without Postgres (auth works on its own); Postgres is only
-needed once boards sync through the server. The boards home screen is gated
-behind the single tutor password (`/api/auth/login`, rate-limited). Students
-open a board through its share link (`/board/:id?k=…`); the tutor can make
-that link view-only, turn it off, replace it, or remove a student from the
-Share popover. After pulling this change, run `npm run db:push -w server` to
-add the `share_key` / `share_mode` columns.
+`npm run dev` is for working on the app. For a lesson, serve a built copy:
+
+```bash
+npm run build
+npm start                 # http://localhost:3001
+cloudflared tunnel run    # or: cloudflared tunnel --url http://localhost:3001
+caffeinate -dis           # keep the Mac awake for the lesson
+```
+
+Students open a board's share link (`/board/:id?k=…`). The Share popover makes
+it view-only, turns it off, replaces it, or removes a student.
+
+Rules that keep a lesson safe while you keep changing the code:
+
+- **Students only see changes after you rebuild and restart.** The client is
+  served from `client/dist`, and the server loads its code once at startup.
+  Do both between lessons, with code you have tried in `npm run dev`.
+- **Don't run `npm run dev` during a lesson** on the same port and database.
+  Both default to port 3001 and the `server/.env` database, so test edits
+  would land on real boards.
+- **Ctrl-C is safe.** The server saves every open board before it exits.
+- Behind Cloudflare, set `CLIENT_IP_HEADER=cf-connecting-ip` so login rate
+  limits apply per student rather than to everyone at once.
+
+## Configuration
+
+Everything lives in `server/.env`. See `server/.env.example` for the full
+list with comments.
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `TUTOR_PASSWORD` | yes | The only login: the tutor's |
+| `SESSION_SECRET` | yes | Signs the session cookie. Use a long random string |
+| `DATABASE_URL` | yes | Postgres connection |
+| `TUTOR_NAME` | | Name on the tutor's cursor |
+| `PORT` | | Server port (default 3001) |
+| `CLIENT_IP_HEADER` | | Real client IP header behind a proxy (`cf-connecting-ip` for Cloudflare) |
+| `UPLOAD_QUOTA_GB` | | Disk cap for uploads (default 20) |
+| `OPENROUTER_API_KEY` | | Turns on the AI equation buttons. They are hidden when unset |
+| `BLOB_DIR`, `DOC_DIR`, `MUSIC_DIR` | | Where images, documents and music live (default `server/data/…`) |
+
+With `NODE_ENV=production` (the Docker image sets it), the server refuses to
+start if the three required variables are missing, instead of falling back to
+insecure defaults.
+
+Music player: put audio files in `server/data/music/<playlist>/`. Each folder
+is a playlist (mp3, m4a, wav, ogg, aac, flac, webm).
+
+## Database changes
+
+The schema is in `server/src/db/schema.ts`, and migrations in `server/drizzle/`
+are committed to git.
+
+```bash
+# after editing schema.ts
+npm run db:generate   # writes a new migration file, review and commit it
+npm run db:migrate    # applies pending migrations to the database in server/.env
+```
+
+`db:migrate` is safe to run any time: it only applies what is missing. A
+database created earlier with `db:push` takes over the migration history on
+its first run, with no data changes.
+
+## Backups and moving machines
+
+A board's state lives in two places, and a backup needs both:
+
+1. **Postgres**: board content, metadata, attendance.
+2. **`server/data/`**: uploaded images (`blobs/`) and documents (`docs/`).
+   Boards refer to these files by hash, so a database without them shows
+   broken images.
+
+```bash
+# Postgres (use the Docker container's pg_dump if Postgres runs in Docker)
+pg_dump -Fc "$DATABASE_URL" > whiteboard.dump
+tar czf whiteboard-data.tgz -C server data
+
+# restore elsewhere
+pg_restore -d "<TARGET_DATABASE_URL>" --clean --if-exists whiteboard.dump
+tar xzf whiteboard-data.tgz -C server
+```
+
+## Running with Docker
+
+The production image builds the client, applies migrations, then starts the
+server:
+
+```bash
+docker compose --profile app up -d --build   # app on :3001, plus Postgres
+```
+
+It reads `server/.env` and keeps uploads in the `whiteboard_data` volume.
+On a stop, it gets 30s to save open boards. Without `--profile app`,
+`npm run db:up` starts Postgres alone.
+
+This setup runs as-is on any VPS. The server needs a persistent Node process
+(WebSockets, local file storage), so serverless and static hosts won't work.
+Behind the Cloudflare proxy, make sure WebSockets are enabled.
+
+## Scripts
+
+```bash
+npm run dev           # client + server with hot reload
+npm run build         # production build of the client
+npm start             # serve the build + API + collaboration on :3001
+npm run check         # typecheck + all tests
+npm run lint          # oxlint
+npm run db:up         # start Postgres in Docker (db:down to stop)
+npm run db:migrate    # apply pending migrations
+npm run db:generate   # write a migration after a schema change
+```
 
 ## Repository layout
 
 ```
-/shared   @whiteboard/shared — cross-cutting TypeScript types & contracts
-/client   React 19 + Vite app (canvas engine + UI)
-/server   Node collaboration server (Hocuspocus + Postgres, later phases)
+shared/   @whiteboard/shared: types, contracts and geometry used by both sides
+client/   React 19 + Vite: canvas engine, tools, UI
+server/   Hono API + Hocuspocus (Yjs) collaboration + Drizzle/Postgres
 ```
 
-## Other scripts
+How it fits together, in brief:
 
-```bash
-npm run typecheck   # strict TS check across all workspaces
-npm run build       # production build of the client
-npm start           # serve the built client + API/collab server
-npm run db:up       # start Postgres (docker-compose)
-npm run db:down     # stop Postgres
-npm run db:push     # apply the Drizzle schema
-```
+- Each board is a **Yjs** document, plus one document per page, synced through
+  **Hocuspocus** over a WebSocket. The server stores a snapshot plus an
+  append log of updates in Postgres. The browser keeps a copy in IndexedDB for
+  offline use.
+- All canvas edits go through one `Editor` interface. Undo is per page and
+  covers only your own edits.
+- Shapes and tools are registries (`client/src/canvas/shapes`, `tools`), so
+  adding one doesn't touch the core.
 
-## Tech stack
+[REPO_MAP.md](REPO_MAP.md) has the full file map, invariants and extension
+patterns.
 
-- **Client:** React 19 + Vite + TypeScript (strict)
-- **Styling:** Tailwind CSS v4 (CSS-first `@theme` in `client/src/index.css`)
-- **Components:** shadcn/ui on **Base UI** primitives; icons via **Lucide**
-- **Theme:** near-monochrome oklch palette + one restrained accent
-  (`--accent-brand`) reserved for selection, the active tool, and primary actions
+## Known limitations
 
-## Architecture
-
-- **Shape/tool registries** (`client/src/canvas/shapes`, `tools`) — the core
-  canvas iterates registries; adding a shape or tool is additive.
-- **`Editor` seam** — all content mutations flow through one interface, now
-  backed by a **Yjs** doc (per-board) with `Y.UndoManager` (local-origin undo).
-- **Persistence** — local content via `y-indexeddb`; the server persists each
-  board's opaque Yjs state as Postgres `bytea` via Drizzle (Hocuspocus
-  Database extension). Relational columns hold board metadata only.
-- **`BoardRepository`** seam — the home screen talks only to this interface
-  (IndexedDB now, server REST in a later phase).
-- **Auth** — a single tutor credential (`TUTOR_PASSWORD`, constant-time
-  compare) signs a `jose` JWT session cookie; gates the boards home only.
-
-## Database Migration & Backups
-
-To move an existing database (e.g. from Docker to native Postgres, or to a cloud provider):
-
-1. **Export dump from Docker container:**
-
-   ```bash
-   docker exec bestwhiteboard-postgres-1 pg_dump -U whiteboard -d whiteboard -Fc > whiteboard_backup.dump
-   ```
-
-2. **Restore to target database:**
-   ```bash
-   # Native local Postgres:
-   pg_restore -h localhost -p 5432 -d whiteboard --clean --if-exists whiteboard_backup.dump
-
-   # Or remote cloud database:
-   pg_restore -d "<REMOTE_DATABASE_URL>" --clean --if-exists whiteboard_backup.dump
-   ```
-
-> **Note on images:** Uploaded image assets live on the filesystem under `server/data/blobs`. When migrating or deploying to a new host, remember to copy this folder alongside your database.
-
-## Deployment & Cloudflare
-
-- **Cloudflare Tunnel (`cloudflared`):** Expose your local or VPS server (`localhost:3001`) to the internet. WebSockets and HTTP routes work out-of-the-box.
-- **Cloudflare CDN / DNS Proxy:** If using a VPS behind Cloudflare, ensure **WebSockets** are enabled under Cloudflare Dashboard -> _Network_.
-- **Cloudflare Pages:** You can host the static client (`client/dist` from `npm run build -w client`) on Cloudflare Pages, but the collaboration server (`server/`) requires a persistent Node.js runtime (e.g. Railway, Render, Fly.io, or a VPS) to maintain WebSocket connections and local blob storage.
+- **One account.** There is a single tutor and no student accounts.
+- **Voice and video are peer-to-peer with STUN only.** They can fail on strict
+  school or corporate networks until a TURN server is configured
+  (`client/src/collab/voice/peer-connection.ts`).
+- **Uploads need no login** (students upload through share links). The upload
+  quota is the only cap.
