@@ -103,7 +103,7 @@ export function collectAssetIds(
       for (const [k, v] of Object.entries(value)) walk(v, k);
     }
   };
-  for (const name of [...doc.share.keys()]) walk(doc.getMap(name).toJSON(), name);
+  for (const name of doc.share.keys()) walk(doc.getMap(name).toJSON(), name);
 }
 
 /** A document as it is right now: the live copy if anyone has it open. */

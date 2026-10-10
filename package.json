@@ -16,7 +16,7 @@
     "start": "npm run start -w server",
     "typecheck": "npm run typecheck -w shared && npm run typecheck -w client && npm run typecheck -w server",
     "test": "npm run test -w client && npm run test -w server",
-    "check": "npm run typecheck && npm run test",
+    "check": "npm run lint && npm run typecheck && npm run test",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "db:up": "docker compose up -d",
@@ -24,7 +24,8 @@
     "db:push": "npm run db:push -w server",
     "db:generate": "npm run db:generate -w server",
     "db:migrate": "npm run db:migrate -w server",
-    "lint": "oxlint client/src server/src shared/src"
+    "lint": "oxlint client/src server/src shared/src",
+    "prepare": "git config core.hooksPath .githooks || true"
   },
   "devDependencies": {
     "concurrently": "^9.1.0",
