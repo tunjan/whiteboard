@@ -118,31 +118,35 @@ function stitchContourLines(
   });
 
   const used = new Set<number>();
-  const paths: ContourPoint[][] = [];
-  for (let seed = 0; seed < lines.length; seed += 1) {
-    if (used.has(seed)) continue;
-    const seedLine = lines[seed]!;
-    const seedEndpoints = endpoints[seed]!;
-    const startAtA = (adjacency.get(seedEndpoints.a)?.length ?? 0) !== 2;
-    const startKey = startAtA ? seedEndpoints.a : seedEndpoints.b;
-    const points = [startAtA ? seedLine.a : seedLine.b];
-    let currentKey = startKey;
-
+  /** Follow unused lines from `key`, appending each far end to `points`. */
+  const walk = (key: string, points: ContourPoint[]) => {
+    let currentKey = key;
     while (true) {
       const nextIndex = adjacency
         .get(currentKey)
         ?.find((index) => !used.has(index));
-      if (nextIndex === undefined) break;
+      if (nextIndex === undefined) return;
       used.add(nextIndex);
       const line = lines[nextIndex]!;
       const endpoint = endpoints[nextIndex]!;
       const leavesFromA = endpoint.a === currentKey;
       points.push(leavesFromA ? line.b : line.a);
       currentKey = leavesFromA ? endpoint.b : endpoint.a;
-      if (currentKey === startKey) break;
     }
+  };
 
-    if (points.length > 1) paths.push(points);
+  const paths: ContourPoint[][] = [];
+  for (let seed = 0; seed < lines.length; seed += 1) {
+    if (used.has(seed)) continue;
+    used.add(seed);
+    // The seed is usually mid-curve (lines arrive in grid order, not curve
+    // order), so grow it both ways. A closed loop is used up by the forward
+    // walk, which leaves the backward one nothing to add.
+    const forward = [lines[seed]!.a, lines[seed]!.b];
+    walk(endpoints[seed]!.b, forward);
+    const backward: ContourPoint[] = [];
+    walk(endpoints[seed]!.a, backward);
+    paths.push([...backward.reverse(), ...forward]);
   }
   return paths;
 }
@@ -276,31 +280,44 @@ function clampToRange(value: number, min: number, max: number): number {
   return value < min ? min : value > max ? max : value;
 }
 
+/** Halvings before a change that won't shrink counts as a jump. */
+const MAX_JUMP_BISECTIONS = 60;
+
 /**
- * Whether the gap between two consecutive samples is a pole rather than a
- * steep-but-continuous stretch.
+ * The bracket around a jump or pole between two samples, or null when the
+ * curve is continuous there.
  *
- * A large jump alone cannot tell the two apart — `exp(10x)` zoomed in climbs
- * just as far between samples as `tan(x)` does crossing pi/2, and treating both
- * as breaks chops smooth curves into pieces. Probing the midpoint separates
- * them: a function that rises steeply but continuously passes through the
- * values in between, so its midpoint lands inside the endpoint range, while
- * across a pole the midpoint leaves that range entirely (`tan` reappears on the
- * far branch) or leaves the reals (`1/x` at zero).
+ * Neither the size of the change nor a midpoint probe tells a jump from a
+ * steep stretch: `floor(x)` steps less than a zoomed-in `exp(10x)` climbs. So
+ * keep halving toward the half that changes more. On a continuous curve that
+ * change shrinks with the interval and soon falls below `flatness`; across a
+ * jump it never does, and the bracket closes in on the jump itself — which is
+ * where the two pieces should end.
  */
-function crossesPole(
+function findJump(
   f: (x: number) => number,
   x0: number,
   y0: number,
   x1: number,
   y1: number,
-): boolean {
-  const midY = f((x0 + x1) / 2);
-  if (!Number.isFinite(midY)) return true;
-  // Tolerance keeps float noise at the ends of a near-linear ramp from reading
-  // as an excursion.
-  const margin = Math.abs(y1 - y0) * 0.01;
-  return midY < Math.min(y0, y1) - margin || midY > Math.max(y0, y1) + margin;
+  flatness: number,
+): { x0: number; y0: number; x1: number; y1: number } | null {
+  for (let i = 0; i < MAX_JUMP_BISECTIONS; i += 1) {
+    const xMid = (x0 + x1) / 2;
+    // Out of float resolution with the change still standing.
+    if (xMid <= x0 || xMid >= x1) break;
+    const yMid = f(xMid);
+    if (!Number.isFinite(yMid)) break;
+    if (Math.abs(yMid - y0) >= Math.abs(y1 - yMid)) {
+      x1 = xMid;
+      y1 = yMid;
+    } else {
+      x0 = xMid;
+      y0 = yMid;
+    }
+    if (Math.abs(y1 - y0) <= flatness) return null;
+  }
+  return { x0, y0, x1, y1 };
 }
 
 function sampleExplicitGraphExpression(
@@ -312,9 +329,10 @@ function sampleExplicitGraphExpression(
   const f = parsed.createEvaluator(parameters);
   const xRange = viewport.xMax - viewport.xMin;
   const yRange = viewport.yMax - viewport.yMin;
-  const jump = Math.abs(yRange) * JUMP_RANGES;
   // Half a sample step: below this the extra point lands on the same pixel.
   const flatness = Math.abs(yRange) / samples / 2;
+  // A change of a couple of pixels or more might be a jump worth breaking at.
+  const jumpCheck = flatness * 4;
   const minStep = Math.abs(xRange) / samples / (1 << MAX_REFINEMENT_DEPTH);
   const clampMin = viewport.yMin - Math.abs(yRange) * OFFSCREEN_RANGES;
   const clampMax = viewport.yMax + Math.abs(yRange) * OFFSCREEN_RANGES;
@@ -365,13 +383,22 @@ function sampleExplicitGraphExpression(
       previousY = Number.NaN;
       continue;
     }
+    // Both ends off the same edge: the join is out of sight either way.
+    const offscreen =
+      (y > viewport.yMax && previousY > viewport.yMax) ||
+      (y < viewport.yMin && previousY < viewport.yMin);
+    const jump =
+      Number.isFinite(previousY) &&
+      !offscreen &&
+      Math.abs(y - previousY) > jumpCheck
+        ? findJump(f, previousX, previousY, x, y, flatness)
+        : null;
     if (!Number.isFinite(previousY)) {
       push(x, y);
-    } else if (
-      Math.abs(y - previousY) > jump &&
-      crossesPole(f, previousX, previousY, x, y)
-    ) {
+    } else if (jump) {
+      if (jump.x0 > previousX) push(jump.x0, jump.y0);
       flush();
+      if (jump.x1 < x) push(jump.x1, jump.y1);
       push(x, y);
     } else {
       refine(previousX, previousY, x, y, 0);

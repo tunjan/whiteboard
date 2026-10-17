@@ -633,6 +633,7 @@ function tokenize(
 ): Token[] {
   const tokens: Token[] = [];
   let i = 0;
+  let openBars = 0;
 
   while (i < source.length) {
     const char = source[i]!;
@@ -695,6 +696,21 @@ function tokenize(
         tokens.push({ type: 'identifier', value: rawName });
       }
       i = end;
+      continue;
+    }
+
+    // `|x|` reads as abs(x). A bar after something that ends a factor closes
+    // the innermost open one; anywhere else it opens, so `||x|-1|` nests.
+    if (char === '|') {
+      if (openBars > 0 && canEndFactor(tokens[tokens.length - 1] ?? null)) {
+        tokens.push({ type: 'rparen', value: ')' });
+        openBars -= 1;
+      } else {
+        tokens.push({ type: 'function', value: 'abs' });
+        tokens.push({ type: 'lparen', value: '(' });
+        openBars += 1;
+      }
+      i += 1;
       continue;
     }
 

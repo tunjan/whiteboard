@@ -112,6 +112,11 @@ export function MathField({
     mf.mathVirtualKeyboardPolicy = virtualKeyboardPolicy;
     mf.smartFence = true;
     mf.smartSuperscript = true;
+    // MathLive has no `abs` operator — typed, it serializes as `a b s`.
+    mf.inlineShortcuts = {
+      ...mf.inlineShortcuts,
+      abs: '\\left|#?\\right|',
+    };
     // No right-click math menu or inline keyboard toggle in this compact panel.
     mf.menuItems = [];
     if (placeholder) mf.setAttribute('placeholder', placeholder);

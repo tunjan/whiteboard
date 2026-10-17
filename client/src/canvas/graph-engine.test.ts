@@ -51,6 +51,23 @@ describe('graph expressions', () => {
     expect(parsed.evaluate(1, {})).toBeCloseTo(0);
   });
 
+  it('reads absolute-value bars, nested and side by side', () => {
+    const cases: [string, string, number, number][] = [
+      ['|(x+2)/(x-1)|', 'abs((x+2)/(x-1))', 0, 2],
+      ['||x|-1|', 'abs(abs(x)-1)', 0, 1],
+      ['|x||x-3|', 'abs(x)*abs(x-3)', 1, 2],
+      ['2|x|', '2*abs(x)', -3, 6],
+    ];
+    for (const [source, normalized, x, y] of cases) {
+      const parsed = parseGraphExpression(source);
+      expect(parsed.ok).toBe(true);
+      if (!parsed.ok || isCoordinateExpression(parsed)) return;
+      expect(parsed.normalized).toBe(normalized);
+      expect(parsed.variables).toEqual([]);
+      expect(parsed.evaluate(x, {})).toBeCloseTo(y);
+    }
+  });
+
   it('detects slider variables from implicit multiplication', () => {
     const parsed = parseGraphExpression('a*x^2 + bx + c');
 
@@ -312,7 +329,11 @@ describe('discontinuities and steep curves', () => {
     expect(result.segments.length).toBeGreaterThanOrEqual(3);
     for (const segment of result.segments) {
       const xs = segment.map((point) => point.x);
-      expect(Math.max(...xs) - Math.min(...xs)).toBeLessThan(Math.PI);
+      // A branch now runs right up to its asymptotes, so the middle one is
+      // exactly pi wide; anything wider crossed a pole.
+      expect(Math.max(...xs) - Math.min(...xs)).toBeLessThanOrEqual(
+        Math.PI + 1e-9,
+      );
     }
   });
 
@@ -328,6 +349,52 @@ describe('discontinuities and steep curves', () => {
 
     expect(result.ok).toBe(true);
     expect(result.segments).toHaveLength(1);
+  });
+
+  it.each([
+    ['close up', { xMin: -2.3, xMax: 2.3, yMin: -3, yMax: 3 }, 6],
+    ['zoomed out', { xMin: -50.5, xMax: 50.5, yMin: -60, yMax: 60 }, 102],
+  ])('breaks a step function at each jump, %s', (_, view, steps) => {
+    const result = sampleGraphExpression(expression('floor(x)'), view, {}, 600);
+
+    expect(result.segments).toHaveLength(steps);
+    for (const segment of result.segments) {
+      // Flat treads, no risers: every point sits on the step's own value…
+      const level = Math.floor(segment[0]!.x);
+      for (const point of segment) expect(point.y).toBe(level);
+      // …and the tread runs right up to the jump rather than the last sample.
+      const end = segment.at(-1)!.x;
+      if (end < view.xMax) expect(end).toBeCloseTo(level + 1, 6);
+    }
+  });
+
+  it.each(['cbrt(x)', '10*x', 'sqrt(abs(x))'])(
+    'keeps the continuous %s in one piece',
+    (source) => {
+      const result = sampleGraphExpression(
+        expression(source),
+        { xMin: -2, xMax: 2, yMin: -2, yMax: 2 },
+        {},
+        600,
+      );
+      expect(result.segments).toHaveLength(1);
+    },
+  );
+
+  it.each([
+    ['x*y=1', 2],
+    ['y^2=x', 1],
+    ['x^2+y^2=4', 1],
+    ['sin(x)-y=0', 1],
+  ])('stitches the implicit %s into %i path(s)', (source, paths) => {
+    const result = sampleGraphExpression(
+      expression(source),
+      { xMin: -10, xMax: 10, yMin: -6, yMax: 6 },
+      {},
+      543,
+      347,
+    );
+    expect(result.segments).toHaveLength(paths);
   });
 
   it('clamps runaway values instead of emitting unbounded coordinates', () => {
