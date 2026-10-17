@@ -42,6 +42,23 @@ describe('graph expressions', () => {
     expect(parsed.evaluate(Math.PI / 2, {})).toBeCloseTo(1);
   });
 
+  it('reads a built-in call on the left as an equation, not a definition', () => {
+    const parsed = parseGraphExpression('sin(x)=y');
+
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok || isCoordinateExpression(parsed)) return;
+    expect(parsed.kind).toBe('explicit');
+    expect(parsed.normalized).toBe('sin(x)');
+  });
+
+  it('reads floor, ceil and round as the math field writes them', () => {
+    const parsed = parseGraphExpression('y=floor  ((x)/(2))+ceil  (x)-round  (x)');
+
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok || isCoordinateExpression(parsed)) return;
+    expect(parsed.evaluate(3.4, {})).toBeCloseTo(1 + 4 - 3);
+  });
+
   it('parses polynomial expressions', () => {
     const parsed = parseGraphExpression('x^2 - 4x + 3');
 
@@ -397,6 +414,71 @@ describe('discontinuities and steep curves', () => {
     expect(result.segments).toHaveLength(paths);
   });
 
+  it.each([
+    ['(x-y)^2=0', (x: number, y: number) => x - y, 11],
+    ['(x^2+y^2-4)^2=0', (x: number, y: number) => Math.hypot(x, y) - 2, 3.9],
+  ])('draws %s, which touches zero without crossing it', (source, offCurve, span) => {
+    const result = sampleGraphExpression(
+      expression(source),
+      { xMin: -10, xMax: 10, yMin: -6, yMax: 6 },
+      {},
+      543,
+      347,
+    );
+    const points = result.segments.flat();
+    expect(result.segments.length).toBeGreaterThan(0);
+    expect(result.segments.length).toBeLessThanOrEqual(4);
+    for (const point of points) expect(Math.abs(offCurve(point.x, point.y))).toBeLessThan(1e-4);
+    const xs = points.map((point) => point.x);
+    expect(Math.max(...xs) - Math.min(...xs)).toBeGreaterThan(span);
+  });
+
+  it('draws nothing where a square only comes near zero', () => {
+    const result = sampleGraphExpression(
+      expression('(x-y)^2+0.0001=0'),
+      { xMin: -10, xMax: 10, yMin: -6, yMax: 6 },
+      {},
+      543,
+      347,
+    );
+    expect(result.segments).toEqual([]);
+  });
+
+  it.each([
+    ['sqrt(1-x^2)', -1, 1],
+    ['y=x^2{x>0.5}', 0.5, 1.7],
+  ])('runs %s right up to the ends of its domain', (source, start, end) => {
+    const view = { xMin: -1.37, xMax: 1.7, yMin: -2, yMax: 2 };
+    const result = sampleGraphExpression(expression(source), view, {}, 97);
+    expect(result.segments).toHaveLength(1);
+    expect(result.segments[0]![0]!.x).toBeCloseTo(start, 9);
+    expect(result.segments[0]!.at(-1)!.x).toBeCloseTo(end, 9);
+  });
+
+  it('follows log(x) down off the plot instead of stopping at a sample', () => {
+    const view = { xMin: -1, xMax: 3, yMin: -4, yMax: 4 };
+    const result = sampleGraphExpression(expression('ln(x)'), view, {}, 101);
+    expect(result.segments[0]![0]!.y).toBeLessThan(view.yMin);
+  });
+
+  it.each([
+    ['y<x', 2, true],
+    ['y>=x', 2, false],
+    ['x^2+y^2<1', Math.PI, true],
+    ['y<=x^2{x>0}', 1 + 1 / 3, false],
+  ])('shades the region of %s', (source, expectedArea, strict) => {
+    const view = { xMin: -1, xMax: 1, yMin: -1, yMax: 1 };
+    const result = sampleGraphExpression(expression(source), view, {}, 543, 543);
+    expect(result.strict).toBe(strict);
+    const fill = result.fill!;
+    let area = 0;
+    for (let i = 0; i < fill.length; i += 4) {
+      area += (fill[i + 2]! - fill[i]!) * (fill[i + 3]! - fill[i + 1]!);
+    }
+    expect(Math.abs(area - expectedArea) / expectedArea).toBeLessThan(0.01);
+    expect(result.segments.length).toBeGreaterThan(0);
+  });
+
   it('clamps runaway values instead of emitting unbounded coordinates', () => {
     const view = { xMin: -1, xMax: 1, yMin: -5, yMax: 5 };
     const result = sampleGraphExpression(expression('1/x'), view, {}, 101);
@@ -624,6 +706,112 @@ describe('expanded function library', () => {
   it('reserves new function names so they must be called', () => {
     const parsed = parseGraphExpression('sec');
     expect(parsed.ok).toBe(false);
+  });
+});
+
+describe('typed math the field writes', () => {
+  const fn = (source: string, definitions?: ReturnType<typeof createGraphFunctionDefinitions>) => {
+    const parsed = parseGraphExpression(source, definitions);
+    if (!parsed.ok) throw new Error(parsed.message);
+    if (isCoordinateExpression(parsed)) throw new Error('Expected a function');
+    return parsed;
+  };
+
+  it.each([
+    ['y=mod(x,3)', -1, 2],
+    ['y=log _2(x)', 8, 3],
+    ['y=log _(10) x', 1000, 3],
+    ['y=log _2(x)^2', 8, 9],
+  ])('evaluates %s at %d', (source, x, y) => {
+    expect(fn(source).evaluate(x, {})).toBeCloseTo(y, 9);
+  });
+
+  it.each(['r=1+cos theta', 'r=1+cos(θ)'])('draws the polar %s', (source) => {
+    const parsed = parseGraphExpression(source);
+    expect(parsed.ok && parsed.kind).toBe('parametric');
+    if (!parsed.ok || parsed.kind !== 'parametric') return;
+    expect(parsed.polar).toBe(true);
+    expect(parsed.variables).toEqual([]);
+    const at = parsed.createEvaluator({});
+    expect(at(0).x).toBeCloseTo(2);
+    expect(at(Math.PI / 2).y).toBeCloseTo(1);
+  });
+
+  it('reads a constant radius as a circle', () => {
+    const parsed = parseGraphExpression('r=2');
+    if (!parsed.ok || parsed.kind !== 'parametric') throw new Error('not polar');
+    expect(parsed.createEvaluator({})(Math.PI).x).toBeCloseTo(-2);
+  });
+
+  it.each([
+    ['y=x^2{x>0}', [[-1, NaN], [2, 4]]],
+    ['y=x^2\\{0<x<2\\}', [[1, 1], [3, NaN], [-1, NaN]]],
+    ['y=x{y>1}', [[0, NaN], [2, 2]]],
+    ['y=x{x>0}{x<=1}', [[0.5, 0.5], [1, 1], [1.5, NaN]]],
+  ] as const)('restricts %s', (source, cases) => {
+    const parsed = fn(source);
+    for (const [x, y] of cases) {
+      if (Number.isNaN(y)) expect(parsed.evaluate(x, {})).toBeNaN();
+      else expect(parsed.evaluate(x, {})).toBeCloseTo(y);
+    }
+  });
+
+  it('restricts an implicit curve and finds sliders in the restriction', () => {
+    const parsed = fn('x^2+y^2=4{y>a}');
+    expect(parsed.variables).toEqual(['a']);
+    const a = { a: { ...DEFAULT_GRAPH_PARAMETER, value: 0 } };
+    expect(parsed.evaluate(0, a, -2)).toBeNaN();
+    expect(parsed.evaluate(0, a, 2)).toBe(0);
+  });
+
+  it.each([
+    ['y<x^2', 'explicit', '<'],
+    ['x^2>y', 'explicit', '<'],
+    ['y<=x^2', 'explicit', '<='],
+    ['y≥x', 'explicit', '>='],
+    ['x^2+y^2<4', 'implicit', '<'],
+    ['x>2', 'implicit', '>'],
+  ])('reads the inequality %s', (source, kind, op) => {
+    const parsed = fn(source);
+    expect(parsed.kind).toBe(kind);
+    expect(parsed.inequality).toBe(op);
+  });
+
+  it.each([
+    ['1<y<x', 'Use one inequality sign, or a restriction like {0 < x < 2}'],
+    ['y=sin()', 'Put a value inside sin( )'],
+    ['y=x+', 'The expression is unfinished'],
+    ['y=(x+1', 'A bracket is never closed'],
+    ['y=x{x}', 'A restriction needs a comparison, like {x > 0}'],
+  ])('explains %s', (source, message) => {
+    const parsed = parseGraphExpression(source);
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.message).toBe(message);
+  });
+
+  it.each([
+    ["f'(x)", 12],
+    ['f^′(x)', 12],
+    ['f^(′′)(x)', 12],
+    ["y=f'(x)+1", 13],
+  ])('differentiates %s', (source, expected) => {
+    const definitions = createGraphFunctionDefinitions([
+      expression('f(x)=x^3'),
+      expression(source),
+    ]);
+    expect(fn(source, definitions).evaluate(2, {})).toBeCloseTo(expected, 4);
+  });
+
+  it('finds the sliders a derivative depends on', () => {
+    const definitions = createGraphFunctionDefinitions([
+      expression('f(x)=a*x^2'),
+      expression("f'(x)"),
+    ]);
+    const parsed = fn("f'(x)", definitions);
+    expect(parsed.variables).toEqual(['a']);
+    expect(
+      parsed.evaluate(3, { a: { ...DEFAULT_GRAPH_PARAMETER, value: 2 } }),
+    ).toBeCloseTo(12, 4);
   });
 });
 

@@ -9,6 +9,7 @@ import {
   EMPTY_GRAPH_FUNCTIONS,
   isCoordinateExpression,
   parseGraphExpression,
+  satisfies,
   type GraphFunctionDefinitions,
   type ParsedGraphCoordinate,
   type ParsedGraphExpression,
@@ -21,6 +22,10 @@ export interface GraphSampleResult {
   segments: { x: number; y: number }[][];
   /** Plotted dots — a coordinate expression resolves to one of these. */
   points?: { x: number; y: number }[];
+  /** An inequality's region: rectangles `x0, y0, x1, y1, …` in graph units. */
+  fill?: number[];
+  /** A strict inequality, whose boundary isn't part of its region. */
+  strict?: boolean;
 }
 
 type ContourPoint = { x: number; y: number };
@@ -72,25 +77,33 @@ function interpolateZero(
   if (valueA === 0) return { x: aX, y: aY };
   if (valueB === 0) return { x: bX, y: bY };
   const tolerance = Math.min(Math.abs(valueA), Math.abs(valueB)) * 1e-6;
+  // False position with the Illinois tweak: halve the end that keeps getting
+  // chosen, so a curving relation still converges in a handful of steps where
+  // plain bisection took 20–30. Linear ones land on the first probe. Values
+  // are scaled to keep huge ones from overflowing the interpolation.
+  const scale = Math.max(Math.abs(valueA), Math.abs(valueB));
   let lo = 0;
   let hi = 1;
-  let loValue = valueA;
-  // Linear relations usually converge on the first probe. Nonlinear ones use
-  // bisection, and must reduce the residual relative to both original ends.
-  const scale = Math.max(Math.abs(valueA), Math.abs(valueB));
-  let t = valueA / scale / (valueA / scale - valueB / scale);
-  for (let i = 0; i < 32; i += 1) {
+  let loValue = valueA / scale;
+  let hiValue = valueB / scale;
+  let kept = 0;
+  for (let i = 0; i < 40; i += 1) {
+    const t = (lo * hiValue - hi * loValue) / (hiValue - loValue);
     const point = { x: aX + (bX - aX) * t, y: aY + (bY - aY) * t };
     const value = evaluate(point.x, point.y);
     if (!Number.isFinite(value)) return null;
     if (Math.abs(value) <= tolerance) return point;
     if (loValue < 0 === value < 0) {
       lo = t;
-      loValue = value;
+      loValue = value / scale;
+      if (kept === 1) hiValue /= 2;
+      kept = 1;
     } else {
       hi = t;
+      hiValue = value / scale;
+      if (kept === -1) loValue /= 2;
+      kept = -1;
     }
-    t = (lo + hi) / 2;
   }
   return null;
 }
@@ -151,6 +164,173 @@ function stitchContourLines(
   return paths;
 }
 
+/** Finest-grid cells per side of the blocks the contour pass starts from. */
+const CONTOUR_BLOCK = 8;
+
+/**
+ * Whether a block whose grid points read these values could hold part
+ * of the curve. A sign change (or a value it can't read) certainly might.
+ * Otherwise a zero inside would have to lie closer than the block's own spread
+ * of values suggests the function travels — far from zero relative to that
+ * spread, the block is skipped whole.
+ */
+function blockMightCross(values: readonly number[]): boolean {
+  let min = Number.POSITIVE_INFINITY;
+  let max = Number.NEGATIVE_INFINITY;
+  for (const value of values) {
+    if (!Number.isFinite(value)) return true;
+    if (value < min) min = value;
+    if (value > max) max = value;
+  }
+  if (min <= 0 && max >= 0) return true;
+  return Math.min(Math.abs(min), Math.abs(max)) <= max - min;
+}
+
+/**
+ * How far a parabola's vertex may stay from zero, relative to the sample, to
+ * be worth a search. An ordinary minimum sits near 1; a touch is 0 for an
+ * exact square, but `(x^2 + y^2 - 4)^2` is quartic along a grid line and its
+ * fit lands around 0.3.
+ */
+const TOUCH_VERTEX_RATIO = 0.5;
+
+/**
+ * Where f touches zero without changing sign between the grid points either
+ * side of `v` (at s = -1 and 1), or null. These are the curves marching
+ * squares cannot see — `(x - y)^2 = 0` never goes negative.
+ */
+function touchBetween(
+  a: number,
+  v: number,
+  b: number,
+  line: (s: number) => number,
+): number | null {
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+  // A sign change is the contour's to draw.
+  if (a < 0 !== v < 0 || b < 0 !== v < 0) return null;
+  // `<` on one side only, so a flat minimum is claimed by one grid point.
+  if (!(Math.abs(v) <= Math.abs(a) && Math.abs(v) < Math.abs(b))) return null;
+  // Only a likely touch is worth the search below: a parabola through the
+  // three points whose vertex reaches (or passes) zero, where an ordinary
+  // minimum keeps it near v — or, when the zero sits almost on this grid point
+  // and the fit can't move, a value far below both neighbours'.
+  const curvature = (a + b) / 2 - v;
+  const slope = (b - a) / 2;
+  if (curvature === 0) return null;
+  const vertex = v - (slope * slope) / (4 * curvature);
+  const deep = Math.abs(v) <= 0.25 * Math.min(Math.abs(a), Math.abs(b));
+  if (vertex / v > TOUCH_VERTEX_RATIO && !deep) return null;
+
+  // Golden-section search for the minimum of |f| along the line.
+  const ratio = (Math.sqrt(5) - 1) / 2;
+  let lo = -1;
+  let hi = 1;
+  let p = hi - ratio * (hi - lo);
+  let q = lo + ratio * (hi - lo);
+  let fp = Math.abs(line(p));
+  let fq = Math.abs(line(q));
+  for (let i = 0; i < 50; i += 1) {
+    if (!Number.isFinite(fp) || !Number.isFinite(fq)) return null;
+    if (fp < fq) {
+      hi = q;
+      q = p;
+      fq = fp;
+      p = hi - ratio * (hi - lo);
+      fp = Math.abs(line(p));
+    } else {
+      lo = p;
+      p = q;
+      fp = fq;
+      q = lo + ratio * (hi - lo);
+      fq = Math.abs(line(q));
+    }
+  }
+  const s = fp < fq ? p : q;
+  return Math.min(fp, fq) <= Math.max(Math.abs(a), Math.abs(b)) * 1e-6 ? s : null;
+}
+
+/**
+ * Join scattered points along a curve into paths, nearest neighbour first,
+ * growing each path both ways from where it starts. Distances are in grid
+ * cells, and a gap over 1.6 of them starts a new path.
+ */
+function chainPoints(
+  points: readonly ContourPoint[],
+  xStep: number,
+  yStep: number,
+): ContourPoint[][] {
+  const buckets = new Map<string, number[]>();
+  const cellOf = (point: ContourPoint) => [
+    Math.floor(point.x / xStep),
+    Math.floor(point.y / yStep),
+  ];
+  points.forEach((point, index) => {
+    const key = cellOf(point).join(':');
+    const bucket = buckets.get(key);
+    if (bucket) bucket.push(index);
+    else buckets.set(key, [index]);
+  });
+
+  const used = new Uint8Array(points.length);
+  const nearest = (from: ContourPoint): number => {
+    const [cx, cy] = cellOf(from) as [number, number];
+    let best = -1;
+    let bestDistance = 1.6 * 1.6;
+    for (let dx = -2; dx <= 2; dx += 1) {
+      for (let dy = -2; dy <= 2; dy += 1) {
+        for (const index of buckets.get(`${cx + dx}:${cy + dy}`) ?? []) {
+          if (used[index]) continue;
+          const point = points[index]!;
+          const distance =
+            ((point.x - from.x) / xStep) ** 2 + ((point.y - from.y) / yStep) ** 2;
+          if (distance < bestDistance) {
+            bestDistance = distance;
+            best = index;
+          }
+        }
+      }
+    }
+    return best;
+  };
+  const grow = (from: ContourPoint, path: ContourPoint[]) => {
+    for (let next = nearest(from); next >= 0; next = nearest(from)) {
+      used[next] = 1;
+      from = points[next]!;
+      path.push(from);
+    }
+  };
+
+  const paths: ContourPoint[][] = [];
+  points.forEach((point, index) => {
+    if (used[index]) return;
+    used[index] = 1;
+    const forward = [point];
+    grow(point, forward);
+    const backward: ContourPoint[] = [];
+    grow(point, backward);
+    // A lone point is a curve that only touches zero at one place; skip it.
+    if (forward.length + backward.length > 1) {
+      const path = [...backward.reverse(), ...forward];
+      // A loop's two ends meet again: close it.
+      const first = path[0]!;
+      const last = path[path.length - 1]!;
+      const gap = ((last.x - first.x) / xStep) ** 2 + ((last.y - first.y) / yStep) ** 2;
+      if (path.length > 2 && gap < 1.6 * 1.6) path.push(first);
+      paths.push(path);
+    }
+  });
+  return paths;
+}
+
+/**
+ * Marching squares over a grid that is only filled in where the curve may be.
+ *
+ * The plot is cut into blocks of {@link CONTOUR_BLOCK} cells; a block that
+ * {@link blockMightCross} clears is skipped, the rest are quartered down to
+ * single cells. Most of a typical plot is far from its curve, so this reads a
+ * fraction of the grid a full pass would — and what it does read is cached,
+ * since neighbouring blocks and cells share corners.
+ */
 function sampleImplicitGraphExpression(
   parsed: ParsedGraphFunction,
   viewport: GraphViewport,
@@ -160,36 +340,50 @@ function sampleImplicitGraphExpression(
 ): GraphSampleResult {
   const columns = Math.max(
     32,
-    Math.min(320, Math.round(horizontalSamples * 0.55)),
+    Math.min(1024, Math.round(horizontalSamples * 0.55)),
   );
-  const rows = Math.max(32, Math.min(240, Math.round(verticalSamples * 0.55)));
+  const rows = Math.max(32, Math.min(768, Math.round(verticalSamples * 0.55)));
   const xStep = (viewport.xMax - viewport.xMin) / columns;
   const yStep = (viewport.yMax - viewport.yMin) / rows;
+  const xAt = (column: number) => viewport.xMin + column * xStep;
+  const yAt = (row: number) => viewport.yMin + row * yStep;
   const stride = columns + 1;
   // One flat Float64Array rather than a row-per-array grid: the contour pass
   // reads it ~120k times and the nested arrays cost a bounds-checked pointer
   // chase (plus `rows` allocations) for every one of them.
   const values = new Float64Array(stride * (rows + 1));
+  const known = new Uint8Array(values.length);
   const evaluate = parsed.createEvaluator(parameters);
-
-  for (let row = 0; row <= rows; row += 1) {
-    const y = viewport.yMin + row * yStep;
-    const offset = row * stride;
-    for (let column = 0; column <= columns; column += 1) {
-      values[offset + column] = evaluate(viewport.xMin + column * xStep, y);
+  const at = (column: number, row: number): number => {
+    const index = row * stride + column;
+    if (!known[index]) {
+      known[index] = 1;
+      values[index] = evaluate(xAt(column), yAt(row));
     }
-  }
+    return values[index]!;
+  };
 
   const lines: ContourLine[] = [];
+  const touches: ContourPoint[] = [];
   // Reused across cells; `interpolateZero` reads them and returns fresh points.
   const cornerX = [0, 0, 0, 0];
   const cornerY = [0, 0, 0, 0];
   const cornerValue = [0, 0, 0, 0];
 
+  // Each edge is shared by two cells; solve it once. Keyed by its first grid
+  // point, doubled, plus one for the vertical edge from it.
+  const edgePoints = new Map<number, ContourPoint | null>();
+  let cellColumn = 0;
+  let cellRow = 0;
   const edgePoint = (edge: number): ContourPoint | null => {
+    const key =
+      ((cellRow + (edge === 2 ? 1 : 0)) * stride + cellColumn + (edge === 1 ? 1 : 0)) * 2 +
+      (edge % 2);
+    const known = edgePoints.get(key);
+    if (known !== undefined) return known;
     const a = CONTOUR_EDGE_CORNERS[edge * 2]!;
     const b = CONTOUR_EDGE_CORNERS[edge * 2 + 1]!;
-    return interpolateZero(
+    const point = interpolateZero(
       cornerX[a]!,
       cornerY[a]!,
       cornerX[b]!,
@@ -198,65 +392,140 @@ function sampleImplicitGraphExpression(
       cornerValue[b]!,
       evaluate,
     );
+    edgePoints.set(key, point);
+    return point;
   };
 
-  for (let row = 0; row < rows; row += 1) {
-    const y0 = viewport.yMin + row * yStep;
-    const y1 = y0 + yStep;
-    const bottom = row * stride;
-    const top = bottom + stride;
-    for (let column = 0; column < columns; column += 1) {
-      const v0 = values[bottom + column]!;
-      const v1 = values[bottom + column + 1]!;
-      const v2 = values[top + column + 1]!;
-      const v3 = values[top + column]!;
-      if (
-        !Number.isFinite(v0) ||
-        !Number.isFinite(v1) ||
-        !Number.isFinite(v2) ||
-        !Number.isFinite(v3)
-      ) {
-        continue;
-      }
+  /** A double root through the cell's bottom-left grid point, along x and y. */
+  const findTouches = (column: number, row: number) => {
+    const v = at(column, row);
+    const x = xAt(column);
+    const y = yAt(row);
+    if (v === 0) {
+      touches.push({ x, y });
+      return;
+    }
+    if (column > 0) {
+      const s = touchBetween(at(column - 1, row), v, at(column + 1, row), (s) =>
+        evaluate(x + s * xStep, y),
+      );
+      if (s !== null) touches.push({ x: x + s * xStep, y });
+    }
+    if (row > 0) {
+      const s = touchBetween(at(column, row - 1), v, at(column, row + 1), (s) =>
+        evaluate(x, y + s * yStep),
+      );
+      if (s !== null) touches.push({ x, y: y + s * yStep });
+    }
+  };
 
-      const cellCase =
-        (v0 >= 0 ? 1 : 0) |
-        (v1 >= 0 ? 2 : 0) |
-        (v2 >= 0 ? 4 : 0) |
-        (v3 >= 0 ? 8 : 0);
-      if (cellCase === 0 || cellCase === 15) continue;
+  const cell = (column: number, row: number) => {
+    const v0 = at(column, row);
+    const v1 = at(column + 1, row);
+    const v2 = at(column + 1, row + 1);
+    const v3 = at(column, row + 1);
+    if (
+      !Number.isFinite(v0) ||
+      !Number.isFinite(v1) ||
+      !Number.isFinite(v2) ||
+      !Number.isFinite(v3)
+    ) {
+      return;
+    }
 
-      const x0 = viewport.xMin + column * xStep;
-      const x1 = x0 + xStep;
-      cornerX[0] = x0;
-      cornerY[0] = y0;
-      cornerX[1] = x1;
-      cornerY[1] = y0;
-      cornerX[2] = x1;
-      cornerY[2] = y1;
-      cornerX[3] = x0;
-      cornerY[3] = y1;
-      cornerValue[0] = v0;
-      cornerValue[1] = v1;
-      cornerValue[2] = v2;
-      cornerValue[3] = v3;
+    const cellCase =
+      (v0 >= 0 ? 1 : 0) |
+      (v1 >= 0 ? 2 : 0) |
+      (v2 >= 0 ? 4 : 0) |
+      (v3 >= 0 ? 8 : 0);
+    if (cellCase === 0 || cellCase === 15) {
+      findTouches(column, row);
+      return;
+    }
 
-      let edges = CONTOUR_EDGES[cellCase]!;
-      if (cellCase === 5 || cellCase === 10) {
-        // Saddle: the center sign decides which way the two branches connect.
-        const centerPositive = (v0 + v1 + v2 + v3) / 4 >= 0;
-        const connected = cellCase === 5 ? centerPositive : !centerPositive;
-        edges = connected ? SADDLE_CONNECTED : SADDLE_CROSSED;
-      }
-      for (let i = 0; i < edges.length; i += 2) {
-        const a = edgePoint(edges[i]!);
-        const b = edgePoint(edges[i + 1]!);
-        if (a && b) lines.push({ a, b });
-      }
+    // From the column and row indices on both sides, so a neighbour's shared
+    // edge lands on the same coordinates bit for bit.
+    const x0 = xAt(column);
+    const x1 = xAt(column + 1);
+    const y0 = yAt(row);
+    const y1 = yAt(row + 1);
+    cornerX[0] = x0;
+    cornerY[0] = y0;
+    cornerX[1] = x1;
+    cornerY[1] = y0;
+    cornerX[2] = x1;
+    cornerY[2] = y1;
+    cornerX[3] = x0;
+    cornerY[3] = y1;
+    cornerValue[0] = v0;
+    cornerValue[1] = v1;
+    cornerValue[2] = v2;
+    cornerValue[3] = v3;
+
+    cellColumn = column;
+    cellRow = row;
+    let edges = CONTOUR_EDGES[cellCase]!;
+    if (cellCase === 5 || cellCase === 10) {
+      // Saddle: the sign at the center decides which way the two branches
+      // connect. Read it rather than averaging the corners, which guesses
+      // wrong whenever the function bends inside the cell.
+      const center = evaluate((x0 + x1) / 2, (y0 + y1) / 2);
+      const centerPositive =
+        (Number.isFinite(center) ? center : (v0 + v1 + v2 + v3) / 4) >= 0;
+      const connected = cellCase === 5 ? centerPositive : !centerPositive;
+      edges = connected ? SADDLE_CONNECTED : SADDLE_CROSSED;
+    }
+    for (let i = 0; i < edges.length; i += 2) {
+      const a = edgePoint(edges[i]!);
+      const b = edgePoint(edges[i + 1]!);
+      if (a && b) lines.push({ a, b });
+    }
+  };
+
+  const visit = (column: number, row: number, size: number) => {
+    if (column >= columns || row >= rows) return;
+    if (size === 1) {
+      cell(column, row);
+      return;
+    }
+    const half = size / 2;
+    const right = Math.min(column + size, columns);
+    const top = Math.min(row + size, rows);
+    const middle = Math.min(column + half, columns);
+    const centre = Math.min(row + half, rows);
+    // Corners, edge midpoints and centre: the quarters' corners, so a block
+    // that does split has already read what its children start from.
+    const mightCross = blockMightCross([
+      at(column, row),
+      at(middle, row),
+      at(right, row),
+      at(column, centre),
+      at(middle, centre),
+      at(right, centre),
+      at(column, top),
+      at(middle, top),
+      at(right, top),
+    ]);
+    if (!mightCross) return;
+    visit(column, row, half);
+    visit(column + half, row, half);
+    visit(column, row + half, half);
+    visit(column + half, row + half, half);
+  };
+
+  for (let row = 0; row < rows; row += CONTOUR_BLOCK) {
+    for (let column = 0; column < columns; column += CONTOUR_BLOCK) {
+      visit(column, row, CONTOUR_BLOCK);
     }
   }
 
-  return { ok: true, segments: stitchContourLines(lines, xStep, yStep) };
+  return {
+    ok: true,
+    segments: [
+      ...stitchContourLines(lines, xStep, yStep),
+      ...chainPoints(touches, xStep, yStep),
+    ],
+  };
 }
 
 /**
@@ -371,6 +640,29 @@ function sampleExplicitGraphExpression(
     refine(xMid, yMid, x1, y1, depth + 1);
   };
 
+  /**
+   * The last point before f stops being defined, between a sample where it is
+   * and one where it isn't. Without it `sqrt(1 - x^2)` stops short of the axis
+   * and a restricted curve short of its restriction, by up to a sample.
+   */
+  const domainEdge = (definedX: number, undefinedX: number) => {
+    let a = definedX;
+    let b = undefinedX;
+    let edge: { x: number; y: number } | null = null;
+    for (let i = 0; i < 40; i += 1) {
+      const mid = (a + b) / 2;
+      if (mid === a || mid === b) break;
+      const value = f(mid);
+      if (Number.isFinite(value)) {
+        a = mid;
+        edge = { x: mid, y: value };
+      } else {
+        b = mid;
+      }
+    }
+    return edge;
+  };
+
   let previousX = Number.NaN;
   let previousY = Number.NaN;
 
@@ -378,8 +670,16 @@ function sampleExplicitGraphExpression(
     const x = viewport.xMin + (xRange * i) / samples;
     const y = f(x);
 
-    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    if (!Number.isFinite(y)) {
+      if (Number.isFinite(previousY)) {
+        const edge = domainEdge(previousX, x);
+        if (edge) {
+          refine(previousX, previousY, edge.x, edge.y, 0);
+          push(edge.x, edge.y);
+        }
+      }
       flush();
+      previousX = x;
       previousY = Number.NaN;
       continue;
     }
@@ -394,6 +694,11 @@ function sampleExplicitGraphExpression(
         ? findJump(f, previousX, previousY, x, y, flatness)
         : null;
     if (!Number.isFinite(previousY)) {
+      const edge = i > 0 ? domainEdge(x, previousX) : null;
+      if (edge) {
+        push(edge.x, edge.y);
+        refine(edge.x, edge.y, x, y, 0);
+      }
       push(x, y);
     } else if (jump) {
       if (jump.x0 > previousX) push(jump.x0, jump.y0);
@@ -508,6 +813,98 @@ function sampleCoordinateExpression(
   return { ok: true, segments };
 }
 
+/** Bisection steps placing a region's edge within a band: 1/4096 of a column. */
+const REGION_EDGE_STEPS = 12;
+
+/**
+ * Where an inequality holds, as one rectangle per run of each horizontal band.
+ * A run's ends are bisected onto the boundary, so the only stepping is the
+ * band height (about 2px), and the boundary curve is drawn over that.
+ */
+function sampleRegion(
+  inside: (x: number, y: number) => boolean,
+  viewport: GraphViewport,
+  columns: number,
+  bands: number,
+): number[] {
+  const rects: number[] = [];
+  const xStep = (viewport.xMax - viewport.xMin) / columns;
+  const yStep = (viewport.yMax - viewport.yMin) / bands;
+  const boundary = (y: number, a: number, b: number, aInside: boolean) => {
+    for (let i = 0; i < REGION_EDGE_STEPS; i += 1) {
+      const mid = (a + b) / 2;
+      if (inside(mid, y) === aInside) a = mid;
+      else b = mid;
+    }
+    return (a + b) / 2;
+  };
+  for (let band = 0; band < bands; band += 1) {
+    const y0 = viewport.yMin + band * yStep;
+    const y1 = viewport.yMin + (band + 1) * yStep;
+    const y = (y0 + y1) / 2;
+    let start: number | null = null;
+    let previousX = viewport.xMin;
+    let previousInside = false;
+    for (let column = 0; column <= columns; column += 1) {
+      const x = viewport.xMin + column * xStep;
+      const isInside = inside(x, y);
+      if (column === 0) {
+        if (isInside) start = x;
+      } else if (isInside !== previousInside) {
+        const edge = boundary(y, previousX, x, previousInside);
+        if (isInside) {
+          start = edge;
+        } else {
+          rects.push(start!, y0, edge, y1);
+          start = null;
+        }
+      }
+      previousX = x;
+      previousInside = isInside;
+    }
+    if (start !== null) rects.push(start, y0, viewport.xMax, y1);
+  }
+  return rects;
+}
+
+/** A boundary sampled as usual, with the region its inequality covers. */
+function sampleInequality(
+  parsed: ParsedGraphFunction,
+  boundary: GraphSampleResult,
+  options: GraphSampleOptions,
+  samples: number,
+  verticalSamples: number,
+): GraphSampleResult {
+  const op = parsed.inequality!;
+  const f = parsed.createEvaluator(options.parameters);
+  let inside: (x: number, y: number) => boolean;
+  if (parsed.kind === 'implicit') {
+    inside = (x, y) => satisfies(f(x, y), op);
+  } else {
+    // `y < f(x)` is `y - f(x) < 0`. Every band reads the same columns, so f
+    // is evaluated once per x rather than once per band.
+    const column = new Map<number, number>();
+    inside = (x, y) => {
+      let value = column.get(x);
+      if (value === undefined) {
+        value = f(x);
+        column.set(x, value);
+      }
+      return satisfies(y - value, op);
+    };
+  }
+  return {
+    ...boundary,
+    fill: sampleRegion(
+      inside,
+      options.viewport,
+      Math.max(16, Math.round(samples / 2.8)),
+      Math.max(16, Math.round(verticalSamples / 2.8)),
+    ),
+    strict: op === '<' || op === '>',
+  };
+}
+
 export interface GraphSampleOptions {
   viewport: GraphViewport;
   parameters: Record<string, GraphParameter>;
@@ -549,20 +946,24 @@ export function sampleParsedGraphExpression(
       count,
     );
   }
-  if (parsed.kind === 'implicit') {
-    return sampleImplicitGraphExpression(
-      parsed,
-      viewport,
-      parameters,
-      count,
-      clampToRange(
-        Math.round(options.verticalSamples ?? options.samples),
-        MIN_SAMPLES,
-        MAX_SAMPLES,
-      ),
-    );
-  }
-  return sampleExplicitGraphExpression(parsed, viewport, parameters, count);
+  const verticalCount = clampToRange(
+    Math.round(options.verticalSamples ?? options.samples),
+    MIN_SAMPLES,
+    MAX_SAMPLES,
+  );
+  const boundary =
+    parsed.kind === 'implicit'
+      ? sampleImplicitGraphExpression(
+          parsed,
+          viewport,
+          parameters,
+          count,
+          verticalCount,
+        )
+      : sampleExplicitGraphExpression(parsed, viewport, parameters, count);
+  return parsed.inequality
+    ? sampleInequality(parsed, boundary, options, count, verticalCount)
+    : boundary;
 }
 
 /** Parse (cached) and sample one expression from a graph shape. */

@@ -77,7 +77,8 @@ describe('graph parser loading', () => {
     await math.ensureGraphMath();
 
     const definitions = parser.createGraphFunctionDefinitions(expressions);
-    expect(definitions.size).toBe(1);
+    // f, plus the f' and f'' that come with it.
+    expect(definitions.size).toBe(3);
     const parsed = asFunction(
       parser.parseGraphExpression('y = f(x) + 1', definitions),
     );

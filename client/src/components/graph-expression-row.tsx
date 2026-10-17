@@ -232,9 +232,12 @@ function CurveStyle({
 
 function DomainRow({
   domain,
+  variable,
   onChange,
 }: {
   domain: GraphParametricDomain;
+  /** `t`, or `θ` for a polar curve. */
+  variable: string;
   onChange: (domain: GraphParametricDomain) => void;
 }) {
   const [draft, setDraft] = useState({
@@ -264,7 +267,7 @@ function DomainRow({
       type="number"
       step="any"
       inputMode="decimal"
-      aria-label={`t ${bound === 'min' ? 'minimum' : 'maximum'}`}
+      aria-label={`${variable} ${bound === 'min' ? 'minimum' : 'maximum'}`}
       value={draft[bound]}
       onChange={(e) => setDraft((d) => ({ ...d, [bound]: e.target.value }))}
       onBlur={() => commit(bound)}
@@ -279,7 +282,7 @@ function DomainRow({
   return (
     <div className="flex items-center gap-1 pb-1.5 pl-10 text-xs text-fg-subtle">
       {field('min')}
-      <span className={cn(MATH_SYMBOL, 'text-xs text-fg-subtle')}>≤ t ≤</span>
+      <span className={cn(MATH_SYMBOL, 'text-xs text-fg-subtle')}>≤ {variable} ≤</span>
       {field('max')}
     </div>
   );
@@ -437,6 +440,7 @@ export function ExpressionRow({
       {parametric ? (
         <DomainRow
           domain={parametricDomain(expression.domain)}
+          variable={parsed.polar ? 'θ' : 't'}
           onChange={(domain) => onPatch({ domain })}
         />
       ) : null}

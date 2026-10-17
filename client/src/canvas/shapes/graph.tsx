@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react';
+import type { GraphViewport } from '@whiteboard/shared';
 import { formatAxisLabel, niceStep, tickValues } from '../grid';
 import {
   DEFAULT_GRAPH_CURVE_WIDTH,
@@ -17,6 +18,7 @@ import { breakUndoCapture, editor } from '../use-document-store';
 import { useSelectionStore } from '../use-selection-store';
 import { boxBounds, boxHitTest, rotationTransform } from './box-geometry';
 import { graphToScreen, panViewport, zoomViewport } from './graph-interaction';
+import { GraphTrace } from './graph-trace';
 import { createGraphViewportWriter } from './graph-viewport-writer';
 import { PaintedShadow, roundedRectPath } from './painted-shadow';
 import { polylineLength } from './perfect-dash';
@@ -57,6 +59,22 @@ function pathFromPoints(points: readonly { x: number; y: number }[]): string {
         `${index === 0 ? 'M' : 'L'}${point.x.toFixed(2)} ${point.y.toFixed(2)}`,
     )
     .join(' ');
+}
+
+/** An inequality's region rectangles (see `GraphSampleResult.fill`) as one path. */
+function regionPath(
+  fill: readonly number[],
+  viewport: GraphViewport,
+  area: { x: number; y: number; w: number; h: number },
+): string {
+  let d = '';
+  for (let i = 0; i < fill.length; i += 4) {
+    const topLeft = graphToScreen({ x: fill[i]!, y: fill[i + 3]! }, viewport, area);
+    const bottomRight = graphToScreen({ x: fill[i + 2]!, y: fill[i + 1]! }, viewport, area);
+    const left = topLeft.x.toFixed(2);
+    d += `M${left} ${topLeft.y.toFixed(2)}H${bottomRight.x.toFixed(2)}V${bottomRight.y.toFixed(2)}H${left}Z`;
+  }
+  return d;
 }
 
 function stepFor(range: number, size: number): number {
@@ -210,6 +228,16 @@ export const graphUtil: ShapeUtil<'graph'> = {
       functionDefinitions,
       mathReady,
     );
+    // Mapped once: the paths, their dash lengths and hover tracing all read it.
+    const drawn = curves.map(({ expression, result }) => ({
+      expression,
+      result,
+      screens: result.ok
+        ? result.segments.map((segment) =>
+            segment.map((point) => graphToScreen(point, viewport, area)),
+          )
+        : [],
+    }));
     const xLabelsBelow = clippedXAxis <= area.y + area.h - 18;
     const xLabelY = xLabelsBelow ? clippedXAxis + 13 : clippedXAxis - 7;
     const yLabelsRight = clippedYAxis <= area.x + area.w - 34;
@@ -375,16 +403,25 @@ export const graphUtil: ShapeUtil<'graph'> = {
             strokeWidth={1.25}
             vectorEffect="non-scaling-stroke"
           />
-          {curves.map(({ expression, result }) => {
+          {drawn.map(({ expression, result, screens }) => {
             if (!result.ok) return null;
             const width = expression.width ?? DEFAULT_GRAPH_CURVE_WIDTH;
+            // A strict inequality's boundary isn't in its region: dashed,
+            // unless the row already asks for a pattern of its own.
+            const dash =
+              result.strict && (expression.dash ?? 'solid') === 'solid'
+                ? 'dashed'
+                : expression.dash;
             return (
               <g key={expression.id}>
-                {result.segments.map((segment, index) => {
-                  // Mapped once: both the path and its dash length read it.
-                  const screen = segment.map((point) =>
-                    graphToScreen(point, viewport, area),
-                  );
+                {result.fill?.length ? (
+                  <path
+                    d={regionPath(result.fill, viewport, area)}
+                    fill={expression.color}
+                    fillOpacity={0.2}
+                  />
+                ) : null}
+                {screens.map((screen, index) => {
                   return (
                     <path
                       key={`${expression.id}-${index}`}
@@ -392,9 +429,9 @@ export const graphUtil: ShapeUtil<'graph'> = {
                       fill="none"
                       stroke={expression.color}
                       strokeWidth={width}
-                      strokeLinecap={strokeLineCap(expression.dash) ?? 'round'}
+                      strokeLinecap={strokeLineCap(dash) ?? 'round'}
                       strokeLinejoin="round"
-                      {...dashProps(expression.dash, width, polylineLength(screen))}
+                      {...dashProps(dash, width, polylineLength(screen))}
                       vectorEffect="non-scaling-stroke"
                     />
                   );
@@ -504,6 +541,15 @@ export const graphUtil: ShapeUtil<'graph'> = {
               0
             </text>
           ) : null}
+          <GraphTrace
+            target={groupRef}
+            curves={drawn.map(({ expression, screens }) => ({
+              color: expression.color,
+              screens,
+            }))}
+            viewport={viewport}
+            area={area}
+          />
         </g>
       </g>
     );

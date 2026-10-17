@@ -9,9 +9,10 @@
 import { ensureGraphMath } from './graph-math';
 import { createGraphFunctionDefinitions } from './graph-parser';
 import {
+  packGraphSample,
   sampleGraph,
   type GraphSampleInput,
-  type GraphSampleOutput,
+  type PackedGraphSampleOutput,
 } from './graph-sample-client';
 
 export interface GraphSampleRequest {
@@ -21,7 +22,7 @@ export interface GraphSampleRequest {
 
 export interface GraphSampleResponse {
   id: number;
-  output: GraphSampleOutput;
+  output: PackedGraphSampleOutput;
 }
 
 /** See `equation-typeset.worker.ts`: the app's `lib` types `self` as Window. */
@@ -30,7 +31,7 @@ interface WorkerScope {
     type: 'message',
     listener: (event: MessageEvent<GraphSampleRequest>) => void,
   ): void;
-  postMessage(message: GraphSampleResponse): void;
+  postMessage(message: GraphSampleResponse, transfer: Transferable[]): void;
 }
 
 const scope = self as unknown as WorkerScope;
@@ -40,10 +41,9 @@ scope.addEventListener('message', (event) => {
   // A failed parser load still answers: every curve then reads as unparsable,
   // which is what the main thread would have drawn too.
   void ensureGraphMath().catch(() => undefined).then(() => {
-    const output = sampleGraph(
-      input,
-      createGraphFunctionDefinitions(input.expressions),
+    const output = packGraphSample(
+      sampleGraph(input, createGraphFunctionDefinitions(input.expressions)),
     );
-    scope.postMessage({ id, output });
+    scope.postMessage({ id, output }, [output.coords.buffer]);
   });
 });

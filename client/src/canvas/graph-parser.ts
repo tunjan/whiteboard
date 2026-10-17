@@ -43,6 +43,7 @@ const FUNCTION_ALIASES = new Map([
   ['floor', 'floor'],
   ['ceil', 'ceil'],
   ['round', 'round'],
+  ['mod', 'mod'],
 ]);
 
 const UNARY = { min: 1, max: 1 } as const;
@@ -71,6 +72,7 @@ const FUNCTION_ARITY = new Map<string, { min: number; max: number }>([
   ['floor', UNARY],
   ['ceil', UNARY],
   ['round', UNARY],
+  ['mod', { min: 2, max: 2 }],
 ]);
 
 const BUILTIN_FUNCTION_NAMES = new Set([
@@ -123,11 +125,14 @@ type TokenType =
   | 'lparen'
   | 'rparen'
   | 'comma'
-  | 'equals';
+  | 'equals'
+  | 'compare';
 
 interface BasicToken {
   type: TokenType;
   value: string;
+  /** `log _2(x)`'s base, added as a second argument once the call is closed. */
+  base?: Token[];
 }
 
 /** A sum or an integral: an operator that binds a variable over a range. */
@@ -176,6 +181,22 @@ const MAX_SUM_TERMS = 200;
 /** The prefix of the generated names aggregates are called by. */
 const AGGREGATE_PREFIX = '_agg';
 
+/** `r = f(θ)` reads θ, typed as `theta` (or pasted as `θ`), as its angle. */
+const POLAR_VARIABLE = 'theta';
+
+/** Highest derivative `f''(x)` a user function gets. */
+const MAX_DERIVATIVE_ORDER = 2;
+
+/** The scope name `f'(x)` (`order` primes) is called by. */
+function derivativeName(name: string, order: number): string {
+  return `${name}__d${order}`;
+}
+
+/** A function token's name as the user wrote it: `f__d2` reads `f''`. */
+function displayFunctionName(name: string): string {
+  return name.replace(/__d(\d)$/, (_, order: string) => "'".repeat(Number(order)));
+}
+
 function isAggregateName(name: string): boolean {
   return name.startsWith(AGGREGATE_PREFIX);
 }
@@ -193,6 +214,11 @@ export interface ParsedGraphFunction {
   source: string;
   normalized: string;
   kind: 'explicit' | 'implicit';
+  /**
+   * Set on an inequality: the region where the relation compares to zero this
+   * way — `y - f(x)` for an explicit one, the equation's `left - right` else.
+   */
+  inequality?: GraphComparison;
   variables: string[];
   /** One-off evaluation. Loops should use {@link createEvaluator} instead. */
   evaluate: (
@@ -219,6 +245,8 @@ export interface ParsedGraphCoordinate {
   source: string;
   normalized: string;
   kind: 'point' | 'parametric';
+  /** Typed as `r = f(θ)`: the domain is θ's. */
+  polar?: boolean;
   variables: string[];
   evaluateAt: (
     t: number,
@@ -265,6 +293,9 @@ export interface GraphFunctionDefinition {
   /** Bound into the scope the body evaluates against. */
   aggregates?: readonly CompiledAggregate[];
   error?: string;
+  /** Set on `f'` and `f''`: differentiated numerically from `f`. */
+  derivativeOf?: string;
+  order?: number;
 }
 
 export type GraphFunctionDefinitions = ReadonlyMap<
@@ -651,6 +682,12 @@ function tokenize(
       continue;
     }
 
+    if (char === 'θ') {
+      tokens.push({ type: 'identifier', value: POLAR_VARIABLE });
+      i += 1;
+      continue;
+    }
+
     if (isNameStart(char)) {
       let end = i + 1;
       while (end < source.length && isNamePart(source[end]!)) end += 1;
@@ -669,6 +706,38 @@ function tokenize(
         );
         tokens.push(limits.token);
         i = limits.next;
+        continue;
+      }
+
+      // `log _2(x)`: MathLive writes a base as a subscript.
+      if (functionName === 'log' && nextNonSpace === '_') {
+        const base = readAggregateBound(source, source.indexOf('_', end) + 1);
+        if (!base) throw new Error('Write a log base like log_2(x)');
+        tokens.push({
+          type: 'function',
+          value: 'log',
+          base: tokenize(base.text, userFunctions, names),
+        });
+        i = base.next;
+        continue;
+      }
+
+      // `f'(x)`, which MathLive writes `f^′(x)` (and `f^(′′)(x)` twice over).
+      const primes = userFunctions.has(rawName)
+        ? source
+            .slice(end)
+            .match(/^\s*(?:\^\s*\(\s*([′']+)\s*\)|\^\s*([′']+)|([′']+))/)
+        : null;
+      if (primes) {
+        const derived = derivativeName(
+          rawName,
+          (primes[1] ?? primes[2] ?? primes[3])!.length,
+        );
+        if (!userFunctions.has(derived)) {
+          throw new Error('Only first and second derivatives can be drawn');
+        }
+        tokens.push({ type: 'function', value: derived });
+        i = end + primes[0].length;
         continue;
       }
 
@@ -720,13 +789,54 @@ function tokenize(
     else if (char === '=') tokens.push({ type: 'equals', value: char });
     else if ('+-*/^%'.includes(char)) {
       tokens.push({ type: 'operator', value: char });
+    } else if ('<>≤≥'.includes(char)) {
+      const typedEquals = (char === '<' || char === '>') && source[i + 1] === '=';
+      const less = char === '<' || char === '≤';
+      const orEqual = typedEquals || char === '≤' || char === '≥';
+      tokens.push({
+        type: 'compare',
+        value: `${less ? '<' : '>'}${orEqual ? '=' : ''}`,
+      });
+      if (typedEquals) i += 1;
     } else {
       throw new Error(`Unexpected token "${char}"`);
     }
     i += 1;
   }
 
-  return applyBareCalls(captureAggregates(tokens, names));
+  tokens.forEach((token, index) => {
+    if (
+      token.type === 'function' &&
+      tokens[index + 1]?.type === 'lparen' &&
+      tokens[index + 2]?.type === 'rparen'
+    ) {
+      throw new Error(`Put a value inside ${displayFunctionName(token.value)}( )`);
+    }
+  });
+  return attachLogBases(applyBareCalls(captureAggregates(tokens, names)));
+}
+
+/** `log _2(x)` → `log(x, 2)`, now that every call has its parentheses. */
+function attachLogBases(tokens: Token[]): Token[] {
+  for (let index = tokens.length - 1; index >= 0; index -= 1) {
+    const token = tokens[index]!;
+    if (token.type === 'aggregate') {
+      attachLogBases(token.from);
+      attachLogBases(token.to);
+      attachLogBases(token.body);
+    }
+    if (token.type !== 'function' || !token.base) continue;
+    let depth = 0;
+    for (let close = index + 1; close < tokens.length; close += 1) {
+      const type = tokens[close]!.type;
+      if (type === 'lparen') depth += 1;
+      else if (type === 'rparen' && --depth === 0) {
+        tokens.splice(close, 0, { type: 'comma', value: ',' }, ...token.base);
+        break;
+      }
+    }
+  }
+  return tokens;
 }
 
 function normalizeTokens(tokens: readonly Token[]): string {
@@ -907,7 +1017,8 @@ function functionDefinitionSource(
   const match = source.match(
     /^\s*([A-Za-z][A-Za-z0-9_]*)\s*\(\s*([A-Za-z][A-Za-z0-9_]*)\s*\)\s*=\s*(.+?)\s*$/,
   );
-  if (!match) return null;
+  // `sin(x) = y` is an equation, not a redefinition of sin.
+  if (!match || BUILTIN_FUNCTION_NAMES.has(match[1]!.toLowerCase())) return null;
   return { name: match[1]!, argument: match[2]!, body: match[3]! };
 }
 
@@ -1059,7 +1170,7 @@ export function createGraphFunctionDefinitions(
   const cached = cacheGet(definitionsCache, signature);
   if (cached) return cached;
 
-  const userFunctions = new Set(sources.keys());
+  const userFunctions = withDerivatives(sources.keys());
   const definitions = new Map<string, GraphFunctionDefinition>();
   for (const source of sources.values()) {
     try {
@@ -1075,6 +1186,17 @@ export function createGraphFunctionDefinitions(
         directVariables: [],
         dependencies: [],
         error: error instanceof Error ? error.message : 'Invalid function',
+      });
+    }
+    for (let order = 1; order <= MAX_DERIVATIVE_ORDER; order += 1) {
+      definitions.set(derivativeName(source.name, order), {
+        name: derivativeName(source.name, order),
+        argument: source.argument,
+        normalizedBody: '',
+        directVariables: [],
+        dependencies: [source.name],
+        derivativeOf: source.name,
+        order,
       });
     }
   }
@@ -1095,7 +1217,7 @@ function addDefinitionVariables(
 ): void {
   const definition = definitions.get(name);
   if (!definition) throw new Error(`Function "${name}" is not defined`);
-  if (definition.error || !definition.evaluateRaw) {
+  if (definition.error || (!definition.evaluateRaw && !definition.derivativeOf)) {
     throw new Error(
       `Function "${name}" is invalid${definition.error ? `: ${definition.error}` : ''}`,
     );
@@ -1316,6 +1438,36 @@ function installAggregates(
 
 type BoundGraphFunctions = ReadonlyMap<string, (input: unknown) => number>;
 
+/** `names` plus the `f'` and `f''` every user function comes with. */
+function withDerivatives(names: Iterable<string>): Set<string> {
+  const all = new Set<string>();
+  for (const name of names) {
+    all.add(name);
+    for (let order = 1; order <= MAX_DERIVATIVE_ORDER; order += 1) {
+      all.add(derivativeName(name, order));
+    }
+  }
+  return all;
+}
+
+/**
+ * Central differences. The step balances truncation against rounding error:
+ * about eps^(1/3) of the scale for a first derivative, eps^(1/4) for a second.
+ */
+function differentiate(
+  f: (input: unknown) => number,
+  x: number,
+  order: number,
+): number {
+  const scale = Math.max(1, Math.abs(x));
+  if (order === 1) {
+    const h = 6e-6 * scale;
+    return (f(x + h) - f(x - h)) / (2 * h);
+  }
+  const h = 1e-4 * scale;
+  return (f(x + h) - 2 * f(x) + f(x - h)) / (h * h);
+}
+
 /** Set each slider variable and each user function into `scope`. */
 function fillScope(
   scope: EvaluationScope,
@@ -1350,6 +1502,15 @@ function bindGraphFunctions(
 ): BoundGraphFunctions {
   const bound = new Map<string, (input: unknown) => number>();
   for (const definition of definitions.values()) {
+    const { derivativeOf, order } = definition;
+    if (derivativeOf && order) {
+      bound.set(definition.name, (input) =>
+        typeof input === 'number'
+          ? differentiate(bound.get(derivativeOf)!, input, order)
+          : Number.NaN,
+      );
+      continue;
+    }
     const { evaluateRaw } = definition;
     if (!evaluateRaw || definition.error) {
       bound.set(definition.name, () => Number.NaN);
@@ -1548,6 +1709,200 @@ export function parseGraphExpression(
   );
 }
 
+/** mathjs reports positions in the rewritten text, which the user never sees. */
+function friendlyMessage(message: string): string {
+  const plain = message.replace(/\s*\(char \d+\)$/, '');
+  if (plain.startsWith('Unexpected end of expression')) {
+    return 'The expression is unfinished';
+  }
+  if (plain.startsWith('Parenthesis ) expected')) return 'A bracket is never closed';
+  if (plain.startsWith('Value expected')) return 'A value is missing';
+  const misplaced = plain.match(/^(?:Unexpected operator|Unexpected token) "?(.+?)"?$/);
+  if (misplaced) return `"${misplaced[1]}" is out of place`;
+  return plain;
+}
+
+export type GraphComparison = '<' | '<=' | '>' | '>=';
+
+/** Whether `value` compares to zero as `op` says. NaN satisfies nothing. */
+export function satisfies(value: number, op: GraphComparison): boolean {
+  if (op === '<') return value < 0;
+  if (op === '<=') return value <= 0;
+  if (op === '>') return value > 0;
+  return value >= 0;
+}
+
+const FLIPPED: Record<GraphComparison, GraphComparison> = {
+  '<': '>',
+  '<=': '>=',
+  '>': '<',
+  '>=': '<=',
+};
+
+/**
+ * Peel the `{x > 0}` restrictions off the end of an expression. MathLive
+ * writes `\{x>0\}` for braces typed as a pair, `{x>0}` otherwise.
+ */
+function splitRestrictions(source: string): {
+  body: string;
+  restrictions: string[];
+} {
+  const restrictions: string[] = [];
+  let body = source;
+  for (;;) {
+    const match = body.match(/\\?\{([^{}]*?)\\?\}\s*$/);
+    if (!match) return { body: body.trim(), restrictions };
+    restrictions.unshift(match[1]!);
+    body = body.slice(0, match.index);
+  }
+}
+
+function splitOnComparison(tokens: Token[]): {
+  sides: Token[][];
+  ops: GraphComparison[];
+} {
+  const sides: Token[][] = [[]];
+  const ops: GraphComparison[] = [];
+  for (const token of tokens) {
+    if (token.type === 'compare') {
+      ops.push(token.value as GraphComparison);
+      sides.push([]);
+    } else {
+      sides[sides.length - 1]!.push(token);
+    }
+  }
+  return { sides, ops };
+}
+
+/**
+ * `r = f(θ)` as the curve it traces, `(f(t) cos t, f(t) sin t)`, so it
+ * samples, takes a domain and finds its sliders like any parametric curve.
+ */
+function polarCoordinates(tokens: Token[]): [Token[], Token[]] | null {
+  const sides = splitOnEquals(tokens);
+  if (sides.length !== 2) return null;
+  const [left, right] = sides as [Token[], Token[]];
+  if (left.length !== 1 || left[0]!.type !== 'identifier' || left[0]!.value !== 'r') {
+    return null;
+  }
+  const inXY = right.some(
+    (token) =>
+      token.type === 'identifier' && (token.value === 'x' || token.value === 'y'),
+  );
+  if (inXY) return null;
+  const t: Token = { type: 'identifier', value: PARAMETRIC_VARIABLE };
+  const radius: Token[] = [
+    { type: 'lparen', value: '(' },
+    ...right.map((token) =>
+      token.type === 'identifier' && token.value === POLAR_VARIABLE ? t : token,
+    ),
+    { type: 'rparen', value: ')' },
+  ];
+  const angle = (fn: string): Token[] => [
+    { type: 'function', value: fn },
+    { type: 'lparen', value: '(' },
+    t,
+    { type: 'rparen', value: ')' },
+  ];
+  return [
+    [...radius, ...angle('cos')],
+    [...radius, ...angle('sin')],
+  ];
+}
+
+type RelationEvaluator = (
+  parameters: Record<string, GraphParameter>,
+) => (x: number, y: number) => number;
+
+/**
+ * Compile one scalar expression in x (and y, when `allowY`), adding the
+ * sliders it reads to `variables`. A self-contained expression runs in Rust;
+ * sums, integrals and user functions live in the mathjs scope.
+ */
+function compileRelation(
+  evaluationSource: string,
+  tokens: readonly Token[],
+  allowY: boolean,
+  definitions: GraphFunctionDefinitions,
+  variables: Set<string>,
+): RelationEvaluator {
+  const userFunctions = new Set(definitions.keys());
+  const names = new Set<string>();
+  const dependencies = new Set<string>();
+  const visit: SymbolVisitor = (node, parent) => {
+    validateStructureNode(node, userFunctions);
+    const calledFunction = functionNodeName(node);
+    if (calledFunction && userFunctions.has(calledFunction)) {
+      dependencies.add(calledFunction);
+    }
+    if (node.type !== 'SymbolNode') return;
+    const name = symbolName(node);
+    if (!name) throw new Error('Invalid symbol');
+    if (isAggregateName(name)) return;
+    if (name === 'x' || (allowY && name === 'y') || CONSTANTS.has(name)) return;
+    if (name === 'y') {
+      throw new Error('Use y in an equation, for example x^2 + y^2 = 1');
+    }
+    if (isFunctionSymbol(name, node, parent, userFunctions)) return;
+    if (!isVariableName(name)) {
+      throw new Error(`Variable "${name}" is not allowed`);
+    }
+    names.add(name);
+  };
+  const evaluateExpression = compileNormalized(evaluationSource, visit);
+  const aggregates = compileAggregates(tokens, visit);
+  for (const dependency of dependencies) {
+    addDefinitionVariables(dependency, definitions, names);
+  }
+  for (const name of names) variables.add(name);
+  const rust =
+    aggregates.length === 0 && dependencies.size === 0
+      ? graphWasmProgram(evaluationSource, [...names])
+      : null;
+  return (parameters) => {
+    const fast = rust?.bind(parameters);
+    if (fast) return fast;
+    const scope = createEvaluationScope({ x: 0, y: 0 }, parameters, names, definitions);
+    installAggregates(scope, aggregates);
+    return (x, y) => {
+      scope.set('x', x);
+      scope.set('y', y);
+      return evaluateExpression(scope);
+    };
+  };
+}
+
+/** `0 < x < 2` as the pair `0 - x < 0` and `x - 2 < 0`. */
+function compileRestriction(
+  text: string,
+  definitions: GraphFunctionDefinitions,
+  variables: Set<string>,
+): { evaluate: RelationEvaluator; op: GraphComparison }[] {
+  const { sides, ops } = splitOnComparison(
+    tokenize(text.trim(), new Set(definitions.keys())),
+  );
+  if (ops.length === 0) {
+    throw new Error('A restriction needs a comparison, like {x > 0}');
+  }
+  return ops.map((op, index) => {
+    const leftTokens = sides[index]!;
+    const rightTokens = sides[index + 1]!;
+    const left = normalizeTokens(leftTokens);
+    const right = normalizeTokens(rightTokens);
+    if (!left || !right) throw new Error('Enter both sides of the restriction');
+    return {
+      op,
+      evaluate: compileRelation(
+        `(${left})-(${right})`,
+        [...leftTokens, ...rightTokens],
+        true,
+        definitions,
+        variables,
+      ),
+    };
+  });
+}
+
 function parseGraphExpressionUncached(
   source: string,
   definitions: GraphFunctionDefinitions,
@@ -1560,92 +1915,115 @@ function parseGraphExpressionUncached(
     if (definition) {
       return parseFunctionDefinitionExpression(source, definition, definitions);
     }
-    const userFunctions = new Set(definitions.keys());
-    if (trimmed.startsWith('(')) {
-      const coordinate = splitCoordinate(tokenize(trimmed, userFunctions));
-      if (coordinate) {
-        return parseCoordinateExpression(source, coordinate, definitions);
+    const { body, restrictions } = splitRestrictions(trimmed);
+    if (!body) return { ok: false, source, message: 'Enter an expression' };
+    const tokens = tokenize(body, new Set(definitions.keys()));
+
+    const coordinate = body.startsWith('(') ? splitCoordinate(tokens) : null;
+    const polar = coordinate ? null : polarCoordinates(tokens);
+    if (coordinate || polar) {
+      if (restrictions.length > 0) {
+        throw new Error('Restrictions like {x > 0} work on curves in x and y');
       }
+      const parsed = parseCoordinateExpression(source, (coordinate ?? polar)!, definitions);
+      return polar ? { ...parsed, polar: true } : parsed;
     }
-    const { normalized, tokens } = normalizeGraphSides(
-      splitOnEquals(tokenize(trimmed, userFunctions)),
-    );
-    if (!normalized) return { ok: false, source, message: 'Enter an expression' };
-    const equationSides = normalized.split('=');
-    const kind = equationSides.length === 2 ? 'implicit' : 'explicit';
-    const left = equationSides[0]!;
-    const right = equationSides[1];
-    if (
-      kind === 'implicit' &&
-      /^[A-Za-z][A-Za-z0-9_]*$/.test(left) &&
-      left !== 'x' &&
-      left !== 'y'
-    ) {
-      throw new Error('Assignments are not allowed; use a relation in x and y');
-    }
-    const evaluationSource =
-      kind === 'implicit' ? `(${left})-(${right!})` : normalized;
-    const variables = new Set<string>();
-    const dependencies = new Set<string>();
-    const visit: SymbolVisitor = (node, parent) => {
-      validateStructureNode(node, userFunctions);
-      const calledFunction = functionNodeName(node);
-      if (calledFunction && userFunctions.has(calledFunction)) {
-        dependencies.add(calledFunction);
+
+    let kind: 'explicit' | 'implicit';
+    let normalized: string;
+    let evaluationSource: string;
+    let relationTokens: Token[];
+    let inequality: GraphComparison | undefined;
+    const { sides, ops } = splitOnComparison(tokens);
+    if (ops.length > 0) {
+      if (ops.length > 1) {
+        throw new Error('Use one inequality sign, or a restriction like {0 < x < 2}');
       }
-      if (node.type !== 'SymbolNode') return;
-      const name = symbolName(node);
-      if (!name) throw new Error('Invalid symbol');
-      if (isAggregateName(name)) return;
+      if (tokens.some((token) => token.type === 'equals')) {
+        throw new Error('Use either = or an inequality sign');
+      }
+      const [leftTokens, rightTokens] = sides as [Token[], Token[]];
+      const left = normalizeTokens(leftTokens);
+      const right = normalizeTokens(rightTokens);
+      if (!left || !right) throw new Error('Enter both sides of the inequality');
+      const op = ops[0]!;
+      normalized = `${left}${op}${right}`;
+      // `y < g(x)` keeps g on the explicit sampler; the region is then
+      // `y - g(x) < 0`.
+      if (left === 'y' && !containsY(rightTokens)) {
+        kind = 'explicit';
+        evaluationSource = right;
+        relationTokens = rightTokens;
+        inequality = op;
+      } else if (right === 'y' && !containsY(leftTokens)) {
+        kind = 'explicit';
+        evaluationSource = left;
+        relationTokens = leftTokens;
+        inequality = FLIPPED[op];
+      } else {
+        kind = 'implicit';
+        evaluationSource = `(${left})-(${right})`;
+        relationTokens = [...leftTokens, ...rightTokens];
+        inequality = op;
+      }
+    } else {
+      const graphSides = normalizeGraphSides(splitOnEquals(tokens));
+      normalized = graphSides.normalized;
+      relationTokens = graphSides.tokens;
+      if (!normalized) return { ok: false, source, message: 'Enter an expression' };
+      const equationSides = normalized.split('=');
+      kind = equationSides.length === 2 ? 'implicit' : 'explicit';
+      const left = equationSides[0]!;
+      const right = equationSides[1];
       if (
-        name === 'x' ||
-        (kind === 'implicit' && name === 'y') ||
-        CONSTANTS.has(name)
+        kind === 'implicit' &&
+        /^[A-Za-z][A-Za-z0-9_]*$/.test(left) &&
+        left !== 'x' &&
+        left !== 'y'
       ) {
-        return;
+        throw new Error('Assignments are not allowed; use a relation in x and y');
       }
-      if (name === 'y') {
-        throw new Error('Use y in an equation, for example x^2 + y^2 = 1');
-      }
-      if (isFunctionSymbol(name, node, parent, userFunctions)) return;
-      if (!isVariableName(name)) {
-        throw new Error(`Variable "${name}" is not allowed`);
-      }
-      variables.add(name);
-    };
-    const evaluateExpression = compileNormalized(evaluationSource, visit);
-    const compiledAggregates = compileAggregates(tokens, visit);
-    for (const dependency of dependencies) {
-      addDefinitionVariables(dependency, definitions, variables);
+      evaluationSource = kind === 'implicit' ? `(${left})-(${right!})` : normalized;
     }
-    // Sums, integrals and user functions live in the mathjs scope; only a
-    // self-contained expression can go to Rust.
-    const rust =
-      compiledAggregates.length === 0 && dependencies.size === 0
-        ? graphWasmProgram(evaluationSource, [...variables])
-        : null;
+
+    const variables = new Set<string>();
+    const relation = compileRelation(
+      evaluationSource,
+      relationTokens,
+      kind === 'implicit',
+      definitions,
+      variables,
+    );
+    const conditions = restrictions.flatMap((text) =>
+      compileRestriction(text, definitions, variables),
+    );
     const createEvaluator = (parameters: Record<string, GraphParameter>) => {
-      const fast = rust?.bind(parameters);
-      if (fast) {
-        return kind === 'implicit'
-          ? (x: number, y?: number) =>
-              y === undefined ? Number.NaN : fast(x, y)
-          : (x: number) => fast(x, 0);
-      }
-      const scope = createEvaluationScope(
-        kind === 'implicit' ? { x: 0, y: 0 } : { x: 0 },
-        parameters,
-        variables,
-        definitions,
-      );
-      installAggregates(scope, compiledAggregates);
-      return (x: number, y?: number) => {
-        if (kind === 'implicit') {
-          if (y === undefined) return Number.NaN;
-          scope.set('y', y);
+      const f = relation(parameters);
+      const checks = conditions.map(({ evaluate, op }) => ({
+        test: evaluate(parameters),
+        op,
+      }));
+      if (kind === 'implicit') {
+        if (checks.length === 0) {
+          return (x: number, y?: number) =>
+            y === undefined ? Number.NaN : f(x, y);
         }
-        scope.set('x', x);
-        return evaluateExpression(scope);
+        return (x: number, y?: number) => {
+          if (y === undefined) return Number.NaN;
+          for (const check of checks) {
+            if (!satisfies(check.test(x, y), check.op)) return Number.NaN;
+          }
+          return f(x, y);
+        };
+      }
+      if (checks.length === 0) return (x: number) => f(x, 0);
+      // An explicit curve's restriction may read y: the curve's own value.
+      return (x: number) => {
+        const y = f(x, 0);
+        for (const check of checks) {
+          if (!satisfies(check.test(x, y), check.op)) return Number.NaN;
+        }
+        return y;
       };
     };
     return {
@@ -1653,6 +2031,7 @@ function parseGraphExpressionUncached(
       source,
       normalized,
       kind,
+      ...(inequality ? { inequality } : {}),
       variables: [...variables].sort((a, b) => a.localeCompare(b)),
       evaluate: (x, parameters, y) => createEvaluator(parameters)(x, y),
       createEvaluator,
@@ -1661,7 +2040,8 @@ function parseGraphExpressionUncached(
     return {
       ok: false,
       source,
-      message: error instanceof Error ? error.message : 'Invalid expression',
+      message:
+        error instanceof Error ? friendlyMessage(error.message) : 'Invalid expression',
     };
   }
 }

@@ -58,6 +58,31 @@ export interface MathFieldProps {
   elementRef?: (el: MathfieldElement | null) => void;
 }
 
+/** Unquotes `"floor"` (see the inline shortcuts) so the graph value reads
+ * `floor (x)` and MathLive maps it back to the same shortcut on setValue. */
+function readValue(mf: MathfieldElement, format: MathFieldFormat): string {
+  const value = mf.getValue(format);
+  return format === 'ascii-math' ? value.replace(/"([A-Za-z]+)"/g, '$1') : value;
+}
+
+/**
+ * Load `value` into the field. MathLive's ascii-math import writes `{x>0}` as
+ * `\lbracex>0`, one unknown command, which loses the brace and the x — and a
+ * restriction is stored in exactly that form. An empty `""` after the brace
+ * imports as an invisible `\text{}` and exports as nothing, so the value
+ * reads back unchanged.
+ */
+function writeValue(
+  mf: MathfieldElement,
+  value: string,
+  format: MathFieldFormat,
+): void {
+  mf.setValue(
+    format === 'ascii-math' ? value.replace(/\{(?=[A-Za-z])/g, '{""') : value,
+    { format, silenceNotifications: true },
+  );
+}
+
 export function MathField({
   value,
   onChange,
@@ -113,22 +138,35 @@ export function MathField({
     mf.smartFence = true;
     mf.smartSuperscript = true;
     // MathLive has no `abs` operator — typed, it serializes as `a b s`.
+    // MathLive's own floor/ceil insert `\left\lfloor…\right\rfloor`, which
+    // serializes as `\lfloorx\rfloor` and garbles on setValue, and it spells
+    // round as `r o u n d`. An operator around text serializes as `"floor"`
+    // (unquoted by `readValue`) and leaves the caret in math mode. No `#?`
+    // parens: MathLive's ascii-math input expands a stored `floor (x)` through
+    // these same shortcuts, so they must not add a call of their own.
     mf.inlineShortcuts = {
       ...mf.inlineShortcuts,
       abs: '\\left|#?\\right|',
+      floor: '\\operatorname{\\text{floor}}',
+      ceil: '\\operatorname{\\text{ceil}}',
+      round: '\\operatorname{\\text{round}}',
+      // Also unknown to MathLive: `sign` spells out, `asin` reads as a·sin, and
+      // its own `mod` is `\bmod`, which serializes as `undefined`.
+      sign: '\\operatorname{\\text{sign}}',
+      asin: '\\operatorname{\\text{asin}}',
+      acos: '\\operatorname{\\text{acos}}',
+      atan: '\\operatorname{\\text{atan}}',
+      mod: '\\operatorname{\\text{mod}}',
     };
     // No right-click math menu or inline keyboard toggle in this compact panel.
     mf.menuItems = [];
     if (placeholder) mf.setAttribute('placeholder', placeholder);
-    if (mf.getValue(formatRef.current) !== value) {
-      mf.setValue(value, {
-        format: formatRef.current,
-        silenceNotifications: true,
-      });
+    if (readValue(mf, formatRef.current) !== value) {
+      writeValue(mf, value, formatRef.current);
     }
 
     const onInput = () =>
-      handlers.current.onChange(mf.getValue(formatRef.current));
+      handlers.current.onChange(readValue(mf, formatRef.current));
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Enter' && handlers.current.onEnter) {
         event.preventDefault();
@@ -155,7 +193,7 @@ export function MathField({
       } else if (
         event.key === 'Backspace' &&
         handlers.current.onBackspaceEmpty &&
-        mf.getValue(formatRef.current).trim() === ''
+        readValue(mf, formatRef.current).trim() === ''
       ) {
         event.preventDefault();
         event.stopPropagation();
@@ -186,7 +224,7 @@ export function MathField({
       event.preventDefault();
       event.stopPropagation();
       mf.insert(rewritten, { format: 'latex', selectionMode: 'after' });
-      handlers.current.onChange(mf.getValue(formatRef.current));
+      handlers.current.onChange(readValue(mf, formatRef.current));
     };
 
     mf.addEventListener('input', onInput);
@@ -208,9 +246,7 @@ export function MathField({
   // without clobbering the value the user is actively typing.
   React.useEffect(() => {
     const mf = ref.current;
-    if (mf && mf.getValue(format) !== value) {
-      mf.setValue(value, { format, silenceNotifications: true });
-    }
+    if (mf && readValue(mf, format) !== value) writeValue(mf, value, format);
   }, [format, value]);
 
   React.useEffect(() => {

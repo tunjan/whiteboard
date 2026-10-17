@@ -215,6 +215,8 @@ fn function2(name: &[u8]) -> Option<fn(f64, f64) -> f64> {
         b"log" => |v: f64, base: f64| v.ln() / base.ln(),
         b"min" => f64::min,
         b"max" => f64::max,
+        // mathjs's: the sign of the divisor, and `mod(x, 0)` is x.
+        b"mod" => |a: f64, b: f64| if b == 0.0 { a } else { a - b * (a / b).floor() },
         _ => return None,
     })
 }

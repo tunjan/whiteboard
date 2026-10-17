@@ -117,12 +117,83 @@ export function sampleGraph(
   };
 }
 
+/**
+ * A sample on its way back from the worker, with every curve's points in one
+ * `Float64Array` of x, y pairs. Transferred rather than cloned: a dense curve's
+ * 20k `{x, y}` objects took ~5 ms to clone, the packed array ~0.2 ms to unpack.
+ */
+export interface PackedGraphSampleOutput {
+  results: (Omit<GraphSampleResult, 'segments'> & { lengths: number[] })[];
+  coords: Float64Array;
+  intersections: IntersectionPoint[];
+}
+
+export function packGraphSample(output: GraphSampleOutput): PackedGraphSampleOutput {
+  let total = 0;
+  for (const result of output.results) {
+    for (const segment of result.segments) total += segment.length;
+  }
+  const coords = new Float64Array(total * 2);
+  let at = 0;
+  const results = output.results.map(({ segments, ...rest }) => {
+    for (const segment of segments) {
+      for (const point of segment) {
+        coords[at++] = point.x;
+        coords[at++] = point.y;
+      }
+    }
+    return { ...rest, lengths: segments.map((segment) => segment.length) };
+  });
+  return { results, coords, intersections: output.intersections };
+}
+
+export function unpackGraphSample(packed: PackedGraphSampleOutput): GraphSampleOutput {
+  const { coords } = packed;
+  let at = 0;
+  return {
+    intersections: packed.intersections,
+    results: packed.results.map(({ lengths, ...rest }) => ({
+      ...rest,
+      segments: lengths.map((length) => {
+        const segment: { x: number; y: number }[] = [];
+        for (let i = 0; i < length; i += 1) {
+          segment.push({ x: coords[at]!, y: coords[at + 1]! });
+          at += 2;
+        }
+        return segment;
+      }),
+    })),
+  };
+}
+
+/**
+ * Longest a sample may take before the worker is restarted. The slowest real
+ * curves (a sum or user function on the mathjs path) measured ~0.6 s.
+ */
+const SAMPLE_TIMEOUT_MS = 8000;
+
+/** What a graph draws for a request that ran out of time. */
+function tooSlow(input: GraphSampleInput): GraphSampleOutput {
+  return {
+    results: input.expressions.map(() => ({
+      ok: false,
+      message: 'This took too long to draw',
+      segments: [],
+    })),
+    intersections: [],
+  };
+}
+
+interface PendingSample {
+  input: GraphSampleInput;
+  resolve: (output: GraphSampleOutput) => void;
+  reject: () => void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
 let worker: Worker | null = null;
 let nextRequestId = 0;
-const pending = new Map<
-  number,
-  { resolve: (output: GraphSampleOutput) => void; reject: () => void }
->();
+const pending = new Map<number, PendingSample>();
 
 function spawnWorker(): Worker {
   const created = new Worker(
@@ -132,8 +203,11 @@ function spawnWorker(): Worker {
   created.addEventListener(
     'message',
     (event: MessageEvent<GraphSampleResponse>) => {
-      pending.get(event.data.id)?.resolve(event.data.output);
+      const entry = pending.get(event.data.id);
+      if (!entry) return;
+      clearTimeout(entry.timer);
       pending.delete(event.data.id);
+      entry.resolve(unpackGraphSample(event.data.output));
     },
   );
   // A worker that broke answers nothing again; hand its requests back so
@@ -141,21 +215,46 @@ function spawnWorker(): Worker {
   created.addEventListener('error', () => {
     created.terminate();
     if (worker === created) worker = null;
-    for (const entry of pending.values()) entry.reject();
+    for (const entry of pending.values()) {
+      clearTimeout(entry.timer);
+      entry.reject();
+    }
     pending.clear();
   });
   return created;
 }
 
-// ponytail: no timeout — an expression that never finishes wedges the worker
-// (it used to wedge the page). Add the equation client's timeout+restart if
-// one shows up.
+function post(id: number, input: GraphSampleInput): void {
+  worker ??= spawnWorker();
+  worker.postMessage({ id, input } satisfies GraphSampleRequest);
+}
+
+/**
+ * Give up on a request that is still running: the thread is busy with it and
+ * can't be interrupted, so it is replaced. Whatever else was queued behind it
+ * goes to the new one; the slow request answers that it took too long, rather
+ * than falling back inline and stalling the page instead.
+ */
+function timeOut(id: number): void {
+  const slow = pending.get(id);
+  if (!slow) return;
+  pending.delete(id);
+  worker?.terminate();
+  worker = null;
+  slow.resolve(tooSlow(slow.input));
+  for (const [queuedId, entry] of pending) {
+    clearTimeout(entry.timer);
+    entry.timer = setTimeout(() => timeOut(queuedId), SAMPLE_TIMEOUT_MS);
+    post(queuedId, entry.input);
+  }
+}
+
 function sampleOffThread(input: GraphSampleInput): Promise<GraphSampleOutput> {
   return new Promise((resolve, reject) => {
     const id = nextRequestId++;
-    pending.set(id, { resolve, reject });
-    worker ??= spawnWorker();
-    worker.postMessage({ id, input } satisfies GraphSampleRequest);
+    const timer = setTimeout(() => timeOut(id), SAMPLE_TIMEOUT_MS);
+    pending.set(id, { input, resolve, reject, timer });
+    post(id, input);
   });
 }
 
