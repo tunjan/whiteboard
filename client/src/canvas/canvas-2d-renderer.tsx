@@ -860,11 +860,22 @@ export function Canvas2dShapeLayer({ width, height }: ShapeRendererProps) {
       }
     }
 
+    /** Frame masks by parent id, for the document epoch they were cut in.
+     *  Siblings share one array, which is what lets `drawShapes` keep a clip
+     *  open across a run of them by reference alone. */
+    let masks = new Map<string, Point[] | null>();
+    let masksEpoch = -1;
+
     /** Collect the drawable shapes for `ids`, in paint order. */
     const collect = (ids: Iterable<string>) => {
       const t0 = performance.now();
       const items: Drawable[] = [];
       const hiddenIds = scene.hidden.get();
+      const epoch = scene.documentEpoch.get();
+      if (epoch !== masksEpoch) {
+        masks = new Map();
+        masksEpoch = epoch;
+      }
       const cuts = useEraserCutStore.getState().fragments;
       const getShape = (id: string) => scene.record(id).shape.get();
       let handedOver = 0;
@@ -881,9 +892,18 @@ export function Canvas2dShapeLayer({ width, height }: ShapeRendererProps) {
         if (presentation.visibility === 'hidden') continue;
         // Only a parented shape can inherit a frame mask, and most shapes on a
         // board have no parent at all — so the ancestor walk is not entered.
-        const mask = shape.parentId
-          ? ancestorState(shape, getShape, hiddenIds).mask
-          : null;
+        // An arrow escapes the mask its siblings share, so it walks alone.
+        let mask: Point[] | null = null;
+        if (shape.parentId && shape.type === 'arrow') {
+          mask = ancestorState(shape, getShape, hiddenIds).mask;
+        } else if (shape.parentId) {
+          let shared = masks.get(shape.parentId);
+          if (shared === undefined) {
+            shared = ancestorState(shape, getShape, hiddenIds).mask;
+            masks.set(shape.parentId, shared);
+          }
+          mask = shared;
+        }
         items.push({
           node,
           shape,
@@ -923,11 +943,19 @@ export function Canvas2dShapeLayer({ width, height }: ShapeRendererProps) {
         entry: CachedInk;
         mask: Point[] | null;
       }[] = [];
+      // The clip in force. Consecutive items under the same frame share one
+      // mask array, so the clip stays open across the run instead of a
+      // save/clip/restore per shape. Only adjacent items merge; z is untouched.
+      let open: Point[] | null = null;
       for (const item of items) {
-        const clipped = item.mask !== null;
-        if (clipped) {
-          if (item.mask!.length < 3) continue; // fully clipped by its frames
-          clipTo(item.mask!, t);
+        if (item.mask && item.mask.length < 3) continue; // fully clipped
+        if (item.mask !== open) {
+          if (open) {
+            ctx.restore();
+            resetStrokeState();
+          }
+          if (item.mask) clipTo(item.mask, t);
+          open = item.mask;
         }
         // An eraser cut preview stands in for the shape: its fragments are
         // whole shapes in page coordinates, so they are placed like top-level
@@ -972,22 +1000,25 @@ export function Canvas2dShapeLayer({ width, height }: ShapeRendererProps) {
               mask: item.mask,
             });
         }
-        if (clipped) {
-          ctx.restore();
-          resetStrokeState();
-        }
       }
       for (const { shape, alpha, entry, mask } of highlights) {
         // The overlay pass inherits its owner's clip, as the DOM layer's
         // overlay element inherits its owner's `clip-path`.
-        if (mask) clipTo(mask, t);
+        if (mask !== open) {
+          if (open) {
+            ctx.restore();
+            resetStrokeState();
+          }
+          if (mask) clipTo(mask, t);
+          open = mask;
+        }
         const m = composeShapeTransform(world, shape, local);
         ctx.setTransform(m[0], m[1], m[2], m[3], m[4], m[5]);
         stroke(entry, alpha * HIGHLIGHT_OVERLAY_OPACITY);
-        if (mask) {
-          ctx.restore();
-          resetStrokeState();
-        }
+      }
+      if (open) {
+        ctx.restore();
+        resetStrokeState();
       }
       ctx.setTransform(t);
       paintCounters.drawMs += performance.now() - drawStart;

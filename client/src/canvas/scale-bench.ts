@@ -104,13 +104,41 @@ function strokePoints(rnd: () => number): DrawPoint[] {
  * under the same camera, and the only variable left is how many shapes exist
  * off screen.
  */
-function seed(n: number, spacing = GRID_SPACING): number {
+function seed(n: number, spacing = GRID_SPACING, frames = 0): number {
   const rnd = rng(987654321);
   const side = Math.ceil(Math.sqrt(n));
   const half = (side * spacing) / 2;
   let index = generateKeyBetween(null, null);
   const shapes: Shape[] = [];
-  for (let i = 0; i < n; i++) {
+  // `frames` cuts the grid into a square of slide-like frames and parents each
+  // stroke to the one it sits in, so every stroke paints through a frame clip.
+  // Strokes are indexed frame by frame, the order a slide deck is written in.
+  const frameSide = Math.ceil(Math.sqrt(frames));
+  const frameIds: string[] = [];
+  if (frames) {
+    const size = (side * spacing) / frameSide;
+    for (let f = 0; f < frameSide * frameSide; f++) {
+      const id = genId();
+      frameIds.push(id);
+      shapes.push({
+        id,
+        type: 'frame',
+        x: (f % frameSide) * size - half - spacing / 2,
+        y: Math.floor(f / frameSide) * size - half - spacing / 2,
+        rotation: 0,
+        opacity: 1,
+        index,
+        props: { w: size, h: size, name: `Slide ${f + 1}` },
+      } as Shape);
+      index = generateKeyBetween(index, null);
+    }
+  }
+  const frameOf = (i: number) =>
+    Math.floor(((i % side) * frameSide) / side) +
+    frameSide * Math.floor((Math.floor(i / side) * frameSide) / side);
+  const order = Array.from({ length: n }, (_, i) => i);
+  if (frames) order.sort((a, b) => frameOf(a) - frameOf(b) || a - b);
+  for (const i of order) {
     shapes.push({
       id: genId(),
       type: 'draw',
@@ -119,6 +147,7 @@ function seed(n: number, spacing = GRID_SPACING): number {
       rotation: 0,
       opacity: 1,
       index,
+      ...(frames ? { parentId: frameIds[frameOf(i)] } : {}),
       props: {
         points: strokePoints(rnd),
         isClosed: false,
@@ -1492,11 +1521,15 @@ function repaintRow(label: string, reps: readonly RepaintStats[]): string {
 export async function runRepaintBench(
   counts: number[] = [1000, 5000, 20000, 50000],
   reps = REPS,
+  frames = 0,
 ): Promise<string> {
   const restoreCull = instrumentCull();
   const lines: string[] = [];
   try {
-    lines.push('FULL REPAINT — median ms per repaint, camera still');
+    lines.push(
+      'FULL REPAINT — median ms per repaint, camera still' +
+        (frames ? `, ink parented to ${frames} frames` : ''),
+    );
     // No `machineLine`, same as the static sweep: it wants a refresh rate,
     // `measureRefreshMs` spends 40 rAF ticks getting one, and no column here
     // looks at a frame boundary. In a throttled tab those ticks are also most
@@ -1520,7 +1553,7 @@ export async function runRepaintBench(
     const sweep = await repeatInterleaved(counts, reps, async (n) => {
       clear();
       await settle(200);
-      seed(n);
+      seed(n, GRID_SPACING, frames);
       await settle(600);
       useCameraStore.getState().setCamera(HOME);
       await settle(400);
