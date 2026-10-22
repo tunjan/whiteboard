@@ -10,6 +10,7 @@ import {
   UnitCircleGlyph,
   VideoGlyph,
 } from '@/components/ui/glyphs';
+import { PanelBottom, PanelLeft } from 'lucide-react';
 import { blobUrl } from '@/board/blobs';
 import { pickAndAddStickers } from '@/board/custom-stickers';
 import { pickAndPlaceImages } from '@/canvas/place-image';
@@ -20,6 +21,7 @@ import {
   sortedCustomStickers,
   useCustomStickersStore,
 } from '@/canvas/use-custom-stickers-store';
+import { useCanvasUiStore } from '@/canvas/use-canvas-ui-store';
 import { useStyleStore } from '@/canvas/use-style-store';
 import { useToolLockStore } from '@/canvas/use-tool-lock-store';
 import { useToolStore } from '@/canvas/use-tool-store';
@@ -43,10 +45,10 @@ import type { PolygonKind } from '@whiteboard/shared';
 import {
   COMPACT_MORE_TOOLS,
   CONSTRUCTION_TOOLS,
-  SHAPE_TOOLS,
   POLYGON_KINDS,
   MiniShape,
 } from './toolbar-constants';
+import { useToolbarSide } from './toolbar-primitives';
 import { ToolKey } from './toolbar-tool-button';
 
 interface CompactMoreMenuProps {
@@ -113,6 +115,9 @@ export function CompactMoreMenu({
   expanded = false,
 }: CompactMoreMenuProps) {
   const [videoOpen, setVideoOpen] = useState(false);
+  const side = useToolbarSide();
+  const placement = useCanvasUiStore((state) => state.toolbarPlacement);
+  const setPlacement = useCanvasUiStore((state) => state.setToolbarPlacement);
 
   const setTool = useToolStore((state) => state.setTool);
   const locked = useToolLockStore((state) => state.locked);
@@ -126,16 +131,11 @@ export function CompactMoreMenu({
   );
 
   const menuTools: readonly string[] = expanded
-    ? [...SHAPE_TOOLS, 'graph', 'equation', ...CONSTRUCTION_TOOLS]
+    ? ['comment', 'equation', ...CONSTRUCTION_TOOLS]
     : COMPACT_MORE_TOOLS;
-  // Polygons get their own submenu.
-  const directTools = menuTools.filter((id) => id !== 'polygon');
-
-  // Lit only for a tool with no key of its own: shapes belong to Shapes.
+  // Lit only for a tool with no key of its own.
   const active =
-    activeToolId === 'sticker' ||
-    (menuTools.includes(activeToolId) &&
-      !SHAPE_TOOLS.includes(activeToolId as (typeof SHAPE_TOOLS)[number]));
+    (!expanded && activeToolId === 'sticker') || menuTools.includes(activeToolId);
   const activeLabel = toolRegistry.get(activeToolId)?.label;
   const label =
     active && activeLabel ? `More tools, ${activeLabel} selected` : 'More tools';
@@ -145,6 +145,27 @@ export function CompactMoreMenu({
     setTool('sticker');
   };
 
+  // Built-ins, then this board's uploads: one grid, one cell.
+  const stickers = [
+    ...STICKERS.map((def) => ({
+      id: def.id,
+      label: def.label,
+      preview: <StickerPreview def={def} size={20} />,
+    })),
+    ...boardStickers.map((meta) => ({
+      id: meta.id,
+      label: meta.label,
+      preview: (
+        <img
+          src={blobUrl(meta.blobId)}
+          alt=""
+          className="size-5 object-contain"
+          draggable={false}
+        />
+      ),
+    })),
+  ];
+
   return (
     <>
       <DropdownMenu>
@@ -152,9 +173,9 @@ export function CompactMoreMenu({
           <MoreGlyph />
         </ToolKey>
 
-        <DropdownMenuContent side="top" align="end" sideOffset={8} className="w-56">
+        <DropdownMenuContent side={side} align="end" sideOffset={8} className="w-56">
           <DropdownMenuRadioGroup value={activeToolId} onValueChange={setTool}>
-            {directTools.map((toolId) => {
+            {menuTools.map((toolId) => {
               const tool = toolRegistry.get(toolId);
               if (!tool) return null;
               const Icon = tool.icon;
@@ -205,41 +226,20 @@ export function CompactMoreMenu({
               </DropdownMenuSubTrigger>
               <DropdownMenuSubContent>
                 <div className="grid max-h-56 grid-cols-4 gap-0.5 overflow-y-auto">
-                  {STICKERS.map((def) => (
+                  {stickers.map(({ id, label: stickerLabel, preview }) => (
                     <DropdownMenuItem
-                      key={def.id}
-                      title={def.label}
-                      aria-label={def.label}
+                      key={id}
+                      title={stickerLabel}
+                      aria-label={stickerLabel}
                       aria-current={
-                        activeToolId === 'sticker' && stickerId === def.id
+                        activeToolId === 'sticker' && stickerId === id
                           ? 'true'
                           : undefined
                       }
-                      onClick={() => pickSticker(def.id)}
+                      onClick={() => pickSticker(id)}
                       className={STICKER_CELL}
                     >
-                      <StickerPreview def={def} size={20} />
-                    </DropdownMenuItem>
-                  ))}
-                  {boardStickers.map((meta) => (
-                    <DropdownMenuItem
-                      key={meta.id}
-                      title={meta.label}
-                      aria-label={meta.label}
-                      aria-current={
-                        activeToolId === 'sticker' && stickerId === meta.id
-                          ? 'true'
-                          : undefined
-                      }
-                      onClick={() => pickSticker(meta.id)}
-                      className={STICKER_CELL}
-                    >
-                      <img
-                        src={blobUrl(meta.blobId)}
-                        alt=""
-                        className="size-5 object-contain"
-                        draggable={false}
-                      />
+                      {preview}
                     </DropdownMenuItem>
                   ))}
                 </div>
@@ -284,6 +284,18 @@ export function CompactMoreMenu({
               Tool lock
               <DropdownMenuShortcut>Q</DropdownMenuShortcut>
             </DropdownMenuCheckboxItem>
+            <DropdownMenuItem
+              onClick={() =>
+                setPlacement(placement === 'left' ? 'bottom' : 'left')
+              }
+            >
+              {placement === 'left' ? (
+                <PanelBottom className="size-4" />
+              ) : (
+                <PanelLeft className="size-4" />
+              )}
+              {placement === 'left' ? 'Move toolbar to bottom' : 'Move toolbar to side'}
+            </DropdownMenuItem>
             <DropdownMenuItem onClick={onHide}>
               <ChevronDownGlyph className="size-4" />
               Hide toolbar

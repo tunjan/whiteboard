@@ -6,6 +6,7 @@ import { useEraserStore } from './use-eraser-store';
 import { useFrameEditingStore } from './use-frame-editing-store';
 import { useImageCroppingStore } from './use-image-cropping-store';
 import { useLaserStore } from './use-laser-store';
+import { useMeasureStore } from './use-measure-store';
 import { useSelectionStore } from './use-selection-store';
 import { useTextEditingStore } from './use-text-editing-store';
 import { useVideoPlayingStore } from './use-video-playing-store';
@@ -39,6 +40,7 @@ function clearPageBoundInteraction(): void {
   useEraserStore.getState().clear();
   const laser = useLaserStore.getState();
   for (const stroke of laser.strokes) laser.discard(stroke.id);
+  useMeasureStore.getState().clear();
 }
 
 /** Save the durable interaction context, then clear state that cannot cross pages. */

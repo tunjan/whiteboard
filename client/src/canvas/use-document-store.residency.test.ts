@@ -20,12 +20,10 @@ vi.mock('y-indexeddb', () => ({
 
 import './shapes/register';
 import { residentPageDoc } from './page-docs';
+import { createPage, deletePage, moveShapesToPage } from './page-actions';
 import {
-  createPage,
-  deletePage,
   editor,
   loadBoard,
-  moveShapesToPage,
   setCurrentPage,
   useDocumentStore,
 } from './use-document-store';

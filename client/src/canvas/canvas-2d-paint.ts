@@ -4,7 +4,7 @@
 // rasterize it. A canvas has no such intermediary, so this module states the
 // same visuals as a short list of ops. It builds them from the SAME geometry
 // helpers the SVG components use — `curvePath`, `arrowheadPath`,
-// `synthesizeDrawPaths`, `mergedRectPath`, `layoutTextProps`, `dashProps` — so
+// `drawPathData`, `mergedRectPath`, `layoutTextProps`, `dashProps` — so
 // the only thing restated here is which paint attribute goes where, and the two
 // renderers cannot drift apart on the shape of anything.
 //
@@ -34,16 +34,19 @@ import { imageHref } from '../board/blobs';
 import { squaredCorners, mergedRectPath } from './shapes/image-merge';
 import { shadowRings, roundedRectPath } from './shapes/painted-shadow';
 import {
-  synthesizeDrawPaths,
-  ellipseSynthesisPoints,
+  drawPathData,
+  ellipseDrawCommands,
+  polylineDrawCommands,
+  type DrawCommand,
 } from './shapes/geometry-synthesis';
 import {
   arrowPath,
   arrowPoints,
   arrowheadPath,
-  arrowheadPoints,
+  arrowDrawCommands,
   curvePath,
   curvePoints,
+  lineDrawCommands,
   pathMidpoint,
   polylinePath,
   tangentAnchor,
@@ -53,7 +56,7 @@ import { polygonVerticesForBox } from './shapes/polygon-geometry';
 import { dashProps, strokeLineCap } from './shapes/render-style';
 import { MEDIA_CORNER_RADIUS } from './shapes/style';
 import { fontStack, fontWeight, layoutTextProps } from './shapes/text-measure';
-import { youtubeThumbnail } from './shapes/video';
+import { videoPoster } from './shapes/video';
 import { usesImageThumb, type LodDetail } from './lod';
 
 /** Fill opacity the SVG components give a `solid` fill. */
@@ -228,22 +231,22 @@ function closedPath(points: readonly Vec[]): string {
   return `${polylinePath(points)} Z`;
 }
 
-/** The two-pass hand-drawn outline, as one op per pass. */
+/** The hand-drawn outline, as `DrawnOutline` paints it. */
 function drawnOutline(
-  points: readonly Vec[],
+  commands: readonly DrawCommand[],
   seed: string,
   color: string,
   size: number,
   closed: boolean,
-): PathOp[] {
-  return synthesizeDrawPaths(points, { seed, size, closed }).map((d) => ({
-    kind: 'path' as const,
-    d,
+): PathOp {
+  return {
+    kind: 'path',
+    d: drawPathData(commands, { seed, size, closed }),
     stroke: color,
     width: size,
-    cap: 'round' as const,
-    join: 'round' as const,
-  }));
+    cap: 'round',
+    join: 'round',
+  };
 }
 
 /** Each edge dashed on its own arc length, as `DashedOutline` does. */
@@ -378,7 +381,9 @@ export function buildPaint(shape: Shape, env: PaintEnv): PaintOp[] {
           join: 'round',
         });
       else if (dash === 'draw')
-        ops.push(...drawnOutline(points, shape.id, color, size, true));
+        ops.push(
+          drawnOutline(polylineDrawCommands(points), shape.id, color, size, true),
+        );
       else ops.push(...dashedOutline(points, dash, color, size));
       return ops;
     }
@@ -392,8 +397,8 @@ export function buildPaint(shape: Shape, env: PaintEnv): PaintOp[] {
       if (fill) ops.push(fill);
       if (dash === 'draw')
         ops.push(
-          ...drawnOutline(
-            ellipseSynthesisPoints(w / 2, h / 2, w / 2, h / 2),
+          drawnOutline(
+            ellipseDrawCommands(w / 2, h / 2, w / 2, h / 2),
             shape.id,
             color,
             size,
@@ -429,7 +434,9 @@ export function buildPaint(shape: Shape, env: PaintEnv): PaintOp[] {
           join: 'round',
         });
       else if (dash === 'draw')
-        ops.push(...drawnOutline(points, shape.id, color, size, true));
+        ops.push(
+          drawnOutline(polylineDrawCommands(points), shape.id, color, size, true),
+        );
       else ops.push(...dashedOutline(points, dash, color, size));
       return ops;
     }
@@ -441,7 +448,15 @@ export function buildPaint(shape: Shape, env: PaintEnv): PaintOp[] {
       const curve = curvePoints(points, bend ?? 0, spline ?? 'linear');
       const ops: PaintOp[] =
         dash === 'draw'
-          ? drawnOutline(curve, shape.id, color, size, false)
+          ? [
+              drawnOutline(
+                lineDrawCommands(points, bend ?? 0, spline ?? 'linear'),
+                shape.id,
+                color,
+                size,
+                false,
+              ),
+            ]
           : [
               {
                 kind: 'path',
@@ -476,56 +491,41 @@ export function buildPaint(shape: Shape, env: PaintEnv): PaintOp[] {
       const first = body[0]!;
       const last = body[body.length - 1]!;
       const ops: PaintOp[] = [];
-      if (dash === 'draw') {
-        ops.push(...drawnOutline(body, `${shape.id}:body`, color, size, false));
-        if (arrowStart)
-          ops.push(
-            ...drawnOutline(
-              arrowheadPoints(tangentAnchor(body, true), first, size),
-              `${shape.id}:start`,
+      // As in `arrowUtil`: only the body takes the `draw` wobble.
+      ops.push(
+        dash === 'draw'
+          ? drawnOutline(
+              arrowDrawCommands(body, topology),
+              shape.id,
               color,
               size,
               false,
-            ),
-          );
-        if (arrowEnd)
-          ops.push(
-            ...drawnOutline(
-              arrowheadPoints(tangentAnchor(body, false), last, size),
-              `${shape.id}:end`,
-              color,
-              size,
-              false,
-            ),
-          );
-      } else {
+            )
+          : {
+              kind: 'path',
+              d: arrowPath(points, topology, bend ?? 0),
+              stroke: color,
+              width: size,
+              cap: 'round',
+              join: 'round',
+              ...dashFor(dash, size, polylineLength(body)),
+            },
+      );
+      const heads = [
+        arrowStart ? arrowheadPath(tangentAnchor(body, true), first, size) : '',
+        arrowEnd ? arrowheadPath(tangentAnchor(body, false), last, size) : '',
+      ]
+        .filter(Boolean)
+        .join(' ');
+      if (heads)
         ops.push({
           kind: 'path',
-          d: arrowPath(points, topology, bend ?? 0),
+          d: heads,
           stroke: color,
           width: size,
           cap: 'round',
           join: 'round',
-          ...dashFor(dash, size, polylineLength(body)),
         });
-        const heads = [
-          arrowStart
-            ? arrowheadPath(tangentAnchor(body, true), first, size)
-            : '',
-          arrowEnd ? arrowheadPath(tangentAnchor(body, false), last, size) : '',
-        ]
-          .filter(Boolean)
-          .join(' ');
-        if (heads)
-          ops.push({
-            kind: 'path',
-            d: heads,
-            stroke: color,
-            width: size,
-            cap: 'round',
-            join: 'round',
-          });
-      }
       ops.push(
         ...connectorLabel(
           label,
@@ -609,8 +609,9 @@ export function buildPaint(shape: Shape, env: PaintEnv): PaintOp[] {
       return ops;
     }
     case 'video': {
-      const { videoId, w, h } = shape.props;
-      if (!videoId) return [];
+      const { videoId, blobId, w, h } = shape.props;
+      if (!videoId && blobId === undefined) return [];
+      const poster = videoPoster(shape);
       const radius = Math.min(MEDIA_CORNER_RADIUS, w / 4, h / 4);
       const outline = roundedRectPath(0, 0, w, h, radius);
       const ops: PaintOp[] = [];
@@ -620,16 +621,17 @@ export function buildPaint(shape: Shape, env: PaintEnv): PaintOp[] {
         d: outline,
         fill: { kind: 'color', color: '#000000' },
       });
-      ops.push({
-        kind: 'image',
-        src: youtubeThumbnail(videoId),
-        x: 0,
-        y: 0,
-        w,
-        h,
-        fit: 'slice',
-        clip: outline,
-      });
+      if (poster)
+        ops.push({
+          kind: 'image',
+          src: poster,
+          x: 0,
+          y: 0,
+          w,
+          h,
+          fit: 'slice',
+          clip: outline,
+        });
       // The play badge, sized against the box exactly as the SVG does.
       const cx = w / 2;
       const cy = h / 2;

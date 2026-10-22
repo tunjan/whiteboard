@@ -8,17 +8,25 @@ import {
   addCustomSticker,
   customStickersFull,
 } from '@/canvas/board-records';
-import { useCustomStickersStore } from '@/canvas/use-custom-stickers-store';
+import {
+  requestStickerCutOut,
+  useCustomStickersStore,
+} from '@/canvas/use-custom-stickers-store';
 import { useStyleStore } from '@/canvas/use-style-store';
 import { useToolStore } from '@/canvas/use-tool-store';
 import { getLocalUser } from '@/collab/presence';
 import { uploadImageBlob } from './blobs';
-import { cutOutSticker } from './remove-background';
+import {
+  applyCutOut,
+  decodeStickerSource,
+  encodeSticker,
+} from './remove-background';
 
 // Client for the board's custom sticker library. A sticker is a PNG whose
 // backdrop has been erased locally (see ./remove-background.ts) before upload,
 // so what lands in the blob store is already the cut-out artwork — every peer
-// and the PNG export get the transparency for free.
+// and the PNG export get the transparency for free. Each upload stops at the
+// cut-out dialog first, where the backdrop can be kept or picked by hand.
 
 /** The cut-out re-encodes as PNG, so any raster that decodes is fair game. */
 const ACCEPT = 'image/png,image/jpeg,image/webp';
@@ -39,9 +47,19 @@ export async function addStickerFiles(files: File[]): Promise<void> {
       store.setError(LIBRARY_FULL);
       return;
     }
+    let source: ImageData;
+    try {
+      source = await decodeStickerSource(file);
+    } catch (error) {
+      console.error('[stickers] decode failed', error);
+      store.setError(FAILED);
+      continue;
+    }
+    const options = await requestStickerCutOut(file.name, source);
+    if (!options) continue;
     store.beginUpload();
     try {
-      const art = await cutOutSticker(file);
+      const art = await encodeSticker(applyCutOut(source, options));
       const blobId = await uploadImageBlob(art.blob, 'image/png');
       const id = genId();
       addCustomSticker({

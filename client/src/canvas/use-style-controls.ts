@@ -16,7 +16,13 @@ import { editor } from '@/canvas/use-document-store';
 import { shapeStore } from '@/canvas/engine/shape-store';
 import { useStoreValue } from '@/canvas/use-shapes';
 import { useSelectionStore } from '@/canvas/use-selection-store';
-import { paletteColors, useStyleStore } from '@/canvas/use-style-store';
+import {
+  paletteColors,
+  SIZE_OPTIONS,
+  styleSlot,
+  useStyleStore,
+} from '@/canvas/use-style-store';
+import { useToolStore } from '@/canvas/use-tool-store';
 import { useThemeStore } from '@/use-theme-store';
 
 // Draw shapes take a fill too, but only once the stroke closed on itself — an
@@ -160,6 +166,46 @@ function useSharedValue<T>(
 }
 
 /**
+ * Restyle the selection, and — when the active tool draws — what it draws
+ * next. With the select tool the edit stays on the selection, so recolouring a
+ * heading does not also recolour the pen.
+ */
+function writesNextStyle(): boolean {
+  return styleSlot(useToolStore.getState().activeToolId) !== null;
+}
+
+export function applyColor(value: string): void {
+  if (writesNextStyle()) useStyleStore.getState().setColor(value);
+  for (const id of useSelectionStore.getState().selectedIds)
+    editor.updateShape(id, { props: { color: value } });
+}
+
+export function applySize(value: number): void {
+  if (writesNextStyle()) useStyleStore.getState().setSize(value);
+  for (const id of useSelectionStore.getState().selectedIds) {
+    const shape = editor.getShape(id);
+    if (shape && shape.type !== 'text') {
+      editor.updateShape(id, { props: { size: value } });
+    }
+  }
+}
+
+/** One stroke weight thinner (−1) or thicker (1) than the current one. */
+export function stepSize(delta: -1 | 1): void {
+  const selected = useSelectionStore
+    .getState()
+    .selectedIds.map((id) => editor.getShape(id)?.props as { size?: number })
+    .find((props) => typeof props?.size === 'number');
+  const current = selected?.size ?? useStyleStore.getState().size;
+  const index = SIZE_OPTIONS.findIndex((option) => option.value === current);
+  const next =
+    SIZE_OPTIONS[
+      Math.min(Math.max((index < 0 ? 0 : index) + delta, 0), SIZE_OPTIONS.length - 1)
+    ];
+  if (next && next.value !== current) applySize(next.value);
+}
+
+/**
  * Everything a style surface needs: which controls apply, what they currently
  * read, and what each one writes.
  *
@@ -186,7 +232,6 @@ export function useStyleControls(activeToolId: string): StyleControls {
   const theme = useThemeStore((s) => s.theme);
   const {
     setColor,
-    setSize,
     setFill,
     setDash,
     setOpacity,
@@ -354,22 +399,6 @@ export function useStyleControls(activeToolId: string): StyleControls {
     if (next) setColor(next.value);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [theme]);
-
-  const applyColor = (value: string) => {
-    setColor(value);
-    for (const id of selectedIds)
-      editor.updateShape(id, { props: { color: value } });
-  };
-
-  const applySize = (value: number) => {
-    setSize(value);
-    for (const id of selectedIds) {
-      const shape = editor.getShape(id);
-      if (shape && shape.type !== 'text') {
-        editor.updateShape(id, { props: { size: value } });
-      }
-    }
-  };
 
   const applyFill = (value: FillStyle) => {
     setFill(value);

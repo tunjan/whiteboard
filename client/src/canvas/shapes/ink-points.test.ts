@@ -204,6 +204,18 @@ describe('incremental point mirror', () => {
     expect(readPoints(m)).toEqual(stroke(5));
   });
 
+  // A resize scales from the shape it read at pointer-down; rewriting that
+  // array under it made each pointer move compound on the last.
+  it('leaves an array it already handed out as it was', () => {
+    const m = modernShape(stroke(3));
+    const arr = ensurePointsArray(m);
+    const read = readPoints(m);
+    arr.doc!.transact(() => syncYPoints(arr, stroke(3).map((p) => ({ ...p, x: p.x * 2 }))));
+    arr.doc!.transact(() => syncYPoints(arr, stroke(6)));
+    expect(read).toEqual(stroke(3));
+    expect(readPoints(m)).toEqual(stroke(6));
+  });
+
   it('tracks a same-length rewrite, which no length check would catch', () => {
     const m = modernShape(stroke(4));
     const arr = ensurePointsArray(m);

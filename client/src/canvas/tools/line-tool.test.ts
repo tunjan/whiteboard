@@ -4,6 +4,7 @@ import type { Shape } from '@whiteboard/shared';
 import '../shapes/register';
 import type { Editor } from '../editor';
 import { spatialIndex } from '../use-document-store';
+import { useMeasureStore } from '../use-measure-store';
 import { useSelectionStore } from '../use-selection-store';
 import { createLineTool } from './line-tool';
 import type { ToolContext, ToolPointerInfo } from './types';
@@ -185,5 +186,23 @@ describe('line tool snapping while creating', () => {
     tool.onPointerUp?.(pointer(198, 205), ctx);
 
     expect(useSelectionStore.getState().snapGuides).toEqual([]);
+  });
+});
+
+describe('line tool live measurement', () => {
+  it('shows the span while dragging and drops it on release, keeping the line', () => {
+    const { ctx, shapes } = context();
+    const tool = lineTool();
+
+    tool.onPointerDown?.(pointer(0, 0), ctx);
+    tool.onPointerMove?.(pointer(30, -40), ctx);
+    expect(useMeasureStore.getState().span).toEqual({
+      a: { x: 0, y: 0 },
+      b: { x: 30, y: -40 },
+    });
+
+    tool.onPointerUp?.(pointer(30, -40), ctx);
+    expect(useMeasureStore.getState().span).toBeNull();
+    expect(drawn(shapes)?.end).toEqual({ x: 30, y: -40 });
   });
 });

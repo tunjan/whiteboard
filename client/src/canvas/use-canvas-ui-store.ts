@@ -28,6 +28,9 @@ export type EraserMode = 'object' | 'precision';
  */
 export type ShapeRendererChoice = 'auto' | 'dom-svg' | 'canvas-2d';
 
+/** Where the tool bar docks: a row along the bottom, or a rail down the left. */
+export type ToolbarPlacement = 'bottom' | 'left';
+
 interface CanvasUiStore {
   background: BackgroundType;
   /** Whether shape alignment, spacing, resize, and handle snapping is active. */
@@ -105,6 +108,11 @@ interface CanvasUiStore {
    * outweighed the drawing it was a map of.
    */
   minimapVisible: boolean;
+  /**
+   * Where the tool bar docks. The left rail gives a widescreen board back its
+   * bottom edge, where students write, at the cost of height it rarely needs.
+   */
+  toolbarPlacement: ToolbarPlacement;
   /** Whether the on-canvas performance overlay (FPS/frame time) is shown. */
   debugPerformance: boolean;
   /**
@@ -167,6 +175,7 @@ interface CanvasUiStore {
   pngExportScale: number;
   setBackground: (background: BackgroundType) => void;
   setMinimapVisible: (minimapVisible: boolean) => void;
+  setToolbarPlacement: (toolbarPlacement: ToolbarPlacement) => void;
   setGroundFade: (groundFade: boolean) => void;
   setInvertScroll: (invertScroll: boolean) => void;
   setSnappingEnabled: (snappingEnabled: boolean) => void;
@@ -342,6 +351,7 @@ export const useCanvasUiStore = create<CanvasUiStore>()(
       eraserMode: 'object',
       invertScroll: false,
       minimapVisible: false,
+      toolbarPlacement: 'bottom',
       debugPerformance: false,
       shapeRenderer: 'auto',
       rasterCache: 'auto',
@@ -357,6 +367,7 @@ export const useCanvasUiStore = create<CanvasUiStore>()(
       ...PENCIL_DEFAULTS,
       setBackground: (background) => set({ background }),
       setMinimapVisible: (minimapVisible) => set({ minimapVisible }),
+      setToolbarPlacement: (toolbarPlacement) => set({ toolbarPlacement }),
       setGroundFade: (groundFade) => set({ groundFade }),
       setInvertScroll: (invertScroll) => set({ invertScroll }),
       setSnappingEnabled: (snappingEnabled) => set({ snappingEnabled }),

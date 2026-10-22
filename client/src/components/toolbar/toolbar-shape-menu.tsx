@@ -3,7 +3,6 @@ import type { PolygonKind } from '@whiteboard/shared';
 import { toolRegistry } from '@/canvas/tools/tool-registry';
 import { useStyleStore } from '@/canvas/use-style-store';
 import { useToolStore } from '@/canvas/use-tool-store';
-import { ShapesGlyph } from '@/components/ui/glyphs';
 import {
   Popover,
   PopoverContent,
@@ -11,21 +10,22 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 import { toolbarButtonVariants } from '@/components/ui/toolbar';
-import { MiniShape, POLYGON_KINDS, SHAPE_TOOLS } from './toolbar-constants';
-import { ToolKey } from './toolbar-tool-button';
+import { ShapeArt } from './toolbar-art';
+import {
+  MiniShape,
+  POLYGON_KINDS,
+  polygonLabel,
+  SHAPE_MENU_TOOLS,
+} from './toolbar-constants';
+import { useToolbarSide } from './toolbar-primitives';
+import { ToolKey, useLastHeld } from './toolbar-tool-button';
 
-const BASIC_SHAPES = [
-  'rectangle',
-  'ellipse',
-  'arrow',
-  'line',
-  'frame',
-] as const;
+const BASIC_SHAPES = SHAPE_MENU_TOOLS.filter((id) => id !== 'polygon');
 
 interface ShapeMenuProps {
   activeToolId: string;
-  lastShapeId: string;
-  onLastShapeChange: (toolId: string) => void;
+  /** The shape tray lists every shape, so the key only picks one up. */
+  tray?: boolean;
 }
 
 /**
@@ -36,54 +36,73 @@ interface ShapeMenuProps {
  */
 export function ShapeMenu({
   activeToolId,
-  lastShapeId,
-  onLastShapeChange,
+  tray = false,
 }: ShapeMenuProps) {
   const [open, setOpen] = useState(false);
+  const side = useToolbarSide();
   const setTool = useToolStore((state) => state.setTool);
   const polygonKind = useStyleStore((state) => state.polygonKind);
   const setPolygonKind = useStyleStore((state) => state.setPolygonKind);
 
-  const active = SHAPE_TOOLS.includes(
-    activeToolId as (typeof SHAPE_TOOLS)[number],
-  );
-  const currentOrLastId = active ? activeToolId : lastShapeId;
+  const currentOrLastId = useLastHeld(SHAPE_MENU_TOOLS, activeToolId);
+  const active = currentOrLastId === activeToolId;
   const isPolygon = currentOrLastId === 'polygon';
   const displayedTool = toolRegistry.get(currentOrLastId);
-  const FallbackIcon = displayedTool?.icon ?? ShapesGlyph;
 
   const currentLabel = isPolygon
-    ? (POLYGON_KINDS.find((p) => p.kind === polygonKind)?.label ?? 'Polygon')
+    ? polygonLabel(polygonKind)
     : (displayedTool?.label ?? 'Shape');
   const label = active ? `Shapes, ${currentLabel} selected` : 'Shapes';
 
-  const selectBasicShape = (toolId: string) => {
-    onLastShapeChange(toolId);
+  const pick = (toolId: string) => {
     setTool(toolId);
     setOpen(false);
   };
 
-  const selectPolygon = (kind: PolygonKind) => {
+  const pickPolygon = (kind: PolygonKind) => {
     setPolygonKind(kind);
-    onLastShapeChange('polygon');
-    setTool('polygon');
-    setOpen(false);
+    pick('polygon');
   };
+
+  const art = (
+    <ShapeArt
+      kind={
+        isPolygon
+          ? polygonKind
+          : (currentOrLastId as 'rectangle' | 'ellipse' | 'line')
+      }
+    />
+  );
+
+  if (tray) {
+    return (
+      <ToolKey
+        label={label}
+        hotkey={displayedTool?.hotkey}
+        pressed={active}
+        onClick={() => setTool(currentOrLastId)}
+        art
+      >
+        {art}
+      </ToolKey>
+    );
+  }
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <ToolKey
         label={label}
-        hotkey={active ? displayedTool?.hotkey : undefined}
+        hotkey={displayedTool?.hotkey}
         pressed={active}
         render={<PopoverTrigger />}
+        art
       >
-        {isPolygon ? <MiniShape kind={polygonKind} /> : <FallbackIcon />}
+        {art}
       </ToolKey>
 
-      <PopoverContent side="top" sideOffset={8} className="w-auto p-1">
+      <PopoverContent side={side} sideOffset={8} className="w-auto p-1">
         <PopoverTitle className="sr-only">Shapes</PopoverTitle>
-        <div className="grid grid-cols-5 gap-0.5" role="group" aria-label="Shapes">
+        <div className="grid grid-cols-4 gap-0.5" role="group" aria-label="Shapes">
           {BASIC_SHAPES.map((toolId) => {
             const tool = toolRegistry.get(toolId);
             if (!tool) return null;
@@ -96,7 +115,7 @@ export function ShapeMenu({
                 aria-label={tool.label}
                 aria-keyshortcuts={tool.hotkey?.toUpperCase()}
                 aria-pressed={active && activeToolId === toolId}
-                onClick={() => selectBasicShape(tool.id)}
+                onClick={() => pick(tool.id)}
                 className={toolbarButtonVariants()}
               >
                 {Icon ? <Icon /> : null}
@@ -112,7 +131,7 @@ export function ShapeMenu({
               aria-pressed={
                 active && activeToolId === 'polygon' && polygonKind === kind
               }
-              onClick={() => selectPolygon(kind)}
+              onClick={() => pickPolygon(kind)}
               className={toolbarButtonVariants()}
             >
               <MiniShape kind={kind} />

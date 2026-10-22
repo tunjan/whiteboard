@@ -1,6 +1,13 @@
 import { genId, type Point, type Shape } from '@whiteboard/shared';
+import {
+  deleteLocalImageUrl,
+  imageHref,
+  setLocalImageUrl,
+  uploadImageBlob,
+} from '../board/blobs';
+import { toast } from '@/components/ui/toast';
 import { getTopIndex } from './order';
-import { editor } from './use-document-store';
+import { editor, withoutUndo } from './use-document-store';
 
 /** Default size (world units) for a freshly-placed video — 16:9. */
 const DEFAULT_W = 480;
@@ -57,4 +64,181 @@ export function createYoutubeShape(videoId: string, at: Point): string {
   } as Shape;
   editor.createShape(shape);
   return shape.id;
+}
+
+/** Video types the blob store accepts (mirrors the server's `VIDEO_MIME`). */
+const VIDEO_TYPES = new Set(['video/mp4', 'video/webm', 'video/quicktime']);
+
+/** Mirrors the server's `MAX_VIDEO_BYTES`. */
+const MAX_VIDEO_BYTES = 100 * 1024 * 1024;
+
+/** Longest side (px) of the first-frame poster uploaded with a video. */
+const POSTER_PX = 960;
+
+export function isVideoFile(file: File): boolean {
+  return VIDEO_TYPES.has(file.type);
+}
+
+interface VideoProbe {
+  width: number;
+  height: number;
+  poster: Blob;
+}
+
+/**
+ * Decode a video file far enough to read its size and grab a poster frame.
+ * Null when this browser can't play it — the same browser its viewers use.
+ */
+function probeVideo(file: File): Promise<VideoProbe | null> {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const video = document.createElement('video');
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = 'auto';
+    const done = (probe: VideoProbe | null) => {
+      video.onerror = video.onloadedmetadata = video.onseeked = null;
+      video.onloadeddata = video.oncanplay = null;
+      video.removeAttribute('src');
+      video.load();
+      URL.revokeObjectURL(url);
+      resolve(probe);
+    };
+    video.onerror = () => done(null);
+    // A few frames in: frame 0 is black on anything that fades in.
+    video.onloadedmetadata = () => {
+      video.currentTime = Math.min(0.1, (video.duration || 0) / 2);
+    };
+    const capture = () => {
+      video.onloadeddata = video.oncanplay = null;
+      const { videoWidth: width, videoHeight: height } = video;
+      if (!width || !height) return done(null);
+      const scale = Math.min(1, POSTER_PX / Math.max(width, height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(width * scale);
+      canvas.height = Math.round(height * scale);
+      canvas.getContext('2d')!.drawImage(video, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob(
+        (poster) => done(poster ? { width, height, poster } : null),
+        'image/jpeg',
+        0.85,
+      );
+    };
+    // `seeked` can beat the decoded frame; drawn before it, the canvas stays
+    // transparent and the JPEG poster comes out black.
+    video.onseeked = () => {
+      if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) capture();
+      // `loadeddata` fires once per load, so it may already be spent.
+      else video.onloadeddata = video.oncanplay = capture;
+    };
+    video.src = url;
+  });
+}
+
+/**
+ * Place pasted/dropped video files centered near `at` and return their ids.
+ * Like `placeImageFiles`, the shapes appear at once for this client (poster
+ * drawn from a local object URL) and the upload patches the blob ids in.
+ */
+export async function placeVideoFiles(
+  files: File[],
+  at: Point,
+): Promise<string[]> {
+  const fits = files.filter((f) => {
+    if (f.size <= MAX_VIDEO_BYTES) return true;
+    toast.add({
+      title: f.name,
+      description: 'Videos up to 100 MB can be added to the board.',
+      type: 'error',
+    });
+    return false;
+  });
+  const probed = await Promise.all(fits.map(probeVideo));
+  const ready: Array<{ file: File; probe: VideoProbe }> = [];
+  fits.forEach((file, i) => {
+    const probe = probed[i];
+    if (probe) ready.push({ file, probe });
+    else
+      toast.add({
+        title: file.name,
+        description: 'This browser can’t play that video.',
+        type: 'error',
+      });
+  });
+
+  const ids: string[] = [];
+  // One transaction: a multi-video paste is a single undo step.
+  editor.transact(() => {
+    let offset = 0;
+    for (const { probe } of ready) {
+      const scale = Math.min(1, DEFAULT_W / Math.max(probe.width, probe.height));
+      const w = probe.width * scale;
+      const h = probe.height * scale;
+      const id = genId();
+      // Registered before the shape exists so its first render already has it.
+      setLocalImageUrl(id, URL.createObjectURL(probe.poster));
+      editor.createShape({
+        id,
+        type: 'video',
+        x: at.x - w / 2 + offset,
+        y: at.y - h / 2 + offset,
+        rotation: 0,
+        index: getTopIndex(editor.getShapes()),
+        props: { videoId: '', blobId: '', posterBlobId: '', w, h },
+      } as Shape);
+      ids.push(id);
+      offset += 16;
+    }
+  });
+  ready.forEach(({ file, probe }, i) => {
+    void uploadPlacedVideo(ids[i]!, file, probe.poster);
+  });
+  return ids;
+}
+
+/** Upload a placed video and its poster, then patch the blob ids in. */
+async function uploadPlacedVideo(
+  id: string,
+  file: File,
+  poster: Blob,
+): Promise<void> {
+  const localUrl = imageHref(id, '')!;
+  const progress = toast.add({
+    title: file.name,
+    description: 'Uploading video…',
+    type: 'loading',
+  });
+  let blobId: string;
+  let posterBlobId: string;
+  try {
+    [blobId, posterBlobId] = await Promise.all([
+      uploadImageBlob(file, file.type),
+      uploadImageBlob(poster, 'image/jpeg'),
+    ]);
+  } catch (error) {
+    console.error('[video] upload failed', error);
+    toast.add({
+      title: file.name,
+      description: 'The video could not be uploaded.',
+      type: 'error',
+    });
+    deleteLocalImageUrl(id);
+    URL.revokeObjectURL(localUrl);
+    // Peers could never play it; remove the placeholder they're seeing.
+    withoutUndo(() => editor.deleteShapes([id]));
+    return;
+  } finally {
+    toast.close(progress);
+  }
+  // The poster's bytes are the ones just uploaded: keep showing them locally.
+  setLocalImageUrl(posterBlobId, localUrl);
+  deleteLocalImageUrl(id);
+  const shape = editor.getShape(id);
+  if (shape?.type === 'video' && !shape.props.blobId) {
+    // Outside undo history, as image uploads are: Ctrl+Z steps back over the
+    // whole paste rather than peeling the upload off it first.
+    withoutUndo(() => {
+      editor.updateShape(id, { props: { blobId, posterBlobId } });
+    });
+  }
 }

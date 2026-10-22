@@ -1,26 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
-import {
-  AlertCircle,
-  Check,
-  Copy,
-  CornerDownLeft,
-  Loader2,
-  Mic,
-  Sparkles,
-  Square,
-} from 'lucide-react';
+import { AlertCircle } from 'lucide-react';
 import {
   genId,
   type EquationProps,
   type EquationShape,
   type Shape,
 } from '@whiteboard/shared';
-import {
-  aiLatexEnabled,
-  latexFromPrompt,
-  transcribeAudio,
-} from '@/board/latex-ai';
 import {
   applyLatexCompletion,
   latexTokenAt,
@@ -54,93 +40,31 @@ import {
   readableError,
   sourceExcerpt,
   sourceProblem,
-  wrapMathLatex,
   type SourceSpan,
 } from '@/canvas/equation-source';
 import { getTopIndex } from '@/canvas/order';
 import {
+  centeredMove,
   EQUATION_DEFAULT_SIZE,
   EQUATION_SETTLE_MS,
 } from '@/canvas/shapes/equation';
 import { editor } from '@/canvas/use-document-store';
 import { useShape } from '@/canvas/use-shapes';
 import { useSelectionStore } from '@/canvas/use-selection-store';
-import { paletteColors } from '@/canvas/use-style-store';
 import { ToolPanelPresence } from '@/components/tool-panel-presence';
 import { Button } from '@/components/ui/button';
 import { Surface } from '@/components/ui/surface';
 import { Textarea } from '@/components/ui/textarea';
-import { toast } from '@/components/ui/toast';
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/components/ui/tooltip';
-import { useThemeStore } from '@/use-theme-store';
-import { cn, swatchBorder } from '@/lib/utils';
-
-type TypesetRender = Extract<EquationRender, { svg: string }>;
+import { TooltipProvider } from '@/components/ui/tooltip';
+import { cn } from '@/lib/utils';
+import { EquationAiPrompt, useEquationDictation } from './equation-dictation';
+import { EquationPreview, type TypesetRender } from './equation-preview';
+import { EquationStyleControls } from './equation-style-controls';
 
 // Frames the panel keeps re-asserting focus for (~200ms at 60fps): long enough
 // to outlast a lazily mounted panel, short enough that it never fights a user
 // who clicked elsewhere.
 const FOCUS_ATTEMPTS = 12;
-
-/** The sizes on offer, in the shape's own `fontSize` units. */
-const FONT_SIZES = [16, 22, 28, 40];
-
-/**
- * The two ways TeX sets the same expression, named for what they are used for
- * rather than for the internal style they select.
- */
-const STYLES = [
-  {
-    inline: false,
-    label: 'Display',
-    hint: 'Set as its own line: limits above ∑, full-size fractions',
-  },
-  {
-    inline: true,
-    label: 'Inline',
-    hint: 'Set to sit in a line of text: limits beside ∑, smaller fractions',
-  },
-] as const;
-
-/**
- * A row of mutually exclusive choices — size, style — as a recess with the
- * chosen segment tinted with the accent, exactly the way the toolbar marks a
- * selected key: accent as a wash, accent as the ink, no filled-in white chip.
- * A white chip is a platform switch; this is chrome, and chrome states which
- * of its keys is on with the one accent. Radii are concentric: the 4px track
- * less its own 2px padding leaves 2px on the segment.
- */
-/**
- * A segmented control: size, style.
- *
- * No groove under it. A sunken track with a recessed segment on top is two
- * greys a step apart and the choice stops reading; a sunken track with an
- * inverted segment on top is a slab of solid ink halfway down a settings panel,
- * which is the loudest thing on the surface for the least important decision on
- * it. The segments sit on the panel's own ground and the chosen one takes the
- * recess — the same mark the style bar's weight switch uses, so a value chosen
- * from a run looks the same everywhere in the app.
- */
-const SEGMENTED_TRACK = 'w-full';
-
-const SEGMENTED_ITEM =
-  'h-8 grow basis-0 px-2.5 text-xs font-medium';
-
-/**
- * A labelled row, the way about:preferences states a setting: the name in a
- * fixed left column, the control it names filling the rest, and a full-bleed
- * hairline to the next one. The left column is the width of the longest label
- * here, so the three controls all start on the same vertical.
- */
-const PANEL_ROW = 'flex gap-3 px-3 py-2.5';
-
-const ROW_LABEL = 'w-10 shrink-0 text-xs font-medium text-fg-secondary';
 
 /**
  * Space between one line of a derivation and the next, as a fraction of the
@@ -148,13 +72,6 @@ const ROW_LABEL = 'w-10 shrink-0 text-xs font-medium text-fg-secondary';
  * rather than like a 16pt one that happens to be bigger.
  */
 const LINE_GAP_EM = 0.5;
-
-/**
- * The tallest the preview draws a formula, in pixels. A `\sum` with limits or
- * a pmatrix is several lines tall at the base size; past this it is scaled
- * down to fit rather than allowed to push the source field off the panel.
- */
-const PREVIEW_MAX_H = 96;
 
 /** Completions the list shows at once, before the caret has to do the work. */
 const SUGGESTION_LIMIT = 7;
@@ -176,71 +93,6 @@ function useDebouncedValue<T>(value: T, delay: number): T {
     return () => window.clearTimeout(timer);
   }, [delay, value]);
   return debounced;
-}
-
-/**
- * Whether the element `resolve` finds is scrolling content its box can't show,
- * re-measured when `key` changes and whenever the box is resized.
- *
- * Measured rather than guessed: a content heuristic ("this many characters")
- * misses `\int_{-\infty}^{\infty} e^{-x^2}\,dx`, which runs past the preview
- * in about thirty, and fires on long expressions that happen to fit.
- */
-function useOverflowing(resolve: () => Element | null, key: unknown): boolean {
-  const [overflowing, setOverflowing] = useState(false);
-  const resolveRef = useRef(resolve);
-  resolveRef.current = resolve;
-
-  useEffect(() => {
-    const element = resolveRef.current();
-    if (!element) {
-      setOverflowing(false);
-      return;
-    }
-    const measure = () => {
-      setOverflowing(element.scrollWidth - element.clientWidth > 1);
-    };
-    // MathJax lays out after the value lands, so the first read waits a frame
-    // rather than measuring a box that is still empty.
-    const frame = requestAnimationFrame(measure);
-    const observer = new ResizeObserver(measure);
-    observer.observe(element);
-    return () => {
-      cancelAnimationFrame(frame);
-      observer.disconnect();
-    };
-    // `resolve` is read through a ref so a fresh closure each render doesn't
-    // tear the observer down and rebuild it on every keystroke.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
-
-  return overflowing;
-}
-
-/**
- * Resize around the box center. Anchoring to the top-left instead would make
- * the formula creep right and down with every character typed, and centers are
- * also the pivot the rotation transform uses.
- */
-function centeredMove(
-  shape: EquationShape,
-  w: number,
-  h: number,
-): { x: number; y: number } {
-  return {
-    x: shape.x + (shape.props.w - w) / 2,
-    y: shape.y + (shape.props.h - h) / 2,
-  };
-}
-
-/**
- * The box the preview draws the formula in, from the size the renderer
- * measured — scaled down as one piece when the formula is taller than the
- * preview allows, so it shrinks rather than clips.
- */
-function previewBox(render: TypesetRender): { width: number; height: number } {
-  const scale = Math.min(1, PREVIEW_MAX_H / render.height);
-  return { width: render.width * scale, height: render.height * scale };
 }
 
 /**
@@ -311,44 +163,13 @@ export function EquationPanelContent({ shape }: { shape: EquationShape }) {
   const shapeId = shape.id;
   const inline = shape.props.inline ?? false;
   const sourceRef = useRef<HTMLTextAreaElement | null>(null);
-  const previewRef = useRef<HTMLDivElement | null>(null);
   const inputVersion = useRef(0);
   const focusFrame = useRef(0);
-  const copiedTimer = useRef<number | null>(null);
   const pendingWrap = useRef<{ index: number; text: string } | null>(null);
   const [ready, setReady] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
   const [suggestions, setSuggestions] = useState<LatexCompletion[]>([]);
   const [activeSuggestion, setActiveSuggestion] = useState(0);
-  const [aiEnabled, setAiEnabled] = useState(false);
-  const [prompt, setPrompt] = useState('');
-  const [generating, setGenerating] = useState(false);
-  const [recorder, setRecorder] = useState<MediaRecorder | null>(null);
-  const discardRecording = useRef(false);
-  // The live recorder for the unmount cleanup, which must not re-run (and
-  // flag the recording as discarded) every time `recorder` changes.
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const theme = useThemeStore((state) => state.theme);
-
-  useEffect(() => {
-    let active = true;
-    aiLatexEnabled().then((enabled) => {
-      if (active) setAiEnabled(enabled);
-    });
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  // Always include the equation's own color: a shape can carry a value the
-  // current theme's palette doesn't hold, and a grid with nothing selected
-  // reads as "no color set".
-  const colors = paletteColors(theme);
-  const swatches = colors.some((c) => c.value === shape.props.color)
-    ? colors
-    : [...colors, { name: 'Current color', value: shape.props.color }];
-  const swatchRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   /** Focus the source field, retrying until it reports that the focus took. */
   const focusInput = useCallback(
@@ -408,15 +229,7 @@ export function EquationPanelContent({ shape }: { shape: EquationShape }) {
     return unsubscribe;
   }, [focusInput, shapeId]);
 
-  useEffect(
-    () => () => {
-      if (copiedTimer.current !== null) {
-        window.clearTimeout(copiedTimer.current);
-      }
-      cancelAnimationFrame(focusFrame.current);
-    },
-    [],
-  );
+  useEffect(() => () => cancelAnimationFrame(focusFrame.current), []);
 
   const settledLatex = useDebouncedValue(shape.props.latex, EQUATION_SETTLE_MS);
   const settledKey = settledLatex.trim();
@@ -435,11 +248,7 @@ export function EquationPanelContent({ shape }: { shape: EquationShape }) {
     : null;
   const errorId = `equation-error-${shape.id}`;
   const listId = `equation-completions-${shape.id}`;
-  const titleId = `equation-panel-title-${shape.id}`;
   const sourceId = `equation-source-${shape.id}`;
-  const colorLabelId = `equation-color-${shape.id}`;
-  const sizeLabelId = `equation-size-${shape.id}`;
-  const styleLabelId = `equation-style-${shape.id}`;
   const currentKey = shape.props.latex.trim();
   const currentRender = useEquationRender(currentKey, inline);
 
@@ -450,11 +259,6 @@ export function EquationPanelContent({ shape }: { shape: EquationShape }) {
   if (!currentKey) lastGoodRender.current = null;
   const previewRender = freshRender ?? lastGoodRender.current;
   const previewStale = !freshRender && previewRender !== null && sourceSettled;
-
-  const previewOverflowing = useOverflowing(
-    () => previewRef.current,
-    currentKey,
-  );
 
   // A brace, delimiter or environment that never closes, found by reading the
   // source rather than by waiting for a typeset to fail — and only once the
@@ -506,6 +310,8 @@ export function EquationPanelContent({ shape }: { shape: EquationShape }) {
       })
       .catch(() => undefined);
   };
+
+  const dictation = useEquationDictation({ updateLatex, focusInput });
 
   /**
    * Switch between display and text style, re-measuring the box as it goes:
@@ -627,88 +433,6 @@ export function EquationPanelContent({ shape }: { shape: EquationShape }) {
     });
   };
 
-  /**
-   * Ask the model to write LaTeX for a plain-language description.
-   *
-   * Written through `updateLatex` rather than `applyEdit`: the latter types
-   * through the source field's own undo stack, which only works while that
-   * field already has focus — here it's the prompt field that does.
-   */
-  const generateFromPrompt = async (spoken?: string) => {
-    const text = (spoken ?? prompt).trim();
-    if (!text || generating) return;
-    setGenerating(true);
-    try {
-      const latex = await latexFromPrompt(text);
-      updateLatex(latex);
-      setPrompt('');
-      focusInput();
-    } catch (err) {
-      toast.add({
-        title: err instanceof Error ? err.message : 'Generation failed',
-        type: 'error',
-      });
-    } finally {
-      setGenerating(false);
-    }
-  };
-
-  /**
-   * Dictate the description: first press records, second press stops. The
-   * transcript lands in the description field — so the student sees what was
-   * heard — and is generated from straight away.
-   */
-  const toggleDictation = async () => {
-    if (recorder) {
-      recorder.stop();
-      return;
-    }
-    let stream: MediaStream;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    } catch {
-      toast.add({ title: 'Microphone unavailable', type: 'error' });
-      return;
-    }
-    const next = new MediaRecorder(stream);
-    const chunks: Blob[] = [];
-    next.ondataavailable = (event) => chunks.push(event.data);
-    next.onstop = async () => {
-      stream.getTracks().forEach((track) => track.stop());
-      recorderRef.current = null;
-      setRecorder(null);
-      if (discardRecording.current) return;
-      setGenerating(true);
-      try {
-        const text = await transcribeAudio(
-          new Blob(chunks, { type: next.mimeType }),
-        );
-        setPrompt(text);
-        setGenerating(false);
-        await generateFromPrompt(text);
-      } catch (err) {
-        toast.add({
-          title: err instanceof Error ? err.message : 'Transcription failed',
-          type: 'error',
-        });
-        setGenerating(false);
-      }
-    };
-    discardRecording.current = false;
-    next.start();
-    recorderRef.current = next;
-    setRecorder(next);
-  };
-
-  // Closing the panel mid-recording releases the mic without transcribing.
-  useEffect(
-    () => () => {
-      discardRecording.current = true;
-      if (recorderRef.current?.state === 'recording') recorderRef.current.stop();
-    },
-    [],
-  );
-
   const acceptSuggestion = (completion: LatexCompletion) => {
     const target = sourceRef.current;
     if (!target) return;
@@ -812,45 +536,6 @@ export function EquationPanelContent({ shape }: { shape: EquationShape }) {
     }
   };
 
-  const applyColor = (color: string) => {
-    editor.updateShape(shape.id, { props: { color } });
-  };
-
-  const moveSwatchFocus = (from: number, delta: number) => {
-    const next = (from + delta + swatches.length) % swatches.length;
-    const swatch = swatches[next];
-    if (!swatch) return;
-    applyColor(swatch.value);
-    swatchRefs.current[next]?.focus();
-  };
-
-  const applyFontSize = (fontSize: number) => {
-    const current = editor.getShape(shape.id);
-    if (current?.type !== 'equation') return;
-    const scale = fontSize / current.props.fontSize;
-    if (!Number.isFinite(scale) || scale <= 0) return;
-    const w = current.props.w * scale;
-    const h = current.props.h * scale;
-    editor.updateShape(shape.id, {
-      ...centeredMove(current, w, h),
-      props: { fontSize, w, h },
-    });
-  };
-
-  const copyLatex = async (bodyOnly: boolean) => {
-    const text = bodyOnly
-      ? shape.props.latex
-      : wrapMathLatex(shape.props.latex, inline);
-    try {
-      await navigator.clipboard.writeText(text);
-    } catch {
-      return;
-    }
-    setCopied(true);
-    if (copiedTimer.current !== null) window.clearTimeout(copiedTimer.current);
-    copiedTimer.current = window.setTimeout(() => setCopied(false), 1500);
-  };
-
   const releaseFocus = () => {
     sourceRef.current?.blur();
     if (!shape.props.latex.trim()) {
@@ -874,111 +559,24 @@ export function EquationPanelContent({ shape }: { shape: EquationShape }) {
     <TooltipProvider delay={300}>
       <Surface
         role="region"
-        aria-labelledby={titleId}
+        aria-label="Equation"
+        onKeyDownCapture={dictation.onKeyDownCapture}
         className="touch-targets flex max-h-[calc(100dvh-7rem-env(safe-area-inset-top))] w-[min(23rem,calc(100vw-2rem))] flex-col overflow-hidden p-0 [--chrome-hover:var(--color-tb-track)] sm:max-h-[calc(100dvh-6.25rem-env(safe-area-inset-top))]"
       >
-        {/* The panel says what it is, and carries the two actions that are
-            about the equation as a whole rather than about any one setting. */}
-        <header className="flex h-10 shrink-0 items-center gap-0.5 border-b border-border pr-1 pl-3">
-          <h2
-            id={titleId}
-            className="flex-1 truncate text-sm font-semibold text-fg"
-          >
-            Equation
-          </h2>
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label="Add equation below"
-                  disabled={!currentKey}
-                  onClick={addEquationBelow}
-                  className="disabled:opacity-40"
-                />
-              }
-            >
-              <CornerDownLeft className="size-4" aria-hidden="true" />
-            </TooltipTrigger>
-            <TooltipContent side="top">
-              Add equation below (⌘/Ctrl + Enter)
-            </TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label={copied ? 'LaTeX copied' : 'Copy LaTeX'}
-                  disabled={!currentKey}
-                  onClick={(event) => void copyLatex(event.altKey)}
-                  className="disabled:opacity-40"
-                />
-              }
-            >
-              {copied ? (
-                <Check className="size-4 text-success" aria-hidden="true" />
-              ) : (
-                <Copy className="size-4" aria-hidden="true" />
-              )}
-            </TooltipTrigger>
-            <TooltipContent side="top">
-              Copy as {inline ? 'inline' : 'display'} math (Alt: body only)
-            </TooltipContent>
-          </Tooltip>
-        </header>
-
-        {/* Live canvas preview, on the dimmed ground a Proton panel gives the
-            content it is previewing rather than the controls around it. */}
-        <section
-          aria-label="Preview"
-          className="shrink-0 border-b border-border bg-panel"
-        >
-          <div
-            ref={previewRef}
-            data-overflow={previewOverflowing ? true : undefined}
-            aria-busy={previewStale || undefined}
-            className="equation-fade-end equation-preview-box scrollbar-none flex min-h-20 items-center justify-center overflow-x-auto px-3 py-3 text-center"
-          >
-            {!ready && !loadError ? (
-              <span role="status" className="text-xs text-fg-muted">
-                Preparing renderer — what you type is saved.
-              </span>
-            ) : !currentKey ? (
-              <span role="status" className="text-xs text-fg-muted">
-                Start typing to preview the equation.
-              </span>
-            ) : previewRender ? (
-              <div
-                role="img"
-                aria-label={`Preview of equation: ${currentKey}`}
-                className={cn(
-                  'equation-output-preview',
-                  previewStale && 'opacity-60',
-                )}
-                style={{
-                  color: shape.props.color,
-                  ...previewBox(previewRender),
-                }}
-                dangerouslySetInnerHTML={{ __html: previewRender.svg }}
-              />
-            ) : (
-              <span role="status" className="text-xs text-fg-muted">
-                Rendering…
-              </span>
-            )}
-          </div>
-        </section>
+        <EquationPreview
+          shape={shape}
+          currentKey={currentKey}
+          render={previewRender}
+          stale={previewStale}
+          ready={ready}
+          loadError={loadError}
+          onAddBelow={addEquationBelow}
+        />
 
         {/* Source, and anything wrong with it. The only part that scrolls. */}
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">
           <div className="px-3 py-2.5">
-            <label
-              htmlFor={sourceId}
-              className="mb-1.5 block text-xs font-medium text-fg-secondary"
-            >
+            <label htmlFor={sourceId} className="sr-only">
               LaTeX
             </label>
             <div className="relative">
@@ -1021,7 +619,7 @@ export function EquationPanelContent({ shape }: { shape: EquationShape }) {
                 placeholder={String.raw`\frac{a}{b}`}
                 spellCheck={false}
                 rows={3}
-                className="min-h-20 w-full resize-y rounded-control px-2.5 py-2 font-mono text-sm leading-5 text-fg"
+                className="min-h-20 w-full resize-none rounded-control px-2.5 py-2 font-mono text-sm leading-5 text-fg"
               />
 
               {/* The urlbar's own autocomplete: a popup on the popup surface,
@@ -1146,192 +744,12 @@ export function EquationPanelContent({ shape }: { shape: EquationShape }) {
           ) : null}
         </div>
 
-        {/* Colour, size and style — the only things about an equation that
-            aren't in its source. Laid out the way about:preferences lays out a
-            setting: its name in a fixed left column, the control it names
-            filling the rest, one hairline between rows. */}
-        <div className="shrink-0 divide-y divide-border border-t border-border">
-          <div className={cn(PANEL_ROW, 'items-start')}>
-            <span id={colorLabelId} className={cn(ROW_LABEL, 'pt-2')}>
-              Color
-            </span>
-            <div
-              role="radiogroup"
-              aria-labelledby={colorLabelId}
-              className="grid flex-1 grid-cols-6 gap-0.5"
-            >
-              {swatches.map((paletteColor, index) => {
-                const active = shape.props.color === paletteColor.value;
-                return (
-                  <Tooltip key={paletteColor.value}>
-                    <TooltipTrigger
-                      render={
-                        <button
-                          ref={(node) => {
-                            swatchRefs.current[index] = node;
-                          }}
-                          type="button"
-                          role="radio"
-                          aria-label={paletteColor.name}
-                          aria-checked={active}
-                          tabIndex={active ? 0 : -1}
-                          onClick={() => applyColor(paletteColor.value)}
-                          onKeyDown={(event) => {
-                            const delta =
-                              event.key === 'ArrowRight' ||
-                              event.key === 'ArrowDown'
-                                ? 1
-                                : event.key === 'ArrowLeft' ||
-                                    event.key === 'ArrowUp'
-                                  ? -1
-                                  : 0;
-                            if (!delta) return;
-                            event.preventDefault();
-                            moveSwatchFocus(index, delta);
-                          }}
-                          className="flex h-8 w-full items-center justify-center rounded-control transition-colors duration-fast ease-out hover:bg-tb-track active:scale-[0.98] motion-reduce:transition-none"
-                        />
-                      }
-                    >
-                      <span
-                        className={cn(
-                          'size-4.5 rounded-full border',
-                          active &&
-                            'ring-2 ring-ring ring-offset-2 ring-offset-surface',
-                        )}
-                        style={{
-                          backgroundColor: paletteColor.value,
-                          borderColor: swatchBorder(paletteColor.value),
-                        }}
-                      />
-                    </TooltipTrigger>
-                    <TooltipContent side="top">
-                      {paletteColor.name}
-                    </TooltipContent>
-                  </Tooltip>
-                );
-              })}
-            </div>
-          </div>
+        <EquationAiPrompt
+          dictation={dictation}
+          spaced={Boolean(error || (problem && problemExcerpt))}
+        />
 
-          <div className={cn(PANEL_ROW, 'items-center')}>
-            <span id={sizeLabelId} className={ROW_LABEL}>
-              Size
-            </span>
-            <ToggleGroup
-              className={SEGMENTED_TRACK}
-              aria-labelledby={sizeLabelId}
-              value={[String(Math.round(shape.props.fontSize))]}
-              onValueChange={(values) => {
-                const next = values[0];
-                if (next) applyFontSize(Number(next));
-              }}
-            >
-              {FONT_SIZES.map((size) => (
-                <Tooltip key={size}>
-                  <TooltipTrigger
-                    render={
-                      <ToggleGroupItem
-                        className={SEGMENTED_ITEM}
-                        value={String(size)}
-                        aria-label={`Size ${size}`}
-                      />
-                    }
-                  >
-                    {size}
-                  </TooltipTrigger>
-                  <TooltipContent side="top">Size {size}</TooltipContent>
-                </Tooltip>
-              ))}
-            </ToggleGroup>
-          </div>
-
-          {/* Display or text style. Not a property of the source — the same
-              LaTeX is valid in both — so it belongs beside colour and size
-              rather than in the field. */}
-          <div className={cn(PANEL_ROW, 'items-center')}>
-            <span id={styleLabelId} className={ROW_LABEL}>
-              Style
-            </span>
-            <ToggleGroup
-              className={SEGMENTED_TRACK}
-              aria-labelledby={styleLabelId}
-              value={[inline ? 'inline' : 'display']}
-              onValueChange={(values) => {
-                const next = values[0];
-                if (next) applyInline(next === 'inline');
-              }}
-            >
-              {STYLES.map((style) => (
-                <Tooltip key={style.label}>
-                  <TooltipTrigger
-                    render={
-                      <ToggleGroupItem
-                        className={SEGMENTED_ITEM}
-                        value={style.inline ? 'inline' : 'display'}
-                        aria-label={style.label}
-                      />
-                    }
-                  >
-                    {style.label}
-                  </TooltipTrigger>
-                  <TooltipContent side="top">{style.hint}</TooltipContent>
-                </Tooltip>
-              ))}
-            </ToggleGroup>
-          </div>
-        </div>
-
-        {/* Plain-language description → LaTeX, via the model. In the dimmed
-            footer a Proton panel keeps for the action that is offered rather
-            than the one you came for — and out of the way of the field that
-            is. Only shown where the server is configured to answer it. */}
-        {aiEnabled ? (
-          <footer className="flex shrink-0 items-center gap-2 border-t border-border bg-panel px-3 py-2.5">
-            <Textarea
-              aria-label="Describe an equation to generate its LaTeX"
-              value={prompt}
-              onChange={(event) => setPrompt(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key !== 'Enter' || event.shiftKey) return;
-                event.preventDefault();
-                void generateFromPrompt();
-              }}
-              placeholder={recorder ? 'Listening…' : 'Describe an equation…'}
-              rows={1}
-              disabled={generating || Boolean(recorder)}
-              className="min-h-8 flex-1 resize-none rounded-control px-2.5 py-1.5 text-sm text-fg"
-            />
-            <Button
-              size="sm"
-              variant={recorder ? 'default' : 'ghost'}
-              aria-label={recorder ? 'Stop dictating' : 'Dictate an equation'}
-              aria-pressed={Boolean(recorder)}
-              disabled={generating}
-              onClick={() => void toggleDictation()}
-              className="shrink-0"
-            >
-              {recorder ? (
-                <Square className="size-3.5" aria-hidden="true" />
-              ) : (
-                <Mic className="size-3.5" aria-hidden="true" />
-              )}
-            </Button>
-            <Button
-              size="sm"
-              disabled={!prompt.trim() || generating || Boolean(recorder)}
-              onClick={() => void generateFromPrompt()}
-              className="shrink-0"
-            >
-              {generating ? (
-                <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
-              ) : (
-                <Sparkles className="size-3.5" aria-hidden="true" />
-              )}
-              Generate
-            </Button>
-          </footer>
-        ) : null}
+        <EquationStyleControls shape={shape} onInlineChange={applyInline} />
       </Surface>
     </TooltipProvider>
   );

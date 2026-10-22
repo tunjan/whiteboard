@@ -26,7 +26,7 @@ function countPaths(markup: string): number {
 }
 
 describe('draw stroke style renderers', () => {
-  it('draws a deterministic two-pass rectangle over its exact fill geometry', () => {
+  it('draws a deterministic rectangle outline over its exact fill geometry', () => {
     const shape: RectangleShape = {
       ...base,
       id: 'rectangle-1',
@@ -47,10 +47,11 @@ describe('draw stroke style renderers', () => {
     expect(markup).toContain('<rect');
     expect(markup).toContain('fill-opacity="0.18"');
     expect(markup).toContain('stroke="none"');
-    expect(countPaths(markup)).toBe(2);
+    // tldraw's two passes share one path, so their overlap is painted once.
+    expect(countPaths(markup)).toBe(1);
   });
 
-  it('draws a two-pass ellipse around its exact fill geometry', () => {
+  it('draws an ellipse outline around its exact fill geometry', () => {
     const shape: EllipseShape = {
       ...base,
       id: 'ellipse-1',
@@ -69,10 +70,10 @@ describe('draw stroke style renderers', () => {
 
     expect(markup).toContain('<ellipse');
     expect(markup).toContain('<pattern');
-    expect(countPaths(markup)).toBe(2);
+    expect(countPaths(markup)).toBe(1);
   });
 
-  it('draws a two-pass polygon', () => {
+  it('draws a polygon outline', () => {
     const shape: PolygonShape = {
       ...base,
       id: 'polygon-1',
@@ -90,10 +91,10 @@ describe('draw stroke style renderers', () => {
     );
 
     expect(markup).toContain('<polygon');
-    expect(countPaths(markup)).toBe(2);
+    expect(countPaths(markup)).toBe(1);
   });
 
-  it('draws two stable passes along line curve geometry', () => {
+  it('draws a smooth line along its own spline segments', () => {
     const shape: LineShape = {
       ...base,
       id: 'line-1',
@@ -113,12 +114,12 @@ describe('draw stroke style renderers', () => {
       createElement(lineUtil.Component, { shape }),
     );
 
-    expect(countPaths(markup)).toBe(2);
-    expect(markup).toContain(' q ');
+    expect(countPaths(markup)).toBe(1);
+    expect(markup).toMatch(/ c /i);
     expect(markup).not.toContain('stroke-dasharray');
   });
 
-  it('synthesizes the arrow body and both heads independently', () => {
+  it('wobbles the arrow body and keeps both heads solid', () => {
     const shape: ArrowShape = {
       ...base,
       id: 'arrow-1',
@@ -138,8 +139,8 @@ describe('draw stroke style renderers', () => {
       createElement(arrowUtil.Component, { shape }),
     );
 
-    // Two passes each for body, start head, and end head.
-    expect(countPaths(markup)).toBe(6);
+    // The body, then both heads in one solid path, as tldraw draws them.
+    expect(countPaths(markup)).toBe(2);
     expect(markup).not.toContain('stroke-dasharray');
   });
 });

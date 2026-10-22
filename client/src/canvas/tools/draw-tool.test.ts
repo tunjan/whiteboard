@@ -1038,6 +1038,50 @@ describe('straight-segment mode', () => {
     expect(bridge[2]!.pressure).toBeLessThan(bridge[3]!.pressure!);
     expect(points[8]).toMatchObject({ x: 95, y: 30 });
   });
+
+  it("keeps the bridge no heavier than the stroke's own pressure", () => {
+    const { ctx, shapes } = context();
+    const tool = createDrawTool();
+    // A light stylus: stored pressure well under neutral.
+    const light = { pressure: 0.16 };
+
+    withSynchronousFrames(() => {
+      tool.onPointerDown?.(pointer(0, 0, light), ctx);
+      for (let i = 1; i < 10; i++) {
+        tool.onPointerMove?.(pointer(i * 5, 0, { ...light, shiftKey: true }), ctx);
+      }
+      for (let i = 0; i < 10; i++) tool.onPointerMove?.(pointer(50, i * 5, light), ctx);
+      tool.onPointerUp?.(pointer(50, 50, light), ctx);
+    });
+
+    const points = drawPoints([...shapes.values()][0])!;
+    const stroke = points[0]!.pressure!;
+    for (const point of points) expect(point.pressure!).toBeLessThanOrEqual(stroke);
+  });
+
+  it('keeps one pivot when the point cap falls inside a segment', () => {
+    const { ctx, shapes } = context();
+    const tool = createDrawTool();
+
+    withSynchronousFrames(() => {
+      tool.onPointerDown?.(pointer(0, 0), ctx);
+      for (let i = 1; i < 598; i++) tool.onPointerMove?.(pointer(i, 0), ctx);
+      // Shift arms at 597 and commits on the next move, anchoring at the
+      // 599th point — so the very first segment endpoint reaches the cap.
+      tool.onPointerMove?.(pointer(598, 0, { shiftKey: true }), ctx);
+      tool.onPointerMove?.(pointer(610, 0, { shiftKey: true }), ctx);
+      tool.onPointerMove?.(pointer(797, 201, { shiftKey: true }), ctx);
+      tool.onPointerUp?.(pointer(797, 201, { shiftKey: true }), ctx);
+    });
+
+    // One shape, its segment snapped at 45 degrees from the single anchor.
+    expect(shapes.size).toBe(1);
+    const points = drawPoints([...shapes.values()][0])!;
+    const anchor = points.at(-2)!;
+    const end = points.at(-1)!;
+    expect(anchor).toMatchObject({ x: 598, y: 0 });
+    expect(end.x - anchor.x).toBeCloseTo(end.y - anchor.y, 9);
+  });
 });
 
 describe('segment extension', () => {
@@ -1298,6 +1342,20 @@ describe('highlighter (marker ink)', () => {
     marker().onPointerDown?.(pointer(0, 0, { shiftKey: true }), ctx);
     expect(shapes.size).toBe(2);
     expect(drawPoints(shapes.get('ink'))).toHaveLength(1);
+  });
+
+  it("is not adopted by the pen's Shift-click extension", () => {
+    const { ctx, shapes } = context();
+    shapes.set('hl', {
+      ...stroke('hl', 'a1'),
+      props: { points: [{ x: 0, y: 0, pressure: 0.5 }], isClosed: false, inkKind: 'highlight' },
+    } as unknown as Shape);
+
+    const pen = createDrawTool();
+    pen.onPointerDown?.(pointer(0, 0, { shiftKey: true }), ctx);
+    pen.onPointerUp?.(pointer(0, 0, { shiftKey: true }), ctx);
+    expect(shapes.size).toBe(2);
+    expect(drawPoints(shapes.get('hl'))).toHaveLength(1);
   });
 });
 

@@ -116,10 +116,13 @@ describe('geometric shapes', () => {
     expect(ops[0]!.dash).toBeUndefined();
   });
 
-  it('synthesizes the hand-drawn outline as two passes', () => {
-    const ops = paths(buildPaint(rectangle({ dash: 'draw' }), env()));
-    expect(ops.length).toBeGreaterThan(1);
-    for (const op of ops) expect(op.stroke).toBe('#111111');
+  it('paints the hand-drawn outline as one path holding both passes', () => {
+    const strokes = paths(buildPaint(rectangle({ dash: 'draw' }), env())).filter(
+      (op) => op.stroke,
+    );
+    expect(strokes).toHaveLength(1);
+    expect(strokes[0]!.stroke).toBe('#111111');
+    expect(strokes[0]!.d.match(/[Mm]/g)).toHaveLength(2);
   });
 
   it('closes an ellipse dash over its own seam', () => {

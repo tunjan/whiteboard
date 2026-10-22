@@ -101,6 +101,8 @@ export interface CachedInk {
   highlight: boolean;
   /** A closed stroke's interior, painted under the ink; null when unfilled. */
   fill: CompiledOp[] | null;
+  /** The paint that last drew this entry, for {@link evictIdle}. */
+  used: number;
 }
 
 /**
@@ -255,6 +257,22 @@ export function composeShapeTransform(
  */
 const IMAGE_IDLE_MS = 60_000;
 
+/**
+ * How long a cached path or op list may go unpainted before it is dropped.
+ * Measured 2026-10-20 in headless Chrome: a held ink `Path2D` costs ~2.1 KB of
+ * renderer memory for a 15-point stroke (~3.1 KB at 30), about as much as the
+ * shape's own data, so a pan across a 50k board kept ~100 MB that nothing freed.
+ */
+const PATH_IDLE_MS = 60_000;
+
+/** Drop the entries of `store` last painted before `cutoff`. */
+export function evictIdle(
+  store: Map<string, { used: number }>,
+  cutoff: number,
+): void {
+  for (const [id, entry] of store) if (entry.used < cutoff) store.delete(id);
+}
+
 /** Device pixels of overlap repainted at the seam between shifted and fresh. */
 const SEAM = 2;
 
@@ -372,6 +390,7 @@ interface CachedPaint {
   epoch: number;
   corners: number;
   ops: CompiledOp[];
+  used: number;
 }
 
 export function Canvas2dShapeLayer({ width, height }: ShapeRendererProps) {
@@ -464,6 +483,13 @@ export function Canvas2dShapeLayer({ width, height }: ShapeRendererProps) {
       images.set(src, element);
       return null;
     };
+
+    /** When the current paint started, stamped on every cache entry it draws.
+     *  Read once per paint rather than per shape. */
+    let paintedAt = 0;
+    /** When {@link evictIdle} last swept the caches. The sweep walks every
+     *  entry, so it runs a few times per idle window, not once per paint. */
+    let sweptAt = 0;
 
     /** Release sources no paint has asked for in {@link IMAGE_IDLE_MS}. A full
      *  repaint asks for every image on screen, so this only drops ones scrolled
@@ -604,8 +630,10 @@ export function Canvas2dShapeLayer({ width, height }: ShapeRendererProps) {
           impostor,
           movingRef(),
         )
-      )
+      ) {
+        hit.used = paintedAt;
         return hit;
+      }
       built++;
       // Started after the cache test, so this measures conditioning and not the
       // hit path it shares a function with.
@@ -647,6 +675,7 @@ export function Canvas2dShapeLayer({ width, height }: ShapeRendererProps) {
           color,
           highlight,
           fill: null,
+          used: paintedAt,
         };
         store.set(shape.id, entry);
         paintCounters.conditionMs += performance.now() - conditionStart;
@@ -700,6 +729,7 @@ export function Canvas2dShapeLayer({ width, height }: ShapeRendererProps) {
         color,
         highlight,
         fill: fill ? compilePaint([fill]) : null,
+        used: paintedAt,
       };
       store.set(shape.id, entry);
       paintCounters.conditionMs += performance.now() - conditionStart;
@@ -733,12 +763,15 @@ export function Canvas2dShapeLayer({ width, height }: ShapeRendererProps) {
       // Only an image asks about the epoch, and only to decide whether its
       // corner mask is worth re-testing. Everything else is a function of the
       // shape alone and a document change leaves it exactly as it was.
-      if (fresh && (shape.type !== 'image' || hit.epoch === epoch))
+      if (fresh && (shape.type !== 'image' || hit.epoch === epoch)) {
+        hit.used = paintedAt;
         return hit.ops;
+      }
       const conditionStart = performance.now();
       const corners = shape.type === 'image' ? imageCorners(shape) : 0;
       if (fresh && hit.corners === corners) {
         hit.epoch = epoch;
+        hit.used = paintedAt;
         paintCounters.conditionMs += performance.now() - conditionStart;
         return hit.ops;
       }
@@ -763,6 +796,7 @@ export function Canvas2dShapeLayer({ width, height }: ShapeRendererProps) {
         epoch,
         corners,
         ops,
+        used: paintedAt,
       });
       paintCounters.conditionMs += performance.now() - conditionStart;
       return ops;
@@ -1116,6 +1150,7 @@ export function Canvas2dShapeLayer({ width, height }: ShapeRendererProps) {
       const { width, height } = scene.viewport.get();
 
       unsafe__withoutCapture(() => {
+        paintedAt = performance.now();
         const dpr = Math.min(window.devicePixelRatio || 1, 2);
         const pixelWidth = Math.round(width * dpr);
         if (canvas.width !== pixelWidth) {
@@ -1160,6 +1195,12 @@ export function Canvas2dShapeLayer({ width, height }: ShapeRendererProps) {
           const { items, delegated: handedOver } = collect(visible);
           drawShapes(items, camera.z);
           evictImages();
+          // After the paint, so everything on screen has just been stamped.
+          if (paintedAt - sweptAt > PATH_IDLE_MS / 4) {
+            sweptAt = paintedAt;
+            evictIdle(cache, paintedAt - PATH_IDLE_MS);
+            evictIdle(paints, paintedAt - PATH_IDLE_MS);
+          }
           canvas.dataset.canvas2dDrawn = String(items.length);
           canvas.dataset.canvas2dDelegated = String(handedOver);
           bitmap = {

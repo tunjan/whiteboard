@@ -26,8 +26,8 @@ import { dashProps, strokeLineCap } from './render-style';
 import { measureTextWidth } from './text-measure';
 import type { ShapeUtil } from './types';
 
-const DEFAULT_W = 420;
-const DEFAULT_H = 280;
+const DEFAULT_W = 400;
+const DEFAULT_H = 400;
 const MIN_W = 220;
 const MIN_H = 160;
 const PLOT_PADDING = 16;

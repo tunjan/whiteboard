@@ -673,6 +673,10 @@ export function createDrawTool(config: DrawToolConfig = PENCIL_CONFIG): Tool {
    * the point cap is reached. See {@link MAX_POINTS_PER_SHAPE}.
    */
   const splitIfFull = (ctx: ToolContext): void => {
+    // A straight segment never grows the stroke — it rewrites one endpoint —
+    // so it can wait for the next freehand sample. Splitting mid-segment would
+    // move its pivot to the cut and bend the line there.
+    if (straightAnchor !== null) return;
     if (points.length < MAX_POINTS_PER_SHAPE || !strokeProps) return;
     const last = points[points.length - 1]!;
     const worldOrigin = { x: origin.x + last.x, y: origin.y + last.y };
@@ -684,10 +688,6 @@ export function createDrawTool(config: DrawToolConfig = PENCIL_CONFIG): Tool {
     // the line to nothing in the middle of an unbroken stroke.
     strokeProps = { ...strokeProps, startTaper: 0 };
     beginShape(ctx, worldOrigin, { x: 0, y: 0, pressure: last.pressure });
-    // The anchor indexed the chunk that just closed. The seed is the same
-    // position under a new index, so a straight segment in progress continues
-    // from it rather than from a point that is no longer in this array.
-    if (straightAnchor !== null) straightAnchor = 0;
   };
 
   // Minimum spacing between recorded samples, in world units. See `appendPoint`.
@@ -822,6 +822,7 @@ export function createDrawTool(config: DrawToolConfig = PENCIL_CONFIG): Tool {
     let best: { shape: DrawShape; distance: number } | null = null;
     for (const shape of ctx.editor.getShapes()) {
       if (shape.type !== 'draw' || shape.locked || shape.rotation) continue;
+      if (shape.props.inkKind === 'highlight') continue;
       const last = shape.props.points[shape.props.points.length - 1];
       if (!last) continue;
       const distance = Math.hypot(
@@ -890,6 +891,8 @@ export function createDrawTool(config: DrawToolConfig = PENCIL_CONFIG): Tool {
     const endX = to.x - unitX * inset;
     const endY = to.y - unitY * inset;
     const steps = Math.max(4, Math.floor(distance / 16));
+    const fromPressure = from.pressure ?? NEUTRAL_PRESSURE;
+    const toPressure = to.pressure ?? NEUTRAL_PRESSURE;
 
     for (let i = 0; i < steps; i++) {
       const t = i / (steps - 1);
@@ -900,11 +903,14 @@ export function createDrawTool(config: DrawToolConfig = PENCIL_CONFIG): Tool {
       // existing endpoint. Do not store a duplicate just to begin the bridge.
       if (i === 0 && x === from.x && y === from.y) continue;
       const pressurePhase = easeInOutQuad(t);
+      // The dip is relative to the pressure the hand is actually drawing at,
+      // so a light stroke's join stays light instead of swelling to mid weight.
+      const base = fromPressure + (toPressure - fromPressure) * eased;
       points.push({
         ...to,
         x,
         y,
-        pressure: Math.min(1, 0.5 + Math.abs(0.5 - pressurePhase) * 0.65),
+        pressure: base * (1 - (0.5 - Math.abs(0.5 - pressurePhase)) * 0.8),
       });
     }
     points.push(to);
@@ -1121,9 +1127,9 @@ export function createDrawTool(config: DrawToolConfig = PENCIL_CONFIG): Tool {
       // Checked before any style is read: the appended segment belongs to the
       // shape it joins and must keep that shape's colour and brush.
       //
-      // The pen only. Nothing in the schema tells a marker stroke apart from a
-      // pen one, so a marker looking for a free end would happily adopt a pen
-      // stroke and carry on drawing it as a pen — and Shift is worth more to
+      // The pen only, and only onto pen ink (see `extendableAt`). A marker
+      // looking for a free end would adopt a pen stroke and carry on drawing it
+      // as a pen — and Shift is worth more to
       // the marker as its straight-line mode, which is how a line of text gets
       // highlighted in one level pass.
       if (info.shiftKey && config.ink === 'pencil') {

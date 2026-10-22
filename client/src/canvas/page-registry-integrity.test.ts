@@ -24,8 +24,8 @@ vi.mock('yjs', async () => {
 (globalThis as unknown as { __ydocs: Y.Doc[] }).__ydocs = docs;
 
 import './shapes/register';
+import { createPage } from './page-actions';
 import {
-  createPage,
   loadBoard,
   setCurrentPage,
   useDocumentStore,

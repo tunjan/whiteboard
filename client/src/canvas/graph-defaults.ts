@@ -15,8 +15,8 @@ export const DEFAULT_GRAPH_CURVE_WIDTH = GRAPH_CURVE_WIDTHS[1]!;
 export const DEFAULT_GRAPH_VIEWPORT: GraphViewport = {
   xMin: -10,
   xMax: 10,
-  yMin: -6,
-  yMax: 6,
+  yMin: -10,
+  yMax: 10,
 };
 
 export const DEFAULT_GRAPH_PARAMETER: GraphParameter = {

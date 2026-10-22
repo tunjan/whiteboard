@@ -17,9 +17,8 @@ import {
   movePage,
   movePageToIndex,
   renamePage,
-  setCurrentPage,
-  useDocumentStore,
-} from '@/canvas/use-document-store';
+} from '@/canvas/page-actions';
+import { setCurrentPage, useDocumentStore } from '@/canvas/use-document-store';
 import {
   LIST_VERTICAL_PADDING,
   SortableList,

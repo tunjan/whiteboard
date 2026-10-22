@@ -56,6 +56,21 @@ function spliceItems<T>(
   for (const value of tail) target.push(value);
 }
 
+/**
+ * `spliceItems` into a new array. `mirror.points` is what `readPoints` hands
+ * out, so every shape snapshot holds it: splicing it in place rewrote the
+ * gesture-start copy a resize scales from, and each pointer move compounded
+ * on the last.
+ */
+function spliced<T>(
+  source: readonly T[],
+  at: number,
+  remove: number,
+  insert: readonly T[],
+): T[] {
+  return [...source.slice(0, at), ...insert, ...source.slice(at + remove)];
+}
+
 function pointOffset(lengths: readonly number[], chunkIndex: number): number {
   let offset = 0;
   for (let index = 0; index < chunkIndex; index++) offset += lengths[index]!;
@@ -81,7 +96,7 @@ function applyDelta(
         removePoints += mirror.lengths[index] ?? 0;
       }
       spliceItems(mirror.lengths, at, operation.delete, []);
-      spliceItems(mirror.points, pointAt, removePoints, []);
+      mirror.points = spliced(mirror.points, pointAt, removePoints, []);
       continue;
     }
     if (operation.insert !== undefined) {
@@ -98,7 +113,7 @@ function applyDelta(
         0,
         decoded.map((points) => points.length),
       );
-      spliceItems(mirror.points, pointAt, 0, decoded.flat());
+      mirror.points = spliced(mirror.points, pointAt, 0, decoded.flat());
       at += chunks.length;
     }
   }

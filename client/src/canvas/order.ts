@@ -44,13 +44,12 @@ export function jitterKeyBetween(
   return mid;
 }
 
-/** A key strictly above every shape's index (i.e. on top). */
+/**
+ * A key strictly above every shape's index (i.e. on top). `shapes` must be
+ * z-sorted, as `editor.getShapes()` is, so the topmost is the last one.
+ */
 export function getTopIndex(shapes: readonly Shape[]): string {
-  let max: string | null = null;
-  for (const s of shapes) {
-    if (max === null || s.index > max) max = s.index;
-  }
-  return jitterKeyBetween(max, null);
+  return jitterKeyBetween(shapes.at(-1)?.index ?? null, null);
 }
 
 /**

@@ -12,6 +12,19 @@ export const useUndoStore = create<{ canUndo: boolean; canRedo: boolean }>(
   () => ({ canUndo: false, canRedo: false }),
 );
 
+/**
+ * Counts the steps taken, wherever they came from — a shortcut, the
+ * two-finger tap, the bar — so the bar can show one it did not take itself.
+ */
+export const useHistoryStep = create<{ n: number; dir: 'undo' | 'redo' }>(() => ({
+  n: 0,
+  dir: 'undo',
+}));
+
+function noteStep(dir: 'undo' | 'redo') {
+  useHistoryStep.setState((s) => ({ n: s.n + 1, dir }));
+}
+
 /** Mirror an UndoManager's stack depth into useUndoStore. Returns a cleanup. */
 function bindUndoState(manager: Y.UndoManager): () => void {
   const sync = () =>
@@ -109,6 +122,7 @@ export class PageHistory {
     const item = manager.undoStack.at(-1);
     const replay = item ? this.moves.get(item) : undefined;
     manager.undo();
+    if (item) noteStep('undo');
     if (!replay) return;
     replay('undo');
     const inverse = manager.redoStack.at(-1);
@@ -121,6 +135,7 @@ export class PageHistory {
     const item = manager.redoStack.at(-1);
     const replay = item ? this.moves.get(item) : undefined;
     manager.redo();
+    if (item) noteStep('redo');
     if (!replay) return;
     replay('redo');
     const inverse = manager.undoStack.at(-1);

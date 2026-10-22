@@ -665,6 +665,19 @@ export function snapResizeBounds(
       if (handle.includes('n')) bounds.minY += by.offset;
       else bounds.maxY += by.offset;
     }
+    // An edge handle under an aspect lock grows the other axis about its
+    // middle, so a snap along the dragged axis has to carry it along too.
+    if (lockAspect && validX && yValue === null) {
+      const cy = (bounds.minY + bounds.maxY) / 2;
+      const h = (bounds.maxX - bounds.minX) / Math.max(EPS, aspectRatio);
+      bounds.minY = cy - h / 2;
+      bounds.maxY = cy + h / 2;
+    } else if (lockAspect && validY && xValue === null) {
+      const cx = (bounds.minX + bounds.maxX) / 2;
+      const w = (bounds.maxY - bounds.minY) * aspectRatio;
+      bounds.minX = cx - w / 2;
+      bounds.maxX = cx + w / 2;
+    }
   }
 
   // Only the dragged edge is reported: a stationary edge that happens to line up

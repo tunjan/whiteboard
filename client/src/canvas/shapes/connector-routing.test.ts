@@ -1,8 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import type { ArrowShape, RectangleShape, Shape } from '@whiteboard/shared';
+import type {
+  ArrowShape,
+  FrameShape,
+  RectangleShape,
+  Shape,
+} from '@whiteboard/shared';
 import './register';
+import { arrowHandleDrag } from './connector-handles';
 import {
   bindingForPoint,
+  connectorLocalToWorld,
+  findBindableShapeAt,
   orthogonalRoute,
   pointForBinding,
   syncBoundArrows,
@@ -232,5 +240,167 @@ describe('syncBoundArrows dirty-set narrowing', () => {
     unbound.props = { ...unbound.props, bindings: {} };
     syncBoundArrows([rectangle({ id: 'box' }), unbound], editor, null);
     expect(editor.updated).toEqual([]);
+  });
+});
+
+/** Editor stub that applies patches, so a sync can be re-run on its output. */
+function liveEditor(shapes: Shape[]): Editor & { writes: number } {
+  const editor = {
+    writes: 0,
+    getShape: (id: string) => shapes.find((s) => s.id === id),
+    getShapes: () => shapes,
+    createShape: () => {},
+    deleteShapes: () => {},
+    transact: (fn: () => void) => fn(),
+    updateShape: (id: string, patch: ShapePatch) => {
+      editor.writes++;
+      const i = shapes.findIndex((s) => s.id === id);
+      const s = shapes[i]!;
+      shapes[i] = {
+        ...s,
+        ...patch,
+        props: { ...s.props, ...patch.props },
+      } as Shape;
+    },
+  };
+  return editor;
+}
+
+function frame(overrides: Partial<FrameShape> = {}): FrameShape {
+  return {
+    id: 'frame',
+    type: 'frame',
+    x: 0,
+    y: 0,
+    rotation: 0,
+    index: 'a0',
+    props: { w: 1000, h: 1000, name: 'F' },
+    ...overrides,
+  };
+}
+
+describe('rotated connectors', () => {
+  const worldEnd = (shapes: Shape[], index: number) => {
+    const arrow = shapes[1] as ArrowShape;
+    return connectorLocalToWorld(arrow, arrow.props.points[index]!);
+  };
+
+  for (const [topology, bend] of [
+    ['straight', 0],
+    ['arc', 40],
+  ] as const) {
+    it(`lands a bound ${topology} end on its target in one pass at any angle`, () => {
+      for (const degrees of [30, 90, 180, 270]) {
+        const box = rectangle({ id: 'box', x: 320, y: 0 });
+        const arrow = boundArrow('arrow', 'box', [
+          { x: 0, y: 50 },
+          { x: 300, y: 50 },
+        ]);
+        arrow.rotation = (degrees * Math.PI) / 180;
+        arrow.index = 'a1';
+        arrow.props = { ...arrow.props, topology, bend };
+        const shapes: Shape[] = [box, arrow];
+        const freeEnd = worldEnd(shapes, 0);
+        const editor = liveEditor(shapes);
+        syncBoundArrows(shapes, editor, null);
+        const writes = editor.writes;
+        syncBoundArrows(shapes, editor, null);
+        expect(editor.writes).toBe(writes);
+
+        const want = pointForBinding(
+          (shapes[1] as ArrowShape).props.bindings!.end!,
+          box,
+        )!;
+        const got = worldEnd(shapes, 1);
+        expect(got.x).toBeCloseTo(want.x, 4);
+        expect(got.y).toBeCloseTo(want.y, 4);
+        const start = worldEnd(shapes, 0);
+        expect(start.x).toBeCloseTo(freeEnd.x, 4);
+        expect(start.y).toBeCloseTo(freeEnd.y, 4);
+      }
+    });
+  }
+
+  it('moves only the dragged end of a rotated arrow', () => {
+    const arrow = {
+      ...boundArrow('arrow', 'box', [
+        { x: 0, y: 50 },
+        { x: 300, y: 50 },
+      ]),
+      rotation: Math.PI / 2,
+    };
+    arrow.props = { ...arrow.props, bindings: {} };
+    const start = connectorLocalToWorld(arrow, arrow.props.points[0]!);
+    const result = arrowHandleDrag(arrow, 'end', { x: 500, y: 500 }, {
+      shiftKey: false,
+    });
+    const after = {
+      ...arrow,
+      x: result.x!,
+      y: result.y!,
+      props: { ...arrow.props, ...result.props },
+    } as ArrowShape;
+    const newStart = connectorLocalToWorld(after, after.props.points[0]!);
+    const newEnd = connectorLocalToWorld(after, after.props.points[1]!);
+    expect(newStart.x).toBeCloseTo(start.x, 4);
+    expect(newStart.y).toBeCloseTo(start.y, 4);
+    expect(newEnd.x).toBeCloseTo(500, 4);
+    expect(newEnd.y).toBeCloseTo(500, 4);
+  });
+
+  it('leaves a rotated target outward from the bound side', () => {
+    // Anchored on the box's left edge; turned a quarter clockwise, that edge
+    // faces up, so the elbow must leave upward.
+    const box = rectangle({
+      id: 'box',
+      x: 300,
+      y: 300,
+      rotation: Math.PI / 2,
+      props: { ...rectangle().props, w: 100, h: 100 },
+    });
+    const arrow = boundArrow('arrow', 'box', [
+      { x: 0, y: 0 },
+      { x: 300, y: 300 },
+    ]);
+    arrow.index = 'a1';
+    arrow.props = {
+      ...arrow.props,
+      topology: 'elbow',
+      bindings: { end: { shapeId: 'box', anchor: { x: 0.001, y: 0.5 } } },
+    };
+    const shapes: Shape[] = [box, arrow];
+    syncBoundArrows(shapes, liveEditor(shapes), null);
+    const points = (shapes[1] as ArrowShape).props.points;
+    const end = points[points.length - 1]!;
+    const before = points[points.length - 2]!;
+    expect(before.x).toBeCloseTo(end.x, 4);
+    expect(before.y).toBeLessThan(end.y);
+  });
+});
+
+describe('frames as binding targets', () => {
+  it('ignores the empty interior of a frame', () => {
+    expect(findBindableShapeAt([frame()], { x: 500, y: 500 }, 10)).toBeNull();
+  });
+
+  it('binds near the frame border', () => {
+    expect(findBindableShapeAt([frame()], { x: 995, y: 500 }, 10)?.id).toBe(
+      'frame',
+    );
+  });
+
+  it('keeps an arrow bound to a frame out of the frame', () => {
+    const shapes: Shape[] = [
+      frame({ x: 300, props: { w: 100, h: 100, name: 'F' } }),
+      {
+        ...boundArrow('arrow', 'frame', [
+          { x: 0, y: 50 },
+          { x: 300, y: 50 },
+        ]),
+        index: 'a1',
+      },
+    ];
+    syncBoundArrows(shapes, liveEditor(shapes), null);
+    expect(shapes[1]!.parentId ?? null).toBeNull();
   });
 });

@@ -87,6 +87,10 @@ export async function chatCompletion(
         // Transcription and recall both want the likeliest answer, not a
         // varied one — and a re-run of the same ink should agree with itself.
         temperature: 0,
+        // OpenRouter's default routing balances on price and landed on
+        // providers answering in ~2 s; sorting by throughput picked ones that
+        // answer the same prompts in ~0.9 s median (measured 2026-10-13).
+        provider: { sort: 'throughput' },
       }),
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });

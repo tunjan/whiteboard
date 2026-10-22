@@ -37,7 +37,7 @@ function ToggleGroup({
     const root = rootRef.current
     const plate = plateRef.current
     if (!root || !plate) return
-    const item = root.querySelector<HTMLElement>('[data-slot="toggle-group-item"][aria-pressed="true"]')
+    const item = root.querySelector<HTMLElement>(':scope > [aria-pressed="true"]')
     if (!item) {
       plate.style.opacity = "0"
       return
@@ -105,11 +105,13 @@ function ToggleGroupItem({
       data-variant={context.variant || variant}
       data-size={context.size || size}
       className={cn(
-        "relative z-10 shrink-0 text-fg-secondary transition-[color,scale] duration-150 ease-out hover:bg-transparent active:scale-[0.96] aria-pressed:bg-transparent aria-pressed:text-fg group-data-multiple/toggle-group:aria-pressed:bg-surface group-data-multiple/toggle-group:aria-pressed:shadow-[0_0_0_1px_rgba(0,0,0,0.04),0_1px_2px_rgba(0,0,0,0.06)] dark:group-data-multiple/toggle-group:aria-pressed:bg-[#404040]",
+        // After toggleVariants: tailwind-merge keeps the last of a conflict,
+        // and the plate must show through the pressed item.
         toggleVariants({
           variant: context.variant || variant,
           size: context.size || size,
         }),
+        "relative z-10 shrink-0 text-fg-secondary transition-[color,scale] duration-150 ease-out hover:bg-transparent active:scale-[0.96] aria-pressed:bg-transparent aria-pressed:text-fg group-data-multiple/toggle-group:aria-pressed:bg-surface group-data-multiple/toggle-group:aria-pressed:shadow-[0_0_0_1px_rgba(0,0,0,0.04),0_1px_2px_rgba(0,0,0,0.06)] dark:group-data-multiple/toggle-group:aria-pressed:bg-[#404040]",
         className
       )}
       {...props}

@@ -1,13 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { paletteColors } from '@/canvas/use-style-store';
+import '@/canvas/tools/register';
 import {
+  allSwatches,
+  paletteColors,
   quickSwatches,
-  ToolPropertiesSatellite,
-} from './tool-properties-satellite';
+} from '@/canvas/use-style-store';
+import { ToolPropertiesSatellite } from './tool-properties-satellite';
 
-const render = (activeToolId: string) =>
-  renderToStaticMarkup(<ToolPropertiesSatellite activeToolId={activeToolId} />);
+const render = (activeToolId: string, placement?: 'bottom' | 'left') =>
+  renderToStaticMarkup(
+    <ToolPropertiesSatellite activeToolId={activeToolId} placement={placement} />,
+  );
 
 describe('quickSwatches', () => {
   // Ordered as a rainbow, not by frequency: a row this long is found by where
@@ -20,8 +24,8 @@ describe('quickSwatches', () => {
       'Red',
       'Orange',
       'Yellow',
-      'Light green',
-      'Light blue',
+      'Green',
+      'Blue',
       'Violet',
       'Grey',
     ]);
@@ -36,26 +40,39 @@ describe('quickSwatches', () => {
       'Red',
       'Orange',
       'Yellow',
-      'Light green',
-      'Light blue',
+      'Green',
+      'Blue',
       'Violet',
       'Grey',
     ]);
   });
+
+  // One order on every colour surface: the ramp, then its light variants in
+  // the same hue order.
+  it('follows the ramp with the light variants in the same order', () => {
+    expect(
+      allSwatches(paletteColors('light')).map((c) => c.name).slice(8),
+    ).toEqual(['Light red', 'Light green', 'Light blue', 'Light violet']);
+  });
 });
 
 describe('ToolPropertiesSatellite', () => {
+  // Under a bottom bar each stroke setting sits behind a chevron of its own,
+  // as in the reference tray; beside a rail they are out on a row.
   it('offers the swatches and the stroke row to the pen', () => {
     const html = render('draw');
     expect(html).toContain('aria-label="Style controls"');
     expect(html).toContain('aria-label="Color"');
-    expect(html).toContain('aria-label="Stroke weight"');
+    expect(html).toContain('aria-label="Stroke"');
+    expect(render('draw', 'left')).toContain('aria-label="Stroke weight"');
     expect(html).not.toContain('inert=""');
     expect(html).not.toContain('tbar-sep');
   });
 
   it('carries the same controls for the highlighter', () => {
+    // The highlighter's band has no dash, so its weight is the one menu.
     expect(render('highlighter')).toContain('aria-label="Stroke weight"');
+    expect(render('highlighter', 'left')).toContain('aria-label="Stroke weight"');
   });
 
   // Text has no stroke width to set — `fontSize` lives on the shape, not in the
@@ -92,8 +109,11 @@ describe('ToolPropertiesSatellite', () => {
     expect(html).not.toContain('tbar-sep');
   });
 
-  it('marks exactly one swatch and one weight as checked', () => {
-    expect(render('draw').match(/aria-checked="true"/g)).toHaveLength(2);
+  it('marks exactly one choice in each control', () => {
+    const html = render('draw');
+    expect(html.match(/aria-checked="true"/g)).toHaveLength(
+      html.match(/role="radiogroup"/g)!.length,
+    );
   });
 
   // The sliding chip is placed off the segment count and the chosen index, and
@@ -105,7 +125,7 @@ describe('ToolPropertiesSatellite', () => {
   // in fixed pixels would sit half a key off as soon as a coarse pointer grew
   // every key to 44px.
   it('places the weight indicator from the segment count and index', () => {
-    const html = render('draw');
+    const html = render('draw', 'left');
     expect(html).toContain('--seg-count:4');
     expect(html).toContain('--seg-index:0');
     expect(html).not.toMatch(/tb-mark[^>]*width:\s*\d/);
@@ -123,7 +143,7 @@ describe('ToolPropertiesSatellite', () => {
     // thing the markup states about a swatch is the colour it actually is.
     const ramp = html.slice(
       html.indexOf('aria-label="Color"'),
-      html.indexOf('aria-label="Stroke weight"'),
+      html.indexOf('aria-label="Stroke"'),
     );
     expect(ramp).not.toContain('tbar-chip');
     expect(html).not.toContain('box-shadow');
@@ -162,31 +182,64 @@ describe('ToolPropertiesSatellite as a bar in its own right', () => {
     }
   });
 
-  it('offers the rest of the palette where the quick row runs out', () => {
-    expect(html).toContain('aria-label="More colors"');
+  it('ends the colour row with the key to the colour panel', () => {
+    expect(html).toContain('aria-label="Colors"');
   });
 });
 
 // The bar replaced the top-right style panel, so every control that panel
-// carried has to be reachable here — inline where it is reached for constantly,
-// and behind a key that previews its value where it is not.
+// carried has to be reachable here, on the bar itself.
 describe('ToolPropertiesSatellite as the only style surface', () => {
-  // Fill, stroke style, opacity, arrow and text options all live in the one
-  // popover behind the Options key, which renders closed here. So the markup
-  // can only say whether the key exists: it does wherever a section applies.
-  const hasOptions = (tool: string) =>
-    render(tool).includes('aria-label="Options"');
+  const controls = (tool: string) =>
+    [...render(tool).matchAll(/aria-label="([^"]+)"/g)].map((m) => m[1]);
 
-  it('puts everything beyond colour and weight behind one Options key', () => {
-    for (const tool of ['draw', 'arrow', 'line', 'text']) {
-      expect(hasOptions(tool)).toBe(true);
+  // Nothing is behind a key: every setting the tool has is on the bar, on a
+  // second row above the colours.
+  it('shows every setting on the bar rather than behind a key', () => {
+    expect(controls('draw')).not.toContain('Options');
+    expect(controls('arrow')).toEqual(
+      expect.arrayContaining(['Route', 'Ends', 'Stroke']),
+    );
+    expect(controls('text')).toEqual(
+      expect.arrayContaining(['Font', 'Weight', 'Align']),
+    );
+  });
+
+  // The shape tools are the exception: one row of the shapes themselves, with
+  // colour, stroke and weight behind chevrons, as in the reference tray.
+  it('gives the shape tools the shape tray', () => {
+    for (const tool of ['rectangle', 'line']) {
+      const labels = [
+        ...renderToStaticMarkup(
+          <ToolPropertiesSatellite activeToolId={tool} fullPalette />,
+        ).matchAll(/aria-label="([^"]+)"/g),
+      ].map((m) => m[1]);
+      expect(labels).toEqual(
+        expect.arrayContaining([
+          'Shape',
+          'Triangle',
+          'More shapes',
+          'Color',
+          'Stroke',
+          'Opacity',
+          'Stroke weight',
+        ]),
+      );
     }
   });
 
+  // Under the narrow bar nine shapes and the menus cannot share one row, so
+  // the shapes fold behind a key showing the one in hand.
+  it('folds the shapes behind one key under the narrow bar', () => {
+    const labels = controls('rectangle');
+    expect(labels).toContain('Shape, Rectangle');
+    expect(labels).not.toContain('Triangle');
+  });
+
   // The highlighter fixes its own translucency and takes no dash or fill, so
-  // it is the one inking tool that ends up with nothing behind a key at all.
-  it('shows no key where no key would do anything', () => {
-    expect(hasOptions('highlighter')).toBe(false);
+  // it is the one inking tool with a single row.
+  it('gives the highlighter only colour and weight', () => {
+    expect(render('highlighter').match(/tbar-style-row/g)).toHaveLength(1);
   });
 
   // Wide subjects can outrun a phone. The bar is capped to the viewport here,
@@ -209,8 +262,11 @@ describe('ToolPropertiesSatellite key geometry', () => {
   it('builds every key from the one shared class', () => {
     const buttons = html.match(/<button[^>]*>/g) ?? [];
     expect(buttons.length).toBeGreaterThan(8);
+    // The inking tools stand in the drawer's own slots, like the bar's, each
+    // with its chevron, and the stroke settings wait behind the tray's
+    // chevron key.
     for (const button of buttons) {
-      expect(button).toContain('tbar-item');
+      expect(button).toMatch(/tbar-item|drawer-cell|drawer-ink-more|tray-menu/);
     }
   });
 
@@ -224,6 +280,7 @@ describe('ToolPropertiesSatellite key geometry', () => {
   // own pixels would sit half a key off as soon as a coarse pointer grew every
   // key to 44px.
   it('places the weight indicator from the segment count and index alone', () => {
+    const html = render('draw', 'left');
     expect(html).toContain('--seg-count:4');
     expect(html).toContain('--seg-index:0');
     expect(html).not.toMatch(/tbar-chip[^>]*width:\s*\d/);

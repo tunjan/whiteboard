@@ -66,5 +66,5 @@ export const env = {
     process.env.OPENROUTER_TEXT_MODEL ?? 'deepseek/deepseek-v4-flash',
   /** Speech-to-text for dictating a description. Accepts webm and mp4 as-is. */
   openRouterSttModel:
-    process.env.OPENROUTER_STT_MODEL ?? 'openai/whisper-large-v3',
+    process.env.OPENROUTER_STT_MODEL ?? 'openai/whisper-large-v3-turbo',
 } as const;

@@ -33,9 +33,10 @@ import {
   createGraphViewportWriter,
   type GraphViewportWriter,
 } from './shapes/graph-viewport-writer';
+import { isDarwin } from './platform';
 import { springReturnTool, type SpringHold } from './spring-tool';
 import { toolRegistry } from './tools/tool-registry';
-import type { ToolContext, ToolPointerInfo } from './tools/types';
+import type { Tool, ToolContext, ToolPointerInfo } from './tools/types';
 import { fingerDraws, isFingerTap, multiTouchTapAction } from './touch-input';
 import { useCameraStore } from './use-camera-store';
 import { useCanvasUiStore } from './use-canvas-ui-store';
@@ -126,6 +127,9 @@ const ONE_FINGER_ZOOM_TOOLS = new Set(['select', 'hand']);
  * before drawing still gets its previous tool back.
  */
 const SPRING_HOLD_MS = 250;
+
+/** `PointerEvent.buttons` bit for a stylus's eraser end (Pointer Events §4.1.1). */
+const PEN_ERASER_BUTTONS = 32;
 
 export interface QuickZoomFrameRect {
   center: { x: number; y: number };
@@ -289,9 +293,36 @@ export class GestureArbiter {
     };
   };
 
+  // The tool a gesture started with keeps it to the end, so a tool switch
+  // mid-press (a hotkey, a tool handing off) cannot strand the old tool's
+  // half-made shape while the new one receives a release it never saw begin.
+  private gestureTool: Tool | undefined;
+
   private activeTool() {
+    if (this.gesture === 'tool' && this.gestureTool) return this.gestureTool;
     return toolRegistry.get(useToolStore.getState().activeToolId);
   }
+
+  /**
+   * Select what a paste just placed — unless a press is still dragging,
+   * resizing or drawing, which keeps the selection it is acting on.
+   */
+  selectPasted = (ids: string[]): void => {
+    if (!ids.length || this.gesture === 'tool') return;
+    useToolStore.getState().setTool('select');
+    useSelectionStore.getState().setSelection(ids);
+  };
+
+  /**
+   * End the tool gesture in flight, if any, from outside the pointer stream:
+   * Escape cancels it, a tool hotkey commits it. Returns whether there was one.
+   */
+  endToolGestureNow = (mode: 'commit' | 'cancel'): boolean => {
+    const target = this.host.container();
+    if (this.gesture !== 'tool' || !target) return false;
+    this.endToolGesture(target, mode);
+    return true;
+  };
 
   // True only for events that originate on the canvas DOM surface — excludes
   // in-canvas floating UI (data-ui-layer) and portaled popups/dialogs, whose
@@ -388,6 +419,7 @@ export class GestureArbiter {
 
   private dropGesture(): void {
     this.gesture = null;
+    this.gestureTool = undefined;
     this.toolPointerId = null;
   }
 
@@ -422,6 +454,7 @@ export class GestureArbiter {
     // the gesture is what the spring springs back from.
     if (this.spring) this.spring.used = true;
     this.gesture = 'tool';
+    this.gestureTool = toolRegistry.get(useToolStore.getState().activeToolId);
     this.toolPointerId = e.pointerId;
     e.currentTarget.setPointerCapture(e.pointerId);
     const info = this.toInfo(e);
@@ -843,8 +876,17 @@ export class GestureArbiter {
     // this press is aiming the camera, not using the tool.
     if (this.quickZoomArmed && this.beginQuickZoom(e)) return;
     // Right-drag pans too, but only once the press has travelled: until then
-    // it is still a context menu, which `onPointerUp` opens on release.
-    if (e.button === RIGHT_BUTTON) {
+    // it is still a context menu, which `onPointerUp` opens on release. On a
+    // Mac, Ctrl+click is a right-click: the OS fires `contextmenu` for it, so
+    // handing it to the tool as well left a stray dot or selection behind.
+    if (
+      e.button === RIGHT_BUTTON ||
+      (e.button === 0 &&
+        e.ctrlKey &&
+        !e.metaKey &&
+        e.pointerType === 'mouse' &&
+        isDarwin())
+    ) {
       this.rightPointer = {
         id: e.pointerId,
         x: e.clientX,
@@ -863,6 +905,14 @@ export class GestureArbiter {
       this.toolPointerId = e.pointerId;
       pan.beginPan(e);
       return;
+    }
+    // A stylus turned over to its eraser end erases for that one stroke and
+    // hands the pen back on lift — the same borrow a held E makes.
+    if (e.pointerType === 'pen' && e.buttons & PEN_ERASER_BUTTONS) {
+      const from = useToolStore.getState().activeToolId;
+      useToolStore.getState().setTool('eraser');
+      if (from !== 'eraser' && useToolStore.getState().activeToolId === 'eraser')
+        this.springReturn = from;
     }
     this.startToolGesture(e);
   };

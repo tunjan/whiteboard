@@ -925,6 +925,11 @@
     opacity var(--duration-fast) ease-in;
 }
 
+/* Beside a left rail the plate leaves toward the rail, not downward. */
+.style-bar-motion[data-placement='left'][data-visible='false'] {
+  transform: translateX(-10px);
+}
+
 /* The video panel changes between a pill, a floating player and a full-board
    layout. View Transitions preserve that spatial relationship in Chromium;
    the component supplies a FLIP fallback elsewhere. The remaining rules use
@@ -1934,48 +1939,6 @@
   pointer-events: none;
 }
 
-/* A key that opens something says so, quietly: a small wedge in the trailing
-   bottom corner, which is the desktop convention and costs no width. Sized
-   here rather than by the glyph rule above, which it is explicitly excluded
-   from — a caret is a mark on a key, not the key's symbol. */
-.tbar-caret {
-  position: absolute;
-  inset-block-end: 3px;
-  inset-inline-end: 3px;
-  width: 4px;
-  height: 4px;
-  color: var(--fg-subtle);
-  pointer-events: none;
-}
-
-/* Mirrored in RTL, so the wedge still points out of the trailing corner. */
-[dir='rtl'] .tbar-caret {
-  transform: scaleX(-1);
-}
-
-.tbar-item:hover .tbar-caret {
-  color: var(--fg-secondary);
-}
-
-.tbar-item[aria-current='true'] .tbar-caret {
-  color: currentColor;
-}
-
-/* --------------------------------------------------------------------------
- * A menu or flyout opened from the bar.
- *
- * Compact rows, one hover fill, one selected fill, and the same corner as the
- * bar. Nothing here is a second material.
- * -------------------------------------------------------------------------- */
-.tbar-menu {
-  padding: 4px;
-}
-
-.tbar-menu [role^='menuitem'] {
-  min-height: 32px;
-  border-radius: var(--tb-key-radius);
-}
-
 /* --------------------------------------------------------------------------
  * The style bar.
  *
@@ -1987,11 +1950,16 @@
   --tb-item: 32px;
   --tb-pad: 4px;
   display: flex;
-  align-items: center;
-  gap: var(--tb-gap);
+  /* Two rows when the tool has more than colour and weight: the colours sit
+     next to the bar, the rest of the tool's settings above them. */
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--tb-pad);
   padding: var(--tb-pad);
   background-color: var(--bg-surface);
   max-width: calc(100vw - 1rem);
+  /* Sits lower than the bar it serves: a sub-plate, not a second toolbar. */
+  box-shadow: var(--s-control);
 }
 
 .tbar-style > .tbar-group + .tbar-group {
@@ -2056,14 +2024,135 @@
   background-color: var(--tb-track);
 }
 
-/* A segmented row stretched across the options panel. */
-.tbar-seg-fill {
+/* A row that names its segments (the tray's stroke menu): equal cells, so the
+   chip still travels in whole steps. */
+.tbar-seg-labelled {
   grid-auto-columns: 1fr;
-  width: 100%;
 }
 
-.tbar-seg-fill .tbar-item {
-  width: 100%;
+.tbar-seg-labelled .tbar-item {
+  width: auto;
+  height: 34px;
+  gap: 8px;
+  padding-inline: 10px 14px;
+  font-size: 14px;
+}
+
+/* A tray menu's panel: tight to its row, rounded to match the pill. */
+.tbar-panel.tray-panel {
+  gap: 5px;
+  padding: 5px;
+  border-radius: 16px;
+}
+
+/* Its chip is a soft grey pill, no rule round it. */
+.tbar-seg-labelled .tbar-chip {
+  border-color: transparent;
+  border-radius: 11px;
+  background-color: color-mix(in srgb, var(--fg) 6%, transparent);
+}
+
+.tbar-seg-labelled .tbar-item > svg.tray-stroke:not(.tbar-caret) {
+  width: 18px;
+  height: 18px;
+}
+
+.tbar-style-row {
+  display: flex;
+  align-items: center;
+  gap: var(--tb-gap);
+}
+
+/* The colour row, ruled off from the settings above it by a hairline. */
+.tbar-style-row + .tbar-style-row {
+  padding-top: var(--tb-pad);
+  border-top: 1px solid var(--tb-divider);
+}
+
+/* Beside a left rail the plate reads top-down: colours first. */
+[data-placement='left'] > .tbar-style {
+  flex-direction: column-reverse;
+}
+
+[data-placement='left'] > .tbar-style > .tbar-style-row + .tbar-style-row {
+  padding-top: 0;
+  border-top: 0;
+  padding-bottom: var(--tb-pad);
+  border-bottom: 1px solid var(--tb-divider);
+}
+
+/* The colour panel: the bar's colours, then — under a hairline — the ones
+   that can go onto it. */
+.tbar-colors-add {
+  margin-top: var(--tb-pad);
+  padding-top: var(--tb-pad);
+  border-top: 1px solid var(--tb-divider);
+}
+
+/* The bar's colours reorder by drag: no scroll or pan may claim the press. */
+.tbar-colors-ramp {
+  touch-action: none;
+}
+
+.tbar-colors-ramp .tbar-item {
+  cursor: grab;
+}
+
+.tbar-colors-ramp:has([data-dragging]),
+.tbar-colors-ramp:has([data-dragging]) .tbar-item {
+  cursor: grabbing;
+}
+
+/* The colour in hand, still in its slot so the grid shows where it lands. */
+.tbar-colors-ramp [data-dragging] {
+  opacity: 0.5;
+}
+
+/* Takes a colour off the bar: a small disc on the swatch's corner, revealed on
+   hover (always shown on touch, see `.touch-reveal`). */
+.tbar-swatch-remove {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border);
+  background-color: var(--bg-surface);
+  color: var(--fg-muted);
+  transition: opacity var(--duration-fast) ease-out;
+}
+
+.tbar-swatch-remove:hover {
+  color: var(--fg);
+}
+
+.tbar-swatch-remove > svg {
+  width: 9px;
+  height: 9px;
+}
+
+.tbar-custom-color {
+  cursor: pointer;
+}
+
+.tbar-custom-color:has(:focus-visible) {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+/* Opacity on the bar: a short fader and its value. */
+.tbar-opacity {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 9rem;
+  padding-inline: 4px;
+  font-size: var(--text-xs, 0.75rem);
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-muted);
 }
 
 /* A stroke-weight sample: a short bar in the key's own ink, so weight never
@@ -2074,42 +2163,168 @@
   background-color: currentColor;
 }
 
-/* The sticker palette: two rows of stamps that grow sideways as the board
-   uploads more, scrolling rather than widening the plate past its cap. The
-   chosen stamp sits on the same neutral pill as a segmented choice — blue
-   marks the tool, not which artwork it lays down — and keeps its own colours. */
-.tbar-stickers {
+/* The sticker sheet: every stamp drawn as it lands on the board, die-cut halo
+   and drop shadow, so the plate reads as a sheet of stickers rather than a row
+   of icons. One run of stamps — the built-ins, then the board's uploads, then
+   the blank spot that adds one — in shared columns, no rule between them. It
+   fills the plate, seven keys wide at least, and scrolls past two and a half
+   rows: the half-cut row says there is more without a label. */
+.tbar-sheet {
+  --tb-item: 56px;
+  --sheet-pad: 8px;
   display: grid;
-  grid-auto-flow: column;
-  grid-template-rows: repeat(2, var(--tb-item));
-  gap: 2px;
-  max-width: min(26rem, calc(100vw - 6rem));
-  overflow-x: auto;
-  scrollbar-width: none;
+  flex: 1;
+  grid-template-columns: repeat(auto-fill, var(--tb-item));
+  align-content: start;
+  gap: 4px;
+  min-width: calc(var(--tb-item) * 7 + 4px * 6);
+  /* Room above for a peeled sticker's lift, which the scroller would clip. */
+  padding-block: var(--sheet-pad);
+  max-height: calc(var(--tb-item) * 2.5 + 4px * 2 + var(--sheet-pad));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
 }
 
+.tbar-sheet > .tbar-stickers {
+  display: contents;
+}
+
+/* The sheet grows downward; the keys beside it stay level with its first row
+   rather than drifting to the middle of however many rows there are. */
+.tbar-style-row:has(> .tbar-sheet) {
+  align-self: stretch;
+  align-items: flex-start;
+}
+
+.tbar-style-row:has(> .tbar-sheet) > :not(.tbar-sheet) {
+  margin-top: calc(8px + (56px - var(--tb-item)) / 2);
+}
+
+/* While more sits below, the bottom edge fades, so the cut row reads as
+   scrolled rather than tucked behind the bar. The fade lives on a scroll
+   timeline: with nothing to scroll the timeline is inactive and the fade
+   stays at its initial 0. */
+@property --sheet-fade {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 0px;
+}
+
+@keyframes sheet-fade {
+  from,
+  90% {
+    --sheet-fade: 14px;
+  }
+  to {
+    --sheet-fade: 0px;
+  }
+}
+
+@supports (animation-timeline: scroll()) {
+  .tbar-sheet {
+    mask-image: linear-gradient(
+      to bottom,
+      #000 calc(100% - var(--sheet-fade)),
+      transparent
+    );
+    animation: sheet-fade linear both;
+    animation-timeline: scroll(self);
+  }
+}
+
+/* A blank spot on the sheet, its kiss-cut line still showing: where the next
+   upload lands. */
+.tbar-sticker-add {
+  border: 1.5px dashed color-mix(in srgb, currentColor 35%, transparent);
+  color: var(--fg-muted);
+}
+
+.tbar-sticker-add:hover:not(:disabled) {
+  border-color: var(--fg-muted);
+  color: var(--fg);
+}
+
+.tbar-sticker-add[data-error] {
+  border-color: var(--color-danger);
+  color: var(--color-danger);
+}
+
+.tbar-sticker-pending {
+  background-color: var(--tb-track);
+  cursor: default;
+}
+
+.tbar-stickers .tbar-item {
+  border-radius: 12px;
+}
+
+/* The bare spot a sticker was peeled from: a flat recess, not a key. */
 .tbar-stickers .tbar-item[aria-checked='true'],
 .tbar-stickers .tbar-item[aria-checked='true']:hover:not(:disabled):not([aria-disabled='true']) {
-  background-color: var(--tb-seg-chip);
-  box-shadow: inset 0 0 0 1px var(--border);
+  background-color: color-mix(in srgb, var(--fg) 6%, transparent);
   color: var(--fg);
 }
 
 .tbar-stickers .tbar-item:hover:not([aria-checked='true']) {
-  background-color: var(--tb-track);
+  background-color: transparent;
 }
 
+/* The stamp's own shadow on the board (sticker.tsx), so what you pick is
+   what lands. */
 .tbar-stickers .tbar-item > :is(svg, img) {
-  transition: transform var(--duration-fast) var(--ease-out-quart);
+  width: 46px;
+  height: 46px;
+  filter: drop-shadow(0 1.5px 1.5px rgb(0 0 0 / 0.18));
+  transition:
+    translate var(--duration-base) var(--ease-out-quart),
+    rotate var(--duration-base) var(--ease-out-quart),
+    scale var(--duration-base) var(--ease-out-quart),
+    filter var(--duration-base) var(--ease-out-quart);
 }
 
-.tbar-stickers .tbar-item:hover > :is(svg, img) {
-  transform: scale(1.12);
+/* Under the pointer a corner lifts; the one in hand is peeled clean off,
+   tilted and higher, its shadow fallen further below it. */
+.tbar-stickers .tbar-item:hover:not(:disabled) > :is(svg, img) {
+  translate: 0 -2px;
+  rotate: -4deg;
+}
+
+.tbar-stickers .tbar-item[aria-checked='true'] > :is(svg, img) {
+  translate: 1px -5px;
+  rotate: -11deg;
+  scale: 1.1;
+  filter: drop-shadow(1px 7px 4px rgb(0 0 0 / 0.2));
 }
 
 /* The colour ramp runs as one strip, dot to dot, with no air between keys. */
 .tbar-ramp {
   gap: 0;
+}
+
+/* Beside a left rail the plate runs parallel to it: every zone turns on its
+   side, and a segmented chip travels down instead of across. */
+[data-placement='left'] > .tbar-style,
+[data-placement='left'] .tbar-ramp,
+[data-placement='left'] .tbar-ramp > [role='radiogroup'] {
+  flex-direction: column;
+}
+
+[data-placement='left'] .tbar-seg {
+  grid-auto-flow: row;
+}
+
+[data-placement='left'] .tbar-chip,
+[dir='rtl'] [data-placement='left'] .tbar-chip {
+  inset-inline: 0;
+  inset-block-end: auto;
+  width: auto;
+  height: calc(100% / var(--seg-count));
+  transform: translateY(calc(var(--seg-index) * 100%));
+}
+
+[data-placement='left'] .tbar-style > :has(> .tbar-stickers) {
+  flex-direction: column;
 }
 
 /* The options panel: labelled rows of segmented controls. */
@@ -2175,6 +2390,723 @@
   background-color: transparent;
 }
 
+/* --------------------------------------------------------------------------
+ * The drawer.
+ *
+ * The bar is a drawer of tools: each slot holds a drawn object
+ * (`toolbar-art.tsx`) cut off by the bar's bottom edge, with its hotkey
+ * printed above it. The tool in hand rises out of its slot, and its slot
+ * darkens. The style bar becomes the drawer's tray: as wide as the bar,
+ * tucked behind its top edge, sliding out from behind it.
+ * -------------------------------------------------------------------------- */
+:root {
+  --drawer-h: 76px;
+  --drawer-cell: 62px;
+  --drawer-radius: 17px;
+  --drawer-tray-radius: 18px;
+  /* How far the tray reaches down behind the bar. */
+  --drawer-tuck: 26px;
+  /* The visible height of the tray's row of tools. */
+  --drawer-tray-h: 56px;
+  /* Shapes and the arrow are drawn in the bar's ink, not on a card. */
+  --drawer-ink: #3a4049;
+}
+
+.dark {
+  --drawer-ink: #c9ccd2;
+}
+
+/* The drawer is drawn at 1:1 for touch; on a pointer device it shrinks with
+   the screen so it stays a small part of the board. The wrapper carries the
+   bar and its tray, so both scale together; `scale` composes with the
+   wrapper's translate and the entrance's transform. */
+:root {
+  --drawer-scale: 1;
+}
+
+@media (pointer: fine) {
+  :root {
+    --drawer-scale: 0.72;
+  }
+}
+
+@media (pointer: fine) and (min-width: 1280px) {
+  :root {
+    --drawer-scale: 0.78;
+  }
+}
+
+@media (pointer: fine) and (min-width: 1700px) {
+  :root {
+    --drawer-scale: 0.85;
+  }
+}
+
+.drawer-bar {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  height: var(--drawer-h);
+  padding: 0 4px;
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--drawer-radius);
+  box-shadow: 0 -1px 2px rgba(0, 0, 0, 0.08), var(--s-toolbar);
+  overflow: hidden;
+  /* A long press on a drawn tool is a press, not "Save image". */
+  -webkit-touch-callout: none;
+}
+
+.drawer-group {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+}
+
+.drawer-group + .drawer-group {
+  margin-inline-start: 6px;
+}
+
+.drawer-cell {
+  position: relative;
+  flex: none;
+  width: var(--drawer-cell);
+  height: 100%;
+  overflow: hidden;
+  background-color: transparent;
+  color: var(--fg-secondary);
+  cursor: pointer;
+  transition:
+    background-color var(--duration-fast) ease-out,
+    opacity var(--duration-base) ease-out;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* A glyph key is narrower than a slot holding a drawn tool. */
+.drawer-cell:has(> .drawer-glyph) {
+  width: 60px;
+}
+
+.drawer-cell:has(> .drawer-art) {
+  width: 84px;
+}
+
+/* A drawn tool marks its whole slot: a groove, shaded at both walls. Hover
+   only where there is one: a finger's tap would leave the slot half-raised. */
+@media (hover: hover) {
+  .drawer-cell:has(> .drawer-art):hover:not(:disabled) {
+    background-color: color-mix(in srgb, var(--tb-track) 50%, transparent);
+  }
+}
+
+.drawer-cell:has(> .drawer-art)[aria-pressed='true'],
+.drawer-cell:has(> .drawer-art)[aria-checked='true'],
+.drawer-cell:has(> .drawer-art)[aria-expanded='true'] {
+  background-image: linear-gradient(
+    color-mix(in srgb, var(--fg) 5%, transparent),
+    color-mix(in srgb, var(--fg) 24%, transparent)
+  );
+}
+
+/* A glyph marks only its tile, under the hotkey. Hover never lightens the
+   tile of the tool in hand. */
+@media (hover: hover) {
+  .drawer-cell:hover:not(:disabled, [aria-pressed='true'], [aria-expanded='true']) > .drawer-glyph {
+    background-color: var(--tb-track);
+  }
+}
+
+.drawer-cell[aria-pressed='true'] > .drawer-glyph,
+.drawer-cell[aria-expanded='true'] > .drawer-glyph {
+  background-color: var(--tb-chip);
+}
+
+.drawer-cell:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -4px;
+  border-radius: 14px;
+}
+
+/* Base UI keeps a disabled toolbar key focusable, so it writes
+   `aria-disabled` rather than `disabled`. Without pointer events it also
+   cannot hover, lift or turn. */
+.drawer-cell:is(:disabled, [aria-disabled='true']) {
+  opacity: 0.35;
+  cursor: default;
+  pointer-events: none;
+}
+
+.drawer-key {
+  position: absolute;
+  top: 6px;
+  left: 50%;
+  translate: -50% 0;
+  font-size: 13px;
+  line-height: 1;
+  font-weight: 500;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  opacity: 0.4;
+  transition: opacity var(--duration-fast) ease-out;
+  pointer-events: none;
+}
+
+/* The letter wakes under the pointer, so the key to learn is the one you
+   are about to reach for. */
+@media (hover: hover) {
+  .drawer-cell:hover:not(:disabled) > .drawer-key {
+    opacity: 0.75;
+  }
+}
+
+/* A drawn tool stands on the bar's bottom edge, its foot cut off. It rises
+   with a little settle, like something lifted out of a tray. */
+.drawer-art {
+  position: absolute;
+  bottom: -26px;
+  left: 50%;
+  display: block;
+  translate: -50% 0;
+  color: var(--drawer-ink);
+  transition: translate var(--duration-slow) cubic-bezier(0.34, 1.36, 0.64, 1);
+  pointer-events: none;
+}
+
+.drawer-art > svg {
+  display: block;
+  width: 64px;
+  height: 80px;
+  filter: drop-shadow(0 1px 1.5px rgba(0, 0, 0, 0.12));
+  transition: filter var(--duration-base) ease-out;
+}
+
+/* A new colour runs into the pen's tip rather than snapping onto it. */
+.drawer-art path {
+  transition: fill var(--duration-base) ease-out;
+}
+
+/* Only a tool still in its slot lifts to the pointer; the one in hand stays
+   up rather than sinking to the hover height. */
+@media (hover: hover) {
+  .drawer-cell:hover:not(:disabled, [aria-pressed='true'], [aria-checked='true'], [aria-expanded='true'])
+    .drawer-art {
+    translate: -50% -3px;
+  }
+}
+
+/* Reduced motion keeps the rise, since it marks the tool in hand, but not
+   the overshoot. */
+@media (prefers-reduced-motion: reduce) {
+  .drawer-art {
+    transition-timing-function: ease-out;
+  }
+}
+
+.drawer-cell[aria-pressed='true'] .drawer-art,
+.drawer-cell[aria-checked='true'] .drawer-art,
+.drawer-cell[aria-expanded='true'] .drawer-art {
+  translate: -50% -9px;
+}
+
+/* Lifted off the drawer's floor, the tool in hand throws a longer shadow. */
+.drawer-cell[aria-pressed='true'] .drawer-art > svg,
+.drawer-cell[aria-checked='true'] .drawer-art > svg,
+.drawer-cell[aria-expanded='true'] .drawer-art > svg {
+  filter: drop-shadow(0 3px 3px rgba(0, 0, 0, 0.16));
+}
+
+/* Pressing pushes the tool back down into its slot; it rises on release.
+   The push is quick and plain, so the press lands under the finger; only the
+   release takes the slow spring. */
+.drawer-cell:active:not(:disabled) .drawer-art {
+  translate: -50% 1px;
+  transition-duration: 70ms;
+  transition-timing-function: ease-out;
+}
+
+/* The drawn tool in hand rises into its letter's place. */
+.drawer-cell:has(> .drawer-art)[aria-pressed='true'] > .drawer-key,
+.drawer-cell:has(> .drawer-art)[aria-expanded='true'] > .drawer-key {
+  opacity: 0;
+}
+
+/* A glyph rather than a drawing: the pointer, the hand, More. */
+.drawer-glyph {
+  position: absolute;
+  /* A 44px square: the bottom matches the bar's 4px padding plus the 3px
+     side inset, and the top is what is left of the 74px inside the bar. */
+  inset: 23px 3px 7px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  transition:
+    background-color var(--duration-fast) ease-out,
+    scale var(--duration-fast) ease-out;
+  pointer-events: none;
+}
+
+.drawer-glyph > svg:not([width]) {
+  width: 26px;
+  height: 26px;
+}
+
+/* A glyph's tile gives under the press, as the tray's keys do. */
+.drawer-cell:active:not(:disabled) > .drawer-glyph {
+  scale: 0.94;
+  transition-duration: 70ms;
+}
+
+/* Undo over redo, ruled off at the drawer's end. */
+.drawer-history {
+  flex-direction: column;
+  justify-content: center;
+  padding-inline-start: 6px;
+  border-inline-start: 1px solid var(--tb-divider);
+}
+
+.drawer-history .drawer-cell {
+  width: 44px;
+  height: 34px;
+  border-radius: 10px;
+}
+
+.drawer-history .drawer-glyph {
+  inset: 0;
+  border-radius: 10px;
+}
+
+.drawer-history .drawer-glyph > svg:not([width]) {
+  width: 20px;
+  height: 20px;
+  transition: rotate var(--duration-base) var(--ease-out-quart);
+}
+
+/* Undo and redo turn a little the way they go while pressed. */
+@media (prefers-reduced-motion: no-preference) {
+  .drawer-history .drawer-cell:first-child:active:not(:disabled) .drawer-glyph > svg {
+    rotate: -24deg;
+  }
+
+  .drawer-history .drawer-cell:last-child:active:not(:disabled) .drawer-glyph > svg {
+    rotate: 24deg;
+  }
+}
+
+/* The tray: the style bar over a bottom drawer. */
+[data-placement='bottom'] > .tbar-style {
+  --tb-item: 36px;
+  width: 100%;
+  max-width: none;
+  padding: 0 16px var(--drawer-tuck);
+  border-bottom: 0;
+  border-radius: var(--drawer-tray-radius) var(--drawer-tray-radius) 0 0;
+  background-color: color-mix(in srgb, var(--bg-surface) 98.5%, var(--fg));
+  box-shadow: var(--s-toolbar);
+  overflow: hidden;
+}
+
+[data-placement='bottom'] > .tbar-style > .tbar-style-row {
+  min-height: var(--drawer-tray-h);
+  gap: 18px;
+}
+
+[data-placement='bottom'] .tbar-ramp .tbar-swatch {
+  width: 26px;
+  height: 26px;
+}
+
+[data-placement='bottom'] > .tbar-style[data-one-row] {
+  padding-inline: 12px;
+}
+
+[data-placement='bottom'] > .tbar-style[data-one-row] > .tbar-style-row {
+  gap: 4px;
+}
+
+.tbar-style[data-one-row] .tbar-opacity {
+  width: 7rem;
+}
+
+.tbar-style[data-one-row] .drawer-tray-ink {
+  margin-inline-start: -12px;
+}
+
+/* The shape tray: the shapes in their own slots, then each setting as its
+   value and a chevron. The bar's width is the limit; the shape slots narrow
+   to stay inside it. */
+[data-placement='bottom'] > .tbar-style[data-shape-tray] > .tbar-style-row {
+  width: 100%;
+  gap: 4px;
+}
+
+.tray-shapes {
+  display: flex;
+  flex: 0 1 auto;
+  min-width: 0;
+  align-self: flex-start;
+  height: var(--drawer-tray-h);
+  margin-inline-start: -12px;
+}
+
+.tray-shapes > .tray-cell {
+  flex: 0 1 48px;
+  min-width: 30px;
+}
+
+/* Two drawn groups side by side (an arrow's route, then its heads; a font,
+   then its alignment) part by air: the second keeps to the row's rhythm
+   instead of bleeding to the tray's edge like the first. */
+.tray-shapes + .tray-shapes {
+  margin-inline-start: 10px;
+}
+
+/* Unlike the shapes, a few options cannot fill the bar's width on their own:
+   their slots share whatever the menus leave, so the row ends at the tray's
+   edge instead of stopping short of it. */
+.tray-open {
+  flex: 1 1 0;
+}
+
+.tray-open > .tray-cell {
+  flex: 1 1 0;
+}
+
+/* Folded into a menu under the narrow bar: the same slots, as keys. */
+.tray-panel .tray-open {
+  flex: none;
+  height: 48px;
+  margin-inline-start: 0;
+}
+
+.tray-panel .tray-open > .tray-cell {
+  flex: none;
+  width: 52px;
+  border-radius: 10px;
+}
+
+/* A typeface shown by its own letters, at the size it reads as a sample. */
+.tray-font {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.tray-glyph {
+  width: 22px;
+  height: 22px;
+  stroke-width: 1.75;
+}
+
+.tray-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 44px);
+  grid-auto-rows: 44px;
+}
+
+.tray-grid .tray-cell {
+  width: auto;
+  border-radius: 10px;
+}
+
+.tray-cell {
+  display: grid;
+  place-items: center;
+  width: 54px;
+  height: 100%;
+  color: var(--fg);
+  background-color: transparent;
+  cursor: pointer;
+  transition: background-color var(--duration-fast) ease-out;
+  -webkit-tap-highlight-color: transparent;
+}
+
+@media (hover: hover) {
+  .tray-cell:hover {
+    background-color: color-mix(in srgb, var(--tb-track) 50%, transparent);
+  }
+}
+
+.tray-cell[aria-checked='true'] {
+  background-color: color-mix(in srgb, var(--fg) 6%, transparent);
+}
+
+.tray-cell:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -4px;
+  border-radius: 12px;
+}
+
+.tray-menu {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  height: 40px;
+  padding: 0 8px;
+  border-radius: var(--tb-key-radius);
+  color: var(--fg-secondary);
+  font-size: 15px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--duration-fast) ease-out;
+}
+
+.tray-menu[data-checked] {
+  background-color: color-mix(in srgb, var(--fg) 6%, transparent);
+  color: var(--fg);
+}
+
+.tray-menu:hover,
+.tray-menu[aria-expanded='true'] {
+  background-color: var(--tb-track);
+  color: var(--fg);
+}
+
+/* In the tray a setting is a slot like the shapes': the full tray's height,
+   recessed while its menu is open. */
+[data-placement='bottom'] .tbar-style-row > .tray-menu {
+  align-self: flex-start;
+  height: var(--drawer-tray-h);
+  padding-inline: 10px;
+  border-radius: 0;
+}
+
+[data-placement='bottom'] .tbar-style-row > .tray-menu[aria-expanded='true'] {
+  background-color: color-mix(in srgb, var(--fg) 6%, transparent);
+}
+
+.tray-menu:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.tray-chevron {
+  width: 16px;
+  height: 16px;
+  opacity: 0.7;
+}
+
+.tray-dot {
+  width: 28px;
+  height: 28px;
+  border: 1px solid;
+  border-radius: 50%;
+}
+
+.tray-stroke {
+  width: 24px;
+  height: 24px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+}
+
+/* Out: down behind the bar it came from. */
+.style-bar-motion[data-placement='bottom'][data-visible='false'] {
+  transform: translateY(70%);
+}
+
+/* The tray's inking tools stand in slots that run down behind the bar. */
+.drawer-tray-ink {
+  display: flex;
+  align-self: flex-start;
+  height: var(--drawer-tray-h);
+  margin-inline-start: -16px;
+}
+
+.drawer-tray-ink .drawer-cell {
+  width: 68px;
+  height: calc(var(--drawer-tray-h) + var(--drawer-tuck));
+}
+
+.drawer-tray-ink .drawer-art {
+  bottom: calc(var(--drawer-tuck) - 46px);
+}
+
+/* The tooltip: a near-black pill on a small arrow, white label and key. */
+.wb-tip {
+  --tip-bg: #1f1f1f;
+  background-color: var(--tip-bg);
+  color: #ffffff;
+}
+
+:is(.dark) .wb-tip {
+  --tip-bg: #3a3a3d;
+}
+
+/* Scrubbing along the bar, each next tip is already there: only the first
+   one waits and fades in. */
+.wb-tip[data-instant] {
+  animation: none;
+}
+
+.wb-tip [data-slot='kbd'] {
+  height: auto;
+  min-width: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+}
+
+.wb-tip-arrow {
+  width: 10px;
+  height: 10px;
+  rotate: 45deg;
+  border-radius: 2px;
+  background-color: var(--tip-bg);
+}
+
+.wb-tip-arrow[data-side='top'] {
+  bottom: -4px;
+}
+
+.wb-tip-arrow[data-side='bottom'] {
+  top: -4px;
+}
+
+.wb-tip-arrow[data-side='left'],
+.wb-tip-arrow[data-side='inline-end'] {
+  right: -4px;
+}
+
+.wb-tip-arrow[data-side='right'],
+.wb-tip-arrow[data-side='inline-start'] {
+  left: -4px;
+}
+
+/* The chevron beside the pen or highlighter, tucked against its slot. */
+.drawer-ink-more {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  align-self: center;
+  width: 20px;
+  height: 36px;
+  margin-inline-start: -16px;
+  border-radius: 8px;
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition: color var(--duration-fast) ease-out;
+}
+
+/* A bare glyph, like the reference's: it darkens, and turns over while its
+   menu is open, rather than growing a box. */
+.drawer-ink-more:hover,
+.drawer-ink-more[aria-expanded='true'] {
+  color: var(--fg);
+}
+
+.drawer-ink-more > .tray-chevron {
+  transition: rotate var(--duration-fast) var(--ease-out-quart);
+}
+
+.drawer-ink-more[aria-expanded='true'] > .tray-chevron {
+  rotate: 180deg;
+  opacity: 1;
+}
+
+.drawer-ink-more:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+
+/* As a rail down the left edge the drawer turns on its side: the tools lie
+   in it pointing right, cut off by the left edge, and rise rightwards. */
+.drawer-bar[data-orientation='vertical'] {
+  flex-direction: column;
+  width: var(--drawer-h);
+  height: auto;
+  padding: 8px 0;
+}
+
+[data-orientation='vertical'] .drawer-group {
+  flex-direction: column;
+}
+
+[data-orientation='vertical'] .drawer-group + .drawer-group {
+  margin-inline-start: 0;
+  margin-block-start: 6px;
+}
+
+[data-orientation='vertical'] .drawer-cell,
+[data-placement='left'] .drawer-tray-ink .drawer-cell {
+  width: 100%;
+  height: 56px;
+}
+
+[data-orientation='vertical'] .drawer-art,
+[data-placement='left'] .drawer-tray-ink .drawer-art {
+  top: 50%;
+  bottom: auto;
+  left: 0;
+  translate: 0 -50%;
+  rotate: 90deg;
+}
+
+/* The rail keeps the art at its drawn size: on its side it is the rail's width. */
+[data-orientation='vertical'] .drawer-art > svg,
+[data-placement='left'] .drawer-tray-ink .drawer-art > svg {
+  width: 48px;
+  height: 60px;
+}
+
+@media (hover: hover) {
+  [data-orientation='vertical']
+    .drawer-cell:hover:not(:disabled, [aria-pressed='true'], [aria-expanded='true'])
+    .drawer-art,
+  [data-placement='left'] .drawer-tray-ink .drawer-cell:hover .drawer-art {
+    translate: 2px -50%;
+  }
+}
+
+[data-orientation='vertical'] .drawer-cell[aria-pressed='true'] .drawer-art,
+[data-orientation='vertical'] .drawer-cell[aria-expanded='true'] .drawer-art,
+[data-placement='left'] .drawer-tray-ink .drawer-cell[aria-checked='true'] .drawer-art {
+  translate: 4px -50%;
+}
+
+[data-orientation='vertical'] .drawer-cell:active:not(:disabled) .drawer-art,
+[data-placement='left'] .drawer-tray-ink .drawer-cell:active .drawer-art {
+  translate: -1px -50%;
+}
+
+[data-orientation='vertical'] .drawer-key {
+  top: 50%;
+  left: auto;
+  right: 8px;
+  translate: 0 -50%;
+}
+
+[data-orientation='vertical'] .drawer-glyph {
+  inset: 5px 24px 5px 6px;
+}
+
+[data-orientation='vertical'] .drawer-history {
+  flex-direction: row;
+  padding-inline-start: 0;
+  padding-block-start: 6px;
+  border-inline-start: 0;
+  border-block-start: 1px solid var(--tb-divider);
+}
+
+[data-orientation='vertical'] .drawer-history .drawer-cell {
+  width: 34px;
+  height: 44px;
+}
+
+[data-orientation='vertical'] .drawer-history .drawer-glyph {
+  inset: 0;
+  border-radius: 10px;
+}
+
+[data-placement='left'] .drawer-tray-ink {
+  flex-direction: column;
+  width: 68px;
+  height: auto;
+  margin-inline-start: 0;
+}
+
 /* Narrow viewports: the floating style strip can outrun the screen, and the
    fix has to stay on one axis — a vertical scroller would open for the pixel
    the focus rings bleed into the padding. */
@@ -2202,6 +3134,12 @@
 
   .tbar-item:active {
     transform: none;
+  }
+
+  .drawer-art,
+  .drawer-art > svg,
+  .drawer-glyph {
+    transition: none;
   }
 }
 

@@ -7,6 +7,7 @@ import {
   unrotatedPoint,
 } from './box-geometry';
 import { polygonPointsForBox, polygonVerticesForBox } from './polygon-geometry';
+import { polylineDrawCommands } from './geometry-synthesis';
 import { DashedOutline, DrawnOutline, fillFor } from './render-style';
 import { useLodDash } from '../lod';
 import type { ShapeUtil } from './types';
@@ -67,7 +68,7 @@ export const polygonUtil: ShapeUtil<'polygon'> = {
         />
         {dash === 'draw' ? (
           <DrawnOutline
-            points={points}
+            commands={polylineDrawCommands(points)}
             seed={shape.id}
             color={color}
             size={size}

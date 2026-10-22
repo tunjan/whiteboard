@@ -1,7 +1,7 @@
 import { genId, type Shape } from '@whiteboard/shared';
 import type { Editor } from './editor';
 import { childrenOf, descendantsOf, findCommonAncestor } from './hierarchy';
-import { getIndexAboveTopmostOf, getTopIndex } from './order';
+import { getIndexAboveTopmostOf, getTopIndex, jitterKeyBetween } from './order';
 
 const DUPLICATE_OFFSET = 16;
 
@@ -11,12 +11,15 @@ function byIndex(a: Shape, b: Shape): number {
 
 /**
  * Rewrite a connector's bindings onto cloned targets. A terminal bound to a
- * shape that was cloned follows the clone; one bound outside the cloned set
- * keeps pointing at the original, which is what same-page duplication wants.
+ * shape that was cloned follows the clone. One bound outside the cloned set
+ * keeps pointing at the original when `keepExternal` (same-page duplication);
+ * otherwise it is dropped, or a paste at the cursor would snap straight back
+ * onto the original target.
  */
 function remapBindings(
   props: Record<string, unknown>,
   idMap: Map<string, string>,
+  keepExternal: boolean,
 ): void {
   const bindings = props.bindings as
     | { start?: { shapeId: string } | null; end?: { shapeId: string } | null }
@@ -26,6 +29,7 @@ function remapBindings(
     const binding = bindings[terminal];
     const mapped = binding ? idMap.get(binding.shapeId) : undefined;
     if (binding && mapped) binding.shapeId = mapped;
+    else if (binding && !keepExternal) bindings[terminal] = null;
   }
 }
 
@@ -33,6 +37,7 @@ function remapBindings(
  * Materialize clones of `subtree` into the editor with fresh ids, remapping
  * `parentId` within the subtree so container relationships survive. Each clone
  * is offset and stacked on top. Returns the new ids of the original roots.
+ * `keepExternalParent` also keeps arrow bindings to shapes outside `subtree`.
  */
 export function materializeClones(
   editor: Editor,
@@ -43,26 +48,37 @@ export function materializeClones(
 ): string[] {
   const idMap = new Map<string, string>();
   for (const s of subtree) idMap.set(s.id, genId());
+  const roots = new Set(rootIds);
   const newRoots: string[] = [];
-  for (const s of [...subtree].sort(byIndex)) {
-    const newId = idMap.get(s.id)!;
-    const remapped = s.parentId ? idMap.get(s.parentId) : undefined;
-    const parentId =
-      remapped ?? (keepExternalParent ? (s.parentId ?? null) : null);
-    const clone = {
-      ...s,
-      id: newId,
-      parentId,
-      x: s.x + offset.x,
-      y: s.y + offset.y,
-      index: getTopIndex(editor.getShapes()),
-      props: structuredClone(s.props),
-      locked: false,
-    } as Shape;
-    remapBindings(clone.props as Record<string, unknown>, idMap);
-    editor.createShape(clone);
-    if (rootIds.includes(s.id)) newRoots.push(newId);
-  }
+  // One transaction, so `getShapes()` goes stale after the first create: take
+  // the top once and stack each clone above the previous one.
+  let index = getTopIndex(editor.getShapes());
+  editor.transact(() => {
+    for (const s of [...subtree].sort(byIndex)) {
+      const newId = idMap.get(s.id)!;
+      const remapped = s.parentId ? idMap.get(s.parentId) : undefined;
+      const parentId =
+        remapped ?? (keepExternalParent ? (s.parentId ?? null) : null);
+      const clone = {
+        ...s,
+        id: newId,
+        parentId,
+        x: s.x + offset.x,
+        y: s.y + offset.y,
+        index,
+        props: structuredClone(s.props),
+        locked: false,
+      } as Shape;
+      remapBindings(
+        clone.props as Record<string, unknown>,
+        idMap,
+        keepExternalParent,
+      );
+      editor.createShape(clone);
+      if (roots.has(s.id)) newRoots.push(newId);
+      index = jitterKeyBetween(index, null);
+    }
+  });
   return newRoots;
 }
 
@@ -104,6 +120,9 @@ export function duplicateShapes(editor: Editor, ids: string[]): string[] {
  * go stale the moment a child moves.
  */
 export function groupShapes(editor: Editor, ids: string[]): string | null {
+  // Grouping reparents every member, which is an edit a lock forbids; the
+  // unlocked rest still group.
+  ids = ids.filter((id) => !editor.getShape(id)?.locked);
   if (ids.length < 2) return null;
   const groupId = genId();
   const group = {
@@ -136,7 +155,7 @@ export function ungroupShapes(editor: Editor, ids: string[]): string[] {
   editor.transact(() => {
     for (const id of ids) {
       const group = editor.getShape(id);
-      if (group?.type !== 'group') continue;
+      if (group?.type !== 'group' || group.locked) continue;
       for (const child of childrenOf(shapes, id)) {
         editor.updateShape(child.id, { parentId: group.parentId ?? null });
         freed.push(child.id);

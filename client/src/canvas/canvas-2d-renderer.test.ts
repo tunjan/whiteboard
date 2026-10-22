@@ -3,6 +3,7 @@ import type { Shape } from '@whiteboard/shared';
 import {
   REPROJECT_BAND,
   composeShapeTransform,
+  evictIdle,
   exposedEdges,
   impostorCoverage,
   isDetailedEnough,
@@ -398,5 +399,17 @@ describe('the edges a reprojection leaves uncovered', () => {
         );
       });
     }
+  });
+});
+
+describe('evicting idle cache entries', () => {
+  it('drops only entries last painted before the cutoff', () => {
+    const store = new Map([
+      ['stale', { used: 10 }],
+      ['edge', { used: 50 }],
+      ['fresh', { used: 90 }],
+    ]);
+    evictIdle(store, 50);
+    expect([...store.keys()]).toEqual(['edge', 'fresh']);
   });
 });

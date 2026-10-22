@@ -3,6 +3,7 @@ import { DEFAULT_SHAPE_STYLE } from './style';
 import {
   curvePath,
   curvePoints,
+  lineDrawCommands,
   pathMidpoint,
   polylineBounds,
   polylineHitTest,
@@ -46,6 +47,7 @@ export const lineUtil: ShapeUtil<'line'> = {
   }),
 
   getBounds: (s) => polylineBounds(s.x, s.y, lineCurve(s), lineBoundsPad(s)),
+  getResizeMargin: lineBoundsPad,
 
   hitTest: (s, p, tol) =>
     polylineHitTest(
@@ -115,7 +117,7 @@ export const lineUtil: ShapeUtil<'line'> = {
       <g transform={polylineTransform(shape.x, shape.y, pts, shape.rotation)}>
         {dash === 'draw' ? (
           <DrawnOutline
-            points={pts}
+            commands={lineDrawCommands(points, bend ?? 0, spline ?? 'linear')}
             seed={shape.id}
             color={color}
             size={size}

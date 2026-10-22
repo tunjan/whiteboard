@@ -28,6 +28,7 @@ import { toolRegistry } from './tools/tool-registry';
 import type { Tool, ToolContext } from './tools/types';
 import { useCameraStore } from './use-camera-store';
 import { useCanvasUiStore } from './use-canvas-ui-store';
+import { useSelectionStore } from './use-selection-store';
 import { useToolStore } from './use-tool-store';
 
 // Characterisation tests: what the canvas does with a sequence of pointer
@@ -75,6 +76,7 @@ type Init = {
   t?: number;
   button?: number;
   buttons?: number;
+  ctrlKey?: boolean;
   target?: Element;
 };
 
@@ -87,7 +89,7 @@ function event(init: Init = {}): ReactPointerEvent {
     pressure: 0.5,
     shiftKey: false,
     altKey: false,
-    ctrlKey: false,
+    ctrlKey: init.ctrlKey ?? false,
     metaKey: false,
     button: init.button ?? 0,
   };
@@ -187,6 +189,37 @@ describe('a mouse', () => {
     expect(pen).toEqual(['down']);
   });
 
+  it('keeps a press with the tool it started on, and can end it early', () => {
+    down();
+    useToolStore.setState({ activeToolId: 'select' });
+    move({ x: 120 });
+    up({ x: 120 });
+    expect(pen).toEqual(['down', 'move', 'up']);
+    expect(select).toEqual([]);
+
+    useToolStore.setState({ activeToolId: 'pen-tool' });
+    pen.length = 0;
+    down();
+    expect(arbiter.endToolGestureNow('cancel')).toBe(true);
+    move({ x: 130 });
+    up({ x: 130 });
+    expect(pen).toEqual(['down', 'cancel']);
+    expect(arbiter.endToolGestureNow('cancel')).toBe(false);
+  });
+
+  it('leaves the selection to a press in flight when a paste lands', () => {
+    useSelectionStore.getState().setSelection(['dragged']);
+    down();
+    arbiter.selectPasted(['pasted']);
+    expect(useSelectionStore.getState().selectedIds).toEqual(['dragged']);
+    expect(useToolStore.getState().activeToolId).toBe('pen-tool');
+    up();
+
+    arbiter.selectPasted(['pasted']);
+    expect(useSelectionStore.getState().selectedIds).toEqual(['pasted']);
+    expect(useToolStore.getState().activeToolId).toBe('select');
+  });
+
   it('keeps the stroke when the OS takes the pointer away', () => {
     down();
     arbiter.onPointerCancel(event());
@@ -228,6 +261,19 @@ describe('a mouse', () => {
       // A `contextmenu` that rides the release is swallowed once.
       expect(arbiter.takeContextMenuSwallow()).toBe(true);
       expect(arbiter.takeContextMenuSwallow()).toBe(false);
+    });
+
+    it('is what a Ctrl+click is on macOS, never a press of the tool', () => {
+      const platform = vi
+        .spyOn(navigator, 'platform', 'get')
+        .mockReturnValue('MacIntel');
+      down({ ctrlKey: true });
+      expect(arbiter.takeContextMenuSwallow()).toBe(true);
+      up({ ctrlKey: true });
+      platform.mockRestore();
+
+      expect(pen).toEqual([]);
+      expect(menus).toHaveLength(1);
     });
 
     it('pans instead once it has travelled, and opens nothing', () => {

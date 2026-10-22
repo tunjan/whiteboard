@@ -36,8 +36,8 @@ describe('CompactMoreMenu', () => {
     expect(html).toContain('aria-pressed="true"');
   });
 
-  // Shapes have their own key, so a held shape must not light More as well.
-  it('leaves shapes to the Shapes key in expanded mode', () => {
+  // Tools with a key of their own must not light More as well.
+  it('leaves keyed tools to their keys in expanded mode', () => {
     const render = (toolId: string) =>
       renderToStaticMarkup(
         <Toolbar>
@@ -45,7 +45,9 @@ describe('CompactMoreMenu', () => {
         </Toolbar>,
       );
     expect(render('rectangle')).not.toContain('aria-pressed="true"');
-    expect(render('graph')).toContain('aria-pressed="true"');
+    expect(render('graph')).not.toContain('aria-pressed="true"');
+    expect(render('sticker')).not.toContain('aria-pressed="true"');
+    expect(render('equation')).toContain('aria-pressed="true"');
   });
 
   it('contains absolutely no moss green colors in markup', () => {

@@ -3,10 +3,14 @@ import {
   type LineShape,
   type Point,
   type Vec,
-  pointsBounds,
-  rotatePoint,
 } from '@whiteboard/shared';
-import { bindingForPoint, orthogonalRoute } from './connector-routing';
+import {
+  bindingForPoint,
+  connectorLocalToWorld as localToWorld,
+  connectorOrigin,
+  connectorWorldToLocal as worldToLocal,
+  orthogonalRoute,
+} from './connector-routing';
 import {
   bendFromPoint,
   curveApex,
@@ -14,28 +18,12 @@ import {
 } from './line-geometry';
 import type { HandleDragResult, ShapeHandle } from './types';
 
-type ConnectorShape = LineShape | ArrowShape;
-
-function connectorCenter(shape: ConnectorShape): Point {
-  const bounds = pointsBounds(shape.props.points);
-  return {
-    x: shape.x + (bounds.minX + bounds.maxX) / 2,
-    y: shape.y + (bounds.minY + bounds.maxY) / 2,
-  };
-}
-
-function localToWorld(shape: ConnectorShape, point: Vec): Point {
-  const world = { x: shape.x + point.x, y: shape.y + point.y };
-  return shape.rotation
-    ? rotatePoint(world, connectorCenter(shape), shape.rotation)
-    : world;
-}
-
-function worldToLocal(shape: ConnectorShape, point: Point): Vec {
-  const world = shape.rotation
-    ? rotatePoint(point, connectorCenter(shape), -shape.rotation)
-    : point;
-  return { x: world.x - shape.x, y: world.y - shape.y };
+/** A handle result that keeps a rotated connector's unmoved points in place. */
+function placed<T extends LineShape | ArrowShape>(
+  shape: T,
+  props: Partial<T['props']>,
+): { x: number; y: number; props: Partial<T['props']> } {
+  return { ...connectorOrigin(shape, props), props };
 }
 
 function lockToNeighbor(point: Vec, neighbor: Vec): Vec {
@@ -93,9 +81,9 @@ export function lineHandleDrag(
   const points = shape.props.points;
   let local = worldToLocal(shape, point);
   if (handleId === 'bend') {
-    return {
-      props: { bend: bendFromPoint(points[0]!, points[points.length - 1]!, local) },
-    };
+    return placed(shape, {
+      bend: bendFromPoint(points[0]!, points[points.length - 1]!, local),
+    });
   }
   const [kind, rawIndex] = handleId.split(':');
   const index = Number(rawIndex);
@@ -110,7 +98,7 @@ export function lineHandleDrag(
   const next = points.map((vertex) => ({ ...vertex }));
   if (kind === 'create') next.splice(index + 1, 0, local);
   else if (kind === 'vertex' && next[index]) next[index] = local;
-  return { props: { points: next, bend: 0 } };
+  return placed(shape, { points: next, bend: 0 });
 }
 
 export function arrowHandles(shape: ArrowShape): ShapeHandle[] {
@@ -154,13 +142,11 @@ export function arrowHandleDrag(
   const first = points[0]!;
   const last = points[points.length - 1]!;
   if (handleId === 'bend') {
-    return {
-      props: {
-        topology: 'arc',
-        bend: bendFromPoint(first, last, worldToLocal(shape, point)),
-        points: [first, last],
-      },
-    };
+    return placed(shape, {
+      topology: 'arc',
+      bend: bendFromPoint(first, last, worldToLocal(shape, point)),
+      points: [first, last],
+    });
   }
   if (handleId !== 'start' && handleId !== 'end') return {};
 
@@ -182,13 +168,11 @@ export function arrowHandleDrag(
   const topology =
     shape.props.topology ??
     (Math.abs(shape.props.bend ?? 0) >= 0.5 ? 'arc' : 'straight');
-  return {
-    props: {
-      points: topology === 'elbow' ? orthogonalRoute(start, end) : [start, end],
-      bindings: {
-        ...shape.props.bindings,
-        [isStart ? 'start' : 'end']: binding,
-      },
+  return placed(shape, {
+    points: topology === 'elbow' ? orthogonalRoute(start, end) : [start, end],
+    bindings: {
+      ...shape.props.bindings,
+      [isStart ? 'start' : 'end']: binding,
     },
-  };
+  });
 }

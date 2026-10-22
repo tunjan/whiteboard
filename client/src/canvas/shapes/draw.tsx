@@ -200,6 +200,8 @@ export const drawUtil: ShapeUtil<'draw'> = {
     };
   },
 
+  getResizeMargin: (s) => maxInkRadius(s.props.size, s.props),
+
   hitTest: (s, p, tol) => {
     const pts = s.props.points;
     if (pts.length === 0) return false;

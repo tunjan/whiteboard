@@ -9,7 +9,6 @@ import {
   CircleDot,
   Ellipsis,
   Eraser,
-  Flashlight,
   DraftingCompass,
   Frame,
   Hand,
@@ -22,6 +21,7 @@ import {
   LockOpen,
   MessageCircle,
   MousePointer2,
+  MousePointerClick,
   MoveUpRight,
   Pencil,
   Plus,
@@ -34,6 +34,7 @@ import {
   Undo2,
   Redo2,
   Ruler,
+  RulerDimensionLine,
   Video,
   X,
 } from 'lucide-react';
@@ -69,14 +70,15 @@ export const CursorGlyph = glyph(MousePointer2, 'CursorGlyph');
 export const HandGlyph = glyph(Hand, 'HandGlyph');
 export const HandGrabGlyph = glyph(HandGrab, 'HandGrabGlyph');
 export const LassoGlyph = glyph(Lasso, 'LassoGlyph');
+/** The laser pointer points at the board and leaves nothing behind, so it
+    sits with the navigate tools and wears a pointer, not a pen. */
+export const LaserGlyph = glyph(MousePointerClick, 'LaserGlyph');
 
 /* ── Draw ─────────────────────────────────────────────────────────────── */
 
 export const PenGlyph = glyph(Pencil, 'PenGlyph');
 export const HighlighterGlyph = glyph(Highlighter, 'HighlighterGlyph');
 export const EraserGlyph = glyph(Eraser, 'EraserGlyph');
-/** The laser pointer: the one drawing tool that emits light rather than ink. */
-export const LaserGlyph = glyph(Flashlight, 'LaserGlyph');
 
 /* ── Place ────────────────────────────────────────────────────────────── */
 
@@ -93,6 +95,7 @@ export const VideoGlyph = glyph(Video, 'VideoGlyph');
 
 export const StraightedgeGlyph = glyph(Ruler, 'StraightedgeGlyph');
 export const CompassGlyph = glyph(DraftingCompass, 'CompassGlyph');
+export const MeasureGlyph = glyph(RulerDimensionLine, 'MeasureGlyph');
 export const UnitCircleGlyph = glyph(CircleDot, 'UnitCircleGlyph');
 
 /* ── Shapes ───────────────────────────────────────────────────────────── */

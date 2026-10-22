@@ -1,5 +1,6 @@
 import { DEFAULT_SHAPE_STYLE } from './style';
 import { boxBounds, boxHitTest, rotationTransform } from './box-geometry';
+import { polylineDrawCommands } from './geometry-synthesis';
 import { DashedOutline, DrawnOutline, fillFor } from './render-style';
 import { useLodDash } from '../lod';
 import type { ShapeUtil } from './types';
@@ -58,7 +59,7 @@ export const rectangleUtil: ShapeUtil<'rectangle'> = {
         />
         {dash === 'draw' ? (
           <DrawnOutline
-            points={points}
+            commands={polylineDrawCommands(points)}
             seed={shape.id}
             color={color}
             size={size}

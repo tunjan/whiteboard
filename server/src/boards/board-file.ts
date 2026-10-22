@@ -4,7 +4,7 @@ import { gunzip, gzip } from 'node:zlib';
 import * as Y from 'yjs';
 import { MAX_DOCUMENT_BYTES, pageDocumentName } from '@whiteboard/shared';
 import {
-  MAX_BLOB_BYTES,
+  MAX_VIDEO_BYTES,
   isValidBlobId,
   mimeForBlobId,
   readBlob,
@@ -204,7 +204,7 @@ export async function importBoard(boardId: string, file: BoardFile): Promise<voi
       }
       return { id, bytes };
     });
-  const blobs = assets(file.blobs, isValidBlobId, MAX_BLOB_BYTES);
+  const blobs = assets(file.blobs, isValidBlobId, MAX_VIDEO_BYTES);
   const files = assets(file.files, isValidDocId, MAX_DOCUMENT_BYTES);
 
   for (const { id, bytes } of blobs) await saveBlob(bytes, mimeForBlobId(id)!);

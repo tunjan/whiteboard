@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest';
 import { Toolbar as ToolbarRoot } from '@/components/ui/toolbar';
 import { Toolbar } from './toolbar';
 import { CompactMoreMenu } from './toolbar-compact-menu';
-import { InsertMenu } from './toolbar-insert-menu';
 
 describe('Toolbar', () => {
   it('renders all toolbar tools without broken image sources', () => {
@@ -21,8 +20,8 @@ describe('Toolbar', () => {
     // Tools should be present by their aria-label
     expect(html).toContain('aria-label="Select"');
     expect(html).toContain('aria-label="Text"');
-    expect(html).toContain('aria-label="Comment"');
     expect(html).toContain('aria-label="Add image"');
+    expect(html).toContain('aria-label="Undo"');
 
     // The style controls are their own plate above the bar, not a section of
     // it, so only the ones the resting tool actually takes are mounted.
@@ -56,7 +55,7 @@ describe('Toolbar', () => {
 
   it('names every group', () => {
     const html = renderToStaticMarkup(<Toolbar />);
-    for (const group of ['Navigate', 'Draw', 'Insert', 'More']) {
+    for (const group of ['Navigate', 'Draw', 'Insert', 'History']) {
       expect(html).toContain(`aria-label="${group}"`);
     }
   });
@@ -66,13 +65,6 @@ describe('Toolbar', () => {
     const html = renderToStaticMarkup(<Toolbar />);
     expect(html).not.toContain('toolbar-glass');
     expect(html).not.toContain('backdrop-filter');
-  });
-
-  it('renders InsertMenu trigger without broken image sources', () => {
-    const html = renderToStaticMarkup(<InsertMenu active={false} />);
-    expect(html).not.toContain('/toolbar-icons/');
-    expect(html).not.toContain('<img');
-    expect(html).toContain('<svg');
   });
 
   it('renders CompactMoreMenu trigger without broken image sources', () => {

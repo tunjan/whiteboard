@@ -10,8 +10,9 @@ import type {
   TextAlign,
   LineSpline,
 } from '@whiteboard/shared';
-import type { Theme } from '@/use-theme-store';
+import { useThemeStore, type Theme } from '@/use-theme-store';
 import { BASE_STROKE_WIDTH, STROKE_SIZES } from './shapes/style';
+import { useToolStore } from './use-tool-store';
 
 export interface PaletteColor {
   name: string;
@@ -81,6 +82,61 @@ export function paletteColors(theme: Theme): PaletteColor[] {
   return theme === 'dark' ? PALETTE.dark : PALETTE.light;
 }
 
+/** Ink, the six strong hues in wheel order, grey. */
+const QUICK_SLOTS = [0, 11, 7, 6, 8, 4, 3, 1];
+/** The light variants, in the same wheel order as their strong partners. */
+const LIGHT_SLOTS = [10, 9, 5, 2];
+
+/**
+ * The eight colours on the style bar's ramp, and on keys 1–8: ink, then the
+ * strong hues in wheel order, then grey.
+ */
+export function quickSwatches(colors: PaletteColor[]): PaletteColor[] {
+  return QUICK_SLOTS.flatMap((slot) => colors[slot] ?? []);
+}
+
+/**
+ * The whole palette in the one order every colour surface uses: the quick
+ * ramp, then the light variants following the same hue order.
+ */
+export function allSwatches(colors: PaletteColor[]): PaletteColor[] {
+  return [...quickSwatches(colors), ...LIGHT_SLOTS.flatMap((slot) => colors[slot] ?? [])];
+}
+
+/** A palette colour from either theme, as `theme` draws it; anything else as is. */
+export function inCurrentTheme(
+  color: string,
+  theme: Theme = useThemeStore.getState().theme,
+): string {
+  const current = paletteColors(theme);
+  if (current.some((c) => c.value === color)) return color;
+  const slot = [...PALETTE.light, ...PALETTE.dark].findIndex(
+    (c) => c.value === color,
+  );
+  return slot >= 0 ? current[slot % current.length]!.value : color;
+}
+
+/** The toolbar's colours before the user has changed them, as stored values. */
+const DEFAULT_RAMP = allSwatches(PALETTE.light).map((c) => c.value);
+
+/**
+ * The colours on the toolbar, in the user's order and drawn for `theme`.
+ * Palette colours follow the theme; a colour the user picked stays as picked.
+ */
+export function rampColors(
+  ramp: string[] | null,
+  theme: Theme,
+): PaletteColor[] {
+  const palette = paletteColors(theme);
+  return (ramp ?? DEFAULT_RAMP).map((stored) => {
+    const value = inCurrentTheme(stored, theme);
+    return {
+      value,
+      name: palette.find((c) => c.value === value)?.name ?? value.toUpperCase(),
+    };
+  });
+}
+
 export interface SizeOption {
   name: string;
   value: number;
@@ -94,12 +150,11 @@ export const SIZE_OPTIONS: SizeOption[] = [
 ];
 
 /**
- * The style new shapes inherit, shared by every tool that draws one.
+ * The style new shapes inherit.
  *
- * One set rather than one per instrument: choosing a colour chooses *the*
- * colour, so the rectangle tool lays down whatever the pen was last set to and
- * the highlighter washes in it too. Only a control the user actually moved
- * writes here — selecting a shape shows that shape's style on the bar without
+ * Colour and size are kept per instrument (see `StyleSlot`); the rest is one
+ * set shared by every tool. Only a control the user actually moved writes
+ * here — selecting a shape shows that shape's style on the bar without
  * changing what the next one will be drawn with.
  */
 export interface NextShapeStyle {
@@ -119,7 +174,56 @@ export interface NextShapeStyle {
   opacity: number;
 }
 
+/**
+ * The instruments that keep their own colour and size: a tutor writes in black
+ * and highlights in yellow, and re-picking both on every switch was the bar's
+ * main cost. Shapes, text and the rest share one slot.
+ */
+export type StyleSlot = 'pen' | 'highlighter' | 'other';
+
+type SlotStyle = Pick<NextShapeStyle, 'color' | 'size'>;
+
+/** Tools that paint nothing leave the live colour where it is. */
+const UNSTYLED_TOOLS = new Set(['select', 'hand', 'laser', 'eraser']);
+
+export function styleSlot(toolId: string): StyleSlot | null {
+  if (toolId === 'draw') return 'pen';
+  if (toolId === 'highlighter') return 'highlighter';
+  return UNSTYLED_TOOLS.has(toolId) ? null : 'other';
+}
+
+/** What a slot opens on before it has ever been used. */
+function slotDefault(slot: StyleSlot): SlotStyle | undefined {
+  if (slot !== 'highlighter') return undefined;
+  return { color: inCurrentTheme(PALETTE.light[6]!.value), size: SIZE_OPTIONS[1]!.value };
+}
+
+/** The colour a tool will draw in, whether or not it is the active one. */
+export function slotColor(
+  state: Pick<StyleStore, 'color' | 'slot' | 'slots'>,
+  slot: StyleSlot,
+): string {
+  if (slot === state.slot) return state.color;
+  return inCurrentTheme(
+    state.slots[slot]?.color ?? slotDefault(slot)?.color ?? state.color,
+  );
+}
+
 interface StyleStore extends NextShapeStyle {
+  /** The slot the live `color` and `size` belong to. */
+  slot: StyleSlot;
+  /** The other slots' colour and size, put away while they are not live. */
+  slots: Partial<Record<StyleSlot, SlotStyle>>;
+  /** Put the live colour and size away and take out `slot`'s. */
+  enterSlot: (slot: StyleSlot) => void;
+  /** The toolbar's colours, as the user arranged them; null for the default. */
+  ramp: string[] | null;
+  /** Put a colour on the toolbar, at the end; a colour already there stays put. */
+  addRampColor: (color: string) => void;
+  removeRampColor: (index: number) => void;
+  /** Move the colour at `from` to `to`, shifting the ones between. */
+  moveRampColor: (from: number, to: number) => void;
+  resetRamp: () => void;
   /** Whether new arrows draw an arrowhead at the start point. */
   arrowStart: boolean;
   /** Whether new arrows draw an arrowhead at the end point. */
@@ -174,6 +278,54 @@ export const useStyleStore = create<StyleStore>()(
   persist(
     (set) => ({
       ...defaultStyle(),
+      slot: 'pen',
+      slots: {},
+      enterSlot: (slot) =>
+        set((state) => {
+          if (slot === state.slot) return state;
+          // A slot never used before starts from the pen, not from whatever
+          // happens to be live — a first rectangle drawn after highlighting
+          // should not come out yellow.
+          const saved =
+            state.slots[slot] ??
+            slotDefault(slot) ??
+            (state.slot === 'pen' ? undefined : state.slots.pen);
+          return {
+            slot,
+            slots: {
+              ...state.slots,
+              [state.slot]: { color: state.color, size: state.size },
+            },
+            ...(saved && {
+              color: inCurrentTheme(saved.color),
+              size: saved.size,
+            }),
+          };
+        }),
+      ramp: null,
+      addRampColor: (color) =>
+        set((state) => {
+          const ramp = state.ramp ?? DEFAULT_RAMP;
+          const value = inCurrentTheme(color.toLowerCase());
+          if (ramp.some((stored) => inCurrentTheme(stored) === value)) return state;
+          return { ramp: [...ramp, value] };
+        }),
+      removeRampColor: (index) =>
+        set((state) => {
+          const ramp = state.ramp ?? DEFAULT_RAMP;
+          // The bar always keeps one colour to draw with.
+          if (ramp.length <= 1) return state;
+          return { ramp: ramp.filter((_, i) => i !== index) };
+        }),
+      moveRampColor: (from, to) =>
+        set((state) => {
+          const ramp = [...(state.ramp ?? DEFAULT_RAMP)];
+          if (from === to || !(from in ramp) || !(to in ramp)) return state;
+          const [moved] = ramp.splice(from, 1);
+          ramp.splice(to, 0, moved!);
+          return { ramp };
+        }),
+      resetRamp: () => set({ ramp: null }),
       arrowStart: false,
       arrowEnd: true,
       arrowTopology: 'straight',
@@ -205,6 +357,13 @@ export const useStyleStore = create<StyleStore>()(
     },
   ),
 );
+
+// Switching tools swaps in that instrument's colour and size, by click, key or
+// spring-hold alike.
+useToolStore.subscribe((state) => {
+  const slot = styleSlot(state.activeToolId);
+  if (slot) useStyleStore.getState().enterSlot(slot);
+});
 
 /** Read the style new shapes inherit outside React. */
 export function nextShapeStyle(): NextShapeStyle {

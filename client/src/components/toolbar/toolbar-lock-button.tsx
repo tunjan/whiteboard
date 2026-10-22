@@ -13,7 +13,6 @@ export function ToolLockButton() {
       hotkey="q"
       mark="pressed"
       selected={locked}
-      tabIndex={-1}
       onClick={toggle}
     >
       <Icon />

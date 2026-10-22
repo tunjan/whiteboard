@@ -200,9 +200,9 @@ aiRoutes.post('/graph/ink', async (c) => {
 });
 
 /**
- * Dictation: audio in, plain text out. The text goes back to the client's
- * description field rather than straight to LaTeX, so the student sees what
- * was heard and the description path stays the one place LaTeX is written.
+ * Dictation: audio in, the transcript and its LaTeX out. Written here rather
+ * than by a second client request because every request crosses the tunnel;
+ * the transcript still goes back so the student sees what was heard.
  */
 aiRoutes.post('/transcribe', async (c) => {
   if (declaredTooLarge(c.req.header('content-length'), MAX_AUDIO_CHARS + 1024)) {
@@ -226,11 +226,44 @@ aiRoutes.post('/transcribe', async (c) => {
   }
   if (!withinRateLimit(c)) return c.json({ error: 'Too many requests' }, 429);
 
+  let text: string;
+  const started = performance.now();
   try {
-    const text = await transcribe(env.openRouterSttModel, audio, format as string);
-    if (!text) return c.json({ error: 'unreadable' }, 422);
-    return c.json({ text } satisfies TranscribeResponse);
+    text = await transcribe(env.openRouterSttModel, audio, format as string);
   } catch (error) {
     return failure(c, error);
   }
+  if (!text) return c.json({ error: 'unreadable' }, 422);
+  const heard = performance.now();
+
+  // From here a failure still answers 200 with the transcript: what was heard
+  // is worth keeping even when it can't be written as maths.
+  let result: TranscribeResponse;
+  try {
+    const extracted = extractLatex(
+      await chatCompletion(env.openRouterTextModel, [
+        { role: 'system', content: PROMPT_SYSTEM_PROMPT },
+        { role: 'user', content: text.slice(0, MAX_LATEX_PROMPT_CHARS) },
+      ]),
+    );
+    result =
+      'reason' in extracted
+        ? {
+            text,
+            error:
+              extracted.reason === 'unreadable'
+                ? 'No mathematics found'
+                : 'The model did not return a usable equation',
+          }
+        : { text, latex: extracted.latex };
+  } catch (error) {
+    result = {
+      text,
+      error: error instanceof UpstreamError ? error.message : 'Generation failed',
+    };
+  }
+  console.log(
+    `[ai] dictation stt=${Math.round(heard - started)}ms latex=${Math.round(performance.now() - heard)}ms bytes=${audio.length}`,
+  );
+  return c.json(result satisfies TranscribeResponse);
 });

@@ -13,14 +13,16 @@ import type {
 import { packShapeBase, readShapeBase, SHAPE_BASE_KEY } from '@whiteboard/shared';
 import './shapes/register';
 import {
-  compareIndex,
   createPage,
   deletePage,
-  documentByteSize,
   duplicatePage,
+  moveShapesToPage,
+} from './page-actions';
+import {
+  compareIndex,
+  documentByteSize,
   editor,
   loadBoard,
-  moveShapesToPage,
   redo,
   setCurrentPage,
   spatialIndex,

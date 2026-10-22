@@ -123,16 +123,50 @@ describe('graph intersections', () => {
     expect(points.filter((p) => p.kind === 'y-axis')).toHaveLength(0);
   });
 
-  it('ignores implicit relations', () => {
+  it('finds intersections with implicit relations', () => {
     const points = findGraphIntersections(
-      [expression('x^2 + y^2 = 1'), expression('y = x')],
+      [expression('x^2 + y^2 = 1'), expression('y = x'), expression('x = 0.5')],
       viewport,
       {},
     );
+    const r = Math.SQRT1_2;
+    const has = (x: number, y: number, kind: string) =>
+      points.some(
+        (p) =>
+          p.kind === kind &&
+          Math.abs(p.x - x) < 1e-6 &&
+          Math.abs(p.y - y) < 1e-6,
+      );
 
-    expect(points.filter((p) => p.kind === 'curve-curve')).toHaveLength(0);
-    // The explicit line still crosses the origin.
-    expect(points.some((p) => p.kind === 'x-axis')).toBe(true);
+    expect(has(r, r, 'curve-curve')).toBe(true);
+    expect(has(-r, -r, 'curve-curve')).toBe(true);
+    // Implicit against implicit: the circle and the vertical line.
+    expect(has(0.5, Math.sqrt(0.75), 'curve-curve')).toBe(true);
+    expect(has(0.5, -Math.sqrt(0.75), 'curve-curve')).toBe(true);
+    expect(has(0.5, 0.5, 'curve-curve')).toBe(true);
+    expect(has(1, 0, 'x-axis')).toBe(true);
+    expect(has(0, -1, 'y-axis')).toBe(true);
+  });
+
+  it('finds two crossings closer together than one sample step', () => {
+    const points = findGraphIntersections(
+      [expression('y = x^2 - 0.001')],
+      { xMin: -10, xMax: 10, yMin: -10, yMax: 10 },
+      {},
+    );
+    const roots = points.filter((p) => p.kind === 'x-axis').map((p) => p.x);
+    expect(roots).toHaveLength(2);
+    expect(Math.abs(Math.abs(roots[0]!) - Math.sqrt(0.001))).toBeLessThan(1e-6);
+  });
+
+  it('does not flood the cap when a curve lies on an axis', () => {
+    const points = findGraphIntersections(
+      [expression('y = 0'), expression('y = x^2 - 4')],
+      viewport,
+      {},
+    );
+    // (±2, 0), (0, -4), and y = 0 crossing the y-axis at the origin.
+    expect(points).toHaveLength(4);
   });
 
   it('ignores hidden curves', () => {

@@ -48,6 +48,22 @@ export function equationFontSizeForHeight(
   return (height / render.height) * EQUATION_RENDER_EM;
 }
 
+/**
+ * Resize around the box center. Anchoring to the top-left instead would make
+ * the formula creep right and down with every character typed, and centers are
+ * also the pivot the rotation transform uses.
+ */
+export function centeredMove(
+  shape: EquationShape,
+  w: number,
+  h: number,
+): { x: number; y: number } {
+  return {
+    x: shape.x + (shape.props.w - w) / 2,
+    y: shape.y + (shape.props.h - h) / 2,
+  };
+}
+
 type TypesetRender = Extract<EquationRender, { svg: string }>;
 
 export type EquationDisplay =

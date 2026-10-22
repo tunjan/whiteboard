@@ -91,7 +91,7 @@ describe('two-client z-order convergence', () => {
       doc,
       draw() {
         sync();
-        const index = getTopIndex([...cache.values()]);
+        const index = getTopIndex([...cache.values()].sort(compareIndex));
         const id = `${name}-${cache.size}`;
         doc.transact(() => {
           const m = new Y.Map<unknown>();

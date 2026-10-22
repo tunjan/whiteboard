@@ -71,11 +71,16 @@ export function useSpacePan(disabled = false) {
     const onKeyUp = (e: KeyboardEvent) => {
       if (e.code === 'Space') setSpaceDown(false);
     };
+    // A Space released while another window had focus sends its keyup there,
+    // which left every later press panning instead of using the tool.
+    const onBlur = () => setSpaceDown(false);
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', onBlur);
     return () => {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onBlur);
     };
   }, [disabled]);
 

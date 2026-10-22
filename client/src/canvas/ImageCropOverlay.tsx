@@ -94,17 +94,21 @@ export function ImageCropOverlay({ shape }: { shape: ImageShape }) {
   commitRef.current = commit;
 
   useEffect(() => {
+    // Captured, and kept from the canvas's own window listener: there Escape
+    // also clears the selection, which leaving crop mode must not do.
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault();
+        e.stopImmediatePropagation();
         stop();
       } else if (e.key === 'Enter') {
         e.preventDefault();
+        e.stopImmediatePropagation();
         commitRef.current();
       }
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
   }, [stop]);
 
   // Drag a handle (or the body, mode='move') to reshape the crop rect.

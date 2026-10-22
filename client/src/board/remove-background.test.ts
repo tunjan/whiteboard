@@ -124,6 +124,33 @@ describe('removeBackgroundInPlace', () => {
   });
 });
 
+describe('removeBackgroundInPlace with a picked seed', () => {
+  it('also clears an enclosed hole when the seed is inside it', () => {
+    const img = image(32, 32, WHITE);
+    img.rect(8, 8, 23, 23, BLACK);
+    img.rect(14, 14, 17, 17, WHITE);
+
+    removeBackgroundInPlace(img.data, img.width, img.height, undefined, 15 * 32 + 15);
+
+    expect(img.alphaAt(0, 0)).toBe(0);
+    expect(img.alphaAt(15, 15)).toBe(0);
+    expect(img.alphaAt(10, 10)).toBe(255);
+  });
+
+  it('cuts a region out of a source that already has transparency', () => {
+    const img = image(16, 16, WHITE);
+    img.rect(4, 4, 11, 11, BLACK);
+    for (let p = 0; p < 40; p++) img.data[p * 4 + 3] = 0;
+
+    const result = removeBackgroundInPlace(img.data, img.width, img.height, undefined, 8 * 16 + 8);
+
+    expect(result.removed).toBe(true);
+    expect(img.alphaAt(8, 8)).toBe(0);
+    // The opaque white around the black square is not reached from the seed.
+    expect(img.alphaAt(15, 15)).toBe(255);
+  });
+});
+
 describe('opaqueBounds', () => {
   it('returns the tight box around what survived', () => {
     const img = image(32, 32, WHITE);

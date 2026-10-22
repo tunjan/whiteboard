@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
-import { MAX_HISTORY_PAGES, PageHistory, useUndoStore } from './page-history';
+import { MAX_HISTORY_PAGES, PageHistory, useHistoryStep, useUndoStore } from './page-history';
 
 const LOCAL = 'local';
 
@@ -41,6 +41,21 @@ describe('PageHistory', () => {
 
     history.redo();
     expect(shapes.has('a')).toBe(true);
+  });
+
+  it('counts only the steps that were taken', () => {
+    const shapes = page();
+    history.open('p1', shapes);
+    const before = useHistoryStep.getState().n;
+
+    history.undo();
+    expect(useHistoryStep.getState().n).toBe(before);
+
+    add(shapes, 'a');
+    history.undo();
+    expect(useHistoryStep.getState()).toEqual({ n: before + 1, dir: 'undo' });
+    history.redo();
+    expect(useHistoryStep.getState()).toEqual({ n: before + 2, dir: 'redo' });
   });
 
   it('leaves edits from any other origin alone', () => {

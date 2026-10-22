@@ -2,6 +2,7 @@ import {
   type ArrowShape,
   type Bounds,
   type ConnectorBinding,
+  type LineShape,
   type Point,
   type Shape,
   type Vec,
@@ -15,6 +16,7 @@ import type { Editor } from '../editor';
 import { findClosestCommonContainer } from '../hierarchy';
 import { jitterKeyBetween } from '../order';
 import { shapeRotatedBounds } from '../shape-bounds';
+import { unrotatedPoint } from './box-geometry';
 import { shapeRegistry } from './shape-registry';
 import { shapeSnapGeometry } from '../snap-geometry';
 
@@ -149,6 +151,26 @@ export function findBindableShapeAt(
     const shape = shapes[i]!;
     if (shape.id === excludeId || shape.hidden || !isBindableShape(shape))
       continue;
+    // A frame is a region, not an object: its empty interior is where arrows
+    // are drawn, so only its border binds.
+    if (shape.type === 'frame') {
+      const local = unrotatedPoint(
+        shape.x,
+        shape.y,
+        shape.props.w,
+        shape.props.h,
+        shape.rotation,
+        point,
+      );
+      if (
+        local.x > shape.x + tolerance &&
+        local.x < shape.x + shape.props.w - tolerance &&
+        local.y > shape.y + tolerance &&
+        local.y < shape.y + shape.props.h - tolerance
+      ) {
+        continue;
+      }
+    }
     if (
       shapeRegistry.getFor(shape)?.hitTest(shape as never, point, tolerance)
     ) {
@@ -169,6 +191,25 @@ export function bindingDirection(binding: ConnectorBinding): Cardinal {
   ];
   distances.sort((a, b) => a.value - b.value);
   return distances[0]!.direction;
+}
+
+/**
+ * {@link bindingDirection} is in the target's unrotated box; an elbow route is
+ * orthogonal in the connector's own frame. Turn by the difference and take the
+ * nearest axis.
+ */
+function directionInConnector(
+  binding: ConnectorBinding,
+  target: Shape,
+  connector: ConnectorShape,
+): Cardinal {
+  const direction = bindingDirection(binding);
+  const angle = (target.rotation ?? 0) - (connector.rotation ?? 0);
+  if (!angle) return direction;
+  const turned = rotatePoint(direction, { x: 0, y: 0 }, angle);
+  return Math.abs(turned.x) >= Math.abs(turned.y)
+    ? { x: turned.x < 0 ? -1 : 1, y: 0 }
+    : { x: 0, y: turned.y < 0 ? -1 : 1 };
 }
 
 function inflate(bounds: Bounds, amount: number): Bounds {
@@ -405,26 +446,49 @@ export function orthogonalRoute(
   return simplifyRoute([start, startStub, ...middle, endStub, end]);
 }
 
-function connectorCenter(shape: ArrowShape): Point {
-  const bounds = pointsBounds(shape.props.points);
-  return {
-    x: shape.x + (bounds.minX + bounds.maxX) / 2,
-    y: shape.y + (bounds.minY + bounds.maxY) / 2,
-  };
+type ConnectorShape = ArrowShape | LineShape;
+
+/**
+ * The point a connector rotates about: the centre of its drawn body, which is
+ * what the renderer and hit test use. For an arc that is not the centre of the
+ * two control points.
+ */
+function connectorCenter(shape: ConnectorShape): Point {
+  return boundsCenter(shapeRegistry.getFor(shape)!.getBounds(shape as never));
 }
 
-export function connectorLocalToWorld(shape: ArrowShape, point: Vec): Point {
+export function connectorLocalToWorld(shape: ConnectorShape, point: Vec): Point {
   const world = { x: shape.x + point.x, y: shape.y + point.y };
   return shape.rotation
     ? rotatePoint(world, connectorCenter(shape), shape.rotation)
     : world;
 }
 
-export function connectorWorldToLocal(shape: ArrowShape, point: Point): Vec {
+export function connectorWorldToLocal(shape: ConnectorShape, point: Point): Vec {
   const world = shape.rotation
     ? rotatePoint(point, connectorCenter(shape), -shape.rotation)
     : point;
   return { x: world.x - shape.x, y: world.y - shape.y };
+}
+
+/**
+ * Origin for a rotated connector whose geometry becomes `nextProps`, chosen so
+ * points placed with {@link connectorWorldToLocal} land where they were meant
+ * to. Changing the points moves the rotation centre, which otherwise swings
+ * the whole connector about the old centre.
+ */
+export function connectorOrigin(
+  shape: ConnectorShape,
+  nextProps: Partial<ConnectorShape['props']>,
+): Point {
+  if (!shape.rotation) return { x: shape.x, y: shape.y };
+  const before = connectorCenter(shape);
+  const after = connectorCenter({
+    ...shape,
+    props: { ...shape.props, ...nextProps },
+  } as ConnectorShape);
+  const kept = rotatePoint(after, before, shape.rotation);
+  return { x: shape.x + kept.x - after.x, y: shape.y + kept.y - after.y };
 }
 
 function localTargetBounds(shape: ArrowShape, target: Shape): Bounds {
@@ -500,6 +564,8 @@ export function syncBoundArrows(
     byIdIndex ?? new Map(shapes.map((shape) => [shape.id, shape]));
   const updates: Array<{
     id: string;
+    x: number;
+    y: number;
     points: Vec[];
     bindings: ArrowShape['props']['bindings'];
     parentId: string | null;
@@ -541,12 +607,14 @@ export function syncBoundArrows(
             endBounds: endTarget
               ? localTargetBounds(shape, endTarget)
               : undefined,
-            startDirection: bindings.start
-              ? bindingDirection(bindings.start)
-              : undefined,
-            endDirection: bindings.end
-              ? bindingDirection(bindings.end)
-              : undefined,
+            startDirection:
+              bindings.start && startTarget
+                ? directionInConnector(bindings.start, startTarget, shape)
+                : undefined,
+            endDirection:
+              bindings.end && endTarget
+                ? directionInConnector(bindings.end, endTarget, shape)
+                : undefined,
           })
         : [start, end];
     const boundTargets = [startTarget, endTarget].filter(
@@ -560,11 +628,9 @@ export function syncBoundArrows(
           [startTarget.id, endTarget.id],
         ) ?? null;
     } else if (boundTargets[0]) {
-      const target = boundTargets[0];
-      parentId =
-        target.type === 'frame' || target.type === 'group'
-          ? target.id
-          : (target.parentId ?? null);
+      // A frame target is reached at its border, usually from outside, so the
+      // arrow sits beside it: parenting it to the frame would clip it away.
+      parentId = boundTargets[0].parentId ?? null;
     }
 
     // Bound connectors render just above their highest target, but below the
@@ -596,13 +662,16 @@ export function syncBoundArrows(
       parentId !== (shape.parentId ?? null) ||
       index !== shape.index
     ) {
-      updates.push({ id: shape.id, points, bindings, parentId, index });
+      const { x, y } = connectorOrigin(shape, { points });
+      updates.push({ id: shape.id, x, y, points, bindings, parentId, index });
     }
   }
   if (!updates.length) return;
   editor.transact(() => {
     for (const update of updates) {
       editor.updateShape(update.id, {
+        x: update.x,
+        y: update.y,
         parentId: update.parentId,
         index: update.index,
         props: { points: update.points, bindings: update.bindings },

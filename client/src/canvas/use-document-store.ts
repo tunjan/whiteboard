@@ -6,30 +6,16 @@ import {
 } from '@hocuspocus/provider';
 import { create } from 'zustand';
 import {
-  genId,
-  type DrawPoint,
-  type GraphExpression,
   type Page,
   type Shape,
   type WhiteboardDocument,
 } from '@whiteboard/shared';
-import type { Editor, ShapePatch } from './editor';
-import { collectSubtree, deleteShapesWithCleanup } from './commands';
-import { generateKeyBetween, jitterKeyBetween } from './order';
-import {
-  compactYPoints,
-  encodePointsForStorage,
-  ensurePointsArray,
-  syncYPoints,
-} from './shapes/ink-points';
-import {
-  encodeGraphExpressionsForStorage,
-  ensureGraphExpressionsArray,
-  syncYGraphExpressions,
-} from './shapes/graph-storage';
+import type { Editor } from './editor';
+import { generateKeyBetween } from './order';
+import { applyPatchToY, shapeToY } from './shape-yjs';
 import { BindingGraph } from './binding-graph';
 import { SpatialIndex } from './spatial-index';
-import { bindBoardRecords, deleteCommentsOnPage } from './board-records';
+import { bindBoardRecords } from './board-records';
 import { PageHistory } from './page-history';
 import {
   PageDerivedState,
@@ -38,12 +24,7 @@ import {
   type YShape,
 } from './page-derived';
 import { transact } from '@tldraw/state';
-import {
-  packShapeBase,
-  readShapeBase,
-  REMOVED_MESSAGE,
-  SHAPE_BASE_KEY,
-} from '@whiteboard/shared';
+import { REMOVED_MESSAGE } from '@whiteboard/shared';
 import { boardKey, isViewOnly, setBoardAccess } from '@/board/board-access';
 import { publishDocumentChanges } from './engine/document-changes';
 import { shapeStore } from './engine/shape-store';
@@ -83,7 +64,6 @@ import {
 import {
   acquirePageDoc,
   closePageDocs,
-  deleteStoredPage,
   destroyPageDoc,
   openPageDocs,
   pinPageDoc,
@@ -92,7 +72,6 @@ import {
   type PageDoc,
 } from './page-docs';
 import { legacyShapesMap, migrateLegacyShapes } from './page-migration';
-import { getIncrementedName } from './page-names';
 import { readPageSession, writePageSession } from './page-session-state';
 import { completeInteractionBeforePageSwitch } from './page-transition';
 
@@ -117,7 +96,7 @@ const EPHEMERAL_ORIGIN = 'ephemeral';
 // The receiving half of a cross-page move. Untracked so the target page's own
 // history is not disturbed by shapes arriving from elsewhere: the move belongs
 // to the page it was made from, and is undone from there (see `undo`).
-const CROSS_PAGE_ORIGIN = 'cross-page';
+export const CROSS_PAGE_ORIGIN = 'cross-page';
 // Relocating a legacy board's shapes into their page documents. Untracked: it
 // is a change of storage, not an edit anyone made or should be able to undo.
 const MIGRATION_ORIGIN = 'migration';
@@ -198,16 +177,16 @@ export function compareIndex(a: Shape, b: Shape): number {
 
 // --- Pages registry helpers ---
 
-type YPageMeta = Y.Map<unknown>;
+export type YPageMeta = Y.Map<unknown>;
 
-interface PageMeta {
+export interface PageMeta {
   id: string;
   name: string;
   index: string;
 }
 
 /** Read the page registry, sorted by fractional order index. */
-function readPages(pages: Y.Map<YPageMeta>): PageMeta[] {
+export function readPages(pages: Y.Map<YPageMeta>): PageMeta[] {
   const out: PageMeta[] = [];
   for (const [id, m] of pages) {
     out.push({
@@ -220,172 +199,9 @@ function readPages(pages: Y.Map<YPageMeta>): PageMeta[] {
   return out;
 }
 
-// --- Yjs <-> plain shape conversion ---
-
-function shapeToY(shape: Shape): YShape {
-  const m = new Y.Map<unknown>();
-  m.set(
-    SHAPE_BASE_KEY,
-    packShapeBase((field) => shape[field as keyof Shape]),
-  );
-  if (shape.type === 'text') {
-    // Text is a sequence CRDT, not a scalar property. Concurrent insert/delete
-    // operations then merge by character identity instead of overwriting the
-    // entire string with whichever client wrote last.
-    const { text, ...props } = shape.props;
-    m.set('props', props);
-    m.set('text', new Y.Text(text));
-  } else if (shape.type === 'draw') {
-    // Ink points are a growing sequence, for the same reason text is one. A
-    // stroke is written once per frame while it is drawn; storing the array
-    // inside `props` re-encoded the whole array each time, so an n-point stroke
-    // cost O(n²) document bytes — paid by every peer and kept forever. As a
-    // Y.Array the live path appends only the new points: O(n) for the stroke.
-    const { points, ...props } = shape.props;
-    m.set('props', props);
-    // Fixed-point varint chunks: see ink-points.ts.
-    m.set('points', Y.Array.from(encodePointsForStorage(points)));
-  } else if (shape.type === 'graph') {
-    // One Y.Map per curve, so collaborators editing different rows of the same
-    // plot don't overwrite each other. See graph-storage.ts.
-    const { expressions, ...props } = shape.props;
-    m.set('props', props);
-    m.set(
-      'expressions',
-      Y.Array.from(encodeGraphExpressionsForStorage(expressions)),
-    );
-  } else {
-    m.set('props', shape.props);
-  }
-  return m;
-}
-
-/** Apply the smallest contiguous replacement between two strings to Y.Text. */
-function syncYText(text: Y.Text, next: string): void {
-  const current = text.toString();
-  if (current === next) return;
-
-  let prefix = 0;
-  const limit = Math.min(current.length, next.length);
-  while (prefix < limit && current[prefix] === next[prefix]) prefix++;
-
-  let suffix = 0;
-  while (
-    suffix < current.length - prefix &&
-    suffix < next.length - prefix &&
-    current[current.length - 1 - suffix] === next[next.length - 1 - suffix]
-  ) {
-    suffix++;
-  }
-
-  const remove = current.length - prefix - suffix;
-  if (remove > 0) text.delete(prefix, remove);
-  const insert = next.slice(prefix, next.length - suffix);
-  if (insert) text.insert(prefix, insert);
-}
-
-function sameProps(
-  a: Record<string, unknown>,
-  b: Record<string, unknown>,
-): boolean {
-  const keys = Object.keys(a);
-  return (
-    keys.length === Object.keys(b).length &&
-    keys.every((key) => Object.hasOwn(b, key) && a[key] === b[key])
-  );
-}
-
-const PATCHABLE_BASE_FIELDS = [
-  'x',
-  'y',
-  'rotation',
-  'index',
-  'parentId',
-  'locked',
-  'hidden',
-  'opacity',
-] as const;
-
-function applyPatchToY(m: YShape, patch: ShapePatch): void {
-  const base = readShapeBase(m)!;
-  // Written whole, and only when a field actually changed: a Y.Map set is never
-  // free, even with the value it already holds — it emits a new item to every
-  // peer and leaves the old one behind as a tombstone.
-  let nextBase: Record<string, unknown> | null = null;
-  for (const field of PATCHABLE_BASE_FIELDS) {
-    const value = patch[field];
-    if (value !== undefined && base[field] !== value) {
-      (nextBase ??= { ...base })[field] = value;
-    }
-  }
-  if (nextBase) {
-    const fields = nextBase;
-    m.set(SHAPE_BASE_KEY, packShapeBase((field) => fields[field]));
-  }
-  if (patch.props) {
-    const type = base.type;
-    const nextProps = { ...patch.props };
-    if (type === 'text' && typeof nextProps.text === 'string') {
-      const existing = m.get('text');
-      let text: Y.Text;
-      if (existing instanceof Y.Text) {
-        text = existing;
-      } else {
-        const legacy = m.get('props') as { text?: unknown } | undefined;
-        text = new Y.Text(typeof legacy?.text === 'string' ? legacy.text : '');
-        m.set('text', text);
-      }
-      syncYText(text, nextProps.text);
-      delete nextProps.text;
-    }
-    if (type === 'draw' && Array.isArray(nextProps.points)) {
-      const arr = ensurePointsArray(m);
-      const points = nextProps.points as DrawPoint[];
-      syncYPoints(arr, points);
-      // The stroke is finished, so its per-frame chunks can be merged.
-      if (nextProps.isComplete === true) compactYPoints(arr, points);
-      delete nextProps.points;
-    }
-    if (type === 'graph' && Array.isArray(nextProps.expressions)) {
-      syncYGraphExpressions(
-        ensureGraphExpressionsArray(m),
-        nextProps.expressions as GraphExpression[],
-      );
-      delete nextProps.expressions;
-    }
-    if (Object.keys(nextProps).length > 0) {
-      const current =
-        (m.get('props') as Record<string, unknown> | undefined) ?? {};
-      const merged = { ...current, ...nextProps };
-      // An image's blob id only ever goes from '' (upload pending) to set. A
-      // gesture that began before the upload landed writes back the props it
-      // snapshotted, '' included, which would strand every peer on the
-      // placeholder for good.
-      if (type === 'image' && current.blobId && !merged.blobId) {
-        merged.blobId = current.blobId;
-        if (current.thumbBlobId && !merged.thumbBlobId)
-          merged.thumbBlobId = current.thumbBlobId;
-      }
-      // Once a legacy shape has a Y.Text, remove its stale scalar copy.
-      if (type === 'text' && m.get('text') instanceof Y.Text) {
-        delete merged.text;
-      }
-      if (
-        type === 'graph' &&
-        m.get('expressions') instanceof Y.Array
-      ) {
-        delete merged.expressions;
-      }
-      // The live draw tool re-sends `isComplete: false` on every write; without
-      // this check each one re-broadcast the whole props object.
-      if (!sameProps(merged, current)) m.set('props', merged);
-    }
-  }
-}
-
 // --- Current board session ---
 
-interface Session {
+export interface Session {
   boardId: string;
   doc: Y.Doc;
   /** Page registry: pageId -> { id, name, index }. */
@@ -417,6 +233,11 @@ interface Session {
 }
 
 let session: Session | null = null;
+
+/** The open board's session, for page-actions.ts. Read it; don't reassign. */
+export function currentSession(): Session | null {
+  return session;
+}
 
 /**
  * Everything derived from a page that is no longer the active one.
@@ -1080,7 +901,7 @@ export function redo(): void {
   session?.history.redo();
 }
 
-// --- Pages API ---
+// --- Page switching (registry edits are in page-actions.ts) ---
 
 /**
  * Release everything hanging off a page whose document is being dropped.
@@ -1114,7 +935,7 @@ function cleanupDeletedPageState(pageId: string): void {
  * time converge: every shape is written under the id it already had, and
  * emptying the legacy map is idempotent.
  */
-function migrateLegacyPageShapes(pageId: string): void {
+export function migrateLegacyPageShapes(pageId: string): void {
   if (!session) return;
   const legacy = legacyShapesMap(session.doc, pageId);
   if (!legacy || legacy.size === 0) return;
@@ -1147,7 +968,7 @@ function trackPageSyncForLoading(page: PageDoc): void {
 type PageSwitchSource = 'user' | 'follow' | 'restore' | 'integrity';
 
 /** Switch the active page as one coordinated interaction-state handoff. */
-function switchToPageInternal(
+export function switchToPageInternal(
   pageId: string,
   source: PageSwitchSource = 'user',
 ): boolean {
@@ -1210,290 +1031,6 @@ export function setCurrentPage(pageId: string): void {
 /** Follow mode must be able to track a tutor across pages without cancelling itself. */
 export function setCurrentPageForFollow(pageId: string): void {
   switchToPageInternal(pageId, 'follow');
-}
-
-/**
- * Order index for a page inserted directly after `anchorId`, or after the last
- * page when the anchor is gone.
- */
-function indexAfterPage(metas: PageMeta[], anchorId: string): string {
-  const at = metas.findIndex((m) => m.id === anchorId);
-  const before =
-    at >= 0 ? (metas[at]?.index ?? null) : (metas.at(-1)?.index ?? null);
-  const after = at >= 0 ? (metas[at + 1]?.index ?? null) : null;
-  return jitterKeyBetween(before, after);
-}
-
-/** Write one page record. Must run inside a `doc.transact`. */
-function putPageMeta(id: string, name: string, index: string): void {
-  const m = new Y.Map<unknown>();
-  m.set('id', id);
-  m.set('name', name);
-  m.set('index', index);
-  session!.pages.set(id, m);
-}
-
-/** Create a new page after the current one and switch to it. Returns its id. */
-export function createPage(name?: string): string {
-  if (!session || isViewOnly()) return '';
-  const id = genId();
-  const metas = readPages(session.pages);
-  const pageName = getIncrementedName(
-    name?.trim() || `Page ${metas.length + 1}`,
-    metas.map((m) => m.name),
-  );
-  const index = indexAfterPage(metas, session.currentPageId);
-  session.doc.transact(() => {
-    putPageMeta(id, pageName, index);
-  });
-  switchToPageInternal(id);
-  return id;
-}
-
-/**
- * Copy a page and everything on it to a new page placed just after it, then
- * switch to the copy.
- *
- * Asynchronous because the source need not be the page on screen — the page
- * menu offers this on any row — and a page that is not open is not in memory.
- * Awaiting its document is the whole of the wait; when it is the open page (the
- * usual case) that resolves immediately.
- *
- * Shapes are cloned with fresh ids: the source and the copy are independent
- * pages, so sharing ids would make the two indistinguishable to anything keyed
- * by shape id (selection restore, presence, comments). `parentId` and connector
- * bindings are remapped within the copied set so frames, groups, and bound
- * arrows keep pointing at their counterparts on the new page rather than
- * reaching back across to the original.
- *
- * Resolves to the new page id, or `''` when the source page does not exist.
- */
-export async function duplicatePage(id: string): Promise<string> {
-  const boardDoc = session?.doc;
-  if (!session || !boardDoc || !session.pages.has(id) || isViewOnly()) return '';
-
-  pinPageDoc(id);
-  try {
-    const sourcePage = acquirePageDoc(id);
-    migrateLegacyPageShapes(id);
-    await sourcePage.whenSynced;
-    // The board may have been closed or the page deleted while we waited.
-    if (!session || session.doc !== boardDoc || !session.pages.has(id))
-      return '';
-
-    const metas = readPages(session.pages);
-    const source = metas.find((m) => m.id === id);
-    if (!source) return '';
-
-    const newId = genId();
-    const name = getIncrementedName(
-      `${source.name} Copy`,
-      metas.map((m) => m.name),
-    );
-    const index = indexAfterPage(metas, id);
-
-    const idMap = new Map<string, string>();
-    for (const shapeId of sourcePage.shapes.keys()) idMap.set(shapeId, genId());
-
-    session.doc.transact(() => {
-      putPageMeta(newId, name, index);
-    });
-
-    const target = acquirePageDoc(newId);
-    target.doc.transact(() => {
-      for (const [shapeId, m] of sourcePage.shapes) {
-        // `clone` carries the CRDT structure across as it stands — ink point
-        // chunks, text sequences, graph rows — where decoding each shape and
-        // re-encoding it on the other side would rebuild all of it, and cost
-        // the most on exactly the pages worth duplicating.
-        const clone = m.clone();
-        const cloneId = idMap.get(shapeId)!;
-        // Inserted before it is patched: a clone is unintegrated until it lands
-        // in a document, and reading one back before then sees nothing.
-        target.shapes.set(cloneId, clone);
-        const base = readShapeBase(m)!;
-        const parentId =
-          typeof base.parentId === 'string'
-            ? (idMap.get(base.parentId) ?? null)
-            : null;
-        clone.set(
-          SHAPE_BASE_KEY,
-          packShapeBase((field) =>
-            field === 'id'
-              ? cloneId
-              : field === 'parentId'
-                ? parentId
-                : base[field as keyof typeof base],
-          ),
-        );
-        remapClonedBindings(clone, idMap);
-      }
-    }, LOCAL_ORIGIN);
-
-    // Land the copy on the same view of the same drawing, not at the origin.
-    useCameraStore.getState().copyPage(session.boardId, id, newId);
-    switchToPageInternal(newId);
-    return newId;
-  } finally {
-    unpinPageDoc(id);
-  }
-}
-
-/** One endpoint of a cloned connector, as stored in `props.bindings`. */
-type StoredBinding = { shapeId: string } | null | undefined;
-
-/**
- * Point a cloned connector's bindings at the clones of its targets. A target
- * outside `idMap` was not copied, so the binding is dropped rather than left
- * addressing a shape on another page.
- */
-function remapClonedBindings(clone: YShape, idMap: Map<string, string>): void {
-  if (readShapeBase(clone)!.type !== 'arrow') return;
-  const props = clone.get('props') as
-    { bindings?: { start: StoredBinding; end: StoredBinding } } | undefined;
-  const bindings = props?.bindings;
-  if (!bindings) return;
-  const remap = (binding: StoredBinding): StoredBinding =>
-    binding
-      ? idMap.has(binding.shapeId)
-        ? { ...binding, shapeId: idMap.get(binding.shapeId)! }
-        : null
-      : binding;
-  clone.set('props', {
-    ...props,
-    bindings: { start: remap(bindings.start), end: remap(bindings.end) },
-  });
-}
-
-/**
- * Move `ids` (and their descendants) from the current page to `targetPageId`,
- * keeping their ids and their world positions.
- *
- * A moved shape whose parent stays behind is re-rooted to the target page:
- * carrying a `parentId` that names a frame or group on another page would leave
- * it unreachable by the hierarchy walks. Connectors bound across the split heal
- * themselves — the routing pass nulls any binding whose target is absent from
- * the page being rendered.
- *
- * Returns the ids that were moved.
- */
-export function moveShapesToPage(
-  ids: string[],
-  targetPageId: string,
-): string[] {
-  if (!session || ids.length === 0 || isViewOnly()) return [];
-  if (targetPageId === session.currentPageId) return [];
-  if (!session.pages.has(targetPageId)) return [];
-
-  const moving = collectSubtree(editor, ids);
-  if (moving.length === 0) return [];
-  const movingIds = new Set(moving.map((s) => s.id));
-  const movedIds = moving.map((s) => s.id);
-  const arriving = moving.map(
-    (shape) =>
-      ({
-        ...shape,
-        parentId:
-          shape.parentId && movingIds.has(shape.parentId)
-            ? shape.parentId
-            : null,
-      }) as Shape,
-  );
-
-  // The two halves live in different documents; only the outgoing one is
-  // tracked, and the history replays the other so undo and redo move both.
-  const replay = (direction: 'undo' | 'redo') => {
-    const page = residentPageDoc(targetPageId);
-    // The target is pinned resident for as long as an entry referencing it can
-    // be reached, so this is only null once the board itself is gone.
-    if (!page) return;
-    page.doc.transact(() => {
-      for (const shape of arriving) {
-        if (direction === 'undo') page.shapes.delete(shape.id);
-        else page.shapes.set(shape.id, shapeToY(shape));
-      }
-    }, CROSS_PAGE_ORIGIN);
-  };
-  session.history.recordMove(
-    targetPageId,
-    () => {
-      const target = acquirePageDoc(targetPageId);
-      // Writing into a page that has not synced yet is safe: each shape carries
-      // the id it will keep, so the write merges with whatever the page already
-      // held.
-      target.doc.transact(() => {
-        for (const shape of arriving)
-          target.shapes.set(shape.id, shapeToY(shape));
-      }, CROSS_PAGE_ORIGIN);
-      // `movedIds`, not `ids`: `deleteShapes` does not cascade, so passing the
-      // roots alone would strand their children on this page. Groups the move
-      // empties out are pruned here too.
-      transactLocal(() => {
-        deleteShapesWithCleanup(editor, movedIds);
-      });
-    },
-    replay,
-  );
-
-  return movedIds;
-}
-
-export function renamePage(id: string, name: string): void {
-  if (!session || isViewOnly()) return;
-  const trimmed = name.trim();
-  if (!trimmed) return;
-  session.doc.transact(() => {
-    const m = session!.pages.get(id);
-    if (m) m.set('name', trimmed);
-  });
-}
-
-export function deletePage(id: string): void {
-  if (!session || isViewOnly()) return;
-  const metas = readPages(session.pages);
-  if (metas.length <= 1) return; // never delete the last page
-  if (session.currentPageId === id) {
-    const at = metas.findIndex((m) => m.id === id);
-    const neighbor = at > 0 ? metas[at - 1] : metas[at + 1];
-    if (neighbor) switchToPageInternal(neighbor.id);
-  }
-  const boardId = session.boardId;
-  session.doc.transact(() => {
-    session!.pages.delete(id);
-    // A board still holding this page's shapes in the legacy map loses them
-    // here too; a migrated page's content is a document of its own, dropped by
-    // `cleanupDeletedPageState` as the registry change is observed.
-    legacyShapesMap(session!.doc, id)?.clear();
-    deleteCommentsOnPage(id);
-  });
-  deleteStoredPage(boardId, id);
-}
-
-/** Move a page to a resolved list position with one fractional-index write. */
-export function movePageToIndex(id: string, targetIndex: number): void {
-  if (!session || isViewOnly()) return;
-  const metas = readPages(session.pages);
-  const currentIndex = metas.findIndex((meta) => meta.id === id);
-  if (currentIndex < 0) return;
-  const clampedTarget = Math.max(0, Math.min(metas.length - 1, targetIndex));
-  if (clampedTarget === currentIndex) return;
-
-  const remaining = metas.filter((meta) => meta.id !== id);
-  const before = remaining[clampedTarget - 1]?.index ?? null;
-  const after = remaining[clampedTarget]?.index ?? null;
-  const index = jitterKeyBetween(before, after);
-  session.doc.transact(() => {
-    session!.pages.get(id)?.set('index', index);
-  });
-}
-
-/** Move a page one slot with the same index-based operation used by dragging. */
-export function movePage(id: string, direction: 'up' | 'down'): void {
-  if (!session || isViewOnly()) return;
-  const metas = readPages(session.pages);
-  const currentIndex = metas.findIndex((meta) => meta.id === id);
-  if (currentIndex < 0) return;
-  movePageToIndex(id, direction === 'up' ? currentIndex - 1 : currentIndex + 1);
 }
 
 /**

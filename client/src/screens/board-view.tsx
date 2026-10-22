@@ -29,6 +29,7 @@ import { AttentionToast } from '@/components/attention-toast';
 import { LatencyWarningToast } from '@/components/latency-warning-toast';
 import { NameDialog } from '@/components/name-dialog';
 import { PdfRangeDialog } from '@/components/pdf-range-dialog';
+import { StickerCutOutDialog } from '@/components/sticker-cutout-dialog';
 import { Toolbar } from '@/components/toolbar';
 import { Toaster } from '@/components/ui/toast';
 import { VideoPanel } from '@/components/video-panel';
@@ -215,6 +216,8 @@ export function BoardView({ boardId }: { boardId: string }) {
       {/* Opened from the paste handler, not from a control, when a pasted PDF
           runs past the import limit. */}
       <PdfRangeDialog isTutor={identity?.isTutor ?? false} />
+      {/* Opened from the sticker upload flow, once per file. */}
+      <StickerCutOutDialog />
       {/* Held until the board is up: asking a student who they are over a blank
           canvas is a worse first impression than a half-second wait, and
           `resolveIdentity` has long since answered by then. */}

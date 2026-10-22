@@ -94,7 +94,7 @@ async function wheel(init: WheelEventInit) {
 it('receives pointer events and pans the graph without moving the board', async () => {
   expect(getComputedStyle(group()).pointerEvents).toBe('auto');
   await wheel({ clientX: 920, clientY: 680, deltaY: 40 });
-  expect(viewport().yMin).toBeCloseTo(-6 - (20 / 248) * 12);
+  expect(viewport().yMin).toBeCloseTo(-10 - (20 / 248) * 20);
   expect(useCameraStore.getState().camera).toEqual(camera);
 });
 
@@ -127,7 +127,7 @@ it('pans along screen axes when the graph is rotated', async () => {
   screenMatrix = new DOMMatrix().translate(700, 250).rotate(90).scale(2);
   await wheel({ clientX: 500, clientY: 500, deltaY: 40 });
   expect(viewport().xMin).toBeCloseTo(-10 + (20 / 388) * 20);
-  expect(viewport().yMin).toBeCloseTo(-6);
+  expect(viewport().yMin).toBeCloseTo(-10);
 });
 
 it('composes multiple wheel events before a frame', async () => {

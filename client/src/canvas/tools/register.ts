@@ -24,6 +24,7 @@ import { createGraphTool } from './graph-tool';
 import { createEquationTool } from './equation-tool';
 import { createCommentTool } from './comment-tool';
 import { createCompassTool } from './compass-tool';
+import { createMeasureTool } from './measure-tool';
 
 toolRegistry.register(createSelectTool());
 toolRegistry.register(createHandTool());
@@ -91,5 +92,6 @@ toolRegistry.register(
   }),
 );
 toolRegistry.register(createCompassTool());
+toolRegistry.register(createMeasureTool());
 toolRegistry.register(createEraserTool());
 toolRegistry.register(createLaserTool());

@@ -5,7 +5,7 @@ import {
   type DashProps,
   type PerfectDashOptions,
 } from './perfect-dash';
-import { synthesizeDrawPaths } from './geometry-synthesis';
+import { drawPathData, type DrawCommand } from './geometry-synthesis';
 
 /**
  * Dash attributes for a stroke of `length`, distributed so both of its ends
@@ -76,35 +76,32 @@ export function DashedOutline({
   );
 }
 
-/** Deterministic two-pass outline used by the `draw` stroke style. */
+/**
+ * The `draw` stroke style: tldraw's two jittered passes, painted as one path so
+ * where they overlap is not painted twice.
+ */
 export function DrawnOutline({
-  points,
+  commands,
   seed,
   color,
   size,
   closed = false,
 }: {
-  points: readonly Vec[];
+  commands: readonly DrawCommand[];
   seed: string;
   color: string;
   size: number;
   closed?: boolean;
 }): ReactElement {
-  const paths = synthesizeDrawPaths(points, { seed, size, closed });
   return (
-    <>
-      {paths.map((d, pass) => (
-        <path
-          key={pass}
-          d={d}
-          fill="none"
-          stroke={color}
-          strokeWidth={size}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      ))}
-    </>
+    <path
+      d={drawPathData(commands, { seed, size, closed })}
+      fill="none"
+      stroke={color}
+      strokeWidth={size}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
   );
 }
 

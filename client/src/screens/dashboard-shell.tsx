@@ -1,4 +1,4 @@
-import { type ReactNode } from 'react';
+import { type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { BarChart2, ChevronsUpDown, LogOut, Moon, Sun } from 'lucide-react';
 import { BrandMark } from '@/components/brand-mark';
 import {
@@ -14,6 +14,23 @@ import { cn } from '@/lib/utils';
 import { navigate } from '@/router';
 import { useThemeStore } from '@/use-theme-store';
 import './dashboard.css';
+
+// The sheet is a whiteboard, and a whiteboard has a dot lattice. It is
+// invisible until a mouse is over the sheet, then wakes in a soft circle
+// around the pointer. Written straight to CSS variables: no React render per
+// move. Touch has no hover, so it never lights.
+function lightLattice(event: ReactPointerEvent<HTMLElement>) {
+  if (event.pointerType === 'touch') return;
+  const sheet = event.currentTarget;
+  const box = sheet.getBoundingClientRect();
+  sheet.style.setProperty('--mx', `${event.clientX - box.left}px`);
+  sheet.style.setProperty('--my', `${event.clientY - box.top}px`);
+  sheet.style.setProperty('--lit', '1');
+}
+
+function dimLattice(event: ReactPointerEvent<HTMLElement>) {
+  event.currentTarget.style.setProperty('--lit', '0');
+}
 
 /**
  * The frame both tutor pages share: a porcelain tray with a quiet rail on the
@@ -57,8 +74,17 @@ export function DashboardShell({
       <main
         id={mainId}
         aria-busy={busy}
-        className="flex min-w-0 flex-1 flex-col overflow-y-auto bg-[var(--d-sheet)] md:rounded-[22px] md:shadow-[var(--d-lift)] md:ring-1 md:ring-[var(--d-rule)]"
+        onPointerMove={lightLattice}
+        onPointerLeave={dimLattice}
+        // The gutter is held so a list growing past the fold doesn't shift the
+        // sheet sideways; the thumb is a rule-coloured hairline, not a slab.
+        className="isolate flex min-w-0 flex-1 flex-col overflow-y-auto bg-[var(--d-sheet)] [scrollbar-color:var(--d-rule)_transparent] [scrollbar-gutter:stable] [scrollbar-width:thin] md:rounded-[22px] md:shadow-[var(--d-lift)] md:ring-1 md:ring-[var(--d-rule)]"
       >
+        {/* Zero-height sticky anchor: the lattice stays put while the sheet
+            scrolls under it, and sits behind every tile and word. */}
+        <div aria-hidden="true" className="sticky top-0 h-0">
+          <div className="d-lattice absolute top-0 left-0 -z-10 h-dvh w-full" />
+        </div>
         {children}
       </main>
     </div>
@@ -210,11 +236,14 @@ export function AccountMenu({
 /** A page's title block: the display face at a size that lets the sheet breathe. */
 export function PageTitle({
   title,
+  eyebrow,
   detail,
   leading,
   actions,
 }: {
   title: string;
+  /** A line in the tutor's own handwriting above the title. */
+  eyebrow?: string;
   detail?: ReactNode;
   leading?: ReactNode;
   actions?: ReactNode;
@@ -224,11 +253,16 @@ export function PageTitle({
       <div className="flex min-w-0 flex-[1_1_18rem] items-center gap-3">
         {leading}
         <div className="min-w-0">
-          <h1 className="d-display text-(length:--d-fs-display) leading-[1.05] font-semibold md:text-(length:--d-fs-page)">
+          {eyebrow ? (
+            <p className="d-hand d-write mb-1 text-[26px] leading-none text-[var(--d-pencil)]">
+              {eyebrow}
+            </p>
+          ) : null}
+          <h1 className="d-display text-(length:--d-fs-display) leading-[1.05] font-semibold text-balance md:text-(length:--d-fs-page)">
             {title}
           </h1>
           {detail ? (
-            <p className="mt-2 text-(length:--d-fs-lead) text-[var(--d-graphite)]">{detail}</p>
+            <p className="mt-2 text-(length:--d-fs-lead) text-pretty text-[var(--d-graphite)]">{detail}</p>
           ) : null}
         </div>
       </div>

@@ -49,6 +49,12 @@ export interface ShapeUtil<
   /** Whether this geometry may be used as a snap target. Defaults to true. */
   readonly canSnap?: boolean;
 
+  /**
+   * The fixed margin `getBounds` adds around the geometry (stroke, heads,
+   * label) that `resize` keeps rather than scales. Absent means none.
+   */
+  getResizeMargin?(shape: ShapeMap[T]): number;
+
   /** Optional page-space feature points for bounds alignment snapping. */
   getBoundsSnapPoints?(shape: ShapeMap[T]): Point[];
 

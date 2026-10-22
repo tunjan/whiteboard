@@ -10,24 +10,19 @@ import {
 } from '@/canvas/use-custom-stickers-store';
 import { useStyleStore } from '@/canvas/use-style-store';
 import { Button } from '@/components/ui/button';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from '@/components/ui/tooltip';
+import { Tooltip, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+import { KeyTip } from './toolbar-primitives';
 
-export function CustomStickerItem({
+/** A board upload in the strip, with the key that removes it on hover. */
+function CustomStickerItem({
   meta,
   selected,
   onPick,
-  radio = false,
 }: {
   meta: CustomStickerMeta;
   selected: boolean;
   onPick: () => void;
-  /** Mark the choice as a radio, for a strip that is a radiogroup. */
-  radio?: boolean;
 }) {
   return (
     <div className="group relative">
@@ -35,17 +30,16 @@ export function CustomStickerItem({
         type="button"
         variant="ghost"
         size="icon-sm"
-        role={radio ? 'radio' : undefined}
+        role="radio"
         aria-label={meta.label}
-        aria-checked={radio ? selected : undefined}
-        aria-current={!radio && selected ? 'true' : undefined}
+        aria-checked={selected}
         onClick={onPick}
         className="tbar-item w-full"
       >
         <img
           src={blobUrl(meta.blobId)}
           alt=""
-          className="size-6 object-contain"
+          className="object-contain"
           draggable={false}
         />
       </Button>
@@ -62,26 +56,28 @@ export function CustomStickerItem({
                 removeCustomSticker(meta.id);
               }}
               className={cn(
-                'absolute -top-1 -right-1 size-4 rounded-md border border-border bg-surface p-0',
-                'opacity-0 transition-opacity group-hover:opacity-100',
+                'tbar-swatch-remove touch-reveal opacity-0 group-hover:opacity-100',
                 'focus-visible:opacity-100 motion-reduce:transition-none',
               )}
             />
           }
         >
-          <CloseGlyph className="size-3 text-fg-muted hover:text-fg" />
+          <CloseGlyph />
         </TooltipTrigger>
-        <TooltipContent side="top">Remove for everyone</TooltipContent>
+        <KeyTip label="Remove for everyone" />
       </Tooltip>
     </div>
   );
 }
 
 /**
- * The sticker tool's palette, on the style plate while the tool is armed: every
- * stamp in colour, the armed one on a neutral pill, so switching is one click
- * and the next canvas click stamps it. Board uploads follow the built-ins, then
- * the key that adds one.
+ * The sticker tool's palette, on the style plate while the tool is armed: a
+ * sheet of stickers, each drawn as it lands on the board — die-cut halo and
+ * drop shadow — and the armed one peeled up off the sheet, the way the bar's
+ * tool in hand rises from its slot. Switching is one click and the next canvas
+ * click stamps it. The board's uploads continue the same run, scrolling once
+ * they outgrow the plate, and end on a blank spot on the sheet that adds one —
+ * where the new upload lands.
  */
 export function StickerStrip() {
   const stickerId = useStyleStore((state) => state.stickerId);
@@ -95,7 +91,7 @@ export function StickerStrip() {
   const addLabel = pending > 0 ? 'Removing background…' : 'Add sticker';
 
   return (
-    <div className="flex items-center gap-0.5">
+    <div className="tbar-sheet">
       <div role="radiogroup" aria-label="Sticker" className="tbar-stickers">
         {STICKERS.map((def) => (
           <Tooltip key={def.id}>
@@ -111,37 +107,48 @@ export function StickerStrip() {
                 />
               }
             >
-              <StickerPreview def={def} size={22} />
+              <StickerPreview def={def} size={46} />
             </TooltipTrigger>
-            <TooltipContent side="top">{def.label}</TooltipContent>
+            <KeyTip label={def.label} />
           </Tooltip>
         ))}
-        {boardStickers.map((meta) => (
-          <CustomStickerItem
-            key={meta.id}
-            meta={meta}
-            radio
-            selected={meta.id === stickerId}
-            onPick={() => setStickerId(meta.id)}
+      </div>
+      <div className="tbar-stickers">
+        <div role="radiogroup" aria-label="Board stickers" className="contents">
+          {boardStickers.map((meta) => (
+            <CustomStickerItem
+              key={meta.id}
+              meta={meta}
+              selected={meta.id === stickerId}
+              onPick={() => setStickerId(meta.id)}
+            />
+          ))}
+        </div>
+        {Array.from({ length: pending }, (_, i) => (
+          <span
+            key={i}
+            aria-hidden="true"
+            className="tbar-item tbar-sticker-pending animate-pulse motion-reduce:animate-none"
           />
         ))}
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <button
+                type="button"
+                aria-label={error ? `${addLabel}. ${error}` : addLabel}
+                disabled={pending > 0}
+                onClick={() => void pickAndAddStickers()}
+                className="tbar-item tbar-sticker-add"
+                data-error={error ? true : undefined}
+              />
+            }
+          >
+            <PlusGlyph />
+          </TooltipTrigger>
+          <KeyTip label={error ?? addLabel} />
+        </Tooltip>
       </div>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <button
-              type="button"
-              aria-label={error ? `${addLabel}. ${error}` : addLabel}
-              disabled={pending > 0}
-              onClick={() => void pickAndAddStickers()}
-              className={cn('tbar-item', error && 'text-danger')}
-            />
-          }
-        >
-          <PlusGlyph />
-        </TooltipTrigger>
-        <TooltipContent side="top">{error ?? addLabel}</TooltipContent>
-      </Tooltip>
     </div>
   );
 }

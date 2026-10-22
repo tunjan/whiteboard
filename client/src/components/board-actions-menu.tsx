@@ -93,7 +93,7 @@ import { useThemeStore } from '@/use-theme-store';
  *  already claims the free space, and two auto margins would split it. */
 function MenuValue({ children }: { children: ReactNode }) {
   return (
-    <span className="flex-1 pl-4 text-right font-mono text-2xs tabular-nums text-fg-subtle">
+    <span className="flex-1 pl-4 text-right text-xs tabular-nums text-fg-subtle">
       {children}
     </span>
   );
@@ -157,16 +157,16 @@ function MenuSliderItem({
           {icon}
           {label}
         </span>
-        <span className="font-mono text-2xs tabular-nums text-fg-subtle">
+        <span className="text-xs tabular-nums text-fg-subtle">
           {display}
         </span>
       </span>
-      {/* Half the height of a standalone fader: the capsule is parameterised by
-          those three custom properties precisely so it can shrink into a row
-          without a second component. */}
+      {/* The toolbar's opacity fader: an amount fills grey, not the blue that
+          marks a choice, and the thumb is a white pill big enough to read as
+          one — at half height the fill ringed it like an outline. */}
       <Slider
         aria-label={label}
-        className="[--wb-slider-pad:0.125rem] [--wb-slider-thumb:0.75rem] [--wb-slider-track:0.75rem]"
+        className="[--wb-slider-thumb:1.125rem] [--wb-slider-track:1rem] [&_[data-slot=slider-range]]:bg-fg-subtle"
         min={min}
         max={max}
         step={step}
@@ -258,7 +258,8 @@ function TouchSubmenu() {
   );
 }
 
-function PenSubmenu() {
+/** The pen's feel: the board menu's Pen panel, and the tray's pen chevron. */
+export function PenSettingsItems() {
   const pencilStabilization = useCanvasUiStore((s) => s.pencilStabilization);
   const setPencilStabilization = useCanvasUiStore(
     (s) => s.setPencilStabilization,
@@ -288,123 +289,131 @@ function PenSubmenu() {
   const resetPencil = useCanvasUiStore((s) => s.resetPencil);
 
   return (
+    <>
+      <MenuSliderItem
+        label="Stabilisation"
+        value={pencilStabilization}
+        display={`${Math.round(pencilStabilization * 100)}%`}
+        min={0}
+        max={1}
+        step={0.01}
+        onChange={setPencilStabilization}
+      />
+      <MenuSliderItem
+        label="Pressure"
+        value={pencilThinning}
+        display={`${pencilThinning > 0 ? '+' : ''}${Math.round(
+          pencilThinning * 100,
+        )}%`}
+        min={-1}
+        max={1}
+        step={0.05}
+        onChange={setPencilThinning}
+      />
+      <MenuSliderItem
+        label="Tilt"
+        value={pencilTilt}
+        display={`${Math.round(pencilTilt * 100)}%`}
+        min={0}
+        max={1}
+        step={0.05}
+        onChange={setPencilTilt}
+      />
+      <MenuSliderItem
+        label="Smoothing"
+        value={pencilSmoothing}
+        display={`${Math.round(pencilSmoothing * 100)}%`}
+        min={0}
+        max={1}
+        step={0.01}
+        onChange={setPencilSmoothing}
+      />
+      <MenuSliderItem
+        label="Start taper"
+        value={pencilStartTaper}
+        display={`${Math.round(pencilStartTaper)}px`}
+        min={0}
+        max={50}
+        step={1}
+        onChange={setPencilStartTaper}
+      />
+      <DropdownMenuSeparator />
+      {/* Two enums, each behind its own trigger carrying the current value,
+          rather than six more rows in a panel that already holds five
+          faders. Same shape as Resolution below. */}
+      <DropdownMenuSub>
+        <DropdownMenuSubTrigger>
+          Stroke ends
+          <MenuValue>{END_TAPER_LABELS[pencilEndTaper]}</MenuValue>
+        </DropdownMenuSubTrigger>
+        <DropdownMenuSubContent className="w-40">
+          <DropdownMenuRadioGroup
+            value={pencilEndTaper}
+            onValueChange={(value) =>
+              setPencilEndTaper(value as EndTaperMode)
+            }
+          >
+            {END_TAPER_MODES.map((mode) => (
+              <DropdownMenuRadioItem key={mode} value={mode}>
+                {END_TAPER_LABELS[mode]}
+              </DropdownMenuRadioItem>
+            ))}
+          </DropdownMenuRadioGroup>
+        </DropdownMenuSubContent>
+      </DropdownMenuSub>
+      <DropdownMenuSub>
+        <DropdownMenuSubTrigger>
+          Response
+          <MenuValue>{PRESSURE_CURVE_LABELS[pencilPressureCurve]}</MenuValue>
+        </DropdownMenuSubTrigger>
+        <DropdownMenuSubContent className="w-40">
+          <DropdownMenuRadioGroup
+            value={pencilPressureCurve}
+            onValueChange={(value) =>
+              setPencilPressureCurve(value as PencilPressureCurve)
+            }
+          >
+            {PRESSURE_CURVES.map((curve) => (
+              <DropdownMenuRadioItem key={curve} value={curve}>
+                {PRESSURE_CURVE_LABELS[curve]}
+              </DropdownMenuRadioItem>
+            ))}
+          </DropdownMenuRadioGroup>
+        </DropdownMenuSubContent>
+      </DropdownMenuSub>
+      <DropdownMenuSeparator />
+      <DropdownMenuCheckboxItem
+        checked={pencilSimulatePressure}
+        onCheckedChange={setPencilSimulatePressure}
+      >
+        Simulate pressure
+      </DropdownMenuCheckboxItem>
+      <DropdownMenuCheckboxItem
+        checked={pencilPrediction}
+        onCheckedChange={setPencilPrediction}
+      >
+        Predict stroke ahead
+      </DropdownMenuCheckboxItem>
+      <DropdownMenuSeparator />
+      {/* Stays open: the point of restoring defaults is watching the five
+          faders above snap back. */}
+      <DropdownMenuItem closeOnClick={false} onClick={resetPencil}>
+        <RotateCcw />
+        Restore defaults
+      </DropdownMenuItem>
+    </>
+  );
+}
+
+function PenSubmenu() {
+  return (
     <DropdownMenuSub>
       <DropdownMenuSubTrigger>
         <PenTool />
         Pen
       </DropdownMenuSubTrigger>
       <DropdownMenuSubContent className="w-[min(16rem,calc(100vw-1rem))]">
-        <MenuSliderItem
-          label="Stabilisation"
-          value={pencilStabilization}
-          display={`${Math.round(pencilStabilization * 100)}%`}
-          min={0}
-          max={1}
-          step={0.01}
-          onChange={setPencilStabilization}
-        />
-        <MenuSliderItem
-          label="Pressure"
-          value={pencilThinning}
-          display={`${pencilThinning > 0 ? '+' : ''}${Math.round(
-            pencilThinning * 100,
-          )}%`}
-          min={-1}
-          max={1}
-          step={0.05}
-          onChange={setPencilThinning}
-        />
-        <MenuSliderItem
-          label="Tilt"
-          value={pencilTilt}
-          display={`${Math.round(pencilTilt * 100)}%`}
-          min={0}
-          max={1}
-          step={0.05}
-          onChange={setPencilTilt}
-        />
-        <MenuSliderItem
-          label="Smoothing"
-          value={pencilSmoothing}
-          display={`${Math.round(pencilSmoothing * 100)}%`}
-          min={0}
-          max={1}
-          step={0.01}
-          onChange={setPencilSmoothing}
-        />
-        <MenuSliderItem
-          label="Start taper"
-          value={pencilStartTaper}
-          display={`${Math.round(pencilStartTaper)}px`}
-          min={0}
-          max={50}
-          step={1}
-          onChange={setPencilStartTaper}
-        />
-        <DropdownMenuSeparator />
-        {/* Two enums, each behind its own trigger carrying the current value,
-            rather than six more rows in a panel that already holds five
-            faders. Same shape as Resolution below. */}
-        <DropdownMenuSub>
-          <DropdownMenuSubTrigger>
-            Stroke ends
-            <MenuValue>{END_TAPER_LABELS[pencilEndTaper]}</MenuValue>
-          </DropdownMenuSubTrigger>
-          <DropdownMenuSubContent className="w-40">
-            <DropdownMenuRadioGroup
-              value={pencilEndTaper}
-              onValueChange={(value) =>
-                setPencilEndTaper(value as EndTaperMode)
-              }
-            >
-              {END_TAPER_MODES.map((mode) => (
-                <DropdownMenuRadioItem key={mode} value={mode}>
-                  {END_TAPER_LABELS[mode]}
-                </DropdownMenuRadioItem>
-              ))}
-            </DropdownMenuRadioGroup>
-          </DropdownMenuSubContent>
-        </DropdownMenuSub>
-        <DropdownMenuSub>
-          <DropdownMenuSubTrigger>
-            Response
-            <MenuValue>{PRESSURE_CURVE_LABELS[pencilPressureCurve]}</MenuValue>
-          </DropdownMenuSubTrigger>
-          <DropdownMenuSubContent className="w-40">
-            <DropdownMenuRadioGroup
-              value={pencilPressureCurve}
-              onValueChange={(value) =>
-                setPencilPressureCurve(value as PencilPressureCurve)
-              }
-            >
-              {PRESSURE_CURVES.map((curve) => (
-                <DropdownMenuRadioItem key={curve} value={curve}>
-                  {PRESSURE_CURVE_LABELS[curve]}
-                </DropdownMenuRadioItem>
-              ))}
-            </DropdownMenuRadioGroup>
-          </DropdownMenuSubContent>
-        </DropdownMenuSub>
-        <DropdownMenuSeparator />
-        <DropdownMenuCheckboxItem
-          checked={pencilSimulatePressure}
-          onCheckedChange={setPencilSimulatePressure}
-        >
-          Simulate pressure
-        </DropdownMenuCheckboxItem>
-        <DropdownMenuCheckboxItem
-          checked={pencilPrediction}
-          onCheckedChange={setPencilPrediction}
-        >
-          Predict stroke ahead
-        </DropdownMenuCheckboxItem>
-        <DropdownMenuSeparator />
-        {/* Stays open: the point of restoring defaults is watching the five
-            faders above snap back. */}
-        <DropdownMenuItem closeOnClick={false} onClick={resetPencil}>
-          <RotateCcw />
-          Restore defaults
-        </DropdownMenuItem>
+        <PenSettingsItems />
       </DropdownMenuSubContent>
     </DropdownMenuSub>
   );

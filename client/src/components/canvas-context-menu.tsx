@@ -11,7 +11,11 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import { alignShapes, distributeShapes } from '@/canvas/align';
-import { copyShapes, hasClipboard, pasteShapes } from '@/canvas/clipboard';
+import {
+  copyShapes,
+  hasClipboard,
+  pasteAtContextMenu,
+} from '@/canvas/clipboard';
 import {
   deleteShapesWithCleanup,
   duplicateShapes,
@@ -25,11 +29,8 @@ import {
 import { flipShapes } from '@/canvas/flip';
 import { deleteTargetIds } from '@/canvas/hierarchy';
 import { copyStyle, hasCopiedStyle, pasteStyle } from '@/canvas/style-clipboard';
-import {
-  editor,
-  moveShapesToPage,
-  useDocumentStore,
-} from '@/canvas/use-document-store';
+import { moveShapesToPage } from '@/canvas/page-actions';
+import { editor, useDocumentStore } from '@/canvas/use-document-store';
 import { useHiddenStore } from '@/canvas/use-hidden-store';
 import { useImageCroppingStore } from '@/canvas/use-image-cropping-store';
 import { useSelectionStore } from '@/canvas/use-selection-store';
@@ -123,7 +124,7 @@ export function CanvasContextMenu({ children }: { children: ReactNode }) {
         <ContextMenuItem
           disabled={!hasClipboard()}
           onClick={() => {
-            const ids = pasteShapes(editor);
+            const ids = pasteAtContextMenu(editor);
             if (ids.length) useSelectionStore.getState().setSelection(ids);
           }}
         >

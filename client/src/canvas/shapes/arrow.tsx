@@ -1,9 +1,9 @@
 import { arrowHandleDrag, arrowHandles } from './connector-handles';
 import { DEFAULT_SHAPE_STYLE } from './style';
 import {
+  arrowDrawCommands,
   arrowheadLength,
   arrowheadPath,
-  arrowheadPoints,
   arrowPath,
   arrowPoints,
   pathMidpoint,
@@ -57,6 +57,7 @@ export const arrowUtil: ShapeUtil<'arrow'> = {
 
   // Pad bounds by the arrowhead length so heads aren't clipped/culled.
   getBounds: (s) => polylineBounds(s.x, s.y, arrowBody(s), arrowBoundsPad(s)),
+  getResizeMargin: arrowBoundsPad,
 
   hitTest: (s, p, tol) =>
     polylineHitTest(
@@ -134,51 +135,24 @@ export const arrowUtil: ShapeUtil<'arrow'> = {
           shape.rotation,
         )}
       >
+        {/* tldraw keeps arrowheads solid in the `draw` style; only the body wobbles. */}
         {dash === 'draw' ? (
-          <>
-            <DrawnOutline
-              points={bodyPoints}
-              seed={`${shape.id}:body`}
-              color={color}
-              size={size}
-            />
-            {arrowStart ? (
-              <DrawnOutline
-                points={arrowheadPoints(
-                  tangentAnchor(bodyPoints, true),
-                  first,
-                  size,
-                )}
-                seed={`${shape.id}:start`}
-                color={color}
-                size={size}
-              />
-            ) : null}
-            {arrowEnd ? (
-              <DrawnOutline
-                points={arrowheadPoints(
-                  tangentAnchor(bodyPoints, false),
-                  last,
-                  size,
-                )}
-                seed={`${shape.id}:end`}
-                color={color}
-                size={size}
-              />
-            ) : null}
-          </>
+          <DrawnOutline
+            commands={arrowDrawCommands(bodyPoints, topology)}
+            seed={shape.id}
+            color={color}
+            size={size}
+          />
         ) : (
-          <>
-            <path
-              d={arrowPath(points, topology, bend ?? 0)}
-              {...stroke}
-              {...dashProps(dash, size, polylineLength(bodyPoints))}
-            />
-            {startHead || endHead ? (
-              <path d={`${startHead} ${endHead}`.trim()} {...stroke} />
-            ) : null}
-          </>
+          <path
+            d={arrowPath(points, topology, bend ?? 0)}
+            {...stroke}
+            {...dashProps(dash, size, polylineLength(bodyPoints))}
+          />
         )}
+        {startHead || endHead ? (
+          <path d={`${startHead} ${endHead}`.trim()} {...stroke} />
+        ) : null}
         {label?.trim() ? (
           <text
             x={labelPoint.x}

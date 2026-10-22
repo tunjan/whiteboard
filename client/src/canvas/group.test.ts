@@ -288,4 +288,57 @@ describe('duplicateShapes', () => {
 
     expect(bindingTarget(editor, newArrow!)).toBe('rect');
   });
+
+  it('keeps the clones in the originals’ order, in one transaction', () => {
+    const ids = ['a', 'b', 'c', 'd', 'e', 'f'];
+    const inner = makeEditor(ids.map((id) => ({ id })));
+    // Like the document store: `getShapes()` is a cache the observer refreshes
+    // only when the outermost transaction commits.
+    let frozen: Shape[] | null = null;
+    let createsOutside = 0;
+    const editor: Editor = {
+      ...inner,
+      getShapes: () => frozen ?? inner.getShapes(),
+      createShape: (s) => {
+        if (!frozen) createsOutside++;
+        inner.createShape(s);
+      },
+      transact: (fn) => {
+        frozen = inner.getShapes();
+        try {
+          fn();
+        } finally {
+          frozen = null;
+        }
+      },
+    };
+
+    const clones = duplicateShapes(editor, ids);
+
+    expect(createsOutside).toBe(0);
+    expect(order(editor)).toEqual([...ids, ...clones]);
+  });
+});
+
+describe('group commands and locks', () => {
+  it('leaves locked shapes out of a new group, and locked groups whole', () => {
+    const editor = makeEditor([
+      { id: 'a' },
+      { id: 'b' },
+      { id: 'locked' },
+      { id: 'g', type: 'group' },
+      { id: 'c', parentId: 'g' },
+      { id: 'd', parentId: 'g' },
+    ]);
+    editor.updateShape('locked', { locked: true });
+    editor.updateShape('g', { locked: true });
+
+    const gid = groupShapes(editor, ['a', 'b', 'locked']);
+    expect(parentOf(editor, 'a')).toBe(gid);
+    expect(parentOf(editor, 'locked')).toBeNull();
+    expect(groupShapes(editor, ['a', 'locked'])).toBeNull();
+
+    expect(ungroupShapes(editor, ['g'])).toEqual([]);
+    expect(parentOf(editor, 'c')).toBe('g');
+  });
 });

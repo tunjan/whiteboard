@@ -237,7 +237,7 @@ one — it was drawing the whole document each frame. The `cull` column reading
 `canvas-2d-paint.ts` paints `draw`, `rectangle`, `ellipse`, `polygon`, `line`,
 `arrow`, `text`, `image`, `video` and `frame` (`group` draws nothing). It builds
 them from the geometry the SVG components already use — `curvePath`,
-`arrowheadPath`, `synthesizeDrawPaths`, `mergedRectPath`, `layoutTextProps`,
+`arrowheadPath`, `drawPathData`, `mergedRectPath`, `layoutTextProps`,
 `dashProps`, `shadowRings` — so the only thing restated on the canvas side is
 which paint attribute goes where.
 

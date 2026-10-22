@@ -20,7 +20,14 @@ export interface ConnectorBinding {
 
 /** Regular/normalized polygons that fit a w x h box. */
 export type PolygonKind =
-  'triangle' | 'diamond' | 'trapezoid' | 'pentagon' | 'hexagon';
+  | 'triangle'
+  | 'diamond'
+  | 'parallelogram'
+  | 'trapezoid'
+  | 'pentagon'
+  | 'hexagon'
+  | 'cloud'
+  | 'star';
 
 /** Text font families (mapped to concrete font stacks on the client). */
 export type FontFamily = 'sans' | 'serif' | 'mono' | 'hand';
@@ -244,8 +251,15 @@ export interface StickerProps {
 }
 
 export interface VideoProps {
-  /** YouTube video id (e.g. "dQw4w9WgXcQ"). */
+  /** YouTube video id (e.g. "dQw4w9WgXcQ"); empty for an uploaded file. */
   videoId: string;
+  /**
+   * Uploaded video file (`/api/blobs/<blobId>`). Empty while this client's
+   * upload is still in flight; absent on YouTube videos.
+   */
+  blobId?: string;
+  /** First-frame still of an uploaded video, drawn while it isn't playing. */
+  posterBlobId?: string;
   /** Rendered size in world units. */
   w: number;
   h: number;

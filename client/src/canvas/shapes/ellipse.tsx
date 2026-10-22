@@ -7,7 +7,7 @@ import {
   unrotatedPoint,
 } from './box-geometry';
 import { ellipsePerimeter } from './perfect-dash';
-import { ellipseSynthesisPoints } from './geometry-synthesis';
+import { ellipseDrawCommands } from './geometry-synthesis';
 import {
   dashProps,
   DrawnOutline,
@@ -81,7 +81,7 @@ export const ellipseUtil: ShapeUtil<'ellipse'> = {
         />
         {dash === 'draw' ? (
           <DrawnOutline
-            points={ellipseSynthesisPoints(
+            commands={ellipseDrawCommands(
               shape.x + w / 2,
               shape.y + h / 2,
               w / 2,

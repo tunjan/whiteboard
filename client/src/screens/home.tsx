@@ -5,10 +5,14 @@ import {
   useState,
 } from 'react';
 import {
+  ArrowDown,
+  ArrowRight,
   ArrowUpDown,
   BarChart2,
   Check,
+  LayoutGrid,
   Library,
+  List,
   MoreHorizontal,
   Pencil,
   Plus,
@@ -38,6 +42,15 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Kbd } from '@/components/ui/kbd';
 import { Skeleton } from '@/components/ui/skeleton';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Toaster, toast } from '@/components/ui/toast';
 import { cn } from '@/lib/utils';
 import { navigate } from '@/router';
@@ -53,7 +66,11 @@ type TitleDialogState =
   { mode: 'create' } | { mode: 'rename'; board: BoardMeta };
 
 type LibraryView = 'all' | 'favorites';
-type SortMode = 'activity' | 'created' | 'name';
+type SortMode = 'activity' | 'edited' | 'created' | 'name';
+type LibraryLayout = 'grid' | 'list';
+
+// Grid or list is a per-browser habit, not something worth syncing.
+const LAYOUT_KEY = 'whiteboard:library-layout';
 
 // Favorites used to live in this browser only. Read once, pushed to the
 // server, then forgotten — the server copy is the one every device shares.
@@ -79,6 +96,7 @@ const RELATIVE_UNITS: [Intl.RelativeTimeFormatUnit, number][] = [
 
 const SORT_LABELS: Record<SortMode, string> = {
   activity: 'Last opened',
+  edited: 'Last edited',
   created: 'Date created',
   name: 'Name',
 };
@@ -93,6 +111,21 @@ function takeLegacyFavoriteIds(): string[] {
   } catch {
     return [];
   }
+}
+
+function readLayout(): LibraryLayout {
+  try {
+    return localStorage.getItem(LAYOUT_KEY) === 'list' ? 'list' : 'grid';
+  } catch {
+    return 'grid';
+  }
+}
+
+// The timestamp a sort orders by, and so the one its day groups are cut on.
+function sortTime(board: BoardMeta, mode: SortMode): number {
+  if (mode === 'created') return board.createdAt;
+  if (mode === 'edited') return board.updatedAt;
+  return board.lastOpenedAt;
 }
 
 function relativeTime(ts: number): string {
@@ -161,6 +194,50 @@ function splitName(name: string): { primary: string; secondary: string | null } 
     : { primary: name, secondary: null };
 }
 
+// The tutor's first name, in the tutor's own hand, with the right word for the
+// hour. "Tutor" is the signed-out fallback, not a name, so it greets bare.
+function greeting(name: string, hour: number): string {
+  const part =
+    hour < 5
+      ? 'Burning the midnight oil'
+      : hour < 12
+        ? 'Good morning'
+        : hour < 18
+          ? 'Good afternoon'
+          : 'Good evening';
+  const first = name === 'Tutor' ? '' : name.split(/\s+/)[0]!;
+  return first ? `${part}, ${first}` : part;
+}
+
+// "Amara is on one right now" — who, not how many, because the tutor knows
+// these students by name. Past two the count takes over.
+function liveClause(names: string[]): string {
+  if (names.length === 1) return `${names[0]} is on one right now`;
+  if (names.length === 2) {
+    return `${names[0]} and ${names[1]} are on canvases right now`;
+  }
+  return `${names[0]}, ${names[1]} and ${names.length - 2} more are on canvases right now`;
+}
+
+// The part of a name a search matched, set apart so it is clear why a tile is
+// still here. Case-insensitive; only the first occurrence is marked.
+function Highlight({ text, query }: { text: string; query: string }) {
+  const at = query ? text.toLocaleLowerCase().indexOf(query) : -1;
+  if (at < 0) return text;
+  return (
+    <>
+      {text.slice(0, at)}
+      <mark className="rounded-[3px] bg-[color-mix(in_srgb,var(--d-blue)_20%,transparent)] text-inherit">
+        {text.slice(at, at + query.length)}
+      </mark>
+      {text.slice(at + query.length)}
+    </>
+  );
+}
+
+// Windows and Linux have no ⌘; showing it there is a hint that doesn't work.
+const FIND_KEYS = /Mac|iPhone|iPad/.test(navigator.userAgent) ? '⌘K' : 'Ctrl K';
+
 function absoluteTimestamp(ts: number): string {
   return new Date(ts).toLocaleString(undefined, {
     dateStyle: 'medium',
@@ -207,7 +284,7 @@ function BoardSearch({
   onChange: (value: string) => void;
 }) {
   return (
-    <search className="relative min-w-0 flex-1 sm:w-72 sm:flex-none">
+    <search className="relative min-w-0 flex-1 xl:w-72 xl:flex-none">
       <Search
         className="pointer-events-none absolute top-1/2 left-4 size-4 -translate-y-1/2 text-[var(--d-pencil)]"
         aria-hidden="true"
@@ -242,7 +319,7 @@ function BoardSearch({
         </button>
       ) : (
         <Kbd className="absolute top-1/2 right-3 hidden -translate-y-1/2 bg-[var(--d-sheet)] md:inline-flex">
-          ⌘K
+          {FIND_KEYS}
         </Kbd>
       )}
     </search>
@@ -258,6 +335,7 @@ export function Home() {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeView, setActiveView] = useState<LibraryView>('all');
   const [sortMode, setSortMode] = useState<SortMode>('activity');
+  const [layout, setLayout] = useState<LibraryLayout>(readLayout);
   const [titleDialog, setTitleDialog] = useState<TitleDialogState | null>(null);
   const [selectedBoardIds, setSelectedBoardIds] = useState<Set<string>>(
     new Set(),
@@ -270,6 +348,31 @@ export function Home() {
   const [liveIds, setLiveIds] = useState<Set<string>>(new Set());
   const searchRef = useRef<HTMLInputElement>(null);
   const importRef = useRef<HTMLInputElement>(null);
+  // True until the first library has been on screen long enough to have
+  // settled in; only then do tiles stop carrying the entrance animation.
+  const intro = useRef(true);
+  const [hour] = useState(() => new Date().getHours());
+  const ready = auth?.authenticated === true && boards !== null;
+
+  useEffect(() => {
+    if (!ready) return;
+    const timer = setTimeout(() => {
+      intro.current = false;
+    }, 1200);
+    return () => clearTimeout(timer);
+  }, [ready]);
+
+  // A student joining shows on the tab itself, for when this page is behind
+  // the board the tutor is teaching on.
+  const liveInTitle = boards?.filter((b) => liveIds.has(b.id)).length ?? 0;
+  useEffect(() => {
+    if (!ready) return;
+    const before = document.title;
+    document.title = liveInTitle > 0 ? `(${liveInTitle}) Canvases` : 'Canvases';
+    return () => {
+      document.title = before;
+    };
+  }, [ready, liveInTitle]);
 
   const refresh = () => {
     void boardRepository.list().then(setBoards);
@@ -324,10 +427,21 @@ export function Home() {
 
   // ⌘K finds, C creates — the two things people come to this page to do.
   // Plain C is skipped while typing or while a dialog owns the keyboard.
+  // Escape drops a selection, unless it is closing a menu or dialog.
   const dialogOpen = titleDialog !== null;
+  const selectionSize = selectedBoardIds.size;
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const key = event.key.toLowerCase();
+      if (
+        key === 'escape' &&
+        selectionSize > 0 &&
+        !dialogOpen &&
+        !document.querySelector('[role="menu"]')
+      ) {
+        setSelectedBoardIds(new Set());
+        return;
+      }
       if (key === 'k' && (event.metaKey || event.ctrlKey)) {
         event.preventDefault();
         searchRef.current?.select();
@@ -349,7 +463,7 @@ export function Home() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [dialogOpen, auth?.authenticated]);
+  }, [dialogOpen, selectionSize, auth?.authenticated]);
 
   if (auth && !auth.authenticated) {
     return <Login onSuccess={() => void getAuth().then(setAuth)} />;
@@ -374,8 +488,7 @@ export function Home() {
     .filter((board) => !query || board.name.toLocaleLowerCase().includes(query))
     .sort((a, b) => {
       if (sortMode === 'name') return a.name.localeCompare(b.name);
-      if (sortMode === 'created') return b.createdAt - a.createdAt;
-      return b.lastOpenedAt - a.lastOpenedAt;
+      return sortTime(b, sortMode) - sortTime(a, sortMode);
     });
 
   const isFiltered = query.length > 0;
@@ -393,10 +506,7 @@ export function Home() {
     const label =
       sortMode === 'name'
         ? letterGroup(board.name)
-        : recencyGroup(
-            sortMode === 'created' ? board.createdAt : board.lastOpenedAt,
-            startOfToday,
-          );
+        : recencyGroup(sortTime(board, sortMode), startOfToday);
     const last = groups.at(-1);
     if (last && last.label === label && last.label !== LIVE_GROUP) {
       last.boards.push(board);
@@ -532,17 +642,83 @@ export function Home() {
     }
   };
 
+  const changeLayout = (next: LibraryLayout) => {
+    setLayout(next);
+    try {
+      localStorage.setItem(LAYOUT_KEY, next);
+    } catch {
+      // Private mode: the choice just lasts this visit.
+    }
+  };
+
+  const visibleIds = filteredBoards.map((b) => b.id);
+  const selectedVisible = visibleIds.filter((id) => selectedBoardIds.has(id));
+  const toggleSelectAll = () => {
+    setSelectedBoardIds(
+      selectedVisible.length === visibleIds.length
+        ? new Set()
+        : new Set(visibleIds),
+    );
+  };
+
   const showView = (view: LibraryView) => {
     setActiveView(view);
     setSelectedBoardIds(new Set());
   };
 
-  const renderCard = (board: BoardMeta, group: string) => {
+  const boardMenu = (board: BoardMeta, triggerClassName: string) => {
+    const selected = selectedBoardIds.has(board.id);
+    const favorite = board.favorite === true;
+    return (
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={`Actions for ${board.name}`}
+              className={triggerClassName}
+            >
+              <MoreHorizontal />
+            </Button>
+          }
+        />
+        <DropdownMenuContent align="end" className="w-44">
+          <DropdownMenuItem
+            onClick={() => setTitleDialog({ mode: 'rename', board })}
+          >
+            <Pencil data-icon="inline-start" />
+            Rename
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => toggleFavorite(board)}>
+            <Star
+              data-icon="inline-start"
+              className={cn(favorite && 'fill-current')}
+            />
+            {favorite ? 'Unfavorite' : 'Favorite'}
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => toggleSelectBoard(board.id)}>
+            <SquareCheck data-icon="inline-start" />
+            {selected ? 'Deselect' : 'Select'}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            variant="destructive"
+            onClick={() => remove([board.id], `Deleted “${board.name}”`)}
+          >
+            <Trash2 data-icon="inline-start" />
+            Delete
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
+  };
+
+  const renderCard = (board: BoardMeta, group: string, index: number) => {
     const selected = selectedBoardIds.has(board.id);
     const favorite = board.favorite === true;
     const live = liveIds.has(board.id);
-    const shownAt =
-      sortMode === 'created' ? board.createdAt : board.lastOpenedAt;
+    const shownAt = sortTime(board, sortMode);
     const { primary, secondary } = splitName(board.name);
     const stamp = stampInGroup(shownAt, group);
 
@@ -550,11 +726,14 @@ export function Home() {
       <li
         key={board.id}
         data-selected={selected || undefined}
+        style={{ '--i': index } as React.CSSProperties}
         className={cn(
           // No outline at rest: a soft fill is enough to read as a tile, and a
           // grid of hairline boxes is the noisiest thing a list can be. --tile
           // is the fill, so the floating controls can sit on the same colour.
-          'group relative flex items-center rounded-[14px] bg-[var(--tile)] px-4 py-3.5 transition-[box-shadow,background-color] duration-200',
+          // Pressing the tile (not its star or menu) sinks it a hair.
+          'group relative flex items-center rounded-[14px] bg-[var(--tile)] px-4 py-3.5 transition-[box-shadow,background-color,transform] duration-200 has-[a:active]:scale-[0.985]',
+          intro.current && 'd-rise',
           selected
             ? '[--tile:var(--d-blue-wash)] ring-2 ring-[var(--d-blue)]'
             : live
@@ -569,12 +748,14 @@ export function Home() {
             title={board.name}
             className="flex items-center gap-2 truncate text-[14.5px] leading-5 font-semibold text-[var(--d-ink)] outline-none after:absolute after:inset-0 after:rounded-[14px] focus-visible:after:ring-2 focus-visible:after:ring-[var(--d-blue)] focus-visible:after:ring-offset-2 focus-visible:after:ring-offset-[var(--d-sheet)]"
           >
-            <span className="truncate">{primary}</span>
+            <span className="truncate">
+              <Highlight text={primary} query={query} />
+            </span>
           </a>
           <div className="mt-0.5 flex items-baseline gap-2 text-[13px] leading-5">
             {secondary ? (
               <span className="truncate text-[var(--d-graphite)]">
-                {secondary}
+                <Highlight text={secondary} query={query} />
               </span>
             ) : null}
             <time
@@ -583,11 +764,21 @@ export function Home() {
               className={cn(
                 'ml-auto shrink-0 tabular-nums',
                 live
-                  ? 'font-semibold text-[var(--d-live)]'
+                  ? 'inline-flex items-center gap-1 font-semibold text-[var(--d-live)]'
                   : 'text-[var(--d-pencil)]',
               )}
             >
-              {live ? 'Join' : stamp}
+              {live ? (
+                <>
+                  Join
+                  <ArrowRight
+                    aria-hidden="true"
+                    className="size-3.5 transition-transform duration-200 group-hover:translate-x-0.5"
+                  />
+                </>
+              ) : (
+                stamp
+              )}
             </time>
           </div>
         </div>
@@ -632,56 +823,240 @@ export function Home() {
                   ),
             )}
           >
-            <Star fill={favorite ? 'currentColor' : 'none'} />
+            <Star
+                fill={favorite ? 'currentColor' : 'none'}
+                // Starring overshoots and settles; unstarring just relaxes.
+                // A transition, not a keyframe, so it never replays on mount.
+                className={cn(
+                  'transition-transform duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)]',
+                  favorite ? 'scale-100' : 'scale-[0.85]',
+                )}
+              />
           </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label={`Actions for ${board.name}`}
-                  className={cn(
-                    'size-7 rounded-full text-[var(--d-pencil)] hover:text-[var(--d-ink)]',
-                    REVEAL,
-                  )}
-                >
-                  <MoreHorizontal />
-                </Button>
-              }
-            />
-            <DropdownMenuContent align="end" className="w-44">
-              <DropdownMenuItem
-                onClick={() => setTitleDialog({ mode: 'rename', board })}
-              >
-                <Pencil data-icon="inline-start" />
-                Rename
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => toggleFavorite(board)}>
-                <Star
-                  data-icon="inline-start"
-                  className={cn(favorite && 'fill-current')}
-                />
-                {favorite ? 'Unfavorite' : 'Favorite'}
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => toggleSelectBoard(board.id)}>
-                <SquareCheck data-icon="inline-start" />
-                {selected ? 'Deselect' : 'Select'}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                variant="destructive"
-                onClick={() => remove([board.id], `Deleted “${board.name}”`)}
-              >
-                <Trash2 data-icon="inline-start" />
-                Delete
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          {boardMenu(
+            board,
+            cn(
+              'size-7 rounded-full text-[var(--d-pencil)] hover:text-[var(--d-ink)]',
+              REVEAL,
+            ),
+          )}
         </div>
       </li>
     );
   };
+
+  // The list is a register: one line per student, every date side by side,
+  // for when the tutor is scanning for who hasn't been seen in a while.
+  const renderRow = (board: BoardMeta) => {
+    const selected = selectedBoardIds.has(board.id);
+    const favorite = board.favorite === true;
+    const live = liveIds.has(board.id);
+    const { primary, secondary } = splitName(board.name);
+    const dateCell = (ts: number, label: string) => (
+      <time
+        dateTime={new Date(ts).toISOString()}
+        title={`${label} ${absoluteTimestamp(ts)}`}
+      >
+        {relativeTime(ts)}
+      </time>
+    );
+
+    return (
+      <TableRow
+        key={board.id}
+        data-state={selected ? 'selected' : undefined}
+        className="group relative border-[var(--d-rule-soft)] hover:bg-[var(--d-hover)] data-[state=selected]:bg-[var(--d-blue-wash)]"
+      >
+        <TableCell className="w-10 pr-0 pl-3">
+          <Checkbox
+            checked={selected}
+            onCheckedChange={() => toggleSelectBoard(board.id)}
+            aria-label={`Select ${board.name}`}
+            className={cn(
+              'relative z-10 size-4 rounded-[5px]',
+              !selecting && REVEAL,
+            )}
+          />
+        </TableCell>
+        <TableCell className="w-full max-w-0 py-3">
+          <a
+            href={boardHref(board.id)}
+            onClick={(e) => openBoardLink(e, board.id)}
+            title={board.name}
+            className="flex items-center gap-2.5 text-(length:--d-fs-body) font-semibold text-[var(--d-ink)] outline-none after:absolute after:inset-0 focus-visible:after:ring-2 focus-visible:after:ring-[var(--d-blue)] focus-visible:after:ring-inset"
+          >
+            {live ? (
+              <span
+                aria-hidden="true"
+                className="d-pulse size-2 shrink-0 rounded-full bg-[var(--d-live)] text-[var(--d-live)]"
+              />
+            ) : null}
+            <span className="truncate">
+              <Highlight text={primary} query={query} />
+            </span>
+          </a>
+        </TableCell>
+        <TableCell className="hidden max-w-56 truncate sm:table-cell">
+          {secondary ?? (
+            <span className="text-[var(--d-pencil)]" aria-hidden="true">
+              –
+            </span>
+          )}
+        </TableCell>
+        <TableCell className="tabular-nums">
+          {live ? (
+            <span className="font-semibold text-[var(--d-live)]">Join</span>
+          ) : (
+            dateCell(board.lastOpenedAt, 'Opened')
+          )}
+        </TableCell>
+        <TableCell className="hidden tabular-nums md:table-cell">
+          {dateCell(board.updatedAt, 'Edited')}
+        </TableCell>
+        <TableCell className="hidden tabular-nums lg:table-cell">
+          <time
+            dateTime={new Date(board.createdAt).toISOString()}
+            title={`Created ${absoluteTimestamp(board.createdAt)}`}
+          >
+            {absoluteDate(board.createdAt)}
+          </time>
+        </TableCell>
+        <TableCell className="w-px pr-2 pl-0">
+          <div className="relative z-10 flex items-center justify-end">
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={favorite ? 'Remove from favorites' : 'Add to favorites'}
+              aria-pressed={favorite}
+              onClick={() => toggleFavorite(board)}
+              className={cn(
+                'size-7 rounded-full',
+                favorite
+                  ? 'text-[var(--d-star)]'
+                  : cn(REVEAL, 'text-[var(--d-pencil)] hover:text-[var(--d-ink)]'),
+              )}
+            >
+              <Star
+                fill={favorite ? 'currentColor' : 'none'}
+                // Starring overshoots and settles; unstarring just relaxes.
+                // A transition, not a keyframe, so it never replays on mount.
+                className={cn(
+                  'transition-transform duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)]',
+                  favorite ? 'scale-100' : 'scale-[0.85]',
+                )}
+              />
+            </Button>
+            {boardMenu(
+              board,
+              cn(
+                'size-7 rounded-full text-[var(--d-pencil)] hover:text-[var(--d-ink)]',
+                REVEAL,
+              ),
+            )}
+          </div>
+        </TableCell>
+      </TableRow>
+    );
+  };
+
+  // Clicking a column heading sorts by it. Dates run newest first and names
+  // A to Z, so one arrow pointing down reads right for every column.
+  const sortHead = (mode: SortMode, label: string, className?: string) => {
+    const active = sortMode === mode;
+    return (
+      <TableHead
+        aria-sort={
+          active ? (mode === 'name' ? 'ascending' : 'descending') : undefined
+        }
+        className={cn('h-10 px-2', className)}
+      >
+        <button
+          type="button"
+          onClick={() => setSortMode(mode)}
+          className={cn(
+            'inline-flex h-7 items-center gap-1 rounded-full px-2 transition-colors hover:bg-[var(--d-hover)] hover:text-[var(--d-ink)] focus-visible:ring-2 focus-visible:ring-[var(--d-blue)] focus-visible:outline-none',
+            active && 'text-[var(--d-ink)]',
+          )}
+        >
+          {label}
+          <ArrowDown
+            aria-hidden="true"
+            className={cn('size-3.5', !active && 'opacity-0')}
+          />
+        </button>
+      </TableHead>
+    );
+  };
+
+  const COLUMN_COUNT = 7;
+  const listView = (
+    // The primitive's cells carry the board's own type and colour; on this page
+    // they take the dashboard's, which needs the descendant selectors to win.
+    <Table className="[&_td]:text-(length:--d-fs-meta) [&_td]:text-[var(--d-graphite)]">
+      <TableHeader className="border-[var(--d-rule)] bg-transparent [&_th]:text-[var(--d-pencil)] [&_tr]:border-[var(--d-rule)]">
+        <TableRow className="hover:bg-transparent">
+          <TableHead className="w-10 pr-0 pl-3">
+            <Checkbox
+              checked={
+                visibleIds.length > 0 &&
+                selectedVisible.length === visibleIds.length
+              }
+              indeterminate={
+                selectedVisible.length > 0 &&
+                selectedVisible.length < visibleIds.length
+              }
+              onCheckedChange={toggleSelectAll}
+              aria-label="Select all canvases"
+              className="size-4 rounded-[5px]"
+            />
+          </TableHead>
+          {sortHead('name', 'Student')}
+          <TableHead className="hidden h-10 sm:table-cell">
+            Details
+          </TableHead>
+          {sortHead('activity', 'Last opened')}
+          {sortHead('edited', 'Last edited', 'hidden md:table-cell')}
+          {sortHead('created', 'Created', 'hidden lg:table-cell')}
+          <TableHead className="w-px">
+            <span className="sr-only">Actions</span>
+          </TableHead>
+        </TableRow>
+      </TableHeader>
+      {groups.map((group) => (
+        // One tbody per group: its heading row names the rows beneath it.
+        <TableBody key={group.label}>
+          <TableRow className="border-0 hover:bg-transparent">
+            <th
+              scope="rowgroup"
+              colSpan={COLUMN_COUNT}
+              className={cn(
+                'pt-7 pr-4 pb-2 pl-3 text-left text-(length:--d-fs-meta) font-medium',
+                group.label === LIVE_GROUP
+                  ? 'font-semibold text-[var(--d-live)]'
+                  : 'text-[var(--d-graphite)]',
+              )}
+            >
+              <span className="flex items-center gap-2">
+                {group.label === LIVE_GROUP ? (
+                  <span
+                    aria-hidden="true"
+                    className="d-pulse size-2 rounded-full bg-current"
+                  />
+                ) : null}
+                {group.label}
+                {sortMode === 'name' && group.label !== LIVE_GROUP ? null : (
+                  <span className="font-normal tabular-nums text-[var(--d-pencil)]">
+                    {group.boards.length}
+                  </span>
+                )}
+              </span>
+            </th>
+          </TableRow>
+          {group.boards.map(renderRow)}
+        </TableBody>
+      ))}
+    </Table>
+  );
 
   const outlineButton =
     'h-11 rounded-full border-0 bg-[var(--d-sheet)] px-5 text-[14px] font-medium text-[var(--d-ink)] ring-1 ring-[var(--d-rule)] hover:bg-[var(--d-hover)]';
@@ -730,12 +1105,17 @@ export function Home() {
 
   const plural = (n: number, one: string, many: string) =>
     `${n.toLocaleString()} ${n === 1 ? one : many}`;
+  const liveNames = allBoards
+    .filter((b) => liveIds.has(b.id))
+    .map((b) => splitName(b.name).primary);
   const summary = loading
     ? ' '
+    : isFiltered
+      ? `${filteredBoards.length.toLocaleString()} of ${viewBoards.length.toLocaleString()} match`
     : activeView === 'favorites'
       ? `${plural(favoriteCount, 'canvas', 'canvases')} you keep close`
-      : liveCount > 0
-        ? `${plural(allBoards.length, 'canvas', 'canvases')}, ${liveCount === 1 ? 'one has' : `${liveCount} have`} a student on it right now`
+      : liveNames.length > 0
+        ? `${plural(allBoards.length, 'canvas', 'canvases')}, and ${liveClause(liveNames)}`
         : plural(allBoards.length, 'canvas', 'canvases');
 
   const selectionBar = selecting ? (
@@ -824,14 +1204,39 @@ export function Home() {
 
       <PageTitle
         title={activeView === 'favorites' ? 'Favorites' : 'Canvases'}
+        eyebrow={auth ? greeting(accountName, hour) : undefined}
         detail={summary}
         actions={
-          <div className="flex w-full items-center gap-2 sm:w-auto">
+          <div className="flex w-full items-center gap-2 xl:w-auto">
             <BoardSearch
               inputRef={searchRef}
               value={searchQuery}
               onChange={setSearchQuery}
             />
+            <ToggleGroup
+              aria-label="Layout"
+              value={[layout]}
+              onValueChange={(values) =>
+                values[0] && changeLayout(values[0] as LibraryLayout)
+              }
+              className="hidden h-11 shrink-0 rounded-full bg-[var(--d-well)] p-1 sm:flex [&>span]:rounded-full [&>span]:bg-[var(--d-sheet)]"
+            >
+              {(
+                [
+                  ['grid', 'Grid', LayoutGrid],
+                  ['list', 'List', List],
+                ] as const
+              ).map(([value, label, Icon]) => (
+                <ToggleGroupItem
+                  key={value}
+                  value={value}
+                  aria-label={`${label} view`}
+                  className="h-9 w-10 rounded-full text-[var(--d-pencil)] aria-pressed:text-[var(--d-ink)]"
+                >
+                  <Icon className="size-4" />
+                </ToggleGroupItem>
+              ))}
+            </ToggleGroup>
             <DropdownMenu>
               <DropdownMenuTrigger
                 render={
@@ -841,7 +1246,7 @@ export function Home() {
                     className="h-11 shrink-0 gap-2 rounded-full px-4 text-[14px] font-normal text-[var(--d-graphite)] hover:bg-[var(--d-hover)] hover:text-[var(--d-ink)] aria-expanded:bg-[var(--d-press)]"
                   >
                     <ArrowUpDown className="size-4" />
-                    <span className="hidden lg:inline">
+                    <span className="hidden xl:inline">
                       {SORT_LABELS[sortMode]}
                     </span>
                   </Button>
@@ -876,7 +1281,7 @@ export function Home() {
               className="h-11 shrink-0 gap-2 rounded-full px-4 text-[14px] font-normal text-[var(--d-graphite)] hover:bg-[var(--d-hover)] hover:text-[var(--d-ink)]"
             >
               <Upload className="size-4" />
-              <span className="hidden lg:inline">Import</span>
+              <span className="hidden xl:inline">Import</span>
             </Button>
             <Button
               onClick={() => setTitleDialog({ mode: 'create' })}
@@ -948,6 +1353,8 @@ export function Home() {
               </p>
               {emptyState.action}
             </div>
+          ) : layout === 'list' ? (
+            listView
           ) : (
             <div className="flex flex-col gap-10">
               {groups.map((group) => (
@@ -975,7 +1382,9 @@ export function Home() {
                     )}
                   </h2>
                   <ul className={CARD_GRID}>
-                    {group.boards.map((board) => renderCard(board, group.label))}
+                    {group.boards.map((board, i) =>
+                      renderCard(board, group.label, i),
+                    )}
                   </ul>
                 </section>
               ))}

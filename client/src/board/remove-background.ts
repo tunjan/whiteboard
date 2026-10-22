@@ -30,10 +30,10 @@ const ALREADY_CUT_OUT = 0.01;
  * erased, as a fraction of the RGB cube's diagonal. Tuned so JPEG-ish noise and
  * gentle gradients in a backdrop still flood, while flat art next to it holds.
  */
-const TOLERANCE = 0.14;
+export const DEFAULT_TOLERANCE = 0.14;
 
 /**
- * Pixels between `TOLERANCE` and `TOLERANCE * FEATHER` from the backdrop are
+ * Pixels between `tolerance` and `tolerance * FEATHER` from the backdrop are
  * partially erased instead of kept solid — that band is the artwork's
  * anti-aliased rim, and feathering it is what stops the cut-out reading as a
  * jagged paper edge. The band is never flooded through, so it can't leak inside.
@@ -117,29 +117,44 @@ export function sampleBackgroundColor(
 /**
  * Erase the backdrop in place, returning what happened. `data` is RGBA, row
  * major — an `ImageData.data` buffer or any stand-in for one.
+ *
+ * `seed` is a pixel index the user picked as backdrop: its colour replaces the
+ * sampled key and the fill also starts there, which reaches a hole walled in by
+ * the artwork. A picked seed also works on a source that is already cut out —
+ * the border is only flooded when the source is opaque, since transparent
+ * pixels carry arbitrary RGB that could match the key.
  */
 export function removeBackgroundInPlace(
   data: Uint8ClampedArray,
   width: number,
   height: number,
-  tolerance = TOLERANCE,
+  tolerance = DEFAULT_TOLERANCE,
+  seed: number | null = null,
 ): BackgroundRemoval {
   const pixels = width * height;
   if (pixels === 0) return { removed: false, erased: 0 };
-  if (hasTransparency(data)) return { removed: false, erased: 0 };
+  const opaque = !hasTransparency(data);
+  if (!opaque && seed === null) return { removed: false, erased: 0 };
 
-  const [kr, kg, kb] = sampleBackgroundColor(data, width, height);
+  const [kr, kg, kb] =
+    seed === null
+      ? sampleBackgroundColor(data, width, height)
+      : [data[seed * 4]!, data[seed * 4 + 1]!, data[seed * 4 + 2]!];
   // Compare squared distances so the inner loop needs no square root.
   const hard = tolerance * tolerance * 3 * 255 * 255;
   const soft = hard * FEATHER * FEATHER;
 
+  // Restored if the fill eats everything — a cut-out source's alpha included.
+  const original = Uint8ClampedArray.from(data);
   const visited = new Uint8Array(pixels);
-  const stack: number[] = [];
-  for (let x = 0; x < width; x++) {
-    stack.push(x, (height - 1) * width + x);
-  }
-  for (let y = 0; y < height; y++) {
-    stack.push(y * width, y * width + width - 1);
+  const stack: number[] = seed === null ? [] : [seed];
+  if (opaque) {
+    for (let x = 0; x < width; x++) {
+      stack.push(x, (height - 1) * width + x);
+    }
+    for (let y = 0; y < height; y++) {
+      stack.push(y * width, y * width + width - 1);
+    }
   }
 
   let erased = 0;
@@ -157,7 +172,7 @@ export function removeBackgroundInPlace(
       // Rim: fade from clear at the backdrop end of the band to solid at the
       // artwork end. Never expanded through, so the fill can't cross an edge.
       const t = (Math.sqrt(dist) - Math.sqrt(hard)) / (Math.sqrt(soft) - Math.sqrt(hard));
-      data[i + 3] = Math.round(255 * t);
+      data[i + 3] = Math.min(data[i + 3]!, Math.round(255 * t));
       continue;
     }
     data[i + 3] = 0;
@@ -171,7 +186,7 @@ export function removeBackgroundInPlace(
 
   const fraction = erased / pixels;
   if (fraction > MAX_ERASED) {
-    for (let p = 0; p < pixels; p++) data[p * 4 + 3] = 255;
+    data.set(original);
     return { removed: false, erased: 0 };
   }
   return { removed: erased > 0, erased: fraction };
@@ -217,19 +232,28 @@ export interface StickerArtwork {
   blob: Blob;
   width: number;
   height: number;
-  /** False when the source already had transparency and was left alone. */
-  removed: boolean;
 }
+
+/** How the user asked for a sticker's backdrop to be handled. */
+export interface CutOutOptions {
+  /** False keeps the source as it is, backdrop and all. */
+  remove: boolean;
+  tolerance: number;
+  /** Pixel index picked as backdrop, or null to sample the border. */
+  seed: number | null;
+}
+
+export const AUTO_CUT_OUT: CutOutOptions = {
+  remove: true,
+  tolerance: DEFAULT_TOLERANCE,
+  seed: null,
+};
 
 /** Transparent margin kept around the trimmed artwork, in pixels. */
 const TRIM_PADDING = 1;
 
-/**
- * Decode an image file, downscale it, erase its backdrop, and re-encode the
- * trimmed result as a PNG. PNG in, PNG out — the only format that survives the
- * round trip with an alpha channel intact.
- */
-export async function cutOutSticker(file: File): Promise<StickerArtwork> {
+/** Decode an image file into pixels, downscaled to the sticker size cap. */
+export async function decodeStickerSource(file: File): Promise<ImageData> {
   const bitmap = await createImageBitmap(file);
   const scale = Math.min(
     1,
@@ -245,9 +269,38 @@ export async function cutOutSticker(file: File): Promise<StickerArtwork> {
   if (!ctx) throw new Error('Canvas is unavailable');
   ctx.drawImage(bitmap, 0, 0, width, height);
   bitmap.close();
+  return ctx.getImageData(0, 0, width, height);
+}
 
-  const image = ctx.getImageData(0, 0, width, height);
-  const { removed } = removeBackgroundInPlace(image.data, width, height);
+/** A copy of `source` with its backdrop handled per `options`. */
+export function applyCutOut(
+  source: ImageData,
+  options: CutOutOptions,
+): ImageData {
+  const image = new ImageData(
+    Uint8ClampedArray.from(source.data),
+    source.width,
+    source.height,
+  );
+  if (options.remove) {
+    removeBackgroundInPlace(
+      image.data,
+      image.width,
+      image.height,
+      options.tolerance,
+      options.seed,
+    );
+  }
+  return image;
+}
+
+/**
+ * Trim the transparent margin off a processed image and encode it as a PNG.
+ * PNG out — the only format that survives the round trip with an alpha
+ * channel intact.
+ */
+export async function encodeSticker(image: ImageData): Promise<StickerArtwork> {
+  const { width, height } = image;
   const bounds = opaqueBounds(image.data, width, height) ?? {
     x: 0,
     y: 0,
@@ -273,5 +326,5 @@ export async function cutOutSticker(file: File): Promise<StickerArtwork> {
     out.toBlob(resolve, 'image/png');
   });
   if (!blob) throw new Error('Could not encode the sticker');
-  return { blob, width: box.width, height: box.height, removed };
+  return { blob, width: box.width, height: box.height };
 }

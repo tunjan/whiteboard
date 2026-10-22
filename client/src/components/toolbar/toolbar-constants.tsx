@@ -4,45 +4,36 @@ import { polygonPointsForBox } from '@/canvas/shapes/polygon-geometry';
 export const POLYGON_KINDS: { kind: PolygonKind; label: string }[] = [
   { kind: 'triangle', label: 'Triangle' },
   { kind: 'diamond', label: 'Diamond' },
+  { kind: 'parallelogram', label: 'Parallelogram' },
   { kind: 'trapezoid', label: 'Trapezoid' },
   { kind: 'pentagon', label: 'Pentagon' },
   { kind: 'hexagon', label: 'Hexagon' },
+  { kind: 'cloud', label: 'Cloud' },
+  { kind: 'star', label: 'Star' },
 ];
 
-export const NAVIGATE_TOOLS = ['select', 'hand'] as const;
 /** Also the order they stand in, left to right, on the bar. */
-export const INKING_TOOLS = ['draw', 'highlighter', 'laser', 'eraser'] as const;
-export const CREATION_TOOLS = ['text', 'comment'] as const;
-export const STEM_TOOLS = ['graph', 'equation'] as const;
-/** Ruler-and-compass constructions. */
-export const CONSTRUCTION_TOOLS = ['straightedge', 'compass'] as const;
-export const SHAPE_TOOLS = [
-  'rectangle',
-  'ellipse',
-  'arrow',
-  'line',
-  'frame',
-  'polygon',
-] as const;
+export const NAVIGATE_TOOLS = ['select', 'hand', 'laser'] as const;
+/** Also the order they stand in, left to right, on the bar. */
+export const INKING_TOOLS = ['draw', 'highlighter', 'eraser'] as const;
+/** Ruler-and-compass constructions, and measuring them. */
+export const CONSTRUCTION_TOOLS = ['straightedge', 'compass', 'measure'] as const;
+/** The tools behind the Shapes key; arrow and frame have keys of their own. */
+export const SHAPE_MENU_TOOLS: readonly string[] = ['rectangle', 'ellipse', 'line', 'polygon'];
 export const COMPACT_MORE_TOOLS = [
   'hand',
-  'highlighter',
   'laser',
   'comment',
   'graph',
   'equation',
   'straightedge',
   'compass',
+  'measure',
 ] as const;
 
-/**
- * A flyout opened from the bar: same plate, same corner, compact padding.
- * `border-0` drops the popover primitive's own edge, which `.tbar-surface`
- * supplies instead.
- */
-export const TOOL_FLYOUT =
-  'tbar-surface tbar-menu border-0 origin-(--transform-origin) ' +
-  'data-open:zoom-in-95 data-closed:zoom-out-95';
+export function polygonLabel(kind: PolygonKind): string {
+  return POLYGON_KINDS.find((p) => p.kind === kind)?.label ?? 'Polygon';
+}
 
 /** A geometric polygon icon, drawn to the glyph set's stroke weight. */
 export function MiniShape({

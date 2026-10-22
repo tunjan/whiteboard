@@ -22,6 +22,8 @@ const EDIT_SHORTCUTS = [
   { label: 'Duplicate selection', keys: ['⌘/Ctrl', 'D'] },
   { label: 'Copy style', keys: ['⌘/Ctrl', 'Alt', 'C'] },
   { label: 'Paste style onto selection', keys: ['⌘/Ctrl', 'Alt', 'V'] },
+  { label: 'Pick a colour from the style bar', keys: ['1 – 8'] },
+  { label: 'Thinner / thicker stroke', keys: ['[', ']'] },
   { label: 'Delete selection', keys: ['Delete'] },
   { label: 'Edit selected text or equation', keys: ['Enter'] },
 ] as const;

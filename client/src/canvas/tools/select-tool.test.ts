@@ -5,6 +5,7 @@ import type { Editor } from '../editor';
 import { getSelectionInfo, shapeRotatedBounds } from '../selection-geometry';
 import { spatialIndex } from '../use-document-store';
 import { useEnteredGroupStore } from '../use-entered-group-store';
+import { useImageCroppingStore } from '../use-image-cropping-store';
 import { useCanvasUiStore } from '../use-canvas-ui-store';
 import { useSelectionStore } from '../use-selection-store';
 import { nextShapeStyle } from '../use-style-store';
@@ -154,6 +155,43 @@ describe('select tool state machine', () => {
 
   afterEach(() => spatialIndex.clear());
 
+  it('binds a dragged arrow endpoint with snapping turned off', () => {
+    useCanvasUiStore.getState().setSnappingEnabled(false);
+    const arrow = {
+      id: 'arrow',
+      type: 'arrow',
+      x: 0,
+      y: 15,
+      rotation: 0,
+      index: 'a1',
+      props: {
+        points: [
+          { x: 0, y: 0 },
+          { x: 100, y: 0 },
+        ],
+        color: '#111',
+        size: 2,
+        dash: 'solid',
+        arrowStart: false,
+        arrowEnd: true,
+        bend: 0,
+        topology: 'straight',
+        bindings: {},
+        label: '',
+      },
+    } as Shape;
+    const { ctx, shapes } = context([rectangle('r', 200, 0, 'a0'), arrow]);
+    useSelectionStore.getState().setSelection(['arrow']);
+
+    const tool = createSelectTool();
+    tool.onPointerDown?.(pointer(100, 15), ctx);
+    tool.onPointerMove?.(pointer(215, 15), ctx);
+    tool.onPointerUp?.(pointer(215, 15), ctx);
+
+    const moved = shapes.get('arrow') as Extract<Shape, { type: 'arrow' }>;
+    expect(moved.props.bindings?.end?.shapeId).toBe('r');
+  });
+
   // Selecting is not a way of picking up a style. Clicking a red rectangle used
   // to write its colour into the store, so the next stroke came out red; the
   // bar now reads the selection instead, and the style new shapes inherit only
@@ -211,6 +249,34 @@ describe('select tool state machine', () => {
     tool.onPointerMove?.(pointer(70, 10, { altKey: true }), ctx);
     tool.onCancel?.(ctx);
     expect(shapes.get('a')?.x).toBe(30);
+  });
+
+  it('drills into an unentered group on double-click before editing a member', () => {
+    const image = {
+      id: 'img',
+      type: 'image',
+      x: 0,
+      y: 0,
+      rotation: 0,
+      index: 'a1',
+      parentId: 'g',
+      props: { blobId: '', w: 40, h: 30, naturalWidth: 40, naturalHeight: 30 },
+    } as Shape;
+    const sibling = { ...rectangle('r', 100, 0, 'a2'), parentId: 'g' };
+    const { ctx } = context([group('g', 'a0'), image, sibling]);
+    const tool = createSelectTool();
+    useEnteredGroupStore.getState().exit();
+    useImageCroppingStore.getState().stop();
+
+    tool.onDoubleClick?.(pointer(20, 15), ctx);
+    expect(useEnteredGroupStore.getState().enteredGroupId).toBe('g');
+    expect(useSelectionStore.getState().selectedIds).toEqual(['img']);
+    expect(useImageCroppingStore.getState().croppingId).toBeNull();
+
+    tool.onDoubleClick?.(pointer(20, 15), ctx);
+    expect(useImageCroppingStore.getState().croppingId).toBe('img');
+    useImageCroppingStore.getState().stop();
+    useEnteredGroupStore.getState().exit();
   });
 
   it('intersects in either direction and uses Ctrl/Command for wrap selection', () => {
@@ -453,6 +519,49 @@ describe('select tool state machine', () => {
     tool.onPointerUp?.(pointer(53, 15, { metaKey: true }), ctx);
 
     expect(shapes.get('a')?.props).toMatchObject({ w: 50, h: 30 });
+  });
+
+  it('keeps a mid-resize edit to props the resize does not own', () => {
+    const { ctx, shapes } = context([rectangle('a', 0, 0, 'a0')]);
+    const tool = createSelectTool();
+    useSelectionStore.getState().setSelection(['a']);
+
+    tool.onPointerDown?.(pointer(43, 15), ctx);
+    tool.onPointerMove?.(pointer(53, 15, { metaKey: true }), ctx);
+    // A peer recolours the shape while the drag is still held.
+    ctx.editor.updateShape('a', { props: { color: '#f00' } });
+    tool.onPointerMove?.(pointer(63, 15, { metaKey: true }), ctx);
+    tool.onPointerUp?.(pointer(63, 15, { metaKey: true }), ctx);
+
+    expect(shapes.get('a')?.props).toMatchObject({ w: 60, color: '#f00' });
+  });
+
+  it('carries a group’s members when resizing a selection that holds it', () => {
+    const child = (id: string, x: number) => ({
+      ...rectangle(id, x, 0, `a${id}`),
+      parentId: 'g',
+    });
+    const { ctx, shapes } = context([
+      rectangle('r', 0, 0, 'a0'),
+      group('g', 'a1'),
+      child('c1', 100),
+      child('c2', 150),
+    ]);
+    const tool = createSelectTool();
+    useSelectionStore.getState().setSelection(['r', 'g']);
+    const { maxX, maxY } = getSelectionInfo(
+      ctx.editor.getShapes(),
+      ['r', 'g'],
+      1,
+      ctx.editor.getShape,
+    )!.bounds;
+
+    tool.onPointerDown?.(pointer(maxX, maxY), ctx);
+    tool.onPointerMove?.(pointer(maxX * 2, maxY * 2, { metaKey: true }), ctx);
+    tool.onPointerUp?.(pointer(maxX * 2, maxY * 2, { metaKey: true }), ctx);
+
+    expect(shapes.get('c2')!.x).toBeGreaterThan(150);
+    expect((shapes.get('c2')!.props as { w: number }).w).toBeGreaterThan(40);
   });
 
   it('resizes about the box centre while Alt is held', () => {
@@ -744,5 +853,123 @@ describe('select tool state machine', () => {
     expect(shapes.get(shape.id)?.rotation).toBeCloseTo(Math.PI / 2);
     tool.onCancel?.(ctx);
     expect(shapes.get(shape.id)).toMatchObject({ x: 0, y: 0, rotation: 0 });
+  });
+
+  describe('resizing straight and padded geometry', () => {
+    const stroke = (id: string, x: number, points: { x: number; y: number }[], index = 'a0') =>
+      ({
+        id, type: 'draw', x, y: 0, rotation: 0, index,
+        props: { points, isClosed: false, color: '#111', size: 4 },
+      }) as Shape;
+    const line = (id: string, points: { x: number; y: number }[], label: string) =>
+      ({
+        id, type: 'line', x: 0, y: 0, rotation: 0, index: 'a1',
+        props: { points, color: '#111', size: 4, dash: 'solid', bend: 0, spline: 'linear', label },
+      }) as Shape;
+    /** Page extent of the shape's own points, without the bounds margin. */
+    const span = (s: Shape) => {
+      const pts = (s.props as { points: { x: number; y: number }[] }).points;
+      const xs = pts.map((p) => s.x + p.x);
+      const ys = pts.map((p) => s.y + p.y);
+      return { minX: Math.min(...xs), maxX: Math.max(...xs), minY: Math.min(...ys), maxY: Math.max(...ys) };
+    };
+    const handleAt = (ctx: ToolContext, ids: string[], id: string) =>
+      getSelectionInfo(ctx.editor.getShapes(), ids, 1, ctx.editor.getShape)!.handles.find((h) => h.id === id)!.point;
+
+    beforeEach(() => useCanvasUiStore.getState().setSnappingEnabled(false));
+
+    it('keeps a horizontal stroke on its line when a corner is dragged off it', () => {
+      const { ctx, shapes } = context([stroke('a', 0, [{ x: 0, y: 0 }, { x: 100, y: 0 }])]);
+      const tool = createSelectTool();
+      useSelectionStore.getState().setSelection(['a']);
+      const se = handleAt(ctx, ['a'], 'se');
+
+      tool.onPointerDown?.(pointer(se.x, se.y), ctx);
+      tool.onPointerMove?.(pointer(se.x + 100, se.y + 60), ctx);
+      expect(span(shapes.get('a')!)).toMatchObject({ minX: 0, maxX: 200, minY: 0, maxY: 0 });
+      // Shift has no second axis to keep in proportion: vertical jitter on a
+      // 4px-tall box used to multiply the length.
+      tool.onPointerMove?.(pointer(se.x, se.y + 10, { shiftKey: true }), ctx);
+      tool.onPointerUp?.(pointer(se.x, se.y + 10, { shiftKey: true }), ctx);
+      expect(span(shapes.get('a')!)).toMatchObject({ minX: 0, maxX: 100, minY: 0, maxY: 0 });
+    });
+
+    it('keeps an angle-snapped vertical stroke vertical', () => {
+      // What the draw tool's Shift snap produces at 90°: cos(π/2) leaves ~7e-15 in x.
+      const a = Math.PI / 2;
+      const { ctx, shapes } = context([
+        stroke('a', 0, [{ x: 37.3, y: 12 }, { x: 37.3 + Math.cos(a) * 100, y: 12 + Math.sin(a) * 100 }]),
+      ]);
+      const tool = createSelectTool();
+      useSelectionStore.getState().setSelection(['a']);
+      const se = handleAt(ctx, ['a'], 'se');
+
+      tool.onPointerDown?.(pointer(se.x, se.y), ctx);
+      tool.onPointerMove?.(pointer(se.x + 80, se.y + 50), ctx);
+      tool.onPointerUp?.(pointer(se.x + 80, se.y + 50), ctx);
+
+      const after = span(shapes.get('a')!);
+      expect(after.minX).toBeCloseTo(37.3);
+      expect(after.maxX - after.minX).toBeLessThan(1e-6);
+      expect(after.maxY - after.minY).toBeCloseTo(150);
+    });
+
+    it('scales stroke and line geometry with the selection, not their margins', () => {
+      const letter = (id: string, x: number, index: string) =>
+        stroke(id, x, [{ x: 0, y: 0 }, { x: 6, y: 10 }, { x: 12, y: 0 }], index);
+      const { ctx, shapes } = context([
+        letter('a', 0, 'a0'),
+        letter('b', 20, 'a2'),
+        line('l', [{ x: 0, y: 40 }, { x: 200, y: 40 }], 'distance'),
+      ]);
+      const tool = createSelectTool();
+      const ids = ['a', 'b', 'l'];
+      useSelectionStore.getState().setSelection(ids);
+      const se = handleAt(ctx, ids, 'se');
+      const nw = handleAt(ctx, ids, 'nw');
+
+      tool.onPointerDown?.(pointer(se.x, se.y), ctx);
+      tool.onPointerMove?.(pointer((se.x + nw.x) / 2, (se.y + nw.y) / 2), ctx);
+      tool.onPointerUp?.(pointer((se.x + nw.x) / 2, (se.y + nw.y) / 2), ctx);
+
+      for (const id of ['a', 'b']) {
+        const s = span(shapes.get(id)!);
+        expect(s.maxX - s.minX).toBeCloseTo(6);
+        expect(s.maxY - s.minY).toBeCloseTo(5);
+      }
+      expect(span(shapes.get('b')!).minX - span(shapes.get('a')!).minX).toBeCloseTo(10);
+      const l = span(shapes.get('l')!);
+      expect(l.maxX - l.minX).toBeCloseTo(100);
+    });
+
+    it('does not snap a rotated shape’s unrotated box to the page grid', () => {
+      useCanvasUiStore.getState().setSnappingEnabled(true);
+      const { ctx, shapes } = context([{ ...rectangle('a', 0, 0, 'a0'), rotation: Math.PI / 4 }]);
+      const tool = createSelectTool();
+      useSelectionStore.getState().setSelection(['a']);
+      const e = handleAt(ctx, ['a'], 'e');
+      const d = Math.SQRT1_2 * 3;
+
+      tool.onPointerDown?.(pointer(e.x, e.y), ctx);
+      tool.onPointerMove?.(pointer(e.x + d, e.y + d), ctx);
+      tool.onPointerUp?.(pointer(e.x + d, e.y + d), ctx);
+
+      expect((shapes.get('a')!.props as { w: number }).w).toBeCloseTo(43);
+    });
+
+    it('keeps the aspect ratio when a Shift edge drag snaps', () => {
+      useCanvasUiStore.getState().setSnappingEnabled(true);
+      const { ctx, shapes } = context([rectangle('a', 0, 0, 'a0'), rectangle('t', 82, 200, 'a1')]);
+      const tool = createSelectTool();
+      useSelectionStore.getState().setSelection(['a']);
+
+      tool.onPointerDown?.(pointer(40, 15), ctx);
+      tool.onPointerMove?.(pointer(80, 15, { shiftKey: true }), ctx);
+      tool.onPointerUp?.(pointer(80, 15, { shiftKey: true }), ctx);
+
+      const { w, h } = shapes.get('a')!.props as { w: number; h: number };
+      expect(w).toBe(82);
+      expect(w / h).toBeCloseTo(40 / 30);
+    });
   });
 });

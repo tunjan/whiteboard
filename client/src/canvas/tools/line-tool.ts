@@ -12,6 +12,7 @@ import { shapeSnapGeometry } from '../snap-geometry';
 import { SNAP_SCREEN, snapRegion, snapTargetShapes } from '../snap-targets';
 import { type PointSnapTarget, snapPoint } from '../snapping';
 import { useCameraStore } from '../use-camera-store';
+import { useMeasureStore } from '../use-measure-store';
 import { useSelectionStore } from '../use-selection-store';
 import { nextShapeStyle, useStyleStore } from '../use-style-store';
 import type { Tool, ToolContext, ToolPointerInfo } from './types';
@@ -71,6 +72,7 @@ export function createLineTool(opts: LineToolOptions): Tool {
     startTargetId = null;
     snapTargets = [];
     useSelectionStore.getState().setSnapGuides([]);
+    useMeasureStore.getState().clear();
     if (!id) return;
     const shape = ctx.editor.getShape(id);
     const z = useCameraStore.getState().camera.z;
@@ -182,6 +184,8 @@ export function createLineTool(opts: LineToolOptions): Tool {
       if (!shape || (shape.type !== 'line' && shape.type !== 'arrow')) return;
       const end = snapEndpoint({ x: start.x + dx, y: start.y + dy }, info);
       if (shape.type === 'line') {
+        // Live length and angle, drawn by MeasureLayer while the drag lasts.
+        useMeasureStore.getState().set(start, end);
         ctx.editor.updateShape(creatingId, {
           props: {
             points: [
@@ -224,6 +228,9 @@ export function createLineTool(opts: LineToolOptions): Tool {
       const first = { x: startPoint.x - shape.x, y: startPoint.y - shape.y };
       const last = { x: endPoint.x - shape.x, y: endPoint.y - shape.y };
       const topology = shape.props.topology ?? 'straight';
+      // A chord says nothing true about an elbow or arc route.
+      if (topology === 'straight') useMeasureStore.getState().set(startPoint, endPoint);
+      else useMeasureStore.getState().clear();
       const length = Math.hypot(last.x - first.x, last.y - first.y);
       ctx.editor.updateShape(creatingId, {
         props: {
@@ -255,6 +262,7 @@ export function createLineTool(opts: LineToolOptions): Tool {
       startTargetId = null;
       snapTargets = [];
       useSelectionStore.getState().setSnapGuides([]);
+      useMeasureStore.getState().clear();
       if (id) ctx.editor.deleteShapes([id]);
     },
   };

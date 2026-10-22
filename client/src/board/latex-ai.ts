@@ -102,10 +102,14 @@ export async function graphExpressionsFromImage(png: Blob): Promise<string[]> {
 }
 
 /**
- * Transcribe a dictated clip from `MediaRecorder`. The container is read off
- * the blob's type: Safari records mp4, everything else webm.
+ * Transcribe a dictated clip from `MediaRecorder` and write its LaTeX, in one
+ * request. The container is read off the blob's type: Safari records mp4,
+ * everything else webm. Throws only when nothing was heard; a transcript that
+ * couldn't become LaTeX resolves with `error` set instead.
  */
-export async function transcribeAudio(clip: Blob): Promise<string> {
+export async function dictateLatex(
+  clip: Blob,
+): Promise<{ text: string; latex?: string; error?: string }> {
   const format: AudioFormat = clip.type.includes('mp4') ? 'mp4' : 'webm';
   const dataUrl = await toDataUrl(clip);
   let parsed: TranscribeResponse | null;
@@ -120,5 +124,7 @@ export async function transcribeAudio(clip: Blob): Promise<string> {
   }
   const text = parsed?.text?.trim();
   if (!text) throw new UnreadableError('Didn’t catch that');
-  return text;
+  const latex = parsed?.latex?.trim();
+  if (latex) return { text, latex };
+  return { text, error: parsed?.error || 'The equation service returned nothing' };
 }

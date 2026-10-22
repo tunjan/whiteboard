@@ -9,6 +9,7 @@ import {
   pointsBounds,
   rotatePoint,
 } from '@whiteboard/shared';
+import { polylineDrawCommands, type DrawCommand } from './geometry-synthesis';
 
 // Shared geometry for line and arrow shapes. Points are stored in shape-local
 // coordinates; every renderer, hit-test, snap target and handle uses the same
@@ -18,6 +19,8 @@ const BEND_EPSILON = 0.5;
 const ARC_SAMPLES = 32;
 const SPLINE_SAMPLES_PER_SEGMENT = 12;
 const TAU = Math.PI * 2;
+/** A geometry span at or below this has no extent to scale (float noise). */
+export const FLAT_SPAN = 1e-6;
 
 export function polylineBounds(
   x: number,
@@ -405,10 +408,12 @@ export function tangentAnchor(points: readonly Vec[], atStart: boolean): Vec {
 /**
  * Factor taking a span of `extent` to `target`. A span is never squeezed below
  * one unit (or below itself, if already shorter): at zero it would have no
- * extent left to scale back out. A span that is already zero stays as it is.
+ * extent left to scale back out. A span that is already zero stays as it is —
+ * including float noise like the 7e-15 a snapped vertical stroke carries in x,
+ * which would otherwise scale by ~1e16 and throw the points to 1e17.
  */
 function spanScale(extent: number, target: number): number {
-  if (extent <= 0) return 1;
+  if (extent <= FLAT_SPAN) return 1;
   return Math.max(target, Math.min(extent, 1)) / extent;
 }
 
@@ -481,4 +486,50 @@ export function arrowheadPoints(
   const left = { x: back.x + nx * wing, y: back.y + ny * wing };
   const right = { x: back.x - nx * wing, y: back.y - ny * wing };
   return [left, to, right];
+}
+
+/**
+ * A line's `draw` outline, as tldraw builds it: interior vertices wobble, the
+ * two ends stay on the points the line was drawn between. A smooth line keeps
+ * its own spline segments; an arc is drawn without jitter, as tldraw draws its
+ * arcs, since nudging samples of a curve only makes it lumpy.
+ */
+export function lineDrawCommands(
+  points: readonly Vec[],
+  bend: number,
+  spline: LineSpline = 'linear',
+): DrawCommand[] {
+  if (points.length === 2 && Math.abs(bend) >= BEND_EPSILON) {
+    return polylineDrawCommands(
+      sampleArc(points[0]!, points[1]!, bend) ?? points,
+      { offset: 0, roundness: 0 },
+    );
+  }
+  if (spline === 'smooth' && points.length > 2) {
+    const segments = naturalSplineSegments(points);
+    return [
+      { type: 'move', x: points[0]!.x, y: points[0]!.y, offset: 0 },
+      ...segments.map(
+        (segment, i): DrawCommand => ({
+          type: 'cubic',
+          x: segment.b.x,
+          y: segment.b.y,
+          cp1: segment.c1,
+          cp2: segment.c2,
+          offset: i === segments.length - 1 ? 0 : undefined,
+        }),
+      ),
+    ];
+  }
+  return polylineDrawCommands(points, { endOffset: 0 });
+}
+
+/** An arrow body's `draw` outline: only an elbow's corners wobble, as in tldraw. */
+export function arrowDrawCommands(
+  body: readonly Vec[],
+  topology: ArrowTopology,
+): DrawCommand[] {
+  return topology === 'elbow'
+    ? polylineDrawCommands(body, { endOffset: 0 })
+    : polylineDrawCommands(body, { offset: 0, roundness: 0 });
 }

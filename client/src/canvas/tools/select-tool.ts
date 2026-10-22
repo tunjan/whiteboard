@@ -44,7 +44,11 @@ import { useHiddenStore } from '../use-hidden-store';
 import { hitTestCanvas } from '../engine/hit-test';
 import { useEnteredGroupStore } from '../use-entered-group-store';
 import { shapeRegistry } from '../shapes/shape-registry';
-import { findBindableShapeAt } from '../shapes/connector-routing';
+import {
+  findBindableShapeAt,
+  isBindableShape,
+} from '../shapes/connector-routing';
+import { FLAT_SPAN } from '../shapes/line-geometry';
 import { textIndexAtWorldPoint } from '../shapes/text';
 import { layoutTextProps, MIN_TEXT_WIDTH } from '../shapes/text-measure';
 import type { ShapeUtil } from '../shapes/types';
@@ -99,6 +103,31 @@ interface GroupItem {
    * sits off-axis, where a per-axis scale would shear it.
    */
   quarterTurns: number | null;
+  /** See {@link resizedPropsPatch}. */
+  touchedProps: Set<string>;
+}
+
+/**
+ * The props a resize step changed from the gesture-start shape, plus any an
+ * earlier step changed (so a value scaled away and back is still written back).
+ * Writing the whole snapshot instead reverted every edit made to the shape
+ * mid-gesture — a peer's recolour, or text typed remotely — on the next move.
+ */
+export function resizedPropsPatch(
+  initialProps: object,
+  resizedProps: object,
+  touched: Set<string>,
+): Record<string, unknown> {
+  const initial = initialProps as Record<string, unknown>;
+  const resized = resizedProps as Record<string, unknown>;
+  const patch: Record<string, unknown> = {};
+  for (const key in resized) {
+    if (touched.has(key) || resized[key] !== initial[key]) {
+      touched.add(key);
+      patch[key] = resized[key];
+    }
+  }
+  return patch;
 }
 
 interface RotationItem {
@@ -170,6 +199,8 @@ type SelectState =
       targets: BoundsSnapTarget[];
       /** Descendant page positions used by normal (non-crop) frame resize. */
       frameChildren: Map<string, { x: number; y: number }> | null;
+      /** See {@link resizedPropsPatch}. */
+      touchedProps: Set<string>;
     }
   | {
       type: 'group-resize';
@@ -383,6 +414,28 @@ function flippedHandle(
 ): ResizeHandleId {
   const afterX = flipX ? MIRROR_X_HANDLE[handle] : handle;
   return flipY ? MIRROR_Y_HANDLE[afterX] : afterX;
+}
+
+/**
+ * `handle` with the axes the shape's geometry has no extent on taken out, or
+ * null when it has none on either (a dot). A perfectly straight horizontal
+ * stroke cannot grow in y: it only sat centred in a box that did, so a corner
+ * drag walked it down by half the pointer's travel, and Shift let a few pixels
+ * of vertical jitter multiply its length.
+ */
+function unflattenedHandle(
+  shape: Shape,
+  util: ShapeUtil,
+  handle: ResizeHandleId,
+): ResizeHandleId | null {
+  const margin = util.getResizeMargin?.(shape as never);
+  if (margin === undefined) return handle;
+  const b = util.getBounds(shape as never);
+  const flatX = b.maxX - b.minX - 2 * margin <= FLAT_SPAN;
+  const flatY = b.maxY - b.minY - 2 * margin <= FLAT_SPAN;
+  const x = flatX ? '' : handle.replace(/[ns]/, '');
+  const y = flatY ? '' : handle.replace(/[ew]/, '');
+  return ((y + x) || null) as ResizeHandleId | null;
 }
 
 /**
@@ -1141,6 +1194,8 @@ export function createSelectTool(): Tool {
               );
               if (result.props) {
                 ctx.editor.updateShape(shape.id, {
+                  ...(result.x !== undefined ? { x: result.x } : null),
+                  ...(result.y !== undefined ? { y: result.y } : null),
                   props: result.props as unknown as Record<string, unknown>,
                 });
               }
@@ -1162,13 +1217,15 @@ export function createSelectTool(): Tool {
           if (selectionInfo.isSingle) {
             const initial = ctx.editor.getShape(selectionInfo.ids[0]!);
             const util = initial ? shapeRegistry.getFor(initial) : undefined;
-            if (initial && util?.canResize) {
+            const axisHandle =
+              initial && util ? unflattenedHandle(initial, util, handle.id) : null;
+            if (initial && util?.canResize && axisHandle) {
               const movingIds = new Set(
                 moveTargetIds(shapes, selectionInfo.ids),
               );
               state = {
                 type: 'resize',
-                handle: handle.id,
+                handle: axisHandle,
                 initial,
                 util,
                 grabOffset: {
@@ -1184,6 +1241,7 @@ export function createSelectTool(): Tool {
                         ]),
                       )
                     : null,
+                touchedProps: new Set(),
                 targets: snapTargetBounds(
                   ctx.editor,
                   movingIds,
@@ -1194,9 +1252,22 @@ export function createSelectTool(): Tool {
             }
           } else {
             const items: GroupItem[] = [];
+            // A group has no box of its own to scale, so its members are what
+            // the resize carries; skipping it left them behind. A locked member
+            // still follows, as it does when its group is moved.
+            const targets: Shape[] = [];
             for (const id of selectionInfo.ids) {
               const shape = ctx.editor.getShape(id);
               if (!shape || shape.locked) continue;
+              if (shape.type === 'group')
+                targets.push(
+                  ...descendantsOf(shapes, shape.id).filter(
+                    (s) => s.type !== 'group',
+                  ),
+                );
+              else targets.push(shape);
+            }
+            for (const shape of targets) {
               const util = shapeRegistry.getFor(shape);
               if (util?.canResize) {
                 const b0 = util.getBounds(shape as never);
@@ -1209,6 +1280,7 @@ export function createSelectTool(): Tool {
                     shape.rotation,
                     selectionInfo.rotation,
                   ),
+                  touchedProps: new Set(),
                 });
               }
             }
@@ -1249,7 +1321,12 @@ export function createSelectTool(): Tool {
           if (state?.type === 'resize' || state?.type === 'group-resize') {
             useSelectionStore
               .getState()
-              .setGestureCursor(resizeCursor(handle.id, selectionInfo.rotation));
+              .setGestureCursor(
+                resizeCursor(
+                  state.type === 'resize' ? state.handle : handle.id,
+                  selectionInfo.rotation,
+                ),
+              );
           }
           return;
         }
@@ -1406,7 +1483,9 @@ export function createSelectTool(): Tool {
                 state.initial.rotation,
               ),
             );
-          if (shouldSnapResize(info)) {
+          // As for a group: page-axis guides and grid lines say nothing about
+          // the edges of a box drawn on other axes.
+          if (state.initial.rotation === 0 && shouldSnapResize(info)) {
             const camera = useCameraStore.getState().camera;
             const background = useCanvasUiStore.getState().background;
             const initialBounds = state.util.getBounds(state.initial as never);
@@ -1445,7 +1524,11 @@ export function createSelectTool(): Tool {
               // the drag box preserves the stationary side handle's pivot,
               // including when the text shape is rotated.
               y: targetCenterY - nextLayout.height / 2,
-              props,
+              props: resizedPropsPatch(
+                state.initial.props,
+                props,
+                state.touchedProps,
+              ),
             });
             return;
           }
@@ -1459,6 +1542,7 @@ export function createSelectTool(): Tool {
           if (state.initial.type === 'frame' && state.frameChildren) {
             const initialFrame = state.initial;
             const frameChildren = state.frameChildren;
+            const touchedProps = state.touchedProps;
             const cropResize = info.metaKey || info.ctrlKey;
             const dx = resized.x - initialFrame.x;
             const dy = resized.y - initialFrame.y;
@@ -1467,7 +1551,11 @@ export function createSelectTool(): Tool {
                 x: resized.x,
                 y: resized.y,
                 ...turned,
-                props: resized.props as unknown as Record<string, unknown>,
+                props: resizedPropsPatch(
+                  initialFrame.props,
+                  resized.props,
+                  touchedProps,
+                ),
               });
               // Normal resize keeps child coordinates relative to the frame's
               // moving origin. Command/Ctrl switches to crop mode and pins page
@@ -1485,7 +1573,11 @@ export function createSelectTool(): Tool {
               x: resized.x,
               y: resized.y,
               ...turned,
-              props: resized.props as unknown as Record<string, unknown>,
+              props: resizedPropsPatch(
+                state.initial.props,
+                resized.props,
+                state.touchedProps,
+              ),
             });
           }
           return;
@@ -1579,11 +1671,17 @@ export function createSelectTool(): Tool {
               const off = item.quarterTurns === null;
               const w = off ? Math.abs(sx) : swapped ? sy : sx;
               const h = off ? Math.abs(sx) : swapped ? sx : sy;
+              // Scale the geometry inside the shape's fixed margin, not the
+              // padded box: scaling the margin too shrank a 12px letter to 4px
+              // at 50%, and a labelled line to a dot.
+              const m = item.util.getResizeMargin?.(item.initial as never) ?? 0;
+              const hw = ((iw - 2 * m) * Math.abs(w)) / 2 + m;
+              const hh = ((ih - 2 * m) * Math.abs(h)) / 2 + m;
               const scaled: Bounds = {
-                minX: moved.x - (iw * Math.abs(w)) / 2,
-                maxX: moved.x + (iw * Math.abs(w)) / 2,
-                minY: moved.y - (ih * Math.abs(h)) / 2,
-                maxY: moved.y + (ih * Math.abs(h)) / 2,
+                minX: moved.x - hw,
+                maxX: moved.x + hw,
+                minY: moved.y - hh,
+                maxY: moved.y + hh,
               };
               // A quarter turn swaps which of the selection's axes the shape's
               // own x runs along, so the mirror it takes swaps with it.
@@ -1601,7 +1699,11 @@ export function createSelectTool(): Tool {
                 ...(shape.rotation === item.initial.rotation
                   ? null
                   : { rotation: shape.rotation }),
-                props: resized.props as unknown as Record<string, unknown>,
+                props: resizedPropsPatch(
+                  item.initial.props,
+                  resized.props,
+                  item.touchedProps,
+                ),
               });
             }
           });
@@ -1624,25 +1726,28 @@ export function createSelectTool(): Tool {
               SNAP_SCREEN / camera.z,
             );
             point = snapped.point;
-            bindingTarget = snapped.targetId
+            const snappedTo = snapped.targetId
               ? ctx.editor.getShape(snapped.targetId)
               : undefined;
-            if (
-              !bindingTarget &&
-              shape.type === 'arrow' &&
-              (state.handleId === 'start' || state.handleId === 'end')
-            ) {
-              bindingTarget =
-                findBindableShapeAt(
-                  ctx.editor.getShapes(),
-                  point,
-                  0,
-                  shape.id,
-                ) ?? undefined;
-            }
+            if (snappedTo && isBindableShape(snappedTo)) bindingTarget = snappedTo;
             useSelectionStore.getState().setSnapGuides(snapped.guides);
           } else {
             useSelectionStore.getState().setSnapGuides([]);
+          }
+          // Binding is not snapping: like the arrow tool, an endpoint dropped
+          // on a shape attaches whatever the snapping preference.
+          if (
+            !bindingTarget &&
+            shape.type === 'arrow' &&
+            (state.handleId === 'start' || state.handleId === 'end')
+          ) {
+            bindingTarget =
+              findBindableShapeAt(
+                ctx.editor.getShapes(),
+                point,
+                10 / info.zoom,
+                shape.id,
+              ) ?? undefined;
           }
           // Use the gesture-start snapshot. Create handles insert exactly one
           // vertex, and endpoint/curve drags remain stable even when the live
@@ -1742,13 +1847,19 @@ export function createSelectTool(): Tool {
       const cancelled = state;
       state = { type: 'idle' };
       clearTransientState();
-      const restore = (shape: Shape) =>
+      // `touched` limits the props put back to the ones the gesture wrote, so
+      // cancelling does not revert an edit made to the rest meanwhile.
+      const restore = (shape: Shape, touched?: Set<string>) => {
+        const props = shape.props as unknown as Record<string, unknown>;
         ctx.editor.updateShape(shape.id, {
           x: shape.x,
           y: shape.y,
           rotation: shape.rotation,
-          props: shape.props as unknown as Record<string, unknown>,
+          props: touched
+            ? Object.fromEntries([...touched].map((k) => [k, props[k]]))
+            : props,
         });
+      };
       switch (cancelled.type) {
         case 'pending-shape':
         case 'pending-selection':
@@ -1768,7 +1879,7 @@ export function createSelectTool(): Tool {
           return;
         case 'resize':
           ctx.editor.transact(() => {
-            restore(cancelled.initial);
+            restore(cancelled.initial, cancelled.touchedProps);
             for (const [id, initial] of cancelled.frameChildren ?? []) {
               ctx.editor.updateShape(id, { x: initial.x, y: initial.y });
             }
@@ -1779,11 +1890,12 @@ export function createSelectTool(): Tool {
           return;
         case 'rotate':
           ctx.editor.transact(() => {
-            for (const item of cancelled.items) restore(item.initial);
+            for (const item of cancelled.items) restore(item.initial, new Set());
           });
           return;
         case 'group-resize':
-          for (const item of cancelled.items) restore(item.initial);
+          for (const item of cancelled.items)
+            restore(item.initial, item.touchedProps);
           return;
         case 'marquee':
           useSelectionStore.getState().setSelection(cancelled.selectionBefore);
@@ -1856,6 +1968,22 @@ export function createSelectTool(): Tool {
 
       const hitLeaf = topmostHit(shapes, info.point, SHAPE_HIT_SCREEN / zoom);
       if (!hitLeaf) return;
+      // Inside a group not yet entered, a double-click drills one level in;
+      // only once the shape itself is the target does it edit it.
+      const target = selectionTargetId(
+        ctx.editor.getShape,
+        hitLeaf,
+        useEnteredGroupStore.getState().enteredGroupId,
+      );
+      if (ctx.editor.getShape(target)?.type === 'group') {
+        useEnteredGroupStore.getState().enter(target);
+        useSelectionStore
+          .getState()
+          .setSelection([
+            selectionTargetId(ctx.editor.getShape, hitLeaf, target),
+          ]);
+        return;
+      }
       const hitShape = ctx.editor.getShape(hitLeaf);
       if (hitShape?.type === 'frame') {
         useSelectionStore.getState().setSelection([hitShape.id]);
@@ -1889,19 +2017,6 @@ export function createSelectTool(): Tool {
       if (hitShape?.type === 'image') {
         useImageCroppingStore.getState().start(hitShape.id);
         return;
-      }
-      const target = selectionTargetId(
-        ctx.editor.getShape,
-        hitLeaf,
-        useEnteredGroupStore.getState().enteredGroupId,
-      );
-      if (ctx.editor.getShape(target)?.type === 'group') {
-        useEnteredGroupStore.getState().enter(target);
-        useSelectionStore
-          .getState()
-          .setSelection([
-            selectionTargetId(ctx.editor.getShape, hitLeaf, target),
-          ]);
       }
     },
   };

@@ -1,3 +1,5 @@
+import type { VideoShape } from '@whiteboard/shared';
+import { imageHref } from '../../board/blobs';
 import { useLodDetail } from '../lod';
 import { boxBounds, boxHitTest, rotationTransform } from './box-geometry';
 import { PaintedShadow, roundedRectPath } from './painted-shadow';
@@ -14,9 +16,19 @@ export function youtubeThumbnail(videoId: string): string {
 }
 
 /**
- * A YouTube video shape. The canvas renders a static thumbnail + play button
- * (this is what PNG export rasterizes); double-clicking swaps it for an
- * interactive iframe overlay (see `VideoPlayerOverlay`).
+ * The still a video shape shows at rest: YouTube's thumbnail, or an uploaded
+ * file's first-frame poster. Null while a peer's poster upload is pending.
+ */
+export function videoPoster(shape: VideoShape): string | null {
+  const { videoId, posterBlobId } = shape.props;
+  if (videoId) return youtubeThumbnail(videoId);
+  return imageHref(shape.id, posterBlobId ?? '');
+}
+
+/**
+ * A YouTube or uploaded-file video shape. The canvas renders a static
+ * thumbnail + play button (this is what PNG export rasterizes); double-clicking
+ * swaps it for an interactive player overlay (see `VideoPlayerOverlay`).
  */
 export const videoUtil: ShapeUtil<'video'> = {
   type: 'video',
@@ -44,9 +56,10 @@ export const videoUtil: ShapeUtil<'video'> = {
   }),
 
   Component: ({ shape }) => {
-    const { videoId, w, h } = shape.props;
+    const { videoId, blobId, w, h } = shape.props;
     const detail = useLodDetail();
-    if (!videoId) return null;
+    if (!videoId && blobId === undefined) return null;
+    const poster = videoPoster(shape);
     const clipId = `video-clip-${shape.id}`;
     const radius = Math.min(MEDIA_CORNER_RADIUS, w / 4, h / 4);
     const shadow = detail === 'high';
@@ -79,14 +92,16 @@ export const videoUtil: ShapeUtil<'video'> = {
         )}
         <g clipPath={`url(#${clipId})`}>
           <rect x={shape.x} y={shape.y} width={w} height={h} fill="#000000" />
-          <image
-            href={youtubeThumbnail(videoId)}
-            x={shape.x}
-            y={shape.y}
-            width={w}
-            height={h}
-            preserveAspectRatio="xMidYMid slice"
-          />
+          {poster && (
+            <image
+              href={poster}
+              x={shape.x}
+              y={shape.y}
+              width={w}
+              height={h}
+              preserveAspectRatio="xMidYMid slice"
+            />
+          )}
         </g>
         <g pointerEvents="none">
           <circle cx={cx} cy={cy} r={badge} fill="#000000" fillOpacity={0.55} />

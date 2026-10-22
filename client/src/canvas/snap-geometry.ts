@@ -7,7 +7,10 @@ import {
 } from '@whiteboard/shared';
 import type { PointSnapTarget } from './snapping';
 import { arrowPoints, curvePoints } from './shapes/line-geometry';
-import { normalizedPolygonPoints } from './shapes/polygon-geometry';
+import {
+  CLOUD_BUMP_SAMPLES,
+  normalizedPolygonPoints,
+} from './shapes/polygon-geometry';
 import { shapeRegistry } from './shapes/shape-registry';
 
 function rotate(points: Point[], center: Point, angle: number): Point[] {
@@ -108,7 +111,12 @@ function polygonTarget(
     center,
     shape.rotation,
   );
-  return { outline, closed: true, points: [...outline, center] };
+  // A cloud's vertices are samples along its bumps; only the cusps are corners.
+  const corners =
+    shape.props.kind === 'cloud'
+      ? outline.filter((_, i) => i % CLOUD_BUMP_SAMPLES === 0)
+      : outline;
+  return { outline, closed: true, points: [...corners, center] };
 }
 
 function connectorTarget(

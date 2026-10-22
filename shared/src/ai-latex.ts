@@ -32,8 +32,16 @@ export interface TranscribeRequest {
   format: AudioFormat;
 }
 
+/**
+ * The transcript, and the LaTeX written from it in the same request — one trip
+ * through the tunnel instead of two. `error` replaces `latex` when the
+ * transcript was heard but could not be written as maths, so the student keeps
+ * the text to fix by hand.
+ */
 export interface TranscribeResponse {
   text: string;
+  latex?: string;
+  error?: string;
 }
 
 /** Longest description accepted for "quadratic formula"-style generation. */

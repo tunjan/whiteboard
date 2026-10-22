@@ -71,15 +71,17 @@ import { OpacitySlider } from '@/components/opacity-slider';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { toast } from '@/components/ui/toast';
 import { useStyleControls } from './use-style-controls';
+import { ColorEditor } from '@/components/color-editor';
+import { swatchBorder } from '@/lib/utils';
 
 /** Screen-px gap between the selection's edge and the floating bar. */
 const GAP = 12;
 /**
- * Roughly the rendered bar width — six 32px keys, two hairline runs and the
+ * Roughly the rendered bar width — seven 32px keys, two hairline runs and the
  * plate's own padding. Only used to keep the bar on-screen, so it does not
  * have to track the conditional equation key exactly.
  */
-const APPROX_WIDTH = 224;
+const APPROX_WIDTH = 256;
 
 /**
  * The shortcut as the platform writes it. Firefox names the accelerator in
@@ -292,6 +294,7 @@ export function SelectionToolbar() {
             <CopyPlus />
           </Key>
 
+          <ColorKey below={below} />
           <OpacityKey below={below} />
 
           <span className="fxp-bar-sep" role="separator" />
@@ -390,6 +393,47 @@ function Key({
       </Tooltip.Trigger>
       <Tip label={label} shortcut={shortcut} />
     </Tooltip.Root>
+  );
+}
+
+/**
+ * The selection's colour, on the bar over the object so recolouring it does
+ * not mean a trip to the style bar at the foot of the screen. Hidden for
+ * shapes that carry fixed artwork (images, stickers, video).
+ */
+function ColorKey({ below }: { below: boolean }) {
+  const { show, values, apply } = useStyleControls('select');
+  const [open, setOpen] = useState(false);
+  if (!show.color) return null;
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <Tooltip.Root>
+        <Tooltip.Trigger
+          render={<PopoverTrigger aria-label="Color" className="fxp-key" />}
+        >
+          <span
+            aria-hidden="true"
+            className="tbar-swatch"
+            style={{
+              backgroundColor: values.color,
+              borderColor: swatchBorder(values.color),
+            }}
+          />
+        </Tooltip.Trigger>
+        <Tip label="Color" />
+      </Tooltip.Root>
+      <PopoverContent
+        side={below ? 'bottom' : 'top'}
+        sideOffset={6}
+        className="fxp-panel w-auto p-1 [--tb-item:32px]"
+      >
+        <ColorEditor
+          color={values.color}
+          onSelect={apply.color}
+          onDone={() => setOpen(false)}
+        />
+      </PopoverContent>
+    </Popover>
   );
 }
 

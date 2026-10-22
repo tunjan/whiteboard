@@ -6,11 +6,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import type {
-  ComponentProps,
-  DragEvent as ReactDragEvent,
-  MouseEvent as ReactMouseEvent,
-} from 'react';
+import type { ComponentProps, MouseEvent as ReactMouseEvent } from 'react';
 import { type Shape, pointInPolygon } from '@whiteboard/shared';
 import './shapes/register';
 import './tools/register';
@@ -23,13 +19,11 @@ import { useBenchFlags } from './bench-flags';
 import { Background } from './Background';
 import { CanvasControls } from './CanvasControls';
 import { Minimap } from './Minimap';
-import { UndoControls } from './UndoControls';
 import { isActualSize, nextDiscreteZoom, screenToWorld } from './camera';
 import { QuickZoomFrame } from './QuickZoomFrame';
 import { useEdgeScroll } from './use-edge-scroll';
 import { viewportWorldBounds } from './geometry';
 import { PerformanceOverlay } from '@/components/performance-overlay';
-import { noteActivity } from '@/collab/attention';
 import { CursorsLayer } from '@/collab/CursorsLayer';
 import { PeerSelectionLayer } from '@/collab/PeerSelectionLayer';
 import { CommentsLayer } from './CommentsLayer';
@@ -38,8 +32,8 @@ import { EraserCursor } from './EraserCursor';
 import { LaserCursor } from './LaserCursor';
 import { EraserTrail } from './EraserTrail';
 import { LaserLayer } from './LaserLayer';
+import { MeasureLayer } from './MeasureLayer';
 import {
-  getLocalUser,
   setLocalCursor,
   setLocalCursorType,
   setLocalFollowing,
@@ -61,44 +55,16 @@ import { VideoPlayerOverlay } from './VideoPlayerOverlay';
 import { ImageCropOverlay } from './ImageCropOverlay';
 import { toolRegistry } from './tools/tool-registry';
 import type { ToolContext } from './tools/types';
-import {
-  deleteShapesWithCleanup,
-  duplicateShapes,
-  groupShapes,
-  ungroupShapes,
-} from './commands';
-import {
-  clipboardToken,
-  copyShapes,
-  hasClipboard,
-  pasteShapes,
-  wbClipToken,
-} from './clipboard';
-import { copyStyle, pasteStyle } from './style-clipboard';
-import { writeShapesToOsClipboard } from '@/board/clipboard-os';
-import { addFilesToRepository } from '@/board/documents';
-import { useDocumentsStore } from './use-documents-store';
-import { flipShapes } from './flip';
-import { deleteTargetIds, moveTargetIds } from './hierarchy';
-import { linkUrlsFromClipboard } from './link-url';
-import { placeImageFiles } from './place-image';
-import { placeLinkUrls } from './place-link';
-import { PDF_MIME, placePdfFiles } from './place-pdf';
-import { createYoutubeShape, parseYoutubeId } from './place-video';
-import { useEnteredGroupStore } from './use-entered-group-store';
+import { setContextMenuPoint } from './clipboard';
 import {
   bindingGraph,
-  breakUndoCapture,
   editor,
-  redo,
   setCurrentPage,
   setCurrentPageForFollow,
   spatialIndex,
   takeBindingDirty,
-  undo,
   useDocumentStore,
 } from './use-document-store';
-import { useUndoStore } from './page-history';
 import { syncBoundArrows } from './shapes/connector-routing';
 import { useCameraStore } from './use-camera-store';
 import { subscribeCanvasZoomToBounds } from './camera-requests';
@@ -107,68 +73,29 @@ import { useCanvasUiStore } from './use-canvas-ui-store';
 import { getContainerRect, useContainerRect } from './container-rect';
 import { useElementSize } from './use-element-size';
 import { useSafariGestures } from './use-safari-gestures';
-import { copySelectionToPngClipboard } from './export-png';
 import { getSelectionInfo } from './selection-geometry';
 import { shapeRotatedBounds } from './shape-bounds';
-import { isSelectable } from './selectable';
 import { useHiddenStore } from './use-hidden-store';
 import { clearHover } from './use-hover-store';
 import { useLiveStrokeShapeId } from './use-live-stroke-store';
 import { useSelectionStore } from './use-selection-store';
 import { useSpacePan } from './use-space-pan';
 import { GestureArbiter } from './gesture-arbiter';
+import { useCanvasShortcuts } from './canvas-shortcuts';
+import { useCanvasPasteAndDrop } from './canvas-paste-drop';
 import { useTextEditingStore } from './use-text-editing-store';
 import { useFrameEditingStore } from './use-frame-editing-store';
 import { requestEquationFocus } from './equation-focus';
 import { useVideoPlayingStore } from './use-video-playing-store';
-import { useImageCroppingStore } from './use-image-cropping-store';
+import {
+  useEndCropWhenGone,
+  useImageCroppingStore,
+} from './use-image-cropping-store';
 import { useToolStore } from './use-tool-store';
 import { useToolLockStore } from './use-tool-lock-store';
 import { useWheel } from './use-wheel';
 import { registerPageSwitchInteractionCompleter } from './page-transition';
 import { canvasObjectLabel } from './object-navigator';
-import {
-  bringForward,
-  bringToFront,
-  sendBackward,
-  sendToBack,
-} from './z-order';
-
-function isTypingTarget(target: EventTarget | null): boolean {
-  const el = target as HTMLElement | null;
-  return (
-    !!el &&
-    (el.tagName === 'INPUT' ||
-      el.tagName === 'TEXTAREA' ||
-      // The graph panel's MathLive field edits inside its shadow DOM, so events
-      // retarget to the <math-field> host rather than a focusable input.
-      !!el.closest?.('math-field') ||
-      el.isContentEditable)
-  );
-}
-
-/**
- * Frame freshly-placed images, so a paste or drop is looked at rather than left
- * as a stamp under the pointer. Takes the viewport rather than reading it so
- * callers can pass a ref's value and stay dependency-free.
- */
-function zoomToPlaced(
-  ids: string[],
-  viewport: { width: number; height: number },
-): void {
-  const { width, height } = viewport;
-  if (!ids.length || width <= 0 || height <= 0) return;
-  const s = useCameraStore.getState();
-  const info = getSelectionInfo(
-    editor.getShapes(),
-    ids,
-    s.camera.z,
-    editor.getShape,
-  );
-  if (!info) return;
-  stopFollowingForManualCameraChange();
-  s.animateToBounds(info.bounds, width, height);
-}
 
 type EquationItem = { id: string; label: string; locked: boolean };
 const EMPTY_EQUATION_ITEMS: EquationItem[] = [];
@@ -373,8 +300,6 @@ export function Canvas() {
   // that lasts. Changes twice per stroke, not per frame.
   const liveStrokeId = useLiveStrokeShapeId();
   const currentPageId = useDocumentStore((s) => s.currentPageId);
-  const canUndo = useUndoStore((s) => s.canUndo);
-  const canRedo = useUndoStore((s) => s.canRedo);
 
   // Each of these follows its one shape, and re-renders the canvas only when
   // that shape changes.
@@ -382,6 +307,7 @@ export function Canvas() {
   const frameEditingShape = useShape(frameEditingId);
   const playingShape = useShape(playingId);
   const croppingShape = useShape(croppingId);
+  useEndCropWhenGone();
   // Only the four tutor fields the follow and summon effects below actually
   // read. publishPeers keeps unchanged peer objects reference-stable, so
   // selecting the whole tutor already held while *other* peers moved — but the
@@ -456,8 +382,12 @@ export function Canvas() {
         e.stopPropagation();
         return;
       }
-      if (!arbiter.isSurfaceEvent(e.target)) return;
+      if (!arbiter.isSurfaceEvent(e.target)) {
+        setContextMenuPoint(null);
+        return;
+      }
       const info = arbiter.toInfo(e);
+      setContextMenuPoint(info.point);
       const tol = 4 / useCameraStore.getState().camera.z;
       const shapes = editor.getShapes();
       const isHidden = useHiddenStore.getState().isHidden;
@@ -661,443 +591,20 @@ export function Canvas() {
     else s.animateToBounds(bounds, width, height);
   }, []);
 
-  // Keyboard: selection ops, z-order, delete, escape, and tool hotkeys.
-  // (Full configurable shortcut sweep is Phase 27.)
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (isTypingTarget(e.target)) return;
-      noteActivity();
-      const mod = e.metaKey || e.ctrlKey;
-      const ids = useSelectionStore.getState().selectedIds;
-      const isModifierKey =
-        e.key === 'Shift' || e.key === 'Control' || e.key === 'Meta';
+  useCanvasShortcuts({
+    ctx,
+    arbiter,
+    centerRef,
+    onZoomToFit,
+    onZoomToSelection,
+  });
 
-      // Active tools get the first chance at unmodified keys and live modifier
-      // changes. The select tool re-tests an in-progress marquee when
-      // Shift/Ctrl/Command changes without any pointer movement.
-      if ((!mod && !e.altKey) || isModifierKey) {
-        const handled = toolRegistry
-          .get(useToolStore.getState().activeToolId)
-          ?.onKeyDown?.(e, ctx);
-        if (handled) return;
-      }
-
-      if (mod && (e.key === 'z' || e.key === 'Z')) {
-        e.preventDefault();
-        if (e.shiftKey) redo();
-        else undo();
-        return;
-      }
-      if (mod && (e.key === 'y' || e.key === 'Y')) {
-        e.preventDefault();
-        redo();
-        return;
-      }
-      if (mod && (e.key === 'd' || e.key === 'D')) {
-        e.preventDefault();
-        if (ids.length) {
-          useSelectionStore
-            .getState()
-            .setSelection(duplicateShapes(editor, ids));
-        }
-        return;
-      }
-      if (mod && e.key === 'a') {
-        e.preventDefault();
-        useSelectionStore.getState().setSelection(
-          editor
-            .getShapes()
-            .filter(isSelectable)
-            .map((s) => s.id),
-        );
-        return;
-      }
-      if (mod && (e.key === 'g' || e.key === 'G')) {
-        e.preventDefault();
-        if (e.shiftKey) {
-          const freed = ungroupShapes(editor, ids);
-          if (freed.length) useSelectionStore.getState().setSelection(freed);
-        } else if (ids.length >= 2) {
-          const gid = groupShapes(editor, ids);
-          if (gid) useSelectionStore.getState().setSelection([gid]);
-        }
-        return;
-      }
-      if (mod && e.key === ']') {
-        e.preventDefault();
-        if (ids.length) (e.shiftKey ? bringToFront : bringForward)(editor, ids);
-        return;
-      }
-      if (mod && e.key === '[') {
-        e.preventDefault();
-        if (ids.length) (e.shiftKey ? sendToBack : sendBackward)(editor, ids);
-        return;
-      }
-      // Clipboard. Copy/cut also push to the OS clipboard; paste is handled by
-      // the window 'paste' listener below so OS-image and in-app paths agree.
-      //
-      // Shift+Mod+C rasterizes the selection instead (`e.key` is uppercase
-      // while shift is held, so this can't collide with the plain copy below).
-      // Deliberately not awaited: the clipboard write must be issued while this
-      // keydown is still the current task — see `writePngToClipboard`.
-      if (mod && e.shiftKey && e.key === 'C') {
-        e.preventDefault();
-        if (ids.length) {
-          copySelectionToPngClipboard(ids).catch((err: unknown) =>
-            console.error('[clipboard] copy as PNG failed', err),
-          );
-        }
-        return;
-      }
-      // Style transfer, on the modifier pair Figma uses. Matched on `code`: on
-      // macOS Option rewrites `key` to the character it composes (⌥C is 'ç'),
-      // and it must come before the plain copy below, which on Windows/Linux
-      // would otherwise claim Ctrl+Alt+C.
-      if (mod && e.altKey && e.code === 'KeyC') {
-        e.preventDefault();
-        if (ids.length) copyStyle(editor, ids);
-        return;
-      }
-      if (mod && e.altKey && e.code === 'KeyV') {
-        e.preventDefault();
-        if (ids.length) pasteStyle(editor, ids);
-        return;
-      }
-      if (mod && !e.altKey && e.key === 'c') {
-        if (ids.length) {
-          copyShapes(editor, ids);
-          void writeShapesToOsClipboard(editor, ids, clipboardToken());
-        }
-        return;
-      }
-      if (mod && e.key === 'x') {
-        if (ids.length) {
-          copyShapes(editor, ids);
-          void writeShapesToOsClipboard(editor, ids, clipboardToken());
-          const cut = ids.filter((id) => !editor.getShape(id)?.locked);
-          deleteShapesWithCleanup(editor, cut);
-          useSelectionStore.getState().clear();
-        }
-        return;
-      }
-
-      // Zoom (anchored at the viewport center).
-      if (mod && (e.key === '=' || e.key === '+')) {
-        e.preventDefault();
-        stopFollowingForManualCameraChange();
-        const s = useCameraStore.getState();
-        s.zoomAtScreen(centerRef.current, nextDiscreteZoom(s.camera.z, 'in', s.baseZoom));
-        return;
-      }
-      if (mod && e.key === '-') {
-        e.preventDefault();
-        stopFollowingForManualCameraChange();
-        const s = useCameraStore.getState();
-        s.zoomAtScreen(centerRef.current, nextDiscreteZoom(s.camera.z, 'out', s.baseZoom));
-        return;
-      }
-      if (mod && e.key === '0') {
-        e.preventDefault();
-        stopFollowingForManualCameraChange();
-        useCameraStore.getState().zoomAtScreen(centerRef.current, 1);
-        return;
-      }
-      // Shift+1 frames the page, Shift+2 the selection. Matched on `code`
-      // because Shift rewrites `key` to whatever the layout puts above the digit
-      // ('@' above 2 on US, '"' on UK).
-      if (e.shiftKey && !mod && !e.altKey && e.code === 'Digit1') {
-        e.preventDefault();
-        onZoomToFit();
-        return;
-      }
-      if (e.shiftKey && !mod && !e.altKey && e.code === 'Digit2') {
-        e.preventDefault();
-        onZoomToSelection();
-        return;
-      }
-
-      // Arrow-key nudge (Shift = coarse). Skips locked shapes.
-      if (
-        e.key === 'ArrowLeft' ||
-        e.key === 'ArrowRight' ||
-        e.key === 'ArrowUp' ||
-        e.key === 'ArrowDown'
-      ) {
-        if (!ids.length) return;
-        e.preventDefault();
-        const step = e.shiftKey ? 10 : 1;
-        const dx =
-          e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
-        const dy =
-          e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
-        const moveIds = moveTargetIds(editor.getShapes(), ids);
-        // Held arrow keys auto-repeat, and `moveIds` expands a selected
-        // container to its whole subtree, so scanning `ids` from inside the loop
-        // made a large selection quadratic on every repeat.
-        const selectedIds = new Set(ids);
-        editor.transact(() => {
-          for (const id of moveIds) {
-            const s = editor.getShape(id);
-            // Locked descendants still follow an unlocked selected container;
-            // locking protects direct edits, not the parent's transform.
-            if (s && (!s.locked || !selectedIds.has(id))) {
-              editor.updateShape(id, { x: s.x + dx, y: s.y + dy });
-            }
-          }
-        });
-        return;
-      }
-
-      if (e.key === 'Delete' || e.key === 'Backspace') {
-        // Never delete locked shapes; deleting a container takes its children.
-        const unlocked = ids.filter((id) => !editor.getShape(id)?.locked);
-        const deletable = deleteTargetIds(editor.getShapes(), unlocked);
-        if (deletable.length) {
-          e.preventDefault();
-          deleteShapesWithCleanup(editor, deletable);
-          useSelectionStore.getState().clear();
-        }
-        return;
-      }
-      if ((e.key === 'Enter' || e.key === 'F2') && ids.length === 1) {
-        const shape = editor.getShape(ids[0]!);
-        if (shape?.type === 'frame' && !shape.locked) {
-          e.preventDefault();
-          useFrameEditingStore.getState().start(shape.id);
-          return;
-        }
-        if (shape?.type === 'text' && !shape.locked) {
-          e.preventDefault();
-          useTextEditingStore.getState().start(shape.id, {
-            anchor: shape.props.text.length,
-            head: shape.props.text.length,
-          });
-          return;
-        }
-        if (shape?.type === 'equation' && !shape.locked) {
-          e.preventDefault();
-          requestEquationFocus(shape.id);
-          return;
-        }
-      }
-      if (e.key === 'Escape') {
-        useEnteredGroupStore.getState().exit();
-        useSelectionStore.getState().clear();
-        useToolStore.getState().setTool('select');
-        return;
-      }
-      if (mod || e.altKey) return;
-      // Hold Z to arm Quick Zoom — the press that follows aims the camera
-      // rather than using the tool. No tool claims this key, so nothing is
-      // shadowed; Cmd/Ctrl+Z has already returned above as undo.
-      if (e.key === 'z' || e.key === 'Z') {
-        e.preventDefault();
-        arbiter.quickZoomArmed = true;
-        return;
-      }
-      // Shape Lock: toggle the lock on the current selection. Must precede the
-      // hotkey lookup, since byHotkey('L') would otherwise match the Line tool.
-      if (e.shiftKey && (e.key === 'L' || e.key === 'l')) {
-        e.preventDefault();
-        if (ids.length) {
-          const allLocked = ids.every((id) => editor.getShape(id)?.locked);
-          editor.transact(() => {
-            for (const id of ids)
-              editor.updateShape(id, { locked: !allLocked });
-          });
-        }
-        return;
-      }
-      // Flip. Like Shape Lock above, these must precede the hotkey lookup: the
-      // bare keys belong to the Hand and Select tools.
-      if (e.shiftKey && (e.key === 'H' || e.key === 'h')) {
-        e.preventDefault();
-        if (ids.length) flipShapes(editor, ids, 'horizontal');
-        return;
-      }
-      if (e.shiftKey && (e.key === 'V' || e.key === 'v')) {
-        e.preventDefault();
-        if (ids.length) flipShapes(editor, ids, 'vertical');
-        return;
-      }
-      // Tool Lock: keep the active creation tool after placing a shape.
-      if (e.key === 'q' || e.key === 'Q') {
-        e.preventDefault();
-        useToolLockStore.getState().toggle();
-        return;
-      }
-      const tool = toolRegistry.byHotkey(e.key);
-      if (tool) {
-        e.preventDefault();
-        // Auto-repeat while a key is held is not a second press: re-arming on
-        // it would record the borrowed tool as the one to return to.
-        if (e.repeat) return;
-        const from = useToolStore.getState().activeToolId;
-        // Pressing the active tool's own key borrows nothing.
-        arbiter.armSpring(
-          from === tool.id
-            ? null
-            : {
-                key: e.key.toLowerCase(),
-                from,
-                to: tool.id,
-                at: e.timeStamp,
-                used: false,
-              },
-        );
-        useToolStore.getState().setTool(tool.id);
-      }
-    };
-    const onKeyUp = (e: KeyboardEvent) => {
-      if (isTypingTarget(e.target)) return;
-      if (e.key === 'z' || e.key === 'Z') {
-        arbiter.quickZoomArmed = false;
-        // Letting go of the key mid-frame lands on the frame, same as letting
-        // go of the pointer would.
-        arbiter.endQuickZoom(arbiter.pointer);
-      }
-      arbiter.releaseSpring(e);
-      if (e.key !== 'Shift' && e.key !== 'Control' && e.key !== 'Meta') return;
-      toolRegistry.get(useToolStore.getState().activeToolId)?.onKeyUp?.(e, ctx);
-    };
-    window.addEventListener('keydown', onKeyDown);
-    window.addEventListener('keyup', onKeyUp);
-    return () => {
-      window.removeEventListener('keydown', onKeyDown);
-      window.removeEventListener('keyup', onKeyUp);
-    };
-  }, [ctx, arbiter, onZoomToFit, onZoomToSelection]);
-
-  // The single paste path (Cmd+V). Prefers our own tagged copy (editable
-  // shapes), then a clipboard image or PDF, then the in-app buffer as a
-  // fallback. All pastes land at the pointer (viewport center when off-canvas).
-  useEffect(() => {
-    const onPaste = (e: ClipboardEvent) => {
-      if (isTypingTarget(e.target)) return;
-      const dt = e.clipboardData;
-      const ours =
-        hasClipboard() &&
-        wbClipToken(dt?.getData('text/html') ?? '') === clipboardToken();
-
-      const files: File[] = [];
-      const pdfs: File[] = [];
-      if (dt?.items) {
-        for (let i = 0; i < dt.items.length; i++) {
-          const item = dt.items[i]!;
-          if (item.kind !== 'file') continue;
-          const bucket = item.type.startsWith('image/')
-            ? files
-            : item.type === PDF_MIME
-              ? pdfs
-              : null;
-          const f = bucket && item.getAsFile();
-          if (f) bucket.push(f);
-        }
-      }
-
-      const world = screenToWorld(
-        arbiter.pointer ?? centerRef.current,
-        useCameraStore.getState().camera,
-      );
-      const selectPasted = (ids: string[]) => {
-        if (ids.length) {
-          useToolStore.getState().setTool('select');
-          useSelectionStore.getState().setSelection(ids);
-        }
-      };
-
-      if (ours) {
-        e.preventDefault();
-        selectPasted(pasteShapes(editor, world));
-        return;
-      }
-      if (files.length) {
-        e.preventDefault();
-        // Its own undo step, matching pasted links below.
-        breakUndoCapture();
-        void placeImageFiles(files, world).then((ids) => {
-          selectPasted(ids);
-          zoomToPlaced(ids, sizeRef.current);
-        });
-        return;
-      }
-      if (pdfs.length) {
-        e.preventDefault();
-        void placePdfFiles(pdfs, world).then(selectPasted);
-        return;
-      }
-      const text = dt?.getData('text/plain') ?? '';
-      // Pasted links become preview cards. `breakUndoCapture` makes the paste
-      // its own undo step, so Ctrl+Z removes exactly what was just pasted.
-      const urls = linkUrlsFromClipboard(text, dt?.getData('text/html') ?? '');
-      if (urls) {
-        e.preventDefault();
-        breakUndoCapture();
-        selectPasted(placeLinkUrls(urls, world));
-        return;
-      }
-      // A bare video id is not a URL, so it never matches the link path above.
-      const youtubeId = parseYoutubeId(text);
-      if (youtubeId) {
-        e.preventDefault();
-        selectPasted([createYoutubeShape(youtubeId, world)]);
-        return;
-      }
-      if (hasClipboard()) {
-        e.preventDefault();
-        selectPasted(pasteShapes(editor, world));
-      }
-    };
-    window.addEventListener('paste', onPaste);
-    return () => window.removeEventListener('paste', onPaste);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Drag-and-drop files onto the canvas: images and PDFs are placed at the drop
-  // point, anything else goes to the board's document repository. A dropped PDF
-  // matches a pasted one — it belongs under the pen, not behind a drawer — and
-  // the repository's own upload button still takes one for filing.
-  const onDragOver = useCallback((e: ReactDragEvent) => {
-    if (Array.from(e.dataTransfer.types).includes('Files')) e.preventDefault();
-  }, []);
-  const onDrop = useCallback(
-    (e: ReactDragEvent) => {
-      const dropped = Array.from(e.dataTransfer.files);
-      const images = dropped.filter((f) => f.type.startsWith('image/'));
-      const pdfs = dropped.filter((f) => f.type === PDF_MIME);
-      const documents = dropped.filter(
-        (f) => !f.type.startsWith('image/') && f.type !== PDF_MIME,
-      );
-      if (!images.length && !pdfs.length && !documents.length) return;
-      e.preventDefault();
-
-      if (documents.length) {
-        addFilesToRepository(documents, getLocalUser()?.name ?? 'Someone');
-        // Reveal the repository so the file doesn't seem to vanish.
-        useDocumentsStore.getState().setPanelOpen(true);
-      }
-      if (!images.length && !pdfs.length) return;
-
-      const rect = getContainerRect(containerRef.current);
-      const world = screenToWorld(
-        { x: e.clientX - (rect?.left ?? 0), y: e.clientY - (rect?.top ?? 0) },
-        useCameraStore.getState().camera,
-      );
-      const select = (ids: string[]) => {
-        if (ids.length) {
-          useToolStore.getState().setTool('select');
-          useSelectionStore.getState().setSelection(ids);
-        }
-      };
-      if (images.length)
-        void placeImageFiles(images, world).then((ids) => {
-          select(ids);
-          zoomToPlaced(ids, sizeRef.current);
-        });
-      if (pdfs.length) void placePdfFiles(pdfs, world).then(select);
-    },
-    [containerRef],
-  );
+  const { onDragOver, onDrop } = useCanvasPasteAndDrop({
+    arbiter,
+    centerRef,
+    sizeRef,
+    containerRef,
+  });
 
   // Zoom controls.
   const center = useCallback(
@@ -1233,6 +740,7 @@ export function Canvas() {
       {!editingShape && !frameEditingShape && <SelectionToolbar />}
       <CursorsLayer viewportSize={size} />
       <LaserLayer />
+      <MeasureLayer />
       <EraserTrail />
       <CommentsLayer />
       {quickZoomFrame && (
@@ -1263,13 +771,6 @@ export function Canvas() {
       )}
 
       {minimapVisible && <Minimap />}
-
-      <UndoControls
-        canUndo={canUndo}
-        canRedo={canRedo}
-        onUndo={undo}
-        onRedo={redo}
-      />
 
       <LiveCanvasControls
         background={background}

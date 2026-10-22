@@ -1,12 +1,14 @@
 import { useEffect } from 'react';
 import { X } from 'lucide-react';
 import type { VideoShape } from '@whiteboard/shared';
+import { blobUrl } from '../board/blobs';
 import { worldToScreen } from './camera';
 import { useCameraFollow } from './use-camera-interaction';
 import { useVideoPlayingStore } from './use-video-playing-store';
 
 /**
- * Interactive YouTube player shown in place of a video shape's static thumbnail
+ * Interactive player (YouTube iframe, or a native `<video>` for an uploaded
+ * file) shown in place of a video shape's static thumbnail
  * while it's playing. Mirrors `TextEditorOverlay`: an HTML layer positioned over
  * the shape via the camera. Playback state is local (not synced), so playing
  * here doesn't force peers to play.
@@ -33,9 +35,9 @@ export function VideoPlayerOverlay({
   const screen = worldToScreen({ x: shape.x, y: shape.y }, camera);
   const w = shape.props.w * camera.z;
   const h = shape.props.h * camera.z;
-  const src =
-    `https://www.youtube.com/embed/${shape.props.videoId}` +
-    `?autoplay=1&rel=0&modestbranding=1`;
+  const { videoId, blobId } = shape.props;
+  // An uploaded file can't play until its upload lands.
+  if (!videoId && !blobId) return null;
 
   return (
     // The follower is a stacking context, so it carries the z-index.
@@ -52,13 +54,26 @@ export function VideoPlayerOverlay({
         }}
         onPointerDown={(e) => e.stopPropagation()}
       >
-        <iframe
-          title="YouTube video player"
-          src={src}
-          className="h-full w-full border-0"
-          allow="autoplay; encrypted-media; fullscreen; picture-in-picture"
-          allowFullScreen
-        />
+        {videoId ? (
+          <iframe
+            title="YouTube video player"
+            src={
+              `https://www.youtube.com/embed/${videoId}` +
+              `?autoplay=1&rel=0&modestbranding=1`
+            }
+            className="h-full w-full border-0"
+            allow="autoplay; encrypted-media; fullscreen; picture-in-picture"
+            allowFullScreen
+          />
+        ) : (
+          <video
+            src={blobUrl(blobId!)}
+            className="h-full w-full"
+            controls
+            autoPlay
+            playsInline
+          />
+        )}
         <button
           type="button"
           aria-label="Stop video"

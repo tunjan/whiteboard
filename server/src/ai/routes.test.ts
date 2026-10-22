@@ -5,11 +5,20 @@ import {
   MAX_LATEX_PROMPT_CHARS,
 } from '@whiteboard/shared';
 import { aiRoutes } from './routes';
+import { chatCompletion, transcribe } from './openrouter';
 
 // Board access has its own suite (boards/routes.test.ts); here every request
 // is one a board editor sent.
 vi.mock('../boards/access', () => ({
   requireBoardEdit: async (_c: unknown, next: () => Promise<void>) => next(),
+}));
+
+// Only the dictation suite gives these answers; every other case is rejected
+// before a model is reached.
+vi.mock('./openrouter', async (actual) => ({
+  ...(await actual<typeof import('./openrouter')>()),
+  transcribe: vi.fn(),
+  chatCompletion: vi.fn(),
 }));
 
 /**
@@ -106,5 +115,27 @@ describe('POST /transcribe', () => {
   it('rejects an oversized clip', async () => {
     const audio = 'A'.repeat(MAX_AUDIO_CHARS + 1);
     expect((await post('/transcribe', { audio, format: 'webm' })).status).toBe(413);
+  });
+});
+
+describe('POST /transcribe, one round trip', () => {
+  it('returns the transcript with its LaTeX', async () => {
+    vi.mocked(transcribe).mockResolvedValueOnce('x squared');
+    vi.mocked(chatCompletion).mockResolvedValueOnce('$x^2$');
+    const res = await post('/transcribe', { audio: 'AAAA', format: 'webm' });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ text: 'x squared', latex: 'x^2' });
+  });
+
+  // What was heard is kept even when it can't be written as maths.
+  it('keeps the transcript when no maths is found', async () => {
+    vi.mocked(transcribe).mockResolvedValueOnce('hello there');
+    vi.mocked(chatCompletion).mockResolvedValueOnce('UNREADABLE');
+    const res = await post('/transcribe', { audio: 'AAAA', format: 'webm' });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      text: 'hello there',
+      error: 'No mathematics found',
+    });
   });
 });

@@ -12,6 +12,18 @@ const PASTE_OFFSET = 16;
 let buffer: Shape[] = [];
 let roots: string[] = [];
 let pasteCount = 0;
+/** Where the canvas context menu was last opened, in world space. */
+let menuPoint: Point | null = null;
+
+/** Recorded by the canvas on right-click; null when the menu opened elsewhere. */
+export function setContextMenuPoint(point: Point | null): void {
+  menuPoint = point;
+}
+
+/** Paste from the context menu: at the right-click point, like ⌘V under the pointer. */
+export function pasteAtContextMenu(editor: Editor): string[] {
+  return pasteShapes(editor, menuPoint ?? undefined);
+}
 // Tag written into the OS clipboard (see clipboard-os.ts) so paste can tell our
 // own copy apart from a foreign/stale clipboard. Regenerated on every copy.
 let token = '';

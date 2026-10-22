@@ -1,4 +1,10 @@
-import { cloneElement, type ReactElement, type ReactNode } from 'react';
+import {
+  cloneElement,
+  createContext,
+  useContext,
+  type ReactElement,
+  type ReactNode,
+} from 'react';
 import { Kbd } from '@/components/ui/kbd';
 import {
   Tooltip,
@@ -8,26 +14,35 @@ import {
 import { cn } from '@/lib/utils';
 
 /**
- * The toolbar's component set.
- *
- * Four pieces — a surface, a group, a separator and a key — and every control
- * on the bar is one of them. Nothing on the bar styles itself: a call site
- * chooses a variant, never a colour, a radius or a size, so the row cannot
- * drift apart one button at a time. The visual rules all live in section 9 of
- * `index.css`, keyed off these class names.
+ * The toolbar's base layer: where its popups open, how a key's tooltip reads,
+ * the plate and the tray's key. The drawer's slots (`toolbar-tool-button`) and
+ * the style tray build on these; nothing here imports from either. The visual
+ * rules all live in section 9 of `index.css`, keyed off these class names.
  */
 
-/** The wedge on a key that opens a menu. */
-function Caret() {
+/**
+ * The side the bar's tooltips and menus open toward: away from the edge the
+ * bar docks to, so nothing it opens lands off-screen or under the pointer.
+ */
+export const ToolbarSideContext = createContext<'top' | 'right'>('top');
+
+export function useToolbarSide() {
+  return useContext(ToolbarSideContext);
+}
+
+/** A key's tooltip: its name, then its hotkey. */
+export function KeyTip({
+  label,
+  hotkey,
+}: {
+  label: ReactNode;
+  hotkey?: string;
+}) {
   return (
-    <svg
-      className="tbar-caret"
-      viewBox="0 0 4 4"
-      fill="currentColor"
-      aria-hidden="true"
-    >
-      <path d="M4 4H0L4 0Z" />
-    </svg>
+    <TooltipContent side={useToolbarSide()}>
+      {label}
+      {hotkey ? <Kbd className="font-mono uppercase">{hotkey}</Kbd> : null}
+    </TooltipContent>
   );
 }
 
@@ -42,36 +57,6 @@ export function ToolbarSurface({
   return <div {...props} className={cn('tbar-surface', className)} />;
 }
 
-/**
- * A run of related keys, named for assistive technology. Groups are what the
- * separators separate; the bar has no other structure.
- */
-export function ToolbarGroup({
-  label,
-  className,
-  ...props
-}: { label: string } & React.ComponentProps<'div'>) {
-  return (
-    <div
-      {...props}
-      role="group"
-      aria-label={label}
-      className={cn('tbar-group', className)}
-    />
-  );
-}
-
-/** The rule between two groups. */
-export function ToolbarSeparator() {
-  return (
-    <span
-      className="tbar-sep"
-      role="separator"
-      aria-orientation="vertical"
-    />
-  );
-}
-
 interface ToolbarItemProps {
   /** The accessible name. Every key here is icon-only, so this is required. */
   label: string;
@@ -84,8 +69,6 @@ interface ToolbarItemProps {
    */
   selected?: boolean;
   mark?: 'current' | 'pressed' | 'checked';
-  /** The key opens a menu or a flyout, and says so with a wedge. */
-  caret?: boolean;
   disabled?: boolean;
   /** Overrides the tooltip body, for a key whose tooltip is not just its name. */
   tooltip?: ReactNode;
@@ -103,7 +86,7 @@ interface ToolbarItemProps {
 }
 
 /**
- * A key on the bar.
+ * A key on the style tray.
  *
  * Its states — hover, press, selected, focus-visible, disabled — are all in
  * CSS, keyed off `.tbar-item` and the ARIA attribute this writes, so the same
@@ -115,7 +98,6 @@ export function ToolbarItem({
   hotkey,
   selected = false,
   mark = 'current',
-  caret = false,
   disabled = false,
   tooltip,
   onClick,
@@ -146,14 +128,8 @@ export function ToolbarItem({
 
   return (
     <Tooltip>
-      <TooltipTrigger render={trigger}>
-        {children}
-        {caret ? <Caret /> : null}
-      </TooltipTrigger>
-      <TooltipContent side="top" className="flex items-center gap-2">
-        {tooltip ?? <span>{label}</span>}
-        {hotkey ? <Kbd className="font-mono uppercase">{hotkey}</Kbd> : null}
-      </TooltipContent>
+      <TooltipTrigger render={trigger}>{children}</TooltipTrigger>
+      <KeyTip label={tooltip ?? <span>{label}</span>} hotkey={hotkey} />
     </Tooltip>
   );
 }

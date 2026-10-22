@@ -1,7 +1,8 @@
 import { afterEach, expect, it } from 'vitest';
 import type { Shape } from '@whiteboard/shared';
 import '@/canvas/shapes/register';
-import { createPage, editor, loadBoard, useDocumentStore } from '@/canvas/use-document-store';
+import { createPage } from '@/canvas/page-actions';
+import { editor, loadBoard, useDocumentStore } from '@/canvas/use-document-store';
 import { useToolStore } from '@/canvas/use-tool-store';
 import { setBoardAccess } from './board-access';
 
