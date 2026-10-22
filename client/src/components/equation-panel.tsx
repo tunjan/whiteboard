@@ -59,6 +59,7 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { EquationAiPrompt, useEquationDictation } from './equation-dictation';
 import { EquationPreview, type TypesetRender } from './equation-preview';
+import { FIELD_SURFACE } from './equation-panel-styles';
 import { EquationStyleControls } from './equation-style-controls';
 
 // Frames the panel keeps re-asserting focus for (~200ms at 60fps): long enough
@@ -561,7 +562,7 @@ export function EquationPanelContent({ shape }: { shape: EquationShape }) {
         role="region"
         aria-label="Equation"
         onKeyDownCapture={dictation.onKeyDownCapture}
-        className="touch-targets flex max-h-[calc(100dvh-7rem-env(safe-area-inset-top))] w-[min(23rem,calc(100vw-2rem))] flex-col overflow-hidden p-0 [--chrome-hover:var(--color-tb-track)] sm:max-h-[calc(100dvh-6.25rem-env(safe-area-inset-top))]"
+        className="touch-targets flex max-h-[calc(100dvh-7rem-env(safe-area-inset-top))] w-[min(23rem,calc(100vw-2rem))] flex-col overflow-hidden border-0 bg-[var(--ds-surface-overlay)] p-0 [--chrome-hover:var(--color-tb-track)] sm:max-h-[calc(100dvh-6.25rem-env(safe-area-inset-top))]"
       >
         <EquationPreview
           shape={shape}
@@ -575,7 +576,7 @@ export function EquationPanelContent({ shape }: { shape: EquationShape }) {
 
         {/* Source, and anything wrong with it. The only part that scrolls. */}
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">
-          <div className="px-3 py-2.5">
+          <div className="px-4 py-3">
             <label htmlFor={sourceId} className="sr-only">
               LaTeX
             </label>
@@ -619,7 +620,7 @@ export function EquationPanelContent({ shape }: { shape: EquationShape }) {
                 placeholder={String.raw`\frac{a}{b}`}
                 spellCheck={false}
                 rows={3}
-                className="min-h-20 w-full resize-none rounded-control px-2.5 py-2 font-mono text-sm leading-5 text-fg"
+                className={cn(FIELD_SURFACE, 'min-h-20 w-full resize-none rounded-compact px-2 py-2 font-mono text-sm leading-5 text-fg')}
               />
 
               {/* The urlbar's own autocomplete: a popup on the popup surface,
@@ -670,10 +671,10 @@ export function EquationPanelContent({ shape }: { shape: EquationShape }) {
             <div
               id={errorId}
               role="alert"
-              className="flex shrink-0 items-start gap-2 border-t border-danger-border bg-danger-bg px-3 py-2 text-xs text-danger"
+              className="mx-4 mb-3 flex shrink-0 items-start gap-3 rounded-panel bg-[var(--ds-background-danger)] p-3 text-sm text-fg"
             >
               <AlertCircle
-                className="mt-0.5 size-3.5 shrink-0"
+                className="mt-0.5 size-4 shrink-0 text-[var(--ds-icon-danger)]"
                 aria-hidden="true"
               />
               <div className="flex min-w-0 flex-1 flex-col gap-1.5">
@@ -682,7 +683,7 @@ export function EquationPanelContent({ shape }: { shape: EquationShape }) {
                   <button
                     type="button"
                     onClick={() => errorSpan && focusInput(errorSpan)}
-                    className="min-w-0 truncate rounded-control border border-danger-border/60 bg-surface/80 px-1.5 py-1 text-left font-mono text-2xs"
+                    className="min-w-0 truncate rounded-control border border-border bg-surface px-1.5 py-1 text-left font-mono text-2xs"
                   >
                     {errorExcerpt.clippedStart ? '…' : null}
                     {errorExcerpt.before}
@@ -704,10 +705,10 @@ export function EquationPanelContent({ shape }: { shape: EquationShape }) {
             <div
               id={problemId}
               role="status"
-              className="flex shrink-0 items-start gap-2 border-t border-warning-border bg-warning-bg px-3 py-2 text-xs text-warning"
+              className="mx-4 mb-3 flex shrink-0 items-start gap-3 rounded-panel bg-[var(--ds-background-warning)] p-3 text-sm text-fg"
             >
               <AlertCircle
-                className="mt-0.5 size-3.5 shrink-0"
+                className="mt-0.5 size-4 shrink-0 text-[var(--ds-icon-warning)]"
                 aria-hidden="true"
               />
               <div className="flex min-w-0 flex-1 flex-col gap-1.5">
@@ -716,7 +717,7 @@ export function EquationPanelContent({ shape }: { shape: EquationShape }) {
                   <button
                     type="button"
                     onClick={() => focusInput(problem.span)}
-                    className="min-w-0 flex-1 truncate rounded-control border border-warning-border/70 bg-surface/80 px-1.5 py-1 text-left font-mono text-2xs"
+                    className="min-w-0 flex-1 truncate rounded-control border border-border bg-surface px-1.5 py-1 text-left font-mono text-2xs"
                   >
                     {problemExcerpt.clippedStart ? '…' : null}
                     {problemExcerpt.before}
@@ -734,7 +735,7 @@ export function EquationPanelContent({ shape }: { shape: EquationShape }) {
                     // land on the undo stack.
                     onPointerDown={(event) => event.preventDefault()}
                     onClick={() => applyEdit(problem.fix)}
-                    className="shrink-0 text-warning hover:bg-warning/10 hover:text-warning"
+                    className="shrink-0 text-fg"
                   >
                     {problem.action}
                   </Button>

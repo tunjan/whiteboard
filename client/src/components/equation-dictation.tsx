@@ -15,6 +15,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+import { FIELD_SURFACE } from './equation-panel-styles';
 
 /**
  * Plain-language description → LaTeX, typed or dictated, via the model.
@@ -220,8 +221,8 @@ export function EquationAiPrompt({
   return (
     <div
       className={cn(
-        'flex shrink-0 items-center gap-1.5 px-3 pb-2.5',
-        spaced && 'pt-2.5',
+        'flex shrink-0 items-center gap-1 px-4 pb-3',
+        spaced && 'pt-0',
       )}
     >
       <Textarea
@@ -239,7 +240,7 @@ export function EquationAiPrompt({
         // would drop keyboard focus to the page mid-request.
         readOnly={generating || Boolean(recorder)}
         aria-busy={generating || undefined}
-        className="min-h-8 flex-1 resize-none rounded-control px-2.5 py-1.5 text-sm text-fg read-only:border-border read-only:bg-panel read-only:text-fg-subtle"
+        className={cn(FIELD_SURFACE, 'min-h-8 flex-1 resize-none rounded-compact px-2 py-1.5 text-sm text-fg read-only:border-border read-only:bg-panel read-only:text-fg-subtle')}
       />
       <Tooltip>
         <TooltipTrigger

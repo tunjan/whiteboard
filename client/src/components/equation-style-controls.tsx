@@ -3,7 +3,6 @@ import type { EquationShape } from '@whiteboard/shared';
 import { centeredMove } from '@/canvas/shapes/equation';
 import { editor } from '@/canvas/use-document-store';
 import { paletteColors } from '@/canvas/use-style-store';
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import {
   Tooltip,
   TooltipContent,
@@ -11,6 +10,7 @@ import {
 } from '@/components/ui/tooltip';
 import { useThemeStore } from '@/use-theme-store';
 import { cn, swatchBorder } from '@/lib/utils';
+import { ChoiceGroup, ChoiceItem } from './graph-choice-group';
 
 /** The sizes on offer, in the shape's own `fontSize` units. */
 const FONT_SIZES = [16, 22, 28, 40];
@@ -32,11 +32,8 @@ const STYLES = [
   },
 ] as const;
 
-/**
- * A segmented control: size, style. The toggle group's white plate marks the
- * chosen segment on its grey track.
- */
-const SEGMENTED_ITEM = 'h-8 grow basis-0 px-2.5 text-xs font-medium';
+/** Size and style are Atlassian button groups: the chosen button is filled. */
+const CHOICE_ITEM = 'px-2.5 text-sm font-medium';
 
 /**
  * Each size draws its own sample glyph, scaled with the size it stands for, so
@@ -97,7 +94,7 @@ export function EquationStyleControls({
   };
 
   return (
-    <div className="flex shrink-0 flex-col gap-2 border-t border-border px-3 py-2.5">
+    <div className="flex shrink-0 flex-col gap-3 border-t border-border px-4 py-3">
       <div
         role="radiogroup"
         aria-label="Color"
@@ -154,8 +151,8 @@ export function EquationStyleControls({
         })}
       </div>
 
-      <div className="flex gap-2">
-        <ToggleGroup
+      <div className="flex items-center gap-2">
+        <ChoiceGroup
           className="flex-[4]"
           aria-label="Size"
           value={[String(Math.round(shape.props.fontSize))]}
@@ -168,8 +165,8 @@ export function EquationStyleControls({
             <Tooltip key={size}>
               <TooltipTrigger
                 render={
-                  <ToggleGroupItem
-                    className={SEGMENTED_ITEM}
+                  <ChoiceItem
+                    className={CHOICE_ITEM}
                     value={String(size)}
                     aria-label={`Size ${size}`}
                   />
@@ -186,12 +183,14 @@ export function EquationStyleControls({
               <TooltipContent side="top">Size {size}</TooltipContent>
             </Tooltip>
           ))}
-        </ToggleGroup>
+        </ChoiceGroup>
+
+        <span aria-hidden="true" className="h-5 w-px shrink-0 bg-border" />
 
         {/* Display or text style. Not a property of the source — the same
             LaTeX is valid in both — so it belongs beside colour and size
             rather than in the field. */}
-        <ToggleGroup
+        <ChoiceGroup
           className="flex-[3]"
           aria-label="Style"
           value={[inline ? 'inline' : 'display']}
@@ -204,8 +203,8 @@ export function EquationStyleControls({
             <Tooltip key={style.label}>
               <TooltipTrigger
                 render={
-                  <ToggleGroupItem
-                    className={SEGMENTED_ITEM}
+                  <ChoiceItem
+                    className={CHOICE_ITEM}
                     value={style.inline ? 'inline' : 'display'}
                     aria-label={style.label}
                   />
@@ -216,7 +215,7 @@ export function EquationStyleControls({
               <TooltipContent side="top">{style.hint}</TooltipContent>
             </Tooltip>
           ))}
-        </ToggleGroup>
+        </ChoiceGroup>
       </div>
     </div>
   );
