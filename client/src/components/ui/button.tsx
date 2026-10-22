@@ -8,10 +8,10 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        default: "border-action bg-action text-on-action hover:border-action-hover hover:bg-action-hover hover:ring-4 hover:ring-border",
-        primary: "border-action bg-action text-on-action hover:border-action-hover hover:bg-action-hover hover:ring-4 hover:ring-border",
+        default: "border-action bg-action text-on-action hover:border-action-hover hover:bg-action-hover",
+        primary: "border-action bg-action text-on-action hover:border-action-hover hover:bg-action-hover",
         outline:
-          "border-border bg-surface text-fg hover:bg-canvas aria-expanded:border-border-strong aria-expanded:ring-4 aria-expanded:ring-border",
+          "border-border bg-surface text-fg hover:bg-canvas aria-expanded:border-border-strong",
         secondary:
           "bg-secondary text-secondary-foreground hover:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_5%)] aria-expanded:bg-secondary aria-expanded:text-secondary-foreground",
         subtle:
@@ -19,7 +19,7 @@ const buttonVariants = cva(
         ghost:
           "bg-transparent text-fg-secondary hover:bg-[var(--chrome-hover,var(--color-panel))] hover:text-fg disabled:bg-transparent",
         destructive:
-          "border-danger-border bg-surface text-danger-fg hover:bg-danger-bg hover:ring-4 hover:ring-danger-bg",
+          "border-danger-border bg-surface text-danger-fg hover:bg-danger-bg",
         link: "text-fg underline-offset-4 hover:underline disabled:bg-transparent",
       },
       size: {

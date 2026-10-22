@@ -1,6 +1,7 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
 @import 'shadcn/tailwind.css';
+@import './atlassian-tokens.css';
 
 /* ==========================================================================
  * Fonts
@@ -49,23 +50,22 @@
 :root {
   color-scheme: light;
 
-  /* Surfaces, back to front.
-     Achromatic. The board's content is the user's ink, and that ink spans the
-     whole hue wheel — black, violet, blue, yellow, orange, green, red. Any
-     tint in the chrome is a tint the drawing has to be seen through: a warm
-     ground pushes blue ink cold, a cool ground pushes orange ink muddy. Both
-     have been tried here. A grey with no hue at all is the only ground that
-     leaves every swatch reading as itself. */
-  --bg-canvas: #fafafa;
-  --bg-panel: #f5f5f5;
-  --bg-surface: #ffffff;
-  --bg-surface-hover: #f5f5f5;
+  /* Every role below that points at `--ds-*` is an Atlassian Design System
+     token (atlassian-tokens.css), which switches itself between light and
+     dark — so `.dark` only restates what is *not* an Atlassian token.
+
+     Surfaces, back to front: sunken canvas, a raised-neutral panel, the plain
+     surface, an overlay for anything that floats. */
+  --bg-canvas: var(--ds-surface-sunken);
+  --bg-panel: var(--ds-surface-hovered);
+  --bg-surface: var(--ds-surface);
+  --bg-surface-hover: var(--ds-surface-hovered);
   /* The ground a menu, popup or tooltip stands on. Kept separate from
      `--bg-surface` so dark mode can lift panels off dialogs. */
-  --bg-popup: #ffffff;
-  --bg-sunken: #e5e5e5;
-  --bg-inverse: #171717;
-  --bg-inverse-hover: #262626;
+  --bg-popup: var(--ds-surface-overlay);
+  --bg-sunken: var(--ds-surface-pressed);
+  --bg-inverse: var(--ds-background-neutral-bold);
+  --bg-inverse-hover: var(--ds-background-neutral-bold-hovered);
 
   /* Ink: the pen's slot-0 swatch, held as a token so a stroke stored in either
      theme's ink repaints for whoever is looking at it (canvas/ink-color.ts).
@@ -78,85 +78,77 @@
      the shortcut hints down the right edge of every menu. Those are read, so
      "de-emphasised" has to stop at the contrast floor rather than at the point
      where the grey stops being noticeable. */
-  --fg: #171717;
-  --fg-secondary: #404040;
-  --fg-muted: #525252;
-  --fg-subtle: #737373;
-  --fg-inverse: #fafafa;
+  --fg: var(--ds-text);
+  --fg-secondary: var(--ds-text-subtle);
+  --fg-muted: var(--ds-text-subtle);
+  --fg-subtle: var(--ds-text-subtlest);
+  --fg-inverse: var(--ds-text-inverse);
 
-  /* DESIGN.md: 1px neutral hairlines separate surfaces, not shadows. */
-  --border: #e5e5e5;
-  --border-strong: #d4d4d4;
-  --border-subtle: #f5f5f5;
+  /* Atlassian `color.border`: 1px hairlines separate surfaces. */
+  --border: var(--ds-border);
+  --border-strong: var(--ds-border-bold);
+  --border-subtle: var(--ds-background-neutral);
   /* The edge of an input or a checkbox. A real UI component boundary, so it is
      held at 3:1 against the surface behind it rather than at whatever reads as
      quiet. */
-  --control-border: #858585;
+  --control-border: var(--ds-border-input);
 
-  /* DESIGN.md: black is the one primary action on a view. */
-  --action-solid: #000000;
-  --action-hover: #171717;
-  --action-active: #262626;
-  --action-foreground: #ffffff;
+  /* Atlassian `color.background.brand.bold`: blue is the primary action. */
+  --action-solid: var(--ds-background-brand-bold);
+  --action-hover: var(--ds-background-brand-bold-hovered);
+  --action-active: var(--ds-background-brand-bold-pressed);
+  --action-foreground: var(--ds-text-inverse);
 
-  /* DESIGN.md's one accent, blue, is only ever "you are here": links, the
-     control that is on (`--tb-sel-*` below), and checked fills — checkboxes,
-     switches, slider ranges, meters (blue-500). Never a button. */
-  --link: #2563eb;
-  --check: #3b82f6;
-  --on-check: #ffffff;
+  /* Links, the control that is on (`--tb-sel-*` below) and checked fills —
+     checkboxes, switches, slider ranges, meters — use Atlassian's `selected`
+     and `link` tokens. */
+  --link: var(--ds-link);
+  --check: var(--ds-background-selected-bold);
+  --on-check: var(--ds-text-inverse);
 
-  /* Focus: a blue-600 edge; text fields add a flat blue halo around it. */
-  --ring: #2563eb;
-  --focus-halo: rgba(37, 99, 235, 0.12);
+  /* Focus: Atlassian `color.border.focused`, drawn 2px wide. */
+  --ring: var(--ds-border-focused);
+  --focus-halo: transparent;
 
-  /* Scrims. Opacity is chosen per overlay. The drawer scrim is DESIGN.md's
-     `bg-black/20`; the modal scrim is its `bg-neutral-100/50` under a blur. */
-  --c-scrim: #000000;
-  --c-scrim-modal: #f5f5f5;
+  /* Scrims: the RGB of Atlassian's `color.blanket` (its alpha is chosen per
+     overlay here, so the token itself cannot be used). */
+  --c-scrim: #050c1f;
+  --c-scrim-modal: #050c1f;
 
-  /* Status: DESIGN.md's container + content pairs (100 tint, 300 edge), with
-     the text stepped one shade darker than Dub's 600 so it clears 4.5:1 on
-     its own tint, as DESIGN.md's Do's ask. */
-  --status-success-fg: #15803d;
-  --status-success-bg: #dcfce7;
-  --status-success-border: #86efac;
-  --status-warning-fg: #a16207;
-  --status-warning-bg: #fef9c3;
-  --status-warning-border: #fde047;
-  --status-danger-fg: #b91c1c;
-  --status-danger-bg: #fee2e2;
-  --status-danger-border: #fca5a5;
-  --status-danger-control-border: #ef4444;
-  --status-info-fg: #1d4ed8;
-  --status-info-bg: #dbeafe;
-  --status-info-border: #93c5fd;
-  --status-inactive-fg: #525252;
-  --status-inactive-bg: #f5f5f5;
-  --status-inactive-border: #e5e5e5;
-  --status-neutral-fg: #525252;
-  --status-neutral-bg: #f5f5f5;
-  --status-neutral-border: #e5e5e5;
+  /* Status: Atlassian's text / background / subtle-border triples per role. */
+  --status-success-fg: var(--ds-text-success);
+  --status-success-bg: var(--ds-background-success);
+  --status-success-border: var(--ds-border-success-subtle);
+  --status-warning-fg: var(--ds-text-warning);
+  --status-warning-bg: var(--ds-background-warning);
+  --status-warning-border: var(--ds-border-warning-subtle);
+  --status-danger-fg: var(--ds-text-danger);
+  --status-danger-bg: var(--ds-background-danger);
+  --status-danger-border: var(--ds-border-danger-subtle);
+  --status-danger-control-border: var(--ds-border-danger);
+  --status-info-fg: var(--ds-text-information);
+  --status-info-bg: var(--ds-background-information);
+  --status-info-border: var(--ds-border-information-subtle);
+  --status-inactive-fg: var(--ds-text-subtle);
+  --status-inactive-bg: var(--ds-background-neutral);
+  --status-inactive-border: var(--ds-border);
+  --status-neutral-fg: var(--ds-text-subtle);
+  --status-neutral-bg: var(--ds-background-neutral);
+  --status-neutral-border: var(--ds-border);
 
   /* `--status-danger-fg` is tuned for light surfaces; this is for danger text
      sitting directly on a `bg-inverse` surface instead (e.g. a dark pill).
      The light end of the same red ramp. */
-  --status-danger-fg-on-inverse: #fca5a5;
+  --status-danger-fg-on-inverse: var(--ds-background-danger-subtle);
 
-  /* Elevation, DESIGN.md's level 3 only — everything below it is tone and a
-     hairline. control = `shadow-sm` (tooltips), panel = the floating bar's
-     drop, overlay = a popover's `drop-shadow-lg`, modal = `shadow-xl`. */
-  --s-control: 0 1px 2px rgba(0, 0, 0, 0.05);
-  --s-panel: 0 5px 8px rgba(34, 42, 53, 0.11);
-  --s-overlay:
-    0 4px 3px rgba(0, 0, 0, 0.07),
-    0 10px 8px rgba(0, 0, 0, 0.04);
-  --s-modal:
-    0 20px 25px -5px rgba(0, 0, 0, 0.1),
-    0 8px 10px -6px rgba(0, 0, 0, 0.1);
-  /* The floating bar: DESIGN.md's one soft drop under a hairline-edged
-     plate. The border does the separating; the shadow only lifts it. */
-  --s-toolbar: 0 5px 8px rgba(34, 42, 53, 0.11);
+  /* Elevation: Atlassian has two shadows — `raised` for cards and small
+     controls, `overlay` for anything that floats over other UI. */
+  --s-control: var(--ds-shadow-raised);
+  --s-panel: var(--ds-shadow-overlay);
+  --s-overlay: var(--ds-shadow-overlay);
+  --s-modal: var(--ds-shadow-overlay);
+  /* The floating bar is an overlay. */
+  --s-toolbar: var(--ds-shadow-overlay);
 
   /* The wash under a key: mixed from `currentColor` so one rule carries
      neutral, accented and destructive keys alike. */
@@ -172,16 +164,16 @@
      already says which one is chosen, and where the keys carry colour of their
      own; inverting one of those would repaint the very swatch being chosen. So
      a value gets a recess and a mode gets the ink. */
-  --tb-seg-chip: rgba(28, 28, 28, 0.04);
+  --tb-seg-chip: var(--ds-background-neutral);
 
-  /* The control that is *on*: DESIGN.md's active nav item — blue-100 at
-     half alpha under a blue-600 glyph. The state is also written as
+  /* The control that is *on*: Atlassian `color.background.selected` under a
+     `color.text.selected` glyph. The state is also written as
      `aria-current` / `aria-pressed`, which carries it where colour cannot. */
-  --tb-sel-bg: rgba(219, 234, 254, 0.5);
-  --tb-sel-bg-hover: #dbeafe;
-  --tb-sel-fg: var(--link);
+  --tb-sel-bg: var(--ds-background-selected);
+  --tb-sel-bg-hover: var(--ds-background-selected-hovered);
+  --tb-sel-fg: var(--ds-text-selected);
 
-  --tb-divider: rgba(28, 28, 28, 0.1);
+  --tb-divider: var(--ds-border);
 
   /* The wash under board chrome: translucent neutral ground. */
   --chrome-wash-solid: rgba(250, 250, 250, 0.72);
@@ -215,7 +207,7 @@
      part you actually take hold of, so that is what carries the contrast. */
   --minimap-ground: #fafafa;
   --minimap-shape: rgba(28, 28, 28, 0.22);
-  --minimap-selected: #2563eb;
+  --minimap-selected: var(--ds-border-selected);
   --minimap-viewport: rgba(28, 28, 28, 0.06);
   --minimap-viewport-border: rgba(28, 28, 28, 0.45);
   --background: var(--bg-canvas);
@@ -251,91 +243,18 @@
 .dark {
   color-scheme: dark;
 
-  /* DESIGN.md's dark ramp: near-black ground, #171717 plates, #262626 fills. */
-  --bg-canvas: #0a0a0a;
-  --bg-panel: #262626;
-  --bg-surface: #171717;
-  --bg-surface-hover: #262626;
-  --bg-popup: #171717;
-  --bg-sunken: #000000;
-  --bg-inverse: #fafafa;
-  --bg-inverse-hover: #e5e5e5;
-
   --ink: #f3f3f3;
 
-  --fg: #fafafa;
-  --fg-secondary: #d4d4d4;
-  --fg-muted: #a3a3a3;
-  --fg-subtle: #a3a3a3;
-  --fg-inverse: #171717;
-
-  --border: #404040;
-  --border-strong: #525252;
-  --border-subtle: #262626;
-  --control-border: #8a8a8a;
-
-  /* Primary inverts: white on the dark ground. */
-  --action-solid: #fafafa;
-  --action-hover: #e5e5e5;
-  --action-active: #d4d4d4;
-  --action-foreground: #0a0a0a;
-
-  --link: #60a5fa;
-  --check: #3b82f6;
-  --on-check: #ffffff;
-
-  --ring: #60a5fa;
-  --focus-halo: rgba(96, 165, 250, 0.2);
-
-  --c-scrim: #000000;
-  --c-scrim-modal: #000000;
-
-  /* The same ramps, read from the other end: the light step carries the text
-     and the dark step the tint. */
-  --status-success-fg: #4ade80;
-  --status-success-bg: #052e16;
-  --status-success-border: #166534;
-  --status-warning-fg: #facc15;
-  --status-warning-bg: #422006;
-  --status-warning-border: #854d0e;
-  --status-danger-fg: #f87171;
-  --status-danger-bg: #450a0a;
-  --status-danger-border: #991b1b;
-  --status-danger-control-border: #f87171;
-  --status-info-fg: #60a5fa;
-  --status-info-bg: #172554;
-  --status-info-border: #1e40af;
-  --status-inactive-fg: #a3a3a3;
-  --status-inactive-bg: #262626;
-  --status-inactive-border: #404040;
-  --status-neutral-fg: #a3a3a3;
-  --status-neutral-bg: #262626;
-  --status-neutral-border: #404040;
+  --c-scrim: #101214;
+  --c-scrim-modal: #101214;
 
   /* See light theme: `bg-inverse` flips to a light surface here, so this needs
      the dark end of the red ramp instead. */
-  --status-danger-fg-on-inverse: #b91c1c;
-
-  --s-control: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --s-panel: 0 5px 8px rgba(0, 0, 0, 0.5);
-  --s-overlay:
-    0 4px 3px rgba(0, 0, 0, 0.4),
-    0 10px 8px rgba(0, 0, 0, 0.3);
-  --s-modal:
-    0 20px 25px -5px rgba(0, 0, 0, 0.6),
-    0 8px 10px -6px rgba(0, 0, 0, 0.6);
-  --s-toolbar: 0 5px 8px rgba(0, 0, 0, 0.5);
+  --status-danger-fg-on-inverse: var(--ds-background-danger-bold);
 
   --tb-track: color-mix(in srgb, currentColor 10%, transparent);
   --tb-chip: color-mix(in srgb, currentColor 18%, transparent);
 
-  --tb-seg-chip: rgba(245, 245, 245, 0.08);
-
-  --tb-sel-bg: rgba(59, 130, 246, 0.18);
-  --tb-sel-bg-hover: rgba(59, 130, 246, 0.26);
-  --tb-sel-fg: var(--link);
-
-  --tb-divider: rgba(255, 255, 255, 0.12);
   --chrome-wash-solid: rgba(10, 10, 10, 0.72);
 
   --canvas-snap: #fb923c;
@@ -355,7 +274,7 @@
 
   --minimap-ground: #0a0a0a;
   --minimap-shape: rgba(245, 245, 245, 0.22);
-  --minimap-selected: #60a5fa;
+  --minimap-selected: var(--ds-border-selected);
   --minimap-viewport: rgba(245, 245, 245, 0.07);
   --minimap-viewport-border: rgba(245, 245, 245, 0.5);
   --background: var(--bg-canvas);
@@ -388,51 +307,50 @@
 }
 
 @theme {
-  /* ---------- primitives — one achromatic ramp ----------
-       No hue. See the note on `--bg-canvas`: the board's content is the user's
-       ink, and a tinted chrome is a tint that ink has to be seen through. The
-       `stone-*` names are kept because the whole app already refers to them. */
+  /* ---------- primitives — Atlassian's light neutral ramp ----------
+       Neutral0 → Neutral1100 from atlassian.design/foundations/color/color-palette.
+       The `stone-*` names are kept because the whole app already refers to them. */
   --color-stone-0: #ffffff;
-  --color-stone-50: #fafafa;
-  --color-stone-100: #f5f5f5;
-  --color-stone-200: #e5e5e5;
-  --color-stone-300: #d4d4d4;
-  --color-stone-400: #a3a3a3;
-  --color-stone-500: #737373;
-  --color-stone-600: #525252;
-  --color-stone-700: #404040;
-  --color-stone-800: #262626;
-  --color-stone-900: #171717;
-  --color-stone-950: #0a0a0a;
+  --color-stone-50: #f8f8f8;
+  --color-stone-100: #f0f1f2;
+  --color-stone-200: #dddee1;
+  --color-stone-300: #b7b9be;
+  --color-stone-400: #8c8f97;
+  --color-stone-500: #7d818a;
+  --color-stone-600: #6b6e76;
+  --color-stone-700: #505258;
+  --color-stone-800: #3b3d42;
+  --color-stone-900: #292a2e;
+  --color-stone-950: #1e1f21;
 
   /* ---------- geometry ----------
-       DESIGN.md's radius ladder, named by what a thing is:
+       Atlassian's radius tokens, named by what a thing is:
 
-         compact  6px   rounded-md  — inputs, menu rows, tags, status badges
-         control  8px   rounded-lg  — every button, triggers
-         overlay  8px   rounded-lg  — popovers, menus, context menus, toasts
-         panel   12px   rounded-xl  — cards, tooltips, floating panels
-         toolbar 12px   rounded-xl  — the floating bar
-         modal   16px   rounded-2xl — dialogs
+         compact  6px   radius.medium — inputs, menu rows, tags, status badges
+         control  6px   radius.medium — every button, triggers
+         overlay  8px   radius.large  — popovers, menus, context menus, toasts
+         panel    8px   radius.large  — cards, tooltips, floating panels
+         toolbar  8px   radius.large  — the floating bar
+         modal   12px   radius.xlarge — dialogs
 
-       Tailwind's own names are pinned to the same values, so `rounded-lg`
-       in a component means exactly what DESIGN.md means by it. */
-  --radius-compact: 6px;
-  --radius-control: 8px;
-  --radius-overlay: 8px;
-  --radius-panel: 12px;
-  --radius-toolbar: 12px;
-  --radius-modal: 16px;
+       Tailwind's own names are pinned to the same tokens, so `rounded-lg`
+       in a component means `radius.large`. */
+  --radius-compact: var(--ds-radius-medium);
+  --radius-control: var(--ds-radius-medium);
+  --radius-overlay: var(--ds-radius-large);
+  --radius-panel: var(--ds-radius-large);
+  --radius-toolbar: var(--ds-radius-large);
+  --radius-modal: var(--ds-radius-xlarge);
   --radius-full: 9999px;
 
-  --radius-xs: 4px;
-  --radius-sm: 4px;
-  --radius-md: 6px;
-  --radius-lg: 8px;
-  --radius-xl: 12px;
-  --radius-2xl: 16px;
-  --radius-3xl: 20px;
-  --radius-4xl: 20px;
+  --radius-xs: var(--ds-radius-xsmall);
+  --radius-sm: var(--ds-radius-small);
+  --radius-md: var(--ds-radius-medium);
+  --radius-lg: var(--ds-radius-large);
+  --radius-xl: var(--ds-radius-xlarge);
+  --radius-2xl: var(--ds-radius-xxlarge);
+  --radius-3xl: var(--ds-radius-xxlarge);
+  --radius-4xl: var(--ds-radius-xxlarge);
   --radius: var(--radius-control);
 
   /* ---------- type ---------- */
@@ -445,11 +363,9 @@
      is already shipped for canvas text and for the PNG export, so this costs
      no download, and its variable weight axis gives the chrome a 450/500/600
      hierarchy that the system faces cannot be relied on to have. */
-  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--ds-font-family-body);
   --font-canvas: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
-  --font-mono:
-    'Geist Mono Variable', 'JetBrains Mono', ui-monospace, SFMono-Regular,
-    monospace;
+  --font-mono: var(--ds-font-family-code);
 
   /* The ladder is unchanged above 14px. Below it, the old scale ran 11/12/13
        and put real labels on the 11px step, which is below what a dense board
@@ -480,10 +396,10 @@
 
   /* Large text set at default tracking reads loose; small text set tight reads
        cramped. Both are stated so a heading and a label cannot drift. */
-  --tracking-display: -0.02em;
-  --tracking-heading: -0.011em;
+  --tracking-display: 0em;
+  --tracking-heading: 0em;
   --tracking-body: 0em;
-  --tracking-label: 0.006em;
+  --tracking-label: 0em;
 
   /* ---------- elevation ---------- */
   --shadow-control: var(--s-control);
@@ -492,7 +408,7 @@
   --shadow-modal: var(--s-modal);
   --shadow-toolbar: var(--s-toolbar);
   /* A text field's focus: 1px of ring outside its 1px border, then the halo. */
-  --shadow-focus: 0 0 0 1px var(--ring), 0 0 0 4px var(--focus-halo);
+  --shadow-focus: 0 0 0 var(--ds-border-width-focused) var(--ring);
 
   /* Compatibility aliases collapse the old five-step ladder to three
        deliberate tiers and remain theme-aware. */
@@ -2409,11 +2325,11 @@
   /* The visible height of the tray's row of tools. */
   --drawer-tray-h: 56px;
   /* Shapes and the arrow are drawn in the bar's ink, not on a card. */
-  --drawer-ink: #3a4049;
+  --drawer-ink: var(--ds-icon);
 }
 
 .dark {
-  --drawer-ink: #c9ccd2;
+  --drawer-ink: var(--ds-icon);
 }
 
 /* The drawer is drawn at 1:1 for touch; on a pointer device it shrinks with
@@ -2935,9 +2851,11 @@
 }
 
 /* Scrubbing along the bar, each next tip is already there: only the first
-   one waits and fades in. */
+   one waits and fades in. A zero duration, not `animation: none`: the tip
+   being left gets `data-instant` mid-fade, and removing its animation aborts
+   it, which Base UI never treats as finished — the tip stays up for good. */
 .wb-tip[data-instant] {
-  animation: none;
+  animation-duration: 0s;
 }
 
 .wb-tip [data-slot='kbd'] {

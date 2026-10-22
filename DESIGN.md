@@ -630,6 +630,12 @@ components:
 
 # Dub Design System
 
+> **Superseded for the app chrome (2026-10-22).** The app's colour, radius,
+> shadow and type roles now point at the Atlassian Design System tokens in
+> `client/src/atlassian-tokens.css` (generated from `@atlaskit/tokens`), mapped
+> in `client/src/index.css` section 1. The Dub values below describe the
+> previous look; the commit before this change restores it.
+
 ## Overview
 
 Dub is a link attribution platform (short links, conversion analytics, affiliate programs). Its interface is **quiet, precise, and utilitarian** — a monochrome, Vercel/Linear‑school aesthetic where content and data carry the color, and chrome stays out of the way. The UI should feel like a fast developer tool that marketers also enjoy: dense but never cramped, calm, and trustworthy.
