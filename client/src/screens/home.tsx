@@ -6,10 +6,9 @@ import {
 } from 'react';
 import {
   ArrowDown,
-  ArrowRight,
-  ArrowUpDown,
   BarChart2,
   Check,
+  ChevronDown,
   LayoutGrid,
   Library,
   List,
@@ -29,7 +28,6 @@ import {
   boardRepository,
   fetchLiveBoardIds,
 } from '@/board/server-board-repository';
-import { BrandMark } from '@/components/brand-mark';
 import { BoardTitleDialog } from '@/components/board-title-dialog';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -50,13 +48,17 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Toaster, toast } from '@/components/ui/toast';
 import { cn } from '@/lib/utils';
 import { navigate } from '@/router';
 import {
   AccountMenu,
   DashboardShell,
+  FOCUS,
+  initials,
+  Lozenge,
+  markerFor,
+  NEUTRAL_BUTTON,
   NavItem,
   PageTitle,
 } from './dashboard-shell';
@@ -194,21 +196,6 @@ function splitName(name: string): { primary: string; secondary: string | null } 
     : { primary: name, secondary: null };
 }
 
-// The tutor's first name, in the tutor's own hand, with the right word for the
-// hour. "Tutor" is the signed-out fallback, not a name, so it greets bare.
-function greeting(name: string, hour: number): string {
-  const part =
-    hour < 5
-      ? 'Burning the midnight oil'
-      : hour < 12
-        ? 'Good morning'
-        : hour < 18
-          ? 'Good afternoon'
-          : 'Good evening';
-  const first = name === 'Tutor' ? '' : name.split(/\s+/)[0]!;
-  return first ? `${part}, ${first}` : part;
-}
-
 // "Amara is on one right now" — who, not how many, because the tutor knows
 // these students by name. Past two the count takes over.
 function liveClause(names: string[]): string {
@@ -219,7 +206,7 @@ function liveClause(names: string[]): string {
   return `${names[0]}, ${names[1]} and ${names.length - 2} more are on canvases right now`;
 }
 
-// The part of a name a search matched, set apart so it is clear why a tile is
+// The part of a name a search matched, set apart so it is clear why a card is
 // still here. Case-insensitive; only the first occurrence is marked.
 function Highlight({ text, query }: { text: string; query: string }) {
   const at = query ? text.toLocaleLowerCase().indexOf(query) : -1;
@@ -227,11 +214,34 @@ function Highlight({ text, query }: { text: string; query: string }) {
   return (
     <>
       {text.slice(0, at)}
-      <mark className="rounded-[3px] bg-[color-mix(in_srgb,var(--d-blue)_20%,transparent)] text-inherit">
+      <mark className="rounded-[var(--ds-radius-xsmall)] bg-[var(--ds-background-accent-yellow-subtler)] text-inherit">
         {text.slice(at, at + query.length)}
       </mark>
       {text.slice(at + query.length)}
     </>
+  );
+}
+
+// A section heading over its group: the name, then a neutral count badge.
+// "Live now" carries the pulsing dot, the one moving thing on the page.
+function GroupHeading({ label, count }: { label: string; count: number }) {
+  const live = label === LIVE_GROUP;
+  return (
+    <h2 className="flex items-center gap-2 text-(length:--d-fs-body) leading-5 font-semibold text-[var(--ds-text)]">
+      {live ? (
+        <span
+          aria-hidden="true"
+          className="d-pulse size-2 rounded-full bg-[var(--ds-icon-success)] text-[var(--ds-icon-success)]"
+        />
+      ) : null}
+      {label}
+      {/* A letter's count is noise; a day's is a headcount. */}
+      {label.length === 1 || label === '#' ? null : (
+        <span className="rounded-full bg-[var(--ds-background-neutral)] px-1.5 text-(length:--d-fs-caption) leading-4 font-medium tabular-nums">
+          {count}
+        </span>
+      )}
+    </h2>
   );
 }
 
@@ -274,6 +284,8 @@ function isTypingTarget(target: EventTarget | null): boolean {
   );
 }
 
+// The top nav's search: a 32px field that grows to 780px, with the shortcut
+// hint where the clear button takes over once there is something to clear.
 function BoardSearch({
   inputRef,
   value,
@@ -284,9 +296,9 @@ function BoardSearch({
   onChange: (value: string) => void;
 }) {
   return (
-    <search className="relative min-w-0 flex-1 xl:w-72 xl:flex-none">
+    <search className="relative min-w-0 max-w-[780px] flex-1">
       <Search
-        className="pointer-events-none absolute top-1/2 left-4 size-4 -translate-y-1/2 text-[var(--d-pencil)]"
+        className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-[var(--ds-icon-subtle)]"
         aria-hidden="true"
       />
       <input
@@ -300,10 +312,10 @@ function BoardSearch({
             onChange('');
           }
         }}
-        placeholder="Find a student"
+        placeholder="Search students"
         aria-label="Search canvases"
         aria-keyshortcuts="Meta+K Control+K"
-        className="h-11 w-full rounded-full bg-[var(--d-well)] pr-12 pl-11 text-[14px] text-[var(--d-ink)] ring-1 ring-transparent outline-none transition-[box-shadow,background-color] duration-150 placeholder:text-[var(--d-pencil)] hover:ring-[var(--d-rule)] focus-visible:bg-[var(--d-sheet)] focus-visible:ring-2 focus-visible:ring-[var(--d-blue)] [&::-webkit-search-cancel-button]:hidden"
+        className="h-8 w-full rounded-[var(--ds-radius-medium)] border border-[var(--ds-border-input)] bg-[var(--ds-background-input)] pr-14 pl-9 text-(length:--d-fs-body) text-[var(--ds-text)] outline-none transition-colors placeholder:text-[var(--ds-text-subtlest)] hover:bg-[var(--ds-background-input-hovered)] focus-visible:border-[var(--ds-border-focused)] focus-visible:bg-[var(--ds-background-input)] focus-visible:ring-1 focus-visible:ring-[var(--ds-border-focused)] [&::-webkit-search-cancel-button]:hidden"
       />
       {value ? (
         <button
@@ -313,12 +325,15 @@ function BoardSearch({
             onChange('');
             inputRef.current?.focus();
           }}
-          className="absolute top-1/2 right-2 flex size-7 -translate-y-1/2 items-center justify-center rounded-full text-[var(--d-pencil)] transition-colors hover:bg-[var(--d-hover)] hover:text-[var(--d-ink)]"
+          className={cn(
+            'absolute top-1/2 right-1 flex size-6 -translate-y-1/2 items-center justify-center rounded-[var(--ds-radius-small)] text-[var(--ds-icon-subtle)] transition-colors hover:bg-[var(--ds-background-neutral-subtle-hovered)] hover:text-[var(--ds-icon)]',
+            FOCUS,
+          )}
         >
           <X className="size-3.5" />
         </button>
       ) : (
-        <Kbd className="absolute top-1/2 right-3 hidden -translate-y-1/2 bg-[var(--d-sheet)] md:inline-flex">
+        <Kbd className="absolute top-1/2 right-2 hidden -translate-y-1/2 md:inline-flex">
           {FIND_KEYS}
         </Kbd>
       )}
@@ -327,7 +342,7 @@ function BoardSearch({
 }
 
 const CARD_GRID =
-  'grid grid-cols-[repeat(auto-fill,minmax(16rem,1fr))] gap-3';
+  'grid grid-cols-[repeat(auto-fill,minmax(18rem,1fr))] gap-4';
 
 export function Home() {
   const [auth, setAuth] = useState<AuthState | null>(null);
@@ -348,19 +363,7 @@ export function Home() {
   const [liveIds, setLiveIds] = useState<Set<string>>(new Set());
   const searchRef = useRef<HTMLInputElement>(null);
   const importRef = useRef<HTMLInputElement>(null);
-  // True until the first library has been on screen long enough to have
-  // settled in; only then do tiles stop carrying the entrance animation.
-  const intro = useRef(true);
-  const [hour] = useState(() => new Date().getHours());
   const ready = auth?.authenticated === true && boards !== null;
-
-  useEffect(() => {
-    if (!ready) return;
-    const timer = setTimeout(() => {
-      intro.current = false;
-    }, 1200);
-    return () => clearTimeout(timer);
-  }, [ready]);
 
   // A student joining shows on the tab itself, for when this page is behind
   // the board the tutor is teaching on.
@@ -714,7 +717,7 @@ export function Home() {
     );
   };
 
-  const renderCard = (board: BoardMeta, group: string, index: number) => {
+  const renderCard = (board: BoardMeta, group: string) => {
     const selected = selectedBoardIds.has(board.id);
     const favorite = board.favorite === true;
     const live = liveIds.has(board.id);
@@ -726,75 +729,77 @@ export function Home() {
       <li
         key={board.id}
         data-selected={selected || undefined}
-        style={{ '--i': index } as React.CSSProperties}
         className={cn(
-          // No outline at rest: a soft fill is enough to read as a tile, and a
-          // grid of hairline boxes is the noisiest thing a list can be. --tile
-          // is the fill, so the floating controls can sit on the same colour.
-          // Pressing the tile (not its star or menu) sinks it a hair.
-          'group relative flex items-center rounded-[14px] bg-[var(--tile)] px-4 py-3.5 transition-[box-shadow,background-color,transform] duration-200 has-[a:active]:scale-[0.985]',
-          intro.current && 'd-rise',
+          // Atlassian's raised card: raised surface, 1px border, raised shadow,
+          // and a hovered/pressed surface step. Selection swaps in the selected
+          // fill and border; it never changes the card's size.
+          'group relative flex min-h-[72px] items-center gap-3 rounded-[var(--ds-radius-large)] border px-4 py-3 shadow-[var(--ds-shadow-raised)] transition-colors duration-100',
           selected
-            ? '[--tile:var(--d-blue-wash)] ring-2 ring-[var(--d-blue)]'
-            : live
-              ? '[--tile:var(--d-live-wash)] hover:ring-1 hover:ring-[color-mix(in_srgb,var(--d-live)_35%,transparent)]'
-              : '[--tile:var(--d-well)] hover:shadow-[var(--d-lift)] hover:ring-1 hover:ring-[var(--d-rule)] hover:[--tile:var(--d-sheet)]',
+            ? 'border-[var(--ds-border-selected)] bg-[var(--ds-background-selected)]'
+            : 'border-[var(--ds-border)] bg-[var(--ds-surface-raised)] hover:bg-[var(--ds-surface-raised-hovered)] has-[a:active]:bg-[var(--ds-surface-raised-pressed)]',
         )}
       >
+        <span
+          aria-hidden="true"
+          className="flex size-8 shrink-0 items-center justify-center rounded-full text-(length:--d-fs-caption) font-semibold text-[var(--ds-text-inverse)]"
+          style={{ backgroundColor: markerFor(primary) }}
+        >
+          {initials(primary, '?')}
+        </span>
+
         <div className="flex min-w-0 flex-1 flex-col">
           <a
             href={boardHref(board.id)}
             onClick={(e) => openBoardLink(e, board.id)}
             title={board.name}
-            className="flex items-center gap-2 truncate text-[14.5px] leading-5 font-semibold text-[var(--d-ink)] outline-none after:absolute after:inset-0 after:rounded-[14px] focus-visible:after:ring-2 focus-visible:after:ring-[var(--d-blue)] focus-visible:after:ring-offset-2 focus-visible:after:ring-offset-[var(--d-sheet)]"
+            className="truncate text-(length:--d-fs-body) leading-5 font-semibold text-[var(--ds-text)] outline-none after:absolute after:inset-0 after:rounded-[var(--ds-radius-large)] focus-visible:after:ring-2 focus-visible:after:ring-[var(--ds-border-focused)] focus-visible:after:ring-offset-2 focus-visible:after:ring-offset-[var(--ds-surface)]"
           >
-            <span className="truncate">
-              <Highlight text={primary} query={query} />
-            </span>
+            <Highlight text={primary} query={query} />
           </a>
-          <div className="mt-0.5 flex items-baseline gap-2 text-[13px] leading-5">
+          <p className="flex min-w-0 items-center gap-1 text-(length:--d-fs-caption) leading-4 text-[var(--ds-text-subtle)]">
             {secondary ? (
-              <span className="truncate text-[var(--d-graphite)]">
-                <Highlight text={secondary} query={query} />
-              </span>
+              <>
+                <span className="truncate">
+                  <Highlight text={secondary} query={query} />
+                </span>
+                <span aria-hidden="true">·</span>
+              </>
             ) : null}
             <time
               dateTime={new Date(shownAt).toISOString()}
               title={`Opened ${absoluteTimestamp(board.lastOpenedAt)}, created ${absoluteTimestamp(board.createdAt)}`}
-              className={cn(
-                'ml-auto shrink-0 tabular-nums',
-                live
-                  ? 'inline-flex items-center gap-1 font-semibold text-[var(--d-live)]'
-                  : 'text-[var(--d-pencil)]',
-              )}
+              className="shrink-0 tabular-nums"
             >
-              {live ? (
-                <>
-                  Join
-                  <ArrowRight
-                    aria-hidden="true"
-                    className="size-3.5 transition-transform duration-200 group-hover:translate-x-0.5"
-                  />
-                </>
-              ) : (
-                stamp
-              )}
+              {stamp}
             </time>
-          </div>
+          </p>
         </div>
 
-        {/* Controls float over the card's right edge only when reached, so
-            the resting tile is just the mark, the name and the time. */}
+        {/* What the card says at rest: who is on it now, and whether it is kept. */}
+        {live && group !== LIVE_GROUP ? (
+          <Lozenge tone="success">
+            <span aria-hidden="true" className="d-pulse size-1.5 rounded-full bg-current" />
+            Live
+          </Lozenge>
+        ) : null}
+        {favorite ? (
+          <Star
+            aria-hidden="true"
+            className="size-4 shrink-0 fill-current text-[var(--d-star)]"
+          />
+        ) : null}
+
+        {/* Controls cover the right edge only when reached. */}
         <div
           className={cn(
-            'absolute top-2 right-2 z-10 flex items-center rounded-full',
-            (selecting || favorite) && 'bg-[var(--tile)]',
-            'group-hover:bg-[var(--d-sheet)] group-hover:shadow-[var(--d-lift)] has-[[aria-expanded=true]]:bg-[var(--d-sheet)]',
+            'absolute top-1/2 right-2 z-10 flex -translate-y-1/2 items-center rounded-[var(--ds-radius-medium)] bg-[var(--ds-surface-overlay)] shadow-[var(--ds-shadow-raised)]',
+            !selecting &&
+              'opacity-0 group-hover:opacity-100 focus-within:opacity-100 has-[[aria-expanded=true]]:opacity-100 [@media(any-pointer:coarse)]:opacity-100',
           )}
         >
           <div
             className={cn(
-              'flex size-7 items-center justify-center',
+              'flex size-8 items-center justify-center',
               !selecting && 'hidden group-hover:flex [@media(any-pointer:coarse)]:hidden',
             )}
           >
@@ -804,7 +809,7 @@ export function Home() {
               checked={selected}
               onCheckedChange={() => toggleSelectBoard(board.id)}
               aria-label={`Select ${board.name}`}
-              className="size-4 rounded-[5px]"
+              className="size-4 rounded-[var(--ds-radius-xsmall)]"
             />
           </div>
           <Button
@@ -814,32 +819,13 @@ export function Home() {
             aria-pressed={favorite}
             onClick={() => toggleFavorite(board)}
             className={cn(
-              'size-7 rounded-full',
-              favorite
-                ? 'text-[var(--d-star)]'
-                : cn(
-                    REVEAL,
-                    'text-[var(--d-pencil)] hover:text-[var(--d-ink)] [@media(any-pointer:coarse)]:hidden',
-                  ),
+              'text-[var(--ds-icon-subtle)] hover:text-[var(--ds-icon)] [@media(any-pointer:coarse)]:hidden',
+              favorite && 'text-[var(--d-star)] hover:text-[var(--d-star)]',
             )}
           >
-            <Star
-                fill={favorite ? 'currentColor' : 'none'}
-                // Starring overshoots and settles; unstarring just relaxes.
-                // A transition, not a keyframe, so it never replays on mount.
-                className={cn(
-                  'transition-transform duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)]',
-                  favorite ? 'scale-100' : 'scale-[0.85]',
-                )}
-              />
+            <Star fill={favorite ? 'currentColor' : 'none'} />
           </Button>
-          {boardMenu(
-            board,
-            cn(
-              'size-7 rounded-full text-[var(--d-pencil)] hover:text-[var(--d-ink)]',
-              REVEAL,
-            ),
-          )}
+          {boardMenu(board, 'text-[var(--ds-icon-subtle)] hover:text-[var(--ds-icon)]')}
         </div>
       </li>
     );
@@ -850,7 +836,6 @@ export function Home() {
   const renderRow = (board: BoardMeta) => {
     const selected = selectedBoardIds.has(board.id);
     const favorite = board.favorite === true;
-    const live = liveIds.has(board.id);
     const { primary, secondary } = splitName(board.name);
     const dateCell = (ts: number, label: string) => (
       <time
@@ -865,7 +850,7 @@ export function Home() {
       <TableRow
         key={board.id}
         data-state={selected ? 'selected' : undefined}
-        className="group relative border-[var(--d-rule-soft)] hover:bg-[var(--d-hover)] data-[state=selected]:bg-[var(--d-blue-wash)]"
+        className="group relative border-[var(--ds-border)] hover:bg-[var(--ds-background-neutral-subtle-hovered)] data-[state=selected]:bg-[var(--ds-background-selected)]"
       >
         <TableCell className="w-10 pr-0 pl-3">
           <Checkbox
@@ -873,24 +858,25 @@ export function Home() {
             onCheckedChange={() => toggleSelectBoard(board.id)}
             aria-label={`Select ${board.name}`}
             className={cn(
-              'relative z-10 size-4 rounded-[5px]',
+              'relative z-10 size-4 rounded-[var(--ds-radius-xsmall)]',
               !selecting && REVEAL,
             )}
           />
         </TableCell>
-        <TableCell className="w-full max-w-0 py-3">
+        <TableCell className="w-full max-w-0 py-2">
           <a
             href={boardHref(board.id)}
             onClick={(e) => openBoardLink(e, board.id)}
             title={board.name}
-            className="flex items-center gap-2.5 text-(length:--d-fs-body) font-semibold text-[var(--d-ink)] outline-none after:absolute after:inset-0 focus-visible:after:ring-2 focus-visible:after:ring-[var(--d-blue)] focus-visible:after:ring-inset"
+            className="flex items-center gap-3 text-(length:--d-fs-body) font-semibold text-[var(--ds-text)] outline-none after:absolute after:inset-0 focus-visible:after:ring-2 focus-visible:after:ring-[var(--ds-border-focused)] focus-visible:after:ring-inset"
           >
-            {live ? (
-              <span
-                aria-hidden="true"
-                className="d-pulse size-2 shrink-0 rounded-full bg-[var(--d-live)] text-[var(--d-live)]"
-              />
-            ) : null}
+            <span
+              aria-hidden="true"
+              className="flex size-6 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold text-[var(--ds-text-inverse)]"
+              style={{ backgroundColor: markerFor(primary) }}
+            >
+              {initials(primary, '?')}
+            </span>
             <span className="truncate">
               <Highlight text={primary} query={query} />
             </span>
@@ -898,17 +884,13 @@ export function Home() {
         </TableCell>
         <TableCell className="hidden max-w-56 truncate sm:table-cell">
           {secondary ?? (
-            <span className="text-[var(--d-pencil)]" aria-hidden="true">
+            <span className="text-[var(--ds-text-subtlest)]" aria-hidden="true">
               –
             </span>
           )}
         </TableCell>
         <TableCell className="tabular-nums">
-          {live ? (
-            <span className="font-semibold text-[var(--d-live)]">Join</span>
-          ) : (
-            dateCell(board.lastOpenedAt, 'Opened')
-          )}
+          {dateCell(board.lastOpenedAt, 'Opened')}
         </TableCell>
         <TableCell className="hidden tabular-nums md:table-cell">
           {dateCell(board.updatedAt, 'Edited')}
@@ -930,28 +912,16 @@ export function Home() {
               aria-pressed={favorite}
               onClick={() => toggleFavorite(board)}
               className={cn(
-                'size-7 rounded-full',
                 favorite
-                  ? 'text-[var(--d-star)]'
-                  : cn(REVEAL, 'text-[var(--d-pencil)] hover:text-[var(--d-ink)]'),
+                  ? 'text-[var(--d-star)] hover:text-[var(--d-star)]'
+                  : cn(REVEAL, 'text-[var(--ds-icon-subtle)] hover:text-[var(--ds-icon)]'),
               )}
             >
-              <Star
-                fill={favorite ? 'currentColor' : 'none'}
-                // Starring overshoots and settles; unstarring just relaxes.
-                // A transition, not a keyframe, so it never replays on mount.
-                className={cn(
-                  'transition-transform duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)]',
-                  favorite ? 'scale-100' : 'scale-[0.85]',
-                )}
-              />
+              <Star fill={favorite ? 'currentColor' : 'none'} />
             </Button>
             {boardMenu(
               board,
-              cn(
-                'size-7 rounded-full text-[var(--d-pencil)] hover:text-[var(--d-ink)]',
-                REVEAL,
-              ),
+              cn('text-[var(--ds-icon-subtle)] hover:text-[var(--ds-icon)]', REVEAL),
             )}
           </div>
         </TableCell>
@@ -974,8 +944,9 @@ export function Home() {
           type="button"
           onClick={() => setSortMode(mode)}
           className={cn(
-            'inline-flex h-7 items-center gap-1 rounded-full px-2 transition-colors hover:bg-[var(--d-hover)] hover:text-[var(--d-ink)] focus-visible:ring-2 focus-visible:ring-[var(--d-blue)] focus-visible:outline-none',
-            active && 'text-[var(--d-ink)]',
+            'inline-flex h-6 items-center gap-1 rounded-[var(--ds-radius-small)] px-1 transition-colors hover:bg-[var(--ds-background-neutral-subtle-hovered)] hover:text-[var(--ds-text)]',
+            FOCUS,
+            active && 'text-[var(--ds-text)]',
           )}
         >
           {label}
@@ -990,10 +961,10 @@ export function Home() {
 
   const COLUMN_COUNT = 7;
   const listView = (
-    // The primitive's cells carry the board's own type and colour; on this page
-    // they take the dashboard's, which needs the descendant selectors to win.
-    <Table className="[&_td]:text-(length:--d-fs-meta) [&_td]:text-[var(--d-graphite)]">
-      <TableHeader className="border-[var(--d-rule)] bg-transparent [&_th]:text-[var(--d-pencil)] [&_tr]:border-[var(--d-rule)]">
+    // Atlassian's dynamic table: a 2px rule under 12px semibold subtle heads,
+    // a 1px rule between rows, and a hovered fill on the row under the pointer.
+    <Table className="[&_td]:text-(length:--d-fs-body) [&_td]:text-[var(--ds-text)]">
+      <TableHeader className="bg-transparent [&_th]:text-(length:--d-fs-caption) [&_th]:font-semibold [&_th]:text-[var(--ds-text-subtle)] [&_tr]:border-b-2 [&_tr]:border-[var(--ds-border)]">
         <TableRow className="hover:bg-transparent">
           <TableHead className="w-10 pr-0 pl-3">
             <Checkbox
@@ -1007,13 +978,11 @@ export function Home() {
               }
               onCheckedChange={toggleSelectAll}
               aria-label="Select all canvases"
-              className="size-4 rounded-[5px]"
+              className="size-4 rounded-[var(--ds-radius-xsmall)]"
             />
           </TableHead>
           {sortHead('name', 'Student')}
-          <TableHead className="hidden h-10 sm:table-cell">
-            Details
-          </TableHead>
+          <TableHead className="hidden h-10 sm:table-cell">Details</TableHead>
           {sortHead('activity', 'Last opened')}
           {sortHead('edited', 'Last edited', 'hidden md:table-cell')}
           {sortHead('created', 'Created', 'hidden lg:table-cell')}
@@ -1029,27 +998,9 @@ export function Home() {
             <th
               scope="rowgroup"
               colSpan={COLUMN_COUNT}
-              className={cn(
-                'pt-7 pr-4 pb-2 pl-3 text-left text-(length:--d-fs-meta) font-medium',
-                group.label === LIVE_GROUP
-                  ? 'font-semibold text-[var(--d-live)]'
-                  : 'text-[var(--d-graphite)]',
-              )}
+              className="pt-6 pr-4 pb-2 pl-3 text-left"
             >
-              <span className="flex items-center gap-2">
-                {group.label === LIVE_GROUP ? (
-                  <span
-                    aria-hidden="true"
-                    className="d-pulse size-2 rounded-full bg-current"
-                  />
-                ) : null}
-                {group.label}
-                {sortMode === 'name' && group.label !== LIVE_GROUP ? null : (
-                  <span className="font-normal tabular-nums text-[var(--d-pencil)]">
-                    {group.boards.length}
-                  </span>
-                )}
-              </span>
+              <GroupHeading label={group.label} count={group.boards.length} />
             </th>
           </TableRow>
           {group.boards.map(renderRow)}
@@ -1058,16 +1009,14 @@ export function Home() {
     </Table>
   );
 
-  const outlineButton =
-    'h-11 rounded-full border-0 bg-[var(--d-sheet)] px-5 text-[14px] font-medium text-[var(--d-ink)] ring-1 ring-[var(--d-rule)] hover:bg-[var(--d-hover)]';
-
   const emptyState = isFiltered
     ? {
-        line: `No one called “${searchQuery.trim()}”`,
+        header: `No canvases match “${searchQuery.trim()}”`,
+        body: 'Check the spelling, or try another name.',
         action: (
           <Button
-            variant="outline"
-            className={outlineButton}
+            variant="subtle"
+            className={NEUTRAL_BUTTON}
             onClick={() => {
               setSearchQuery('');
               searchRef.current?.focus();
@@ -1079,11 +1028,12 @@ export function Home() {
       }
     : activeView === 'favorites'
       ? {
-          line: 'Star a canvas to keep it here',
+          header: 'No favorites yet',
+          body: 'Star a canvas to keep it close.',
           action: (
             <Button
-              variant="outline"
-              className={outlineButton}
+              variant="subtle"
+              className={NEUTRAL_BUTTON}
               onClick={() => showView('all')}
             >
               Browse canvases
@@ -1091,13 +1041,11 @@ export function Home() {
           ),
         }
       : {
-          line: 'Your first student starts here',
+          header: 'Create your first canvas',
+          body: 'Canvases you create appear here, ready to share with a student.',
           action: (
-            <Button
-              className="h-11 rounded-full bg-[var(--d-ink)] px-5 text-[14px] font-medium text-[var(--d-sheet)] hover:bg-[color-mix(in_srgb,var(--d-ink)_86%,var(--d-sheet))]"
-              onClick={() => setTitleDialog({ mode: 'create' })}
-            >
-              <Plus data-icon="inline-start" className="size-4" />
+            <Button onClick={() => setTitleDialog({ mode: 'create' })}>
+              <Plus data-icon="inline-start" />
               New canvas
             </Button>
           ),
@@ -1109,11 +1057,11 @@ export function Home() {
     .filter((b) => liveIds.has(b.id))
     .map((b) => splitName(b.name).primary);
   const summary = loading
-    ? ' '
+    ? ' '
     : isFiltered
       ? `${filteredBoards.length.toLocaleString()} of ${viewBoards.length.toLocaleString()} match`
     : activeView === 'favorites'
-      ? `${plural(favoriteCount, 'canvas', 'canvases')} you keep close`
+      ? plural(favoriteCount, 'canvas', 'canvases')
       : liveNames.length > 0
         ? `${plural(allBoards.length, 'canvas', 'canvases')}, and ${liveClause(liveNames)}`
         : plural(allBoards.length, 'canvas', 'canvases');
@@ -1122,35 +1070,31 @@ export function Home() {
     <div
       role="toolbar"
       aria-label="Selected canvases"
-      className="flex items-center gap-1 rounded-full bg-[var(--d-ink)] p-1.5 pl-2 text-[14px] text-[var(--d-sheet)] shadow-[0_16px_40px_-12px_rgb(0_0_0/0.45)]"
+      className="flex items-center gap-2 rounded-[var(--ds-radius-large)] border border-[var(--ds-border)] bg-[var(--ds-surface-overlay)] p-2 shadow-[var(--ds-shadow-overlay)]"
     >
-      <button
-        type="button"
+      <Button
+        variant="ghost"
+        size="icon-sm"
         aria-label="Clear selection"
         onClick={() => setSelectedBoardIds(new Set())}
-        className="flex size-8 items-center justify-center rounded-full opacity-70 transition hover:bg-[color-mix(in_srgb,var(--d-sheet)_14%,transparent)] hover:opacity-100"
+        className="text-[var(--ds-icon-subtle)] hover:text-[var(--ds-icon)]"
       >
-        <X className="size-4" />
-      </button>
-      <span className="mr-auto pr-4 pl-1 tabular-nums">
+        <X />
+      </Button>
+      <span className="mr-auto pr-2 text-(length:--d-fs-body) font-medium tabular-nums">
         {selectedBoardIds.size} selected
       </span>
-      <button
-        type="button"
-        onClick={favoriteSelected}
-        className="flex h-8 items-center gap-2 rounded-full px-3.5 font-medium transition hover:bg-[color-mix(in_srgb,var(--d-sheet)_14%,transparent)]"
-      >
-        <Star className="size-4" />
+      <Button variant="subtle" className={NEUTRAL_BUTTON} onClick={favoriteSelected}>
+        <Star data-icon="inline-start" />
         Favorite
-      </button>
-      <button
-        type="button"
+      </Button>
+      <Button
         onClick={removeSelected}
-        className="flex h-8 items-center gap-2 rounded-full bg-[var(--d-danger)] px-3.5 font-medium text-white transition hover:brightness-110"
+        className="border-transparent bg-[var(--ds-background-danger-bold)] text-[var(--ds-text-inverse)] hover:border-transparent hover:bg-[var(--ds-background-danger-bold-hovered)] active:bg-[var(--ds-background-danger-bold-pressed)]"
       >
-        <Trash2 className="size-4" />
+        <Trash2 data-icon="inline-start" />
         Delete
-      </button>
+      </Button>
     </div>
   ) : null;
 
@@ -1163,6 +1107,25 @@ export function Home() {
       mainId="board-library"
       busy={loading}
       account={account}
+      topNavMiddle={
+        <>
+          <BoardSearch
+            inputRef={searchRef}
+            value={searchQuery}
+            onChange={setSearchQuery}
+          />
+          <Button
+            onClick={() => setTitleDialog({ mode: 'create' })}
+            aria-label="New canvas"
+            aria-keyshortcuts="C"
+            title="New canvas (C)"
+            className="shrink-0 px-3 max-sm:w-8 max-sm:px-0"
+          >
+            <Plus data-icon="inline-start" className="max-sm:m-0" />
+            <span className="max-sm:hidden">New canvas</span>
+          </Button>
+        </>
+      }
       nav={
         <>
           <NavItem
@@ -1189,202 +1152,181 @@ export function Home() {
     >
       <a
         href="#canvas-list"
-        className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-50 focus:rounded-full focus:bg-[var(--d-ink)] focus:px-4 focus:py-2 focus:text-sm focus:text-[var(--d-sheet)]"
+        className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-50 focus:rounded-[var(--ds-radius-medium)] focus:bg-[var(--ds-background-neutral-bold)] focus:px-3 focus:py-2 focus:text-sm focus:text-[var(--ds-text-inverse)]"
       >
         Skip to canvases
       </a>
 
-      {/* The rail's job on a phone: brand and account, above the title. */}
-      <div className="flex items-center justify-between px-5 pt-4 md:hidden">
-        <BrandMark className="size-7 rounded-lg" />
-        {auth ? (
-          <AccountMenu name={accountName} onLogout={signOut} compact />
-        ) : null}
-      </div>
+      <input
+        ref={importRef}
+        type="file"
+        accept=".board"
+        hidden
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          event.target.value = '';
+          if (file) void importBoardFile(file);
+        }}
+      />
 
       <PageTitle
+        breadcrumbs={['Library']}
         title={activeView === 'favorites' ? 'Favorites' : 'Canvases'}
-        eyebrow={auth ? greeting(accountName, hour) : undefined}
         detail={summary}
         actions={
-          <div className="flex w-full items-center gap-2 xl:w-auto">
-            <BoardSearch
-              inputRef={searchRef}
-              value={searchQuery}
-              onChange={setSearchQuery}
-            />
-            <ToggleGroup
-              aria-label="Layout"
-              value={[layout]}
-              onValueChange={(values) =>
-                values[0] && changeLayout(values[0] as LibraryLayout)
-              }
-              className="hidden h-11 shrink-0 rounded-full bg-[var(--d-well)] p-1 sm:flex [&>span]:rounded-full [&>span]:bg-[var(--d-sheet)]"
-            >
-              {(
-                [
-                  ['grid', 'Grid', LayoutGrid],
-                  ['list', 'List', List],
-                ] as const
-              ).map(([value, label, Icon]) => (
-                <ToggleGroupItem
-                  key={value}
-                  value={value}
-                  aria-label={`${label} view`}
-                  className="h-9 w-10 rounded-full text-[var(--d-pencil)] aria-pressed:text-[var(--d-ink)]"
-                >
-                  <Icon className="size-4" />
-                </ToggleGroupItem>
-              ))}
-            </ToggleGroup>
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <Button
-                    variant="ghost"
-                    aria-label={`Sort by ${SORT_LABELS[sortMode].toLowerCase()}`}
-                    className="h-11 shrink-0 gap-2 rounded-full px-4 text-[14px] font-normal text-[var(--d-graphite)] hover:bg-[var(--d-hover)] hover:text-[var(--d-ink)] aria-expanded:bg-[var(--d-press)]"
-                  >
-                    <ArrowUpDown className="size-4" />
-                    <span className="hidden xl:inline">
-                      {SORT_LABELS[sortMode]}
-                    </span>
-                  </Button>
-                }
-              />
-              <DropdownMenuContent align="end" className="w-44">
-                {(Object.keys(SORT_LABELS) as SortMode[]).map((mode) => (
-                  <DropdownMenuItem key={mode} onClick={() => setSortMode(mode)}>
-                    {SORT_LABELS[mode]}
-                    {sortMode === mode ? (
-                      <Check className="ml-auto size-4 text-[var(--d-blue)]" />
-                    ) : null}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <input
-              ref={importRef}
-              type="file"
-              accept=".board"
-              hidden
-              onChange={(event) => {
-                const file = event.target.files?.[0];
-                event.target.value = '';
-                if (file) void importBoardFile(file);
-              }}
-            />
-            <Button
-              variant="ghost"
-              aria-label="Import board file"
-              onClick={() => importRef.current?.click()}
-              className="h-11 shrink-0 gap-2 rounded-full px-4 text-[14px] font-normal text-[var(--d-graphite)] hover:bg-[var(--d-hover)] hover:text-[var(--d-ink)]"
-            >
-              <Upload className="size-4" />
-              <span className="hidden xl:inline">Import</span>
-            </Button>
-            <Button
-              onClick={() => setTitleDialog({ mode: 'create' })}
-              aria-label="New canvas"
-              className="h-11 shrink-0 gap-2 rounded-full bg-[var(--d-ink)] px-4 text-[14px] font-medium text-[var(--d-sheet)] hover:bg-[color-mix(in_srgb,var(--d-ink)_86%,var(--d-sheet))] sm:pr-3 sm:pl-5"
-            >
-              <Plus className="size-4 sm:hidden" />
-              <span className="hidden sm:inline">New canvas</span>
-              <Kbd className="hidden rounded-full bg-[color-mix(in_srgb,var(--d-sheet)_16%,transparent)] px-2 text-[var(--d-sheet)] md:inline-flex">
-                C
-              </Kbd>
-            </Button>
-          </div>
+          <Button
+            variant="subtle"
+            onClick={() => importRef.current?.click()}
+            className={NEUTRAL_BUTTON}
+          >
+            <Upload data-icon="inline-start" />
+            Import
+          </Button>
         }
       />
 
-      <div
-        id="canvas-list"
-        className="mx-auto flex w-full max-w-[1180px] flex-1 flex-col px-5 pt-8 pb-20 md:px-12 md:pt-12"
-      >
-        {/* Library switch for widths without the rail. */}
-        <div
-          role="group"
-          aria-label="Library"
-          className="mb-8 flex w-fit items-center gap-1 rounded-full bg-[var(--d-tray)] p-1 md:hidden"
-        >
+      {/* Tabs on the left, view controls on the right, one rule beneath. */}
+      <div className="mx-6 mt-4 flex flex-wrap items-end justify-between gap-x-4 gap-y-2 border-b border-[var(--ds-border)] md:mx-10">
+        <div role="tablist" aria-label="Library" className="flex gap-1">
           {(
             [
-              ['all', 'All'],
-              ['favorites', 'Favorites'],
+              ['all', 'All canvases', undefined],
+              ['favorites', 'Favorites', favoriteCount],
             ] as const
-          ).map(([view, label]) => (
+          ).map(([view, label, count]) => (
             <button
               key={view}
               type="button"
-              aria-pressed={activeView === view}
+              role="tab"
+              id={`tab-${view}`}
+              aria-selected={activeView === view}
+              aria-controls="canvas-list"
               onClick={() => showView(view)}
               className={cn(
-                'flex h-8 items-center rounded-full px-4 text-[14px] font-medium transition-colors',
+                '-mb-px flex h-10 items-center gap-2 border-b-2 px-3 text-(length:--d-fs-body) font-medium transition-colors',
+                FOCUS,
                 activeView === view
-                  ? 'bg-[var(--d-sheet)] text-[var(--d-ink)]'
-                  : 'text-[var(--d-graphite)] hover:text-[var(--d-ink)]',
+                  ? 'border-[var(--ds-border-selected)] text-[var(--ds-text-selected)]'
+                  : 'border-transparent text-[var(--ds-text-subtle)] hover:border-[var(--ds-border-bold)] hover:text-[var(--ds-text)]',
               )}
             >
               {label}
+              {count && !loading ? (
+                <span className="rounded-full bg-[var(--ds-background-neutral)] px-1.5 text-(length:--d-fs-caption) leading-4 font-medium tabular-nums text-[var(--ds-text)]">
+                  {count}
+                </span>
+              ) : null}
             </button>
           ))}
         </div>
 
+        <div className="flex items-center gap-2 pb-1.5">
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <Button
+                  variant="subtle"
+                  aria-label={`Sort by ${SORT_LABELS[sortMode].toLowerCase()}`}
+                  className={cn(NEUTRAL_BUTTON, 'gap-1 pr-2')}
+                >
+                  <span className="font-normal text-[var(--ds-text-subtle)]">
+                    Sort
+                  </span>
+                  {SORT_LABELS[sortMode]}
+                  <ChevronDown data-icon="inline-end" />
+                </Button>
+              }
+            />
+            <DropdownMenuContent align="end" className="w-44">
+              {(Object.keys(SORT_LABELS) as SortMode[]).map((mode) => (
+                <DropdownMenuItem key={mode} onClick={() => setSortMode(mode)}>
+                  {SORT_LABELS[mode]}
+                  {sortMode === mode ? (
+                    <Check className="ml-auto size-4 text-[var(--ds-icon-selected)]" />
+                  ) : null}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          <div
+            role="group"
+            aria-label="Layout"
+            className="hidden items-center gap-px rounded-[var(--ds-radius-medium)] bg-[var(--ds-background-neutral)] p-px sm:flex"
+          >
+            {(
+              [
+                ['grid', 'Grid', LayoutGrid],
+                ['list', 'List', List],
+              ] as const
+            ).map(([value, label, Icon]) => (
+              <button
+                key={value}
+                type="button"
+                aria-pressed={layout === value}
+                aria-label={`${label} view`}
+                onClick={() => changeLayout(value)}
+                className={cn(
+                  'flex size-[30px] items-center justify-center rounded-[calc(var(--ds-radius-medium)-1px)] transition-colors',
+                  FOCUS,
+                  layout === value
+                    ? 'bg-[var(--ds-background-selected-bold)] text-[var(--ds-text-inverse)] hover:bg-[var(--ds-background-selected-bold-hovered)]'
+                    : 'text-[var(--ds-icon)] hover:bg-[var(--ds-background-neutral-hovered)]',
+                )}
+              >
+                <Icon className="size-4" />
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div
+        id="canvas-list"
+        role="tabpanel"
+        aria-labelledby={`tab-${activeView}`}
+        className="flex w-full flex-1 flex-col px-6 pt-6 pb-20 md:px-10"
+      >
         <section aria-label="Canvases" className="flex-1">
           {loading ? (
             <ul className={CARD_GRID}>
               {[0, 1, 2, 3, 4, 5].map((i) => (
                 <li
                   key={i}
-                  className="flex items-center rounded-[14px] bg-[var(--d-well)] px-4 py-4"
+                  className="flex min-h-[72px] items-center gap-3 rounded-[var(--ds-radius-large)] border border-[var(--ds-border)] bg-[var(--ds-surface-raised)] px-4 py-3 shadow-[var(--ds-shadow-raised)]"
                 >
-                  <div className="flex flex-1 flex-col gap-2.5">
-                    <Skeleton className="h-3.5 w-2/3 rounded-full" />
-                    <Skeleton className="h-3 w-1/3 rounded-full" />
+                  <Skeleton className="size-8 shrink-0 rounded-full" />
+                  <div className="flex flex-1 flex-col gap-2">
+                    <Skeleton className="h-3.5 w-2/3 rounded-[var(--ds-radius-small)]" />
+                    <Skeleton className="h-3 w-1/3 rounded-[var(--ds-radius-small)]" />
                   </div>
                 </li>
               ))}
             </ul>
           ) : filteredBoards.length === 0 ? (
-            <div className="d-dots flex min-h-72 flex-col items-center justify-center gap-5 rounded-[24px] px-6 py-12 text-center">
-              <p className="d-hand max-w-md text-[40px] leading-[1.05] font-semibold text-balance text-[var(--d-graphite)]">
-                {emptyState.line}
+            <div className="mx-auto flex max-w-sm flex-col items-center gap-2 py-16 text-center">
+              <h2 className="text-xl leading-6 font-bold text-balance text-[var(--ds-text)]">
+                {emptyState.header}
+              </h2>
+              <p className="text-(length:--d-fs-body) text-pretty text-[var(--ds-text-subtle)]">
+                {emptyState.body}
               </p>
-              {emptyState.action}
+              <div className="mt-4 flex gap-2">{emptyState.action}</div>
             </div>
           ) : layout === 'list' ? (
             listView
           ) : (
-            <div className="flex flex-col gap-10">
+            <div className="flex flex-col gap-8">
               {groups.map((group) => (
                 <section key={group.label} aria-label={group.label}>
-                  <h2
-                    className={cn(
-                      'mb-3.5 flex items-center gap-2 px-1 text-[13px] font-medium',
-                      group.label === LIVE_GROUP
-                        ? 'font-semibold text-[var(--d-live)]'
-                        : 'text-[var(--d-graphite)]',
-                    )}
-                  >
-                    {group.label === LIVE_GROUP ? (
-                      <span
-                        aria-hidden="true"
-                        className="d-pulse size-2 rounded-full bg-current"
-                      />
-                    ) : null}
-                    {group.label}
-                    {/* A letter's count is noise; a day's is a headcount. */}
-                    {sortMode === 'name' && group.label !== LIVE_GROUP ? null : (
-                      <span className="font-normal tabular-nums text-[var(--d-pencil)]">
-                        {group.boards.length}
-                      </span>
-                    )}
-                  </h2>
+                  <div className="mb-3">
+                    <GroupHeading
+                      label={group.label}
+                      count={group.boards.length}
+                    />
+                  </div>
                   <ul className={CARD_GRID}>
-                    {group.boards.map((board, i) =>
-                      renderCard(board, group.label, i),
-                    )}
+                    {group.boards.map((board) => renderCard(board, group.label))}
                   </ul>
                 </section>
               ))}

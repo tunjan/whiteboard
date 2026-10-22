@@ -7,7 +7,6 @@ import {
 } from 'react';
 import {
   AlertCircle,
-  ArrowLeft,
   BarChart2,
   ChevronRight,
   ExternalLink,
@@ -389,7 +388,7 @@ function Card({
       <div className="flex items-baseline justify-between gap-4 px-1">
         <h2
           id={id}
-          className="d-display text-(length:--d-fs-title) font-semibold text-[var(--d-ink)]"
+          className="text-(length:--d-fs-title) leading-5 font-semibold text-[var(--d-ink)]"
         >
           {title}
         </h2>
@@ -399,7 +398,7 @@ function Card({
           </span>
         ) : null}
       </div>
-      <div className="overflow-hidden rounded-[22px] bg-[var(--d-sheet)] ring-1 ring-[var(--d-rule)]">
+      <div className="overflow-hidden rounded-[var(--ds-radius-large)] border border-[var(--ds-border)] bg-[var(--ds-surface-raised)] shadow-[var(--ds-shadow-raised)]">
         {children}
       </div>
     </section>
@@ -509,7 +508,7 @@ function BoardDetail({ board, axis }: { board: AnalyticsBoard; axis: Axis }) {
       <div className={cn('flex flex-wrap items-center gap-x-4 gap-y-2 px-5', UNDER_NAME)}>
         <Button
           variant="outline"
-          className="h-9 gap-2 rounded-full border-0 bg-[var(--d-sheet)] px-4 text-(length:--d-fs-body) font-medium shadow-none ring-1 ring-[var(--d-rule)] hover:bg-[var(--d-hover)]"
+          className="gap-2 border-0 bg-[var(--ds-background-neutral)] font-medium text-[var(--ds-text)] hover:bg-[var(--ds-background-neutral-hovered)]"
           onClick={() => navigate(`/board/${encodeURIComponent(board.id)}`)}
         >
           <ExternalLink className="size-4 text-[var(--d-blue)]" />
@@ -599,7 +598,7 @@ function Summary({
   const strong = 'text-[var(--d-ink)] tabular-nums';
   return (
     <div className="flex flex-col gap-5">
-      <p className="d-display max-w-[24ch] text-(length:--d-fs-display) leading-[1.12] font-semibold text-balance text-[var(--d-graphite)]">
+      <p className="max-w-[40ch] text-(length:--d-fs-display) leading-7 font-bold text-balance text-[var(--d-graphite)]">
         {studentMinutes === 0 ? (
           <>No student time in {RANGE_PHRASE[range]}.</>
         ) : (
@@ -747,21 +746,8 @@ export function Analytics() {
         </>
       }
     >
-      <div className="flex items-center justify-between px-4 pt-4 md:hidden">
-        <Button
-          variant="ghost"
-          aria-label="Back to canvases"
-          onClick={() => navigate('/')}
-          className="size-10 rounded-full p-0 text-[var(--d-graphite)] hover:bg-[var(--d-hover)]"
-        >
-          <ArrowLeft className="size-5" />
-        </Button>
-        {auth ? (
-          <AccountMenu name={accountName} onLogout={signOut} compact />
-        ) : null}
-      </div>
-
       <PageTitle
+        breadcrumbs={['Library']}
         title="Attendance"
         detail={
           data ? (
@@ -774,7 +760,7 @@ export function Analytics() {
           <div
             role="group"
             aria-label="Date range"
-            className="flex items-center gap-1 rounded-full bg-[var(--d-tray)] p-1"
+            className="flex items-center gap-px rounded-[var(--ds-radius-medium)] bg-[var(--ds-background-neutral)] p-px"
           >
             {ANALYTICS_RANGES.map((days) => (
               <button
@@ -783,10 +769,10 @@ export function Analytics() {
                 aria-pressed={range === days}
                 onClick={() => chooseRange(days)}
                 className={cn(
-                  'flex h-9 items-center rounded-full px-4 text-(length:--d-fs-body) font-medium whitespace-nowrap transition-colors duration-150 outline-none focus-visible:ring-2 focus-visible:ring-[var(--d-blue)]',
+                  'flex h-[30px] items-center rounded-[calc(var(--ds-radius-medium)-1px)] px-3 text-(length:--d-fs-body) font-medium whitespace-nowrap transition-colors duration-100 outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focused)]',
                   range === days
-                    ? 'bg-[var(--d-sheet)] text-[var(--d-ink)]'
-                    : 'text-[var(--d-graphite)] hover:text-[var(--d-ink)]',
+                    ? 'bg-[var(--ds-background-selected-bold)] text-[var(--ds-text-inverse)] hover:bg-[var(--ds-background-selected-bold-hovered)]'
+                    : 'text-[var(--ds-text)] hover:bg-[var(--ds-background-neutral-hovered)]',
                 )}
               >
                 {RANGE_LABEL[days]}
@@ -796,12 +782,12 @@ export function Analytics() {
         }
       />
 
-      <div className="mx-auto flex w-full max-w-[1180px] flex-col gap-14 px-5 pt-10 pb-16 md:px-12 md:pt-14">
+      <div className="flex w-full flex-col gap-10 px-6 pt-8 pb-16 md:px-10">
         {error ? (
           <div
             role="alert"
             title={error}
-            className="flex items-center gap-3 rounded-[18px] bg-danger-bg px-5 py-4 text-(length:--d-fs-body) text-danger-fg"
+            className="flex items-center gap-3 rounded-[var(--ds-radius-large)] bg-danger-bg px-5 py-4 text-(length:--d-fs-body) text-danger-fg"
           >
             <AlertCircle className="size-4 shrink-0" />
             <span className="mr-auto">
@@ -819,7 +805,7 @@ export function Analytics() {
 
         <div
           className={cn(
-            'flex flex-col gap-14 transition-opacity duration-200 motion-reduce:transition-none',
+            'flex flex-col gap-10 transition-opacity duration-200 motion-reduce:transition-none',
             loading && data && 'opacity-50',
           )}
         >
@@ -837,8 +823,8 @@ export function Analytics() {
                 ))}
               </div>
             ) : active.length === 0 || !axis ? (
-              <div className="d-dots m-2 flex flex-col items-center gap-5 rounded-[18px] px-6 py-16 text-center">
-                <p className="d-hand text-(length:--d-fs-display) leading-[1.05] font-semibold text-balance text-[var(--d-graphite)]">
+              <div className="flex flex-col items-center gap-2 px-6 py-16 text-center">
+                <p className="text-xl leading-6 font-bold text-balance text-[var(--d-ink)]">
                   No visits in {RANGE_PHRASE[shownRange]}
                 </p>
                 <p className="max-w-sm text-(length:--d-fs-body) text-balance text-[var(--d-graphite)]">
@@ -847,7 +833,6 @@ export function Analytics() {
                 </p>
                 <Button
                   onClick={() => navigate('/')}
-                  className="h-11 rounded-full bg-[var(--d-ink)] px-5 text-(length:--d-fs-body) font-medium text-[var(--d-sheet)] hover:bg-[color-mix(in_srgb,var(--d-ink)_86%,var(--d-sheet))]"
                 >
                   Go to canvases
                 </Button>

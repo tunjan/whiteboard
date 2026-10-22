@@ -1,11 +1,12 @@
-import { type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
-import { BarChart2, ChevronsUpDown, LogOut, Moon, Sun } from 'lucide-react';
+import { type ReactNode, useState } from 'react';
+import { BarChart2, ChevronRight, LogOut, Menu, Moon, Sun } from 'lucide-react';
 import { BrandMark } from '@/components/brand-mark';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
@@ -15,82 +16,124 @@ import { navigate } from '@/router';
 import { useThemeStore } from '@/use-theme-store';
 import './dashboard.css';
 
-// The sheet is a whiteboard, and a whiteboard has a dot lattice. It is
-// invisible until a mouse is over the sheet, then wakes in a soft circle
-// around the pointer. Written straight to CSS variables: no React render per
-// move. Touch has no hover, so it never lights.
-function lightLattice(event: ReactPointerEvent<HTMLElement>) {
-  if (event.pointerType === 'touch') return;
-  const sheet = event.currentTarget;
-  const box = sheet.getBoundingClientRect();
-  sheet.style.setProperty('--mx', `${event.clientX - box.left}px`);
-  sheet.style.setProperty('--my', `${event.clientY - box.top}px`);
-  sheet.style.setProperty('--lit', '1');
-}
+/** Atlassian's focus treatment: a 2px `border.focused` ring, offset 2px. */
+export const FOCUS =
+  'outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focused)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ds-surface)]';
 
-function dimLattice(event: ReactPointerEvent<HTMLElement>) {
-  event.currentTarget.style.setProperty('--lit', '0');
-}
+/** The default (neutral) button: Atlassian's grey fill, no border. */
+export const NEUTRAL_BUTTON =
+  'bg-[var(--ds-background-neutral)] font-medium text-[var(--ds-text)] hover:bg-[var(--ds-background-neutral-hovered)] active:bg-[var(--ds-background-neutral-pressed)] aria-expanded:bg-[var(--ds-background-neutral-pressed)]';
 
 /**
- * The frame both tutor pages share: a porcelain tray with a quiet rail on the
- * left and one white sheet holding the page. Nothing on the rail competes with
- * the sheet — it is labels and a count, set in the tray's own tone.
+ * The page frame, after Atlassian's Nav 4 layout: a 56px top nav (logo, then
+ * search and Create in the middle, account at the end) over a side nav and a
+ * left-aligned main area. Below 1024px the side nav collapses into an overlay
+ * that the top nav's menu button opens, as the layout spec describes.
  */
 export function DashboardShell({
   nav,
   account,
+  topNavMiddle,
   children,
   mainId,
   busy,
 }: {
   nav: ReactNode;
   account: ReactNode | null;
+  /** Search and the create action: the top nav's middle slot. */
+  topNavMiddle?: ReactNode;
   children: ReactNode;
   mainId?: string;
   busy?: boolean;
 }) {
+  const [navOpen, setNavOpen] = useState(false);
+
   return (
-    <div className="flex h-dvh w-full bg-[var(--d-sheet)] font-sans text-[var(--d-ink)] antialiased md:bg-[var(--d-tray)] md:p-3 md:pl-0">
-      {/* Every leading glyph — brand mark, nav icons, avatar — shares one
-          centre line 19px in from the rail's padding edge. */}
-      <aside className="hidden w-60 shrink-0 flex-col px-3 pt-6 pb-3 md:flex">
-        <div className="flex h-9 items-center gap-2.5 px-[7px]">
-          <BrandMark className="size-6 rounded-[7px]" />
-          <span className="d-display text-[16px] font-semibold">
-            Whiteboard
-          </span>
+    <div className="flex h-dvh w-full flex-col bg-[var(--ds-surface)] font-sans text-(length:--d-fs-body) text-[var(--ds-text)] antialiased">
+      <header className="relative z-30 flex h-14 shrink-0 items-center gap-2 border-b border-[var(--ds-border)] bg-[var(--ds-surface)] px-3">
+        <div className="flex shrink-0 items-center gap-1 lg:w-[calc(15rem-1.5rem)]">
+          <button
+            type="button"
+            aria-label={navOpen ? 'Close navigation' : 'Open navigation'}
+            aria-expanded={navOpen}
+            onClick={() => setNavOpen((open) => !open)}
+            className={cn(
+              'flex size-8 items-center justify-center rounded-[var(--ds-radius-medium)] text-[var(--ds-icon)] hover:bg-[var(--ds-background-neutral-subtle-hovered)] active:bg-[var(--ds-background-neutral-subtle-pressed)] lg:hidden',
+              FOCUS,
+            )}
+          >
+            <Menu className="size-4" />
+          </button>
+          <a
+            href="/"
+            onClick={(event) => {
+              if (event.metaKey || event.ctrlKey || event.shiftKey) return;
+              event.preventDefault();
+              navigate('/');
+            }}
+            aria-label="Whiteboard home"
+            className={cn(
+              'flex h-8 items-center gap-2 rounded-[var(--ds-radius-medium)] px-1.5 hover:bg-[var(--ds-background-neutral-subtle-hovered)]',
+              FOCUS,
+            )}
+          >
+            <BrandMark className="size-6 rounded-[var(--ds-radius-small)]" />
+            <span className="hidden text-base font-semibold text-[var(--ds-text)] sm:inline">
+              Whiteboard
+            </span>
+          </a>
         </div>
 
-        <nav aria-label="Library" className="mt-8 flex flex-col gap-1">
-          {nav}
-        </nav>
-
-        <div className="mt-auto border-t border-[var(--d-rule)] pt-3">
-          {account ?? <Skeleton className="h-10 w-full rounded-xl" />}
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          {topNavMiddle}
         </div>
-      </aside>
 
-      <main
-        id={mainId}
-        aria-busy={busy}
-        onPointerMove={lightLattice}
-        onPointerLeave={dimLattice}
-        // The gutter is held so a list growing past the fold doesn't shift the
-        // sheet sideways; the thumb is a rule-coloured hairline, not a slab.
-        className="isolate flex min-w-0 flex-1 flex-col overflow-y-auto bg-[var(--d-sheet)] [scrollbar-color:var(--d-rule)_transparent] [scrollbar-gutter:stable] [scrollbar-width:thin] md:rounded-[22px] md:shadow-[var(--d-lift)] md:ring-1 md:ring-[var(--d-rule)]"
-      >
-        {/* Zero-height sticky anchor: the lattice stays put while the sheet
-            scrolls under it, and sits behind every tile and word. */}
-        <div aria-hidden="true" className="sticky top-0 h-0">
-          <div className="d-lattice absolute top-0 left-0 -z-10 h-dvh w-full" />
+        <div className="flex shrink-0 items-center gap-1">
+          {account ?? <Skeleton className="size-8 rounded-full" />}
         </div>
-        {children}
-      </main>
+      </header>
+
+      <div className="relative flex min-h-0 flex-1">
+        {navOpen ? (
+          <div
+            aria-hidden="true"
+            onClick={() => setNavOpen(false)}
+            className="fixed inset-x-0 top-14 bottom-0 z-30 bg-[var(--ds-blanket)] lg:hidden"
+          />
+        ) : null}
+
+        <aside
+          className={cn(
+            'z-40 flex w-60 shrink-0 flex-col border-r border-[var(--ds-border)] bg-[var(--ds-surface)] px-3 py-3',
+            'max-lg:fixed max-lg:top-14 max-lg:bottom-0 max-lg:left-0 max-lg:shadow-[var(--ds-shadow-overlay)] max-lg:transition-transform max-lg:duration-200 motion-reduce:max-lg:transition-none',
+            !navOpen && 'max-lg:-translate-x-full max-lg:invisible',
+          )}
+        >
+          <nav
+            aria-label="Library"
+            onClick={() => setNavOpen(false)}
+            className="flex flex-col gap-0.5"
+          >
+            {nav}
+          </nav>
+        </aside>
+
+        <main
+          id={mainId}
+          aria-busy={busy}
+          className="flex min-w-0 flex-1 flex-col overflow-y-auto bg-[var(--ds-surface)] [scrollbar-gutter:stable]"
+        >
+          {children}
+        </main>
+      </div>
     </div>
   );
 }
 
+/**
+ * A menu item in the side nav: 32px tall, icon then label, a count or status
+ * at the trailing edge. The selected item takes the selected fill, not a bar.
+ */
 export function NavItem({
   icon,
   label,
@@ -113,28 +156,61 @@ export function NavItem({
       onClick={onClick}
       aria-current={active ? 'page' : undefined}
       className={cn(
-        'flex h-9 w-full items-center gap-3 rounded-[10px] px-2.5 text-(length:--d-fs-body) transition-colors duration-150 outline-none focus-visible:ring-2 focus-visible:ring-[var(--d-blue)] [&_svg]:size-[18px] [&_svg]:shrink-0 [&_svg]:stroke-[1.6]',
+        'flex h-8 w-full items-center gap-3 rounded-[var(--ds-radius-medium)] px-3 text-(length:--d-fs-body) transition-colors duration-100 [&_svg]:size-4 [&_svg]:shrink-0',
+        FOCUS,
         active
-          ? 'bg-[var(--d-sheet)] font-medium text-[var(--d-ink)] [&_svg]:text-[var(--d-blue)]'
-          : 'text-[var(--d-graphite)] hover:bg-[var(--d-hover)] hover:text-[var(--d-ink)] [&_svg]:text-[var(--d-pencil)] hover:[&_svg]:text-[var(--d-graphite)]',
+          ? 'bg-[var(--ds-background-selected)] font-semibold text-[var(--ds-text-selected)] hover:bg-[var(--ds-background-selected-hovered)] active:bg-[var(--ds-background-selected-pressed)] [&_svg]:text-[var(--ds-icon-selected)]'
+          : 'text-[var(--ds-text)] hover:bg-[var(--ds-background-neutral-subtle-hovered)] active:bg-[var(--ds-background-neutral-subtle-pressed)] [&_svg]:text-[var(--ds-icon)]',
       )}
     >
       {icon}
       <span className="flex-1 truncate text-left">{label}</span>
       {live ? (
-        <span
-          aria-label={`${live} live`}
-          className="flex h-5 items-center gap-1.5 rounded-full bg-[var(--d-live-wash)] px-2 text-(length:--d-fs-caption) font-semibold tabular-nums text-[var(--d-live)]"
-        >
+        <Lozenge tone="success" label={`${live} live`}>
           <span aria-hidden="true" className="d-pulse size-1.5 rounded-full bg-current" />
           {live}
-        </span>
+        </Lozenge>
       ) : count ? (
-        <span className="text-(length:--d-fs-caption) tabular-nums text-[var(--d-pencil)]">
+        <span className="text-(length:--d-fs-caption) tabular-nums text-[var(--ds-text-subtlest)]">
           {count}
         </span>
       ) : null}
     </button>
+  );
+}
+
+const LOZENGE_TONES = {
+  success:
+    'bg-[var(--ds-background-success)] text-[var(--ds-text-success)]',
+  neutral: 'bg-[var(--ds-background-neutral)] text-[var(--ds-text)]',
+  information:
+    'bg-[var(--ds-background-information)] text-[var(--ds-text-information)]',
+} as const;
+
+/** Atlassian's lozenge: a compact semantic label, 4px radius, 12px semibold. */
+export function Lozenge({
+  tone,
+  label,
+  children,
+  className,
+}: {
+  tone: keyof typeof LOZENGE_TONES;
+  /** Spoken in place of the visible text, when that is only a glyph and count. */
+  label?: string;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <span
+      aria-label={label}
+      className={cn(
+        'inline-flex h-5 shrink-0 items-center gap-1.5 rounded-[var(--ds-radius-small)] px-1.5 text-(length:--d-fs-caption) leading-4 font-semibold tabular-nums',
+        LOZENGE_TONES[tone],
+        className,
+      )}
+    >
+      {children}
+    </span>
   );
 }
 
@@ -153,7 +229,7 @@ export function initials(name: string, fallback: string): string {
 
 const MARKERS = 5;
 
-/** A student's marker ink: the same name always writes in the same colour. */
+/** A student's avatar colour: the same name always gets the same accent. */
 export function markerFor(name: string): string {
   let hash = 0;
   for (const ch of name.trim().toLocaleLowerCase()) {
@@ -162,14 +238,13 @@ export function markerFor(name: string): string {
   return `var(--d-m${Math.abs(hash) % MARKERS})`;
 }
 
+/** The profile button at the end of the top nav, and the menu it opens. */
 export function AccountMenu({
   name,
   onLogout,
-  compact,
 }: {
   name: string;
   onLogout: () => void;
-  compact?: boolean;
 }) {
   const { theme, toggle: toggleTheme } = useThemeStore();
   return (
@@ -180,35 +255,24 @@ export function AccountMenu({
             type="button"
             aria-label={`Account menu for ${name}`}
             className={cn(
-              'flex items-center gap-3 rounded-xl transition-colors duration-150 outline-none hover:bg-[var(--d-hover)] focus-visible:ring-2 focus-visible:ring-[var(--d-blue)] aria-expanded:bg-[var(--d-press)]',
-              compact ? 'p-1' : 'h-11 w-full px-[5px] pr-2.5',
+              'flex size-8 items-center justify-center rounded-full bg-[var(--ds-background-accent-blue-bolder)] text-(length:--d-fs-caption) font-semibold text-[var(--ds-text-inverse)] transition-[filter] hover:brightness-110 aria-expanded:brightness-90',
+              FOCUS,
             )}
           >
-            <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-[var(--d-ink)] text-(length:--d-fs-caption) font-semibold text-[var(--d-sheet)]">
-              {initials(name, '?')}
-            </span>
-            {compact ? null : (
-              <>
-                <span className="flex-1 truncate text-left text-(length:--d-fs-body) font-medium text-[var(--d-ink)]">
-                  {name}
-                </span>
-                <ChevronsUpDown
-                  aria-hidden="true"
-                  className="size-4 shrink-0 text-[var(--d-pencil)]"
-                />
-              </>
-            )}
+            {initials(name, '?')}
           </button>
         }
       />
-      <DropdownMenuContent
-        align={compact ? 'end' : 'start'}
-        side={compact ? 'bottom' : 'top'}
-        className="w-52"
-      >
+      <DropdownMenuContent align="end" side="bottom" className="w-56">
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className="truncate text-(length:--d-fs-body) font-semibold text-[var(--ds-text)]">
+            {name}
+          </DropdownMenuLabel>
+        </DropdownMenuGroup>
+        <DropdownMenuSeparator />
         <DropdownMenuGroup>
           <DropdownMenuItem
-            className="md:hidden"
+            className="lg:hidden"
             onClick={() => navigate('/analytics')}
           >
             <BarChart2 data-icon="inline-start" />
@@ -233,40 +297,57 @@ export function AccountMenu({
   );
 }
 
-/** A page's title block: the display face at a size that lets the sheet breathe. */
+/**
+ * Atlassian's page header: breadcrumbs, then the title at heading.large with
+ * the page's actions at the end of the same row, and an optional description.
+ */
 export function PageTitle({
   title,
-  eyebrow,
+  breadcrumbs,
   detail,
   leading,
   actions,
 }: {
   title: string;
-  /** A line in the tutor's own handwriting above the title. */
-  eyebrow?: string;
+  /** Where this page sits, outermost first. Read-only text, not links. */
+  breadcrumbs?: string[];
   detail?: ReactNode;
   leading?: ReactNode;
   actions?: ReactNode;
 }) {
   return (
-    <header className="mx-auto flex w-full max-w-[1180px] flex-wrap items-end gap-x-6 gap-y-5 px-5 pt-8 md:px-12 md:pt-16">
-      <div className="flex min-w-0 flex-[1_1_18rem] items-center gap-3">
-        {leading}
-        <div className="min-w-0">
-          {eyebrow ? (
-            <p className="d-hand d-write mb-1 text-[26px] leading-none text-[var(--d-pencil)]">
-              {eyebrow}
-            </p>
-          ) : null}
-          <h1 className="d-display text-(length:--d-fs-display) leading-[1.05] font-semibold text-balance md:text-(length:--d-fs-page)">
+    <header className="flex w-full flex-col gap-1 px-6 pt-6 md:px-10">
+      {breadcrumbs?.length ? (
+        <nav aria-label="Breadcrumbs">
+          <ol className="flex items-center gap-1 text-(length:--d-fs-body) text-[var(--ds-text-subtle)]">
+            {breadcrumbs.map((crumb, i) => (
+              <li key={crumb} className="flex items-center gap-1">
+                {i > 0 ? (
+                  <ChevronRight
+                    aria-hidden="true"
+                    className="size-3 text-[var(--ds-icon-subtlest)]"
+                  />
+                ) : null}
+                {crumb}
+              </li>
+            ))}
+          </ol>
+        </nav>
+      ) : null}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
+        <div className="flex min-w-0 flex-[1_1_16rem] items-center gap-3">
+          {leading}
+          <h1 className="min-w-0 text-[length:var(--d-fs-page)] leading-7 font-bold text-balance text-[var(--ds-text)] [font-family:var(--ds-font-family-heading)]">
             {title}
           </h1>
-          {detail ? (
-            <p className="mt-2 text-(length:--d-fs-lead) text-pretty text-[var(--d-graphite)]">{detail}</p>
-          ) : null}
         </div>
+        {actions}
       </div>
-      {actions}
+      {detail ? (
+        <p className="text-(length:--d-fs-body) text-pretty text-[var(--ds-text-subtle)]">
+          {detail}
+        </p>
+      ) : null}
     </header>
   );
 }
