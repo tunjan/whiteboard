@@ -1325,8 +1325,8 @@
 .math-field-base.graph-expression-field {
   display: block;
   align-content: center;
-  min-height: 3rem;
-  padding-inline: 0.25rem;
+  min-height: 2.5rem;
+  padding-inline: 0.5rem;
   font-size: 1.125rem;
 }
 
@@ -1343,7 +1343,7 @@
   display: none;
 }
 
-/* Focus indication comes from the expression row highlight, not the field. */
+/* Focus indication comes from the field's wrapper in the expression row, not the field. */
 .math-field-base:focus,
 .math-field-base:focus-within,
 .math-field-base:focus-visible {

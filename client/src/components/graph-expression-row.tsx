@@ -1,6 +1,6 @@
 import { useId, useMemo, useRef, useState } from 'react';
 import type { MathfieldElement } from 'mathlive';
-import { Eye, EyeOff, X } from 'lucide-react';
+import { CircleAlert, Eye, EyeOff, X } from 'lucide-react';
 import type {
   GraphExpression,
   GraphParametricDomain,
@@ -14,7 +14,6 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import {
   Tooltip,
   TooltipContent,
@@ -32,12 +31,8 @@ import {
 } from '@/canvas/graph-parser';
 import { useThemeStore } from '@/use-theme-store';
 import { cn, swatchBorder } from '@/lib/utils';
-import {
-  MATH_SYMBOL,
-  QUIET_NUMBER,
-  SEGMENTED_ITEM,
-  SEGMENTED_TRACK,
-} from './graph-panel-styles';
+import { ChoiceGroup, ChoiceItem } from './graph-choice-group';
+import { MATH_SYMBOL, QUIET_NUMBER } from './graph-panel-styles';
 import { formatNumber, useDebouncedValue } from './graph-panel-utils';
 
 const DASHES: StrokeDash[] = ['solid', 'dashed', 'dotted'];
@@ -180,49 +175,45 @@ function CurveStyle({
           })}
         </div>
 
-        <ToggleGroup
+        <ChoiceGroup
           aria-label="Line style"
           value={[expression.dash]}
           onValueChange={(value) => {
             const dash = value[0] as StrokeDash | undefined;
             if (dash) onPatch({ dash });
           }}
-          className={cn(SEGMENTED_TRACK, 'w-full')}
         >
           {DASHES.map((dash) => (
-            <ToggleGroupItem
+            <ChoiceItem
               key={dash}
               value={dash}
               aria-label={capitalize(dash)}
               title={capitalize(dash)}
-              className={SEGMENTED_ITEM}
             >
               <LinePreview dash={dash} color="currentColor" />
-            </ToggleGroupItem>
+            </ChoiceItem>
           ))}
-        </ToggleGroup>
+        </ChoiceGroup>
 
-        <ToggleGroup
+        <ChoiceGroup
           aria-label="Line weight"
           value={[String(width)]}
           onValueChange={(value) => {
             const next = Number(value[0]);
             if (Number.isFinite(next)) onPatch({ width: next });
           }}
-          className={cn(SEGMENTED_TRACK, 'w-full')}
         >
           {GRAPH_CURVE_WIDTHS.map((w) => (
-            <ToggleGroupItem
+            <ChoiceItem
               key={w}
               value={String(w)}
               aria-label={`${w} pixels`}
               title={`${w}px`}
-              className={SEGMENTED_ITEM}
             >
               <LinePreview dash="solid" color="currentColor" width={w} />
-            </ToggleGroupItem>
+            </ChoiceItem>
           ))}
-        </ToggleGroup>
+        </ChoiceGroup>
       </PopoverContent>
     </Popover>
   );
@@ -274,15 +265,15 @@ function DomainRow({
       onKeyDown={(e) => {
         if (e.key === 'Enter') e.currentTarget.blur();
       }}
-      className={QUIET_NUMBER}
+      className={cn(QUIET_NUMBER, 'w-16')}
     />
   );
 
   // Indented to the formula, so it reads as belonging to it.
   return (
-    <div className="flex items-center gap-1 pb-1.5 pl-10 text-xs text-fg-subtle">
+    <div className="flex items-center gap-1 pb-1.5 pl-9 text-xs text-fg-subtle">
       {field('min')}
-      <span className={cn(MATH_SYMBOL, 'text-xs text-fg-subtle')}>≤ {variable} ≤</span>
+      <span className={cn(MATH_SYMBOL, 'whitespace-nowrap text-xs text-fg-subtle')}>≤ {variable} ≤</span>
       {field('max')}
     </div>
   );
@@ -341,18 +332,15 @@ export function ExpressionRow({
   const label = `Expression ${index + 1}`;
 
   return (
-    <div className="group/row relative px-2 transition-colors duration-fast hover:bg-surface-hover/60 focus-within:bg-surface-hover">
-      {/* The accent edge marks the row being edited. */}
-      <span
-        aria-hidden="true"
-        className="absolute inset-y-1.5 left-0 w-0.5 rounded-full bg-check opacity-0 transition-opacity duration-fast group-focus-within/row:opacity-100"
-      />
+    <div className="group/row">
       <div className="flex items-center gap-1">
         <CurveStyle expression={expression} onPatch={onPatch} />
 
         <div
           className={cn(
-            'min-w-0 flex-1 cursor-text transition-opacity duration-fast',
+            // Atlassian's subtle Text field: bare until hovered, a 2px
+            // `border.focused` ring while the formula is being edited.
+            'min-w-0 flex-1 cursor-text rounded-compact border border-transparent transition-[opacity,background-color] duration-fast hover:bg-[var(--ds-background-input-hovered)] focus-within:border-[var(--ds-border-focused)] focus-within:bg-[var(--ds-background-input-pressed)] focus-within:shadow-[inset_0_0_0_1px_var(--ds-border-focused)]',
             !expression.visible && 'opacity-45',
           )}
           onPointerDown={editOnColumnPress}
@@ -431,8 +419,9 @@ export function ExpressionRow({
         <p
           id={errorId}
           role="status"
-          className="pb-2 pl-10 text-xs text-danger"
+          className="flex items-start gap-1 pb-2 pl-9 text-xs text-danger"
         >
+          <CircleAlert className="mt-px size-3.5 shrink-0" aria-hidden="true" />
           {error}
         </p>
       ) : null}

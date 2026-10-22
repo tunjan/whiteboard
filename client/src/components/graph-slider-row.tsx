@@ -3,12 +3,35 @@ import { Pause, Play } from 'lucide-react';
 import type { GraphParameter } from '@whiteboard/shared';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Slider } from '@/components/ui/slider';
+import { Slider as SliderPrimitive } from '@base-ui/react/slider';
 import { breakUndoCapture } from '@/canvas/use-document-store';
 import { useGraphAnimationStore } from '@/canvas/use-graph-animation-store';
 import { cn } from '@/lib/utils';
 import { MATH_SYMBOL, NUMBER_FIELD, QUIET_NUMBER } from './graph-panel-styles';
 import { formatNumber, valueFromSlider } from './graph-panel-utils';
+
+/**
+ * Atlassian's Range: a 4px `background.neutral` track filled with, and
+ * dragged by a 16px thumb in, `background.neutral.bold`; the thumb takes a
+ * 2px `border.focused` ring offset by 2px from the keyboard.
+ */
+function Range({ className, ...props }: SliderPrimitive.Root.Props) {
+  return (
+    <SliderPrimitive.Root
+      thumbAlignment="edge"
+      data-slot="range"
+      className={cn('group/range w-full', className)}
+      {...props}
+    >
+      <SliderPrimitive.Control className="relative flex h-8 w-full touch-none items-center select-none">
+        <SliderPrimitive.Track className="relative h-1 w-full rounded-full bg-[var(--ds-background-neutral)] transition-colors duration-150 group-hover/range:bg-[var(--ds-background-neutral-hovered)]">
+          <SliderPrimitive.Indicator className="h-full rounded-full bg-[var(--ds-background-neutral-bold)] transition-colors duration-150 group-hover/range:bg-[var(--ds-background-neutral-bold-hovered)]" />
+        </SliderPrimitive.Track>
+        <SliderPrimitive.Thumb className="size-4 rounded-full bg-[var(--ds-background-neutral-bold)] outline-2 outline-offset-2 outline-transparent transition-colors duration-150 group-hover/range:bg-[var(--ds-background-neutral-bold-hovered)] has-[:focus-visible]:outline-[var(--ds-border-focused)] data-dragging:bg-[var(--ds-background-neutral-bold-pressed)]" />
+      </SliderPrimitive.Control>
+    </SliderPrimitive.Root>
+  );
+}
 
 /** How often a playing slider's sweep is written to the shared document. */
 const ANIMATION_COMMIT_MS = 80;
@@ -124,62 +147,65 @@ export function SliderRow({
       onKeyDown={(e) => {
         if (e.key === 'Enter') e.currentTarget.blur();
       }}
-      className={QUIET_NUMBER}
+      className={cn(QUIET_NUMBER, 'w-14 shrink-0')}
     />
   );
 
-  // One line: the bounds sit at the ends of the track they bound.
+  // Two lines: the name, play and value above; the track between its bounds.
   return (
-    <div className="flex items-center gap-1">
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon-sm"
-        aria-label={`Animate ${name}`}
-        aria-pressed={playing}
-        onClick={() => setPlaying((p) => !p)}
-        className="text-fg-subtle aria-pressed:bg-tb-sel-bg aria-pressed:text-tb-sel-fg"
-      >
-        {playing ? (
-          <Pause className="size-3.5" aria-hidden="true" />
-        ) : (
-          <Play className="size-3.5" aria-hidden="true" />
-        )}
-      </Button>
-      <span
-        aria-hidden="true"
-        className={cn(MATH_SYMBOL, 'w-4 shrink-0 text-center text-base')}
-      >
-        {name}
-      </span>
+    <div className="flex flex-col">
+      <div className="flex items-center gap-1">
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          aria-label={`Animate ${name}`}
+          aria-pressed={playing}
+          onClick={() => setPlaying((p) => !p)}
+          className="text-fg-subtle aria-pressed:bg-tb-sel-bg aria-pressed:text-tb-sel-fg"
+        >
+          {playing ? (
+            <Pause className="size-3.5" aria-hidden="true" />
+          ) : (
+            <Play className="size-3.5" aria-hidden="true" />
+          )}
+        </Button>
+        <span
+          aria-hidden="true"
+          className={cn(MATH_SYMBOL, 'flex-1 text-base')}
+        >
+          {name}
+        </span>
+        <Input
+          type="number"
+          step="any"
+          inputMode="decimal"
+          aria-label={`${name} value`}
+          value={valueDraft}
+          onChange={(e) => setValueDraft(e.target.value)}
+          onBlur={(e) => commitValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') e.currentTarget.blur();
+          }}
+          className={cn(NUMBER_FIELD, 'w-16 shrink-0')}
+        />
+      </div>
 
-      {bound('min')}
-      <Slider
-        aria-label={name}
-        min={parameter.min}
-        max={parameter.max}
-        step={parameter.step}
-        value={parameter.value}
-        onValueChange={(value) =>
-          onChange({ ...parameter, value: valueFromSlider(value) })
-        }
-        className="min-w-0 flex-1 px-1"
-      />
-      {bound('max')}
-
-      <Input
-        type="number"
-        step="any"
-        inputMode="decimal"
-        aria-label={`${name} value`}
-        value={valueDraft}
-        onChange={(e) => setValueDraft(e.target.value)}
-        onBlur={(e) => commitValue(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') e.currentTarget.blur();
-        }}
-        className={cn(NUMBER_FIELD, 'w-13 shrink-0')}
-      />
+      <div className="flex items-center gap-1">
+        {bound('min')}
+        <Range
+          aria-label={name}
+          min={parameter.min}
+          max={parameter.max}
+          step={parameter.step}
+          value={parameter.value}
+          onValueChange={(value) =>
+            onChange({ ...parameter, value: valueFromSlider(value) })
+          }
+          className="min-w-0 flex-1 px-1"
+        />
+        {bound('max')}
+      </div>
     </div>
   );
 }

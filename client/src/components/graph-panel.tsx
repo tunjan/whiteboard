@@ -133,10 +133,10 @@ export function GraphPanelContent({ shape }: { shape: GraphShape }) {
       <Surface
         role="region"
         aria-label="Graph"
-        className="touch-targets flex max-h-[var(--anchor-max-h,calc(100dvh-2rem))] w-[min(22rem,calc(100vw-2rem))] flex-col overflow-hidden p-0 [--chrome-hover:var(--color-tb-track)]"
+        className="touch-targets flex max-h-[var(--anchor-max-h,calc(100dvh-2rem))] w-[min(23rem,calc(100vw-2rem))] flex-col overflow-hidden border-0 bg-[var(--ds-surface-overlay)] p-0 [--chrome-hover:var(--color-tb-track)]"
       >
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">
-          <ul aria-label="Expressions" className="flex flex-col py-1">
+          <ul aria-label="Expressions" className="flex flex-col gap-1 px-2 pt-2">
             {props.expressions.map((expression, index) => (
               <li key={expression.id}>
                 <ExpressionRow
@@ -159,12 +159,12 @@ export function GraphPanelContent({ shape }: { shape: GraphShape }) {
           </ul>
 
           {/* Adding sits where the next row would be. */}
-          <div className="flex items-center gap-1 px-2 pb-2">
+          <div className="flex items-center gap-1 px-2 pt-1 pb-2">
             <Button
               type="button"
               variant="ghost"
               onClick={() => addExpression()}
-              className="h-8 flex-1 justify-start gap-2 px-2 text-sm font-normal text-fg-muted"
+              className="h-8 flex-1 justify-start gap-2 px-2 text-sm font-medium text-fg-muted"
             >
               <Plus className="size-4" aria-hidden="true" />
               Add expression

@@ -1,32 +1,29 @@
 /**
- * The graph panel's shared geometry, read structurally from DESIGN.md and
- * expressed through the app's own tokens (never DESIGN.md's hex values):
- * one surface, groups ruled off by full-bleed hairlines instead of nested
- * cards, 8px on controls and 6px one step in.
+ * The graph panel's shared geometry, taken from the Atlassian Design System:
+ * one overlay surface, groups divided by `border.default` hairlines, 16px
+ * gutters (`space.200`), and form controls built to the Text field spec
+ * (1px `border.input`, `radius.medium`, 32px compact height).
  */
 
 /** A group of the panel; the full-bleed hairline above it does the separating. */
-export const SECTION = 'flex flex-col gap-2 border-t border-border px-3 py-3';
-
-/** Width only — the track and gliding plate come from ToggleGroup itself. */
-export const SEGMENTED_TRACK =
-  'min-w-0 flex-1';
-
-export const SEGMENTED_ITEM =
-  'h-7 min-w-0 grow basis-0 px-0';
+export const SECTION = 'flex flex-col gap-3 border-t border-border px-4 py-3';
 
 const NO_SPINNER =
   '[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none';
 
-/** A bound typed in place: reads as text until reached. */
-export const QUIET_NUMBER =
-  'h-7 w-10 shrink-0 rounded-compact border-transparent bg-transparent px-0.5 text-center text-xs tabular-nums text-fg-subtle ' +
-  'hover:border-border hover:text-fg focus:border-fg-subtle focus:bg-surface focus:text-fg ' +
+const FIELD =
+  'h-8 min-w-0 rounded-compact px-1.5 text-center text-sm tabular-nums ' +
   NO_SPINNER;
 
-/** A number that is the point of its row. */
+/** Text field, standard appearance. The focus ring is the app-wide one. */
 export const NUMBER_FIELD =
-  'h-7 rounded-compact px-1.5 text-center text-xs tabular-nums ' + NO_SPINNER;
+  FIELD +
+  ' bg-[var(--ds-background-input)] hover:border-[var(--ds-border-input)] hover:bg-[var(--ds-background-input-hovered)] focus:bg-[var(--ds-background-input-pressed)]';
+
+/** Text field, subtle appearance: transparent until hovered or focused. */
+export const QUIET_NUMBER =
+  FIELD +
+  ' border-transparent bg-transparent text-fg-subtle hover:border-transparent hover:bg-[var(--ds-background-input-hovered)] hover:text-fg focus:bg-[var(--ds-background-input-pressed)] focus:text-fg';
 
 /** Math symbols (x, y, t, slider names) share the formula's face. */
 export const MATH_SYMBOL =

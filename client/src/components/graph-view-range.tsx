@@ -3,7 +3,6 @@ import { Compass, Lock, RotateCcw, Unlock } from 'lucide-react';
 import type { GraphViewport } from '@whiteboard/shared';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import {
   Tooltip,
   TooltipContent,
@@ -12,12 +11,8 @@ import {
 import { DEFAULT_GRAPH_VIEWPORT } from '@/canvas/graph-defaults';
 import { GRAPH_VIEWPORT_PRESETS } from '@/canvas/graph-presets';
 import { cn } from '@/lib/utils';
-import {
-  MATH_SYMBOL,
-  NUMBER_FIELD,
-  SEGMENTED_ITEM,
-  SEGMENTED_TRACK,
-} from './graph-panel-styles';
+import { ChoiceGroup, ChoiceItem } from './graph-choice-group';
+import { MATH_SYMBOL, NUMBER_FIELD } from './graph-panel-styles';
 import { formatNumber } from './graph-panel-utils';
 
 const VIEW_RANGE_AXES = [
@@ -283,24 +278,23 @@ export function ViewRange({
   );
 
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex items-center gap-1">
-        <ToggleGroup
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center gap-0.5">
+        <ChoiceGroup
           aria-label="Window"
           value={activePreset ? [activePreset.name] : []}
           onValueChange={(value) => {
             if (value[0]) applyPreset(value[0]);
           }}
-          className={SEGMENTED_TRACK}
+          className="min-w-0 flex-1"
         >
           {GRAPH_VIEWPORT_PRESETS.map((preset) => (
             <Tooltip key={preset.name}>
               <TooltipTrigger
                 render={
-                  <ToggleGroupItem
+                  <ChoiceItem
                     value={preset.name}
                     aria-label={`${preset.name}, ${preset.label}`}
-                    className={SEGMENTED_ITEM}
                   />
                 }
               >
@@ -309,7 +303,9 @@ export function ViewRange({
               <TooltipContent side="top">{preset.name}</TooltipContent>
             </Tooltip>
           ))}
-        </ToggleGroup>
+        </ChoiceGroup>
+
+        <span aria-hidden="true" className="mx-1 h-5 w-px shrink-0 bg-border" />
 
         <Tooltip>
           <TooltipTrigger
@@ -356,10 +352,10 @@ export function ViewRange({
         </Tooltip>
       </div>
 
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-3">
         {VIEW_RANGE_AXES.map(({ label, symbol, minKey, maxKey }) => (
-          <div key={label} className="flex min-w-0 flex-1 items-center gap-1.5">
-            <span aria-hidden="true" className={cn(MATH_SYMBOL, 'w-3 text-sm')}>
+          <div key={label} className="flex min-w-0 flex-1 items-center gap-1">
+            <span aria-hidden="true" className={cn(MATH_SYMBOL, 'w-4 shrink-0 text-center text-base')}>
               {symbol}
             </span>
             {bound(minKey, `${label} minimum`)}
