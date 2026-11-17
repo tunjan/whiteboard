@@ -147,6 +147,23 @@ export class PageHistory {
     this.active?.manager.stopCapturing();
   }
 
+  /** The newest undo step, for `continueStep` to add to later. */
+  lastStep(): unknown {
+    return this.active?.manager.undoStack.at(-1);
+  }
+
+  /**
+   * Fold the next change into `step`, so it undoes with it — only while `step`
+   * is still the newest: an edit, undo or page switch since leaves it alone.
+   */
+  continueStep(step: unknown): boolean {
+    const manager = this.active?.manager;
+    if (!step || manager?.undoStack.at(-1) !== step) return false;
+    // Inside the capture window, Yjs merges the next change into the top item.
+    manager.lastChange = Date.now();
+    return true;
+  }
+
   /**
    * Run a move of shapes off the open page into `targetPageId` as one undo
    * step. `run` writes both halves; `replay` redoes or undoes the target's.

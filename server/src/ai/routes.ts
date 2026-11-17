@@ -5,6 +5,7 @@ import {
   AUDIO_FORMATS,
   MAX_AGENT_BOARD_CHARS,
   MAX_AGENT_INSTRUCTION_CHARS,
+  MAX_AGENT_HISTORY,
   MAX_AGENT_REPLY_CHARS,
   MAX_AUDIO_CHARS,
   MAX_INK_IMAGE_CHARS,
@@ -42,6 +43,7 @@ import {
   listModels,
   transcribe,
   type ChatMessage,
+  type CompletionProgress,
 } from './openrouter';
 import {
   AGENT_TOOLS,
@@ -51,6 +53,8 @@ import {
   lookMessages,
   parseAgentActions,
   parsePrevious,
+  partialSayText,
+  SAY_TOOL,
   sayOf,
 } from './agent';
 import { recordAgentAsk } from './agent-asks';
@@ -504,8 +508,8 @@ aiRoutes.post('/agent', async (c) => {
   if (
     declaredTooLarge(
       c.req.header('content-length'),
-      MAX_AUDIO_CHARS + MAX_INK_IMAGE_CHARS + MAX_AGENT_BOARD_CHARS +
-        MAX_AGENT_INSTRUCTION_CHARS + MAX_AGENT_REPLY_CHARS + 1024,
+      MAX_AUDIO_CHARS + MAX_INK_IMAGE_CHARS + MAX_AGENT_BOARD_CHARS + MAX_AGENT_INSTRUCTION_CHARS +
+        (MAX_AGENT_INSTRUCTION_CHARS + MAX_AGENT_REPLY_CHARS) * MAX_AGENT_HISTORY + 1024,
     )
   ) {
     return c.json({ error: 'Request too large' }, 413);
@@ -581,10 +585,40 @@ aiRoutes.post('/agent', async (c) => {
         ? lookMessages(instruction, board, image, context)
         : agentMessages(instruction, board, context);
     const tools = typeof image === 'string' ? AGENT_TOOLS_AFTER_LOOK : AGENT_TOOLS;
+    // The answer as it is written: plain text while no edit has started
+    // (text beside edits is the model planning, dropped below), or `say`'s
+    // text as its arguments arrive. Text that turns out to be planning is
+    // taken back with a reset.
+    let draft = '';
+    let from: 'text' | 'say' | undefined;
+    let edits = false;
+    const redraft = (next: string, source: 'text' | 'say') => {
+      if (from && from !== source) {
+        draft = '';
+        emit({ step: 'draft', text: '', reset: true });
+      }
+      from = source;
+      if (!next.startsWith(draft) || next === draft) return;
+      emit({ step: 'draft', text: next.slice(draft.length) });
+      draft = next;
+    };
+    const onProgress = (p: CompletionProgress) => {
+      if (p.type === 'started') emit({ step: 'thinking' });
+      else if (p.type === 'tool') {
+        emit({ step: 'tool', name: p.name });
+        if (p.name === SAY_TOOL) return;
+        edits = true;
+        if (from === 'text') {
+          from = undefined;
+          draft = '';
+          emit({ step: 'draft', text: '', reset: true });
+        }
+      } else if (p.type === 'text') {
+        if (!edits && from !== 'say') redraft(draft + p.delta, 'text');
+      } else if (p.name === SAY_TOOL) redraft(partialSayText(p.arguments), 'say');
+    };
     const { content, cost, toolCalls } = streaming
-      ? await streamChatCompletion(model, messages, tools, (p) =>
-          emit(p.type === 'started' ? { step: 'thinking' } : { step: 'tool', name: p.name }),
-        )
+      ? await streamChatCompletion(model, messages, tools, onProgress)
       : await chatCompletion(model, messages, tools);
     recordUsage(c.req.header('x-board-id'), 'agent', model, cost);
     // Anything called beside the look was decided blind; it is decided again

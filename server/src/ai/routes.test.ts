@@ -342,17 +342,25 @@ describe('POST /agent', () => {
     });
   });
 
-  it('tells the model the previous exchange', async () => {
+  it('tells the model the last few exchanges, oldest first', async () => {
     vi.mocked(chatCompletion).mockResolvedValueOnce({ content: 'Because…', cost: 0, toolCalls: [] });
     await post('/agent', {
       board,
       text: 'why?',
-      previous: { instruction: 'is 7 prime?', answer: 'Yes.' },
+      previous: [
+        { instruction: 'too old', answer: 'Dropped.' },
+        { instruction: 'is 9 prime?', answer: 'No.' },
+        { instruction: 'not an exchange' },
+        { instruction: 'is 11 prime?', answer: 'Yes.' },
+        { instruction: 'is 7 prime?', answer: 'Yes.' },
+      ],
     });
     const prompt = vi.mocked(chatCompletion).mock.calls.at(-1)?.[1].at(-1)?.content as string;
-    expect(prompt).toContain('User: is 7 prime?');
+    expect(prompt).not.toContain('too old');
+    expect(prompt).not.toContain('not an exchange');
+    expect(prompt.indexOf('User: is 11 prime?')).toBeLessThan(prompt.indexOf('User: is 7 prime?'));
     expect(prompt).toContain('Result: Yes.');
-    expect(prompt.indexOf('Previous exchange')).toBeLessThan(prompt.indexOf('Instruction: why?'));
+    expect(prompt.indexOf('Earlier exchanges')).toBeLessThan(prompt.indexOf('Instruction: why?'));
   });
 
   it('takes a picture sent up front with a spoken instruction', async () => {
@@ -398,6 +406,39 @@ describe('POST /agent', () => {
       { progress: { step: 'thinking' } },
       { progress: { step: 'tool', name: 'create_graph' } },
       { result: { transcript: 'plot it', actions: [{ type: 'create_graph', expressions: ['y = x'] }] } },
+    ]);
+  });
+
+  it('streams the answer as it is written, and takes back planning text', async () => {
+    vi.mocked(streamChatCompletion).mockImplementationOnce(async (_m, _msgs, _tools, onProgress) => {
+      onProgress({ type: 'text', delta: 'The graph ' });
+      onProgress({ type: 'text', delta: 'goes at x 40.' });
+      onProgress({ type: 'tool', name: 'create_graph' });
+      onProgress({ type: 'text', delta: 'More planning.' });
+      onProgress({ type: 'tool', name: 'say' });
+      onProgress({ type: 'args', name: 'say', arguments: '{"text": "A $\\\\frac' });
+      onProgress({ type: 'args', name: 'say', arguments: '{"text": "A $\\\\frac{1}{2}$ slope."}' });
+      return {
+        content: 'The graph goes at x 40.More planning.',
+        cost: 0,
+        toolCalls: [
+          { name: 'create_graph', arguments: '{"expressions":["y = x/2"]}' },
+          { name: 'say', arguments: '{"text": "A $\\\\frac{1}{2}$ slope."}' },
+        ],
+      };
+    });
+    const res = await post('/agent', { board, text: 'plot a gentle line', stream: true });
+    const drafts = (await res.text())
+      .split('\n\n')
+      .filter((block) => block.startsWith('data:'))
+      .map((block) => JSON.parse(block.slice(5)))
+      .flatMap((event) => (event.progress?.step === 'draft' ? [event.progress] : []));
+    expect(drafts).toEqual([
+      { step: 'draft', text: 'The graph ' },
+      { step: 'draft', text: 'goes at x 40.' },
+      { step: 'draft', text: '', reset: true },
+      { step: 'draft', text: 'A $\\frac' },
+      { step: 'draft', text: '{1}{2}$ slope.' },
     ]);
   });
 

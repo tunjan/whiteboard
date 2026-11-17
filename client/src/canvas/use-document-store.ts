@@ -940,6 +940,16 @@ export function breakUndoCapture(): void {
   session?.history.breakCapture();
 }
 
+/** The newest undo step, to extend later with `continueUndoStep`. */
+export function lastUndoStep(): unknown {
+  return session?.history.lastStep();
+}
+
+/** Make the next change part of `step` if nothing has come after it. */
+export function continueUndoStep(step: unknown): boolean {
+  return session?.history.continueStep(step) ?? false;
+}
+
 export function redo(): void {
   if (isViewOnly()) return;
   session?.history.redo();

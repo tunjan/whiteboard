@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { MAX_AGENT_ACTIONS, MAX_AGENT_GENERATED_STICKERS } from '@whiteboard/shared';
-import { parseAgentActions } from './agent';
+import { parseAgentActions, partialSayText } from './agent';
 
 const call = (name: string, args: unknown) => ({ name, arguments: JSON.stringify(args) });
 
@@ -97,5 +97,23 @@ describe('parseAgentActions', () => {
 
   it('never turns say into an action', () => {
     expect(parseAgentActions([{ name: 'say', arguments: '{"text":"hi"}' }])).toEqual([]);
+  });
+});
+
+describe('partialSayText', () => {
+  it("reads a say call's text while its arguments are still arriving", () => {
+    const full = JSON.stringify({ text: 'Use $\\frac{a}{b}$ and "quotes"\n\u00e9' });
+    let last = '';
+    for (let end = 0; end <= full.length; end++) {
+      const read = partialSayText(full.slice(0, end));
+      // Each read extends the one before: nothing shown is taken back.
+      expect(read.startsWith(last)).toBe(true);
+      last = read;
+    }
+    expect(last).toBe('Use $\\frac{a}{b}$ and "quotes"\n\u00e9');
+  });
+
+  it('reads nothing from arguments that are not a text', () => {
+    expect(partialSayText('{"other": "x"}')).toBe('');
   });
 });

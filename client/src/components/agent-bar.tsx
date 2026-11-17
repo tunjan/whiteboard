@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { ArrowUp, Check, CircleAlert, ListChecks, Loader2, Mic, Sparkles, Square, X } from 'lucide-react';
 import { aiLatexEnabled, askBoardAgent } from '@/board/latex-ai';
 import {
+  MAX_AGENT_HISTORY,
   MAX_AGENT_REPLY_CHARS,
   describeActions,
   type AgentPrevious,
@@ -108,6 +109,9 @@ export function AgentBar() {
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   // What this request has done so far; the last one is under way.
   const [steps, setSteps] = useState<Step[]>([]);
+  // The answer as the model writes it, shown in the answer's own card until
+  // the finished one takes its place (same `id`, so no second entrance).
+  const [draft, setDraft] = useState<{ id: number; text: string } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const discard = useRef(false);
@@ -115,9 +119,9 @@ export function AgentBar() {
   // The last instruction sent, for ↑ in the empty field: rephrasing one that
   // missed is the common next move.
   const lastInstruction = useRef('');
-  // The last exchange that came to something, sent with the next one so a
-  // follow-up ("why?", "now in red") knows what it follows.
-  const previous = useRef<AgentPrevious | null>(null);
+  // The last few exchanges that came to something, sent with the next one so
+  // a follow-up ("why?", "now in red", "and the other root?") knows what it follows.
+  const previous = useRef<AgentPrevious[]>([]);
   // The live recorder for the unmount cleanup, which must run once, not on
   // every recorder change (it would flag each new recording as discarded).
   const recorderRef = useRef<MediaRecorder | null>(null);
@@ -253,6 +257,7 @@ export function AgentBar() {
   }, [outcome]);
 
   const run = async (instruction: string | Blob) => {
+    const id = Date.now();
     const controller = new AbortController();
     request.current = controller;
     // A step for the progress list and, as words, for the screen reader.
@@ -269,10 +274,19 @@ export function AgentBar() {
     setBusy(true);
     setOutcome(null);
     setSteps([]);
+    setDraft(null);
     step(typeof instruction === 'string' ? 'Reading the board' : 'Listening back');
     if (typeof instruction === 'string') lastInstruction.current = instruction;
+    // Once per answer, not once per piece of it.
+    let writing = false;
     const onProgress = (progress: AgentProgress) => {
-      if (progress.step === 'heard') {
+      if (progress.step === 'draft') {
+        if (controller.signal.aborted) return;
+        const { text, reset } = progress;
+        if (!writing && text) step('Writing the answer');
+        writing = !reset || Boolean(text);
+        setDraft((d) => ({ id, text: reset ? text : (d?.text ?? '') + text }));
+      } else if (progress.step === 'heard') {
         setText(progress.transcript);
         step(`Heard “${progress.transcript}”`);
         step('Reading the board');
@@ -289,7 +303,7 @@ export function AgentBar() {
         },
         controller.signal,
         {
-          previous: previous.current ?? undefined,
+          previous: previous.current.length ? previous.current : undefined,
           pictureFirst: agentNeedsPicture(editor),
           onProgress,
         },
@@ -315,8 +329,9 @@ export function AgentBar() {
       const kind = result.reply ? 'reply' : applied ? 'done' : 'error';
       // An answer carries its question, so the field can clear for the next
       // one (↑ brings it back) without the answer losing what it answers.
+      setDraft(null);
       setOutcome({
-        id: Date.now(),
+        id,
         kind,
         text: note,
         question: kind === 'reply' ? lastInstruction.current : undefined,
@@ -324,10 +339,13 @@ export function AgentBar() {
       });
       if (kind !== 'error') {
         const done = applied ? describeActions(result.actions) : '';
-        previous.current = {
-          instruction: lastInstruction.current,
-          answer: [done, result.reply].filter(Boolean).join('. ').slice(0, MAX_AGENT_REPLY_CHARS),
-        };
+        previous.current = [
+          ...previous.current,
+          {
+            instruction: lastInstruction.current,
+            answer: [done, result.reply].filter(Boolean).join('. ').slice(0, MAX_AGENT_REPLY_CHARS),
+          },
+        ].slice(-MAX_AGENT_HISTORY);
       }
       playAgentSound(kind === 'error' ? 'error' : 'done');
       if (kind !== 'error') setText('');
@@ -335,7 +353,8 @@ export function AgentBar() {
       if (controller.signal.aborted) return;
       const message = err instanceof Error ? err.message : 'The assistant failed';
       setStatus(message);
-      setOutcome({ id: Date.now(), kind: 'error', text: message });
+      setDraft(null);
+      setOutcome({ id, kind: 'error', text: message });
       playAgentSound('error');
     } finally {
       if (request.current === controller) request.current = null;
@@ -400,6 +419,11 @@ export function AgentBar() {
   };
 
   if (!enabled) return null;
+
+  // While the answer is still being written it is a read-only answer card.
+  const drafting = !outcome && busy && Boolean(draft?.text.trim());
+  const shown: Outcome | null =
+    outcome ?? (drafting && draft ? { id: draft.id, kind: 'reply', text: draft.text, question: lastInstruction.current } : null);
 
   return (
     <div
@@ -633,36 +657,36 @@ export function AgentBar() {
           })}
         </ol>
       )}
-      {outcome && (
+      {shown && (
         <div
-          key={outcome.id}
+          key={shown.id}
           // Positioned like the bar above it, so it paints over the bar's
           // shadow rather than under it: static, it sat beneath the shadow's
           // 40px blur, which greyed its first lines.
           className={cn(
             'touch-targets relative flex max-w-full items-center gap-2 rounded-panel border border-border bg-surface py-1 pr-1 pl-2.5 text-xs shadow-float',
-            outcome.kind === 'error' ? 'text-danger' : 'text-fg-secondary',
+            shown.kind === 'error' ? 'text-danger' : 'text-fg-secondary',
             // An answer is the one outcome with something to read: it gets
             // the bar's full width and body-size type instead of a chip.
-            outcome.kind === 'reply' && 'w-full items-start px-3 py-2 text-sm text-fg',
-            outcome.leaving ? 'agent-leave' : 'agent-drop-in',
+            shown.kind === 'reply' && 'w-full items-start px-3 py-2 text-sm text-fg',
+            shown.leaving ? 'agent-leave' : 'agent-drop-in',
           )}
         >
-          {outcome.kind === 'done' && (
+          {shown.kind === 'done' && (
             <Check className="tick-draw size-3.5 shrink-0 text-success" aria-hidden="true" />
           )}
           {/* Not by colour alone: a failure carries its own mark. */}
-          {outcome.kind === 'error' && <CircleAlert className="size-3.5 shrink-0" aria-hidden="true" />}
+          {shown.kind === 'error' && <CircleAlert className="size-3.5 shrink-0" aria-hidden="true" />}
           {/* Markdown and `$…$` maths, through the renderer comments use. */}
-          {outcome.kind === 'reply' ? (
+          {shown.kind === 'reply' ? (
             <div className="flex max-h-64 min-w-0 flex-1 flex-col gap-1 overflow-y-auto">
-              {outcome.question && <p className="truncate text-xs text-fg-muted">{outcome.question}</p>}
-              <CommentText text={outcome.text} className="min-w-0 text-pretty" />
+              {shown.question && <p className="truncate text-xs text-fg-muted">{shown.question}</p>}
+              <CommentText text={shown.text} className="min-w-0 text-pretty" />
             </div>
           ) : (
-            <CommentText text={outcome.text} className="min-w-0 text-pretty" />
+            <CommentText text={shown.text} className="min-w-0 text-pretty" />
           )}
-          {outcome.kind === 'done' && (
+          {shown.kind === 'done' && (
             <Button
               type="button"
               size="sm"
@@ -677,7 +701,7 @@ export function AgentBar() {
               Undo
             </Button>
           )}
-          {outcome.kind === 'reply' && outcome.undoable && (
+          {shown.kind === 'reply' && shown.undoable && !drafting && (
             <Button
               type="button"
               size="sm"
@@ -692,12 +716,12 @@ export function AgentBar() {
               Undo
             </Button>
           )}
-          {outcome.kind !== 'done' && (
+          {shown.kind !== 'done' && !drafting && (
             <Button
               type="button"
               size="icon-sm"
               variant="ghost"
-              aria-label={outcome.kind === 'reply' ? 'Close answer' : 'Dismiss'}
+              aria-label={shown.kind === 'reply' ? 'Close answer' : 'Dismiss'}
               className="-my-0.5 size-6 shrink-0 text-fg-muted"
               onClick={() => {
                 setOutcome(null);

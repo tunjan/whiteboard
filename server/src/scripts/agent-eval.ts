@@ -164,7 +164,7 @@ const CASES: Case[] = [
     name: 'follow-up',
     instruction: 'now make it blue',
     board: { selection: ['g1'], shapes: [graph] },
-    context: { previous: { instruction: 'plot y = x^2', answer: 'Added a graph' } },
+    context: { previous: [{ instruction: 'plot y = x^2', answer: 'Added a graph' }] },
     check: only('update_shape'),
   },
   {

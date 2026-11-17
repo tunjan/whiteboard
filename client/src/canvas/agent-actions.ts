@@ -28,7 +28,7 @@ import { EQUATION_DEFAULT_FONT_SIZE, equationBoxSize } from './shapes/equation';
 import { shapeRegistry } from './shapes/shape-registry';
 import { customStickerSize } from './shapes/sticker';
 import { useCameraStore } from './use-camera-store';
-import { breakUndoCapture } from './use-document-store';
+import { breakUndoCapture, continueUndoStep, lastUndoStep } from './use-document-store';
 import { useSelectionStore } from './use-selection-store';
 import { nextShapeStyle, paletteColors } from './use-style-store';
 import { useToolStore } from './use-tool-store';
@@ -38,8 +38,9 @@ import { useToolStore } from './use-tool-store';
  * page in view, and how the actions it answers with land on it.
  *
  * Every action is applied in one `transact`, so a whole instruction syncs as
- * one update and undoes as one step — except generated stickers, which wait
- * on the image model and the cut-out review and land as a step each. Actions are re-checked here against the
+ * one update and undoes as one step. Generated stickers wait on the image
+ * model and the cut-out review, so they land later, folded into that step
+ * unless something else was undone or edited meanwhile. Actions are re-checked here against the
  * page as it is now — the request took seconds, and a collaborator may have
  * erased a shape the model was told about — and anything that no longer fits
  * is skipped rather than thrown.
@@ -309,12 +310,48 @@ export async function applyAgentActions(
   // Whatever the model asked for, new things land where the user is looking.
   const inView = (at: number, size: number, start: number, span: number) =>
     Math.max(start, Math.min(at, start + span - size));
+  // What is in view already, plus each thing placed. Containers count by what
+  // is in them: a frame filling the view doesn't make the view full.
+  const taken = editor.getShapes().flatMap((shape) => {
+    if (shape.type === 'frame' || shape.type === 'group') return [];
+    const b = shapeRotatedBounds(shape);
+    const visible = b.maxX >= view.x && b.minX <= view.x + view.w && b.maxY >= view.y && b.minY <= view.y + view.h;
+    return visible ? [b] : [];
+  });
+  const GAP = 24;
+  const free = (x: number, y: number, w: number, h: number) =>
+    taken.every(
+      (b) => x - GAP >= b.maxX || x + w + GAP <= b.minX || y - GAP >= b.maxY || y + h + GAP <= b.minY,
+    );
+  /** The free spot in view nearest `want`, on a coarse grid; null when the view is full. */
+  // ponytail: grid scan, ~2k candidates × shapes in view; fine at the summary's 150-shape cap.
+  const freeSpot = (want: Point, w: number, h: number): Point | null => {
+    const step = Math.max(8, Math.min(view.w, view.h) / 40);
+    let best: Point | null = null;
+    let bestD = Infinity;
+    for (let y = view.y; y + h <= view.y + view.h; y += step) {
+      for (let x = view.x; x + w <= view.x + view.w; x += step) {
+        const d = Math.hypot(x - want.x, y - want.y);
+        if (d < bestD && free(x, y, w, h)) {
+          best = { x, y };
+          bestD = d;
+        }
+      }
+    }
+    return best;
+  };
   const place = (x: number | undefined, y: number | undefined, w: number, h: number) => {
-    const at = {
+    let at = {
       x: exact && x !== undefined ? x : inView(x ?? view.x + view.w / 2 - w / 2, w, view.x, view.w),
       y: exact && y !== undefined ? y : inView(y ?? cursorY, h, view.y, view.h),
     };
+    // A spot the model chose stands, overlaps and all: a label on a graph or a
+    // tick on an answer is meant to sit on it. One it left out, or that had to
+    // be pulled into view, was never chosen against what is there.
+    const chosen = x !== undefined && y !== undefined && at.x === x && at.y === y;
+    if (!chosen && !free(at.x, at.y, w, h)) at = freeSpot(at, w, h) ?? at;
     if (y === undefined) cursorY = at.y + h + 40;
+    taken.push({ minX: at.x, minY: at.y, maxX: at.x + w, maxY: at.y + h });
     return at;
   };
   let index = getTopIndex(editor.getShapes());
@@ -511,8 +548,9 @@ export async function applyAgentActions(
   });
 
   // Generated artwork takes an image model call and the user's cut-out review,
-  // so it can't wait inside the transaction above: each lands as its own step
-  // once it is in the board's sticker library.
+  // so it can't wait inside the transaction above: each lands once it is in
+  // the board's sticker library, in the same undo step when it still can be.
+  let step = applied ? lastUndoStep() : undefined;
   for (const action of actions) {
     if (action.type !== 'generate_sticker') continue;
     onStep?.({ kind: 'sticker', prompt: action.prompt });
@@ -523,6 +561,7 @@ export async function applyAgentActions(
     const w = natural.w * k;
     const h = natural.h * k;
     index = getTopIndex(editor.getShapes());
+    if (!step || !continueUndoStep(step)) breakUndoCapture();
     editor.transact(() =>
       add({
         type: 'sticker',
@@ -530,6 +569,7 @@ export async function applyAgentActions(
         props: { sticker: sticker.id, blobId: sticker.blobId, w, h },
       } as Shape),
     );
+    step = lastUndoStep();
   }
 
   if (created.length) {

@@ -210,8 +210,8 @@ export async function askBoardAgent(
     pictureFirst = false,
     onProgress,
   }: {
-    /** The exchange before this one, for a follow-up to refer to. */
-    previous?: AgentPrevious;
+    /** The last few exchanges, oldest first, for a follow-up to refer to. */
+    previous?: AgentPrevious[];
     /** Send the picture with the first request rather than wait to be asked. */
     pictureFirst?: boolean;
     /** Each step the server reports as it starts. */
@@ -248,7 +248,7 @@ async function postAgent(
     image,
     previous,
     onProgress = () => {},
-  }: { image?: string; previous?: AgentPrevious; onProgress?: (progress: AgentProgress) => void },
+  }: { image?: string; previous?: AgentPrevious[]; onProgress?: (progress: AgentProgress) => void },
 ): Promise<AgentResponse> {
   let body: unknown;
   // Who is asking, so the board's tutor can see it (the server tells them).

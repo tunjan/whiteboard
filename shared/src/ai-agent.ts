@@ -241,8 +241,11 @@ export function describeActions(actions: AgentAction[]): string {
 /** Longest answer the agent may give to a question. */
 export const MAX_AGENT_REPLY_CHARS = 4000;
 
+/** How many earlier exchanges go with an instruction, so follow-ups can chain. */
+export const MAX_AGENT_HISTORY = 3;
+
 /**
- * The exchange before this one, so a follow-up ("why?", "now make it red")
+ * An exchange before this one, so a follow-up ("why?", "now make it red")
  * has something to refer to. `answer` is the reply, or what the edits did.
  */
 export interface AgentPrevious {
@@ -253,7 +256,8 @@ export interface AgentPrevious {
 export type AgentRequest = {
   board: AgentBoardSummary;
   who?: AgentAsker;
-  previous?: AgentPrevious;
+  /** The last few exchanges, oldest first, up to `MAX_AGENT_HISTORY`. */
+  previous?: AgentPrevious[];
   /**
    * A picture of the selection, or of everything in view, as a PNG data URL:
    * the one the model asked for with `look`, or sent up front when what it
@@ -293,7 +297,12 @@ export interface AgentResponse {
 export type AgentProgress =
   | { step: 'heard'; transcript: string }
   | { step: 'thinking' }
-  | { step: 'tool'; name: string };
+  | { step: 'tool'; name: string }
+  /**
+   * The answer as it is written: append `text`, or replace what was shown
+   * with it when `reset` (the text so far turned out not to be the answer).
+   */
+  | { step: 'draft'; text: string; reset?: boolean };
 
 /** One server-sent event of a streamed agent request; the last is a result or an error. */
 export type AgentStreamEvent =

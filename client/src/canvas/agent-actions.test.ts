@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { describeActions, type AgentAction, type ArrowShape, type RectangleShape } from '@whiteboard/shared';
 import './shapes/register';
 import { applyAgentActions, boardSummary } from './agent-actions';
-import { editor, loadBoard, undo } from './use-document-store';
+import { breakUndoCapture, editor, loadBoard, undo } from './use-document-store';
 import { useSelectionStore } from './use-selection-store';
 
 // The generation pipeline (image model, cut-out review, upload) has its own
@@ -60,6 +60,27 @@ describe('applyAgentActions', () => {
       exact: true,
     });
     expect(at(useSelectionStore.getState().selectedIds[0]!)).toBe(950);
+  });
+
+  it('puts unplaced things in free space, and keeps a spot the model chose', async () => {
+    // Across the middle of the view, where unplaced items used to stack.
+    const work = { ...rect, id: 'work', x: 200, y: 100, props: { ...rect.props, w: 600, h: 400 } };
+    editor.createShape(work);
+    await applyAgentActions(editor, [
+      { type: 'create_equation', latex: 'a' },
+      { type: 'create_equation', latex: 'b' },
+      { type: 'create_equation', latex: 'c', x: 300, y: 200 },
+    ]);
+    const [a, b, c] = useSelectionStore.getState().selectedIds.map((id) => editor.getShape(id)!);
+    const overlaps = (s: typeof a, t: { x: number; y: number; w: number; h: number }) => {
+      const p = s!.props as { w: number; h: number };
+      return s!.x < t.x + t.w && s!.x + p.w > t.x && s!.y < t.y + t.h && s!.y + p.h > t.y;
+    };
+    const workBox = { x: 200, y: 100, w: 600, h: 400 };
+    expect(overlaps(a, workBox)).toBe(false);
+    expect(overlaps(b, workBox)).toBe(false);
+    expect(overlaps(b, { x: a!.x, y: a!.y, w: 200, h: 40 })).toBe(false);
+    expect(c).toMatchObject({ x: 300, y: 200 });
   });
 
   it('applies a whole instruction as one undo step', async () => {
@@ -143,6 +164,38 @@ describe('generated stickers', () => {
     const sticker = editor.getShapes().find((s) => s.type === 'sticker');
     expect(sticker?.props).toEqual({ sticker: 'cat', blobId: 'blob-cat', w: 120, h: 60 });
     expect(useSelectionStore.getState().selectedIds).toHaveLength(2);
+  });
+
+  it('undoes with the rest of the instruction', async () => {
+    // Past Yjs's own 500ms capture window, as a real drawing and review are.
+    // lib0 holds its own copy of Date.now, so fake timers can't stand in.
+    generateSticker.mockImplementationOnce(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      return { id: 'cat', blobId: 'blob-cat', width: 400, height: 200 };
+    });
+    await applyAgentActions(editor, [
+      { type: 'create_text', text: 'Cats' },
+      { type: 'generate_sticker', prompt: 'a cute cat' },
+    ]);
+    expect(editor.getShapes()).toHaveLength(2);
+    undo();
+    expect(editor.getShapes()).toEqual([]);
+  });
+
+  it('keeps its own step when the user edited while it was drawn', async () => {
+    generateSticker.mockImplementationOnce(async () => {
+      // A gesture of the user's own, seconds into the review.
+      breakUndoCapture();
+      editor.createShape(rect);
+      return { id: 'cat', blobId: 'blob-cat', width: 400, height: 200 };
+    });
+    await applyAgentActions(editor, [
+      { type: 'create_text', text: 'Cats' },
+      { type: 'generate_sticker', prompt: 'a cute cat' },
+    ]);
+    undo();
+    // Only the sticker goes: the user's rectangle is not the agent's to undo.
+    expect(editor.getShapes().map((s) => s.type).sort()).toEqual(['rectangle', 'text']);
   });
 
   it('adds nothing when the review is cancelled', async () => {

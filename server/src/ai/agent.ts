@@ -5,6 +5,7 @@ import {
   AGENT_STICKERS,
   MAX_AGENT_ACTIONS,
   MAX_AGENT_GENERATED_STICKERS,
+  MAX_AGENT_HISTORY,
   MAX_STICKER_PROMPT_CHARS,
   MAX_LATEX_CHARS,
   type AgentAction,
@@ -186,7 +187,8 @@ export const AGENT_TOOLS: ToolDefinition[] = [
 
 /** What else the model is told beside the board and the instruction. */
 export interface AgentContext {
-  previous?: AgentPrevious;
+  /** Earlier exchanges, oldest first. */
+  previous?: AgentPrevious[];
   /** The tutor asked for hints only, and a student is asking. */
   hints?: boolean;
 }
@@ -196,11 +198,13 @@ export function agentMessages(
   board: AgentBoardSummary,
   { previous, hints }: AgentContext = {},
 ): ChatMessage[] {
-  // The earlier exchange is context inside this turn, not a replayed
-  // assistant turn: the model would copy a text-only "Added a graph" instead
-  // of calling the tools, and the client wrote it, not the model.
-  const before = previous
-    ? `Previous exchange, for context only (the board above is as it is now):\nUser: ${previous.instruction}\nResult: ${previous.answer}\n\n`
+  // Earlier exchanges are context inside this turn, not replayed assistant
+  // turns: the model would copy a text-only "Added a graph" instead of
+  // calling the tools, and the client wrote them, not the model.
+  const before = previous?.length
+    ? `Earlier exchanges, oldest first, for context only (the board above is as it is now):\n${previous
+        .map((p) => `User: ${p.instruction}\nResult: ${p.answer}`)
+        .join('\n\n')}\n\n`
     : '';
   return [
     { role: 'system', content: hints ? `${AGENT_SYSTEM_PROMPT}\n\n${AGENT_HINTS_PROMPT}` : AGENT_SYSTEM_PROMPT },
@@ -246,12 +250,15 @@ export function lookMessages(
 /** Every tool but the look: the picture has been taken. */
 export const AGENT_TOOLS_AFTER_LOOK = AGENT_TOOLS.filter((t) => t.function.name !== LOOK_TOOL);
 
-/** The earlier exchange a client sent, or nothing if it isn't two capped strings. */
-export function parsePrevious(value: unknown, maxInstruction: number, maxAnswer: number): AgentPrevious | undefined {
-  const { instruction, answer } = (value ?? {}) as Record<string, unknown>;
-  const i = str(instruction, maxInstruction);
-  const a = str(answer, maxAnswer);
-  return i && a ? { instruction: i, answer: a } : undefined;
+/** The earlier exchanges a client sent: the last few that are two capped strings. */
+export function parsePrevious(value: unknown, maxInstruction: number, maxAnswer: number): AgentPrevious[] {
+  if (!Array.isArray(value)) return [];
+  return value.slice(-MAX_AGENT_HISTORY).flatMap((item) => {
+    const { instruction, answer } = (item ?? {}) as Record<string, unknown>;
+    const i = str(instruction, maxInstruction);
+    const a = str(answer, maxAnswer);
+    return i && a ? [{ instruction: i, answer: a }] : [];
+  });
 }
 
 /** What the model said to the user with `say`, or nothing. */
@@ -266,6 +273,25 @@ export function sayOf(calls: ToolCall[], max: number): string | undefined {
     }
   }
   return undefined;
+}
+
+/**
+ * What a `say` call's text reads so far, from arguments still streaming in:
+ * `{"text": "half a sent` → `half a sent`. Cut back past a half-sent escape
+ * (or the closing `"}`) until it decodes, so each read extends the last.
+ */
+export function partialSayText(args: string): string {
+  const open = /^\s*\{\s*"text"\s*:\s*"/.exec(args);
+  if (!open) return '';
+  const rest = args.slice(open[0].length);
+  for (let end = rest.length; end >= Math.max(0, rest.length - 8); end--) {
+    try {
+      return JSON.parse(`"${rest.slice(0, end)}"`) as string;
+    } catch {
+      // Not a whole string yet; one character shorter.
+    }
+  }
+  return '';
 }
 
 // Far past any lesson, near enough that nothing lands where no one will find it.

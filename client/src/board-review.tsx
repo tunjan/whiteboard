@@ -47,15 +47,23 @@ if (withAi) {
     );
   // The agent answers as the server does when asked to stream: progress
   // events a beat apart, then the result.
-  const streamed = (result: unknown, tools: string[]) => {
-    const events = [{ progress: { step: 'thinking' } }, ...tools.map((name) => ({ progress: { step: 'tool', name } })), { result }];
+  const streamed = (result: { reply?: string; actions: unknown[] }, tools: string[]) => {
+    // A written answer arrives as the server forwards it: in pieces.
+    const pieces = !tools.length && result.reply ? (result.reply.match(/[\s\S]{1,12}/g) ?? []) : [];
+    const events = [
+      { progress: { step: 'thinking' } },
+      ...tools.map((name) => ({ progress: { step: 'tool', name } })),
+      ...pieces.map((text) => ({ progress: { step: 'draft', text } })),
+      { result },
+    ];
     const encoder = new TextEncoder();
     return Promise.resolve(
       new Response(
         new ReadableStream({
           async start(controller) {
             for (const event of events) {
-              await new Promise((r) => setTimeout(r, 700));
+              const drafting = 'progress' in event && event.progress?.step === 'draft';
+              await new Promise((r) => setTimeout(r, drafting ? 90 : 700));
               controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
             }
             controller.close();

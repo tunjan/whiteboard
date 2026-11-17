@@ -202,7 +202,11 @@ export type CompletionProgress =
   /** The first token of any kind: reasoning, text or a call. */
   | { type: 'started' }
   /** The model began a call to this tool. */
-  | { type: 'tool'; name: string };
+  | { type: 'tool'; name: string }
+  /** A piece of the model's plain text, as it arrives. */
+  | { type: 'text'; delta: string }
+  /** A call's arguments so far, each time a piece arrives. */
+  | { type: 'args'; name: string; arguments: string };
 
 interface StreamChunk {
   choices?: {
@@ -253,7 +257,10 @@ export async function streamChatCompletion(
       started = true;
       onProgress({ type: 'started' });
     }
-    if (delta.content) content += delta.content;
+    if (delta.content) {
+      content += delta.content;
+      onProgress({ type: 'text', delta: delta.content });
+    }
     for (const part of delta.tool_calls ?? []) {
       const i = part.index ?? calls.length;
       const call = (calls[i] ??= { name: '', arguments: '' });
@@ -261,7 +268,10 @@ export async function streamChatCompletion(
         call.name = part.function.name;
         onProgress({ type: 'tool', name: call.name });
       }
-      if (part.function?.arguments) call.arguments += part.function.arguments;
+      if (part.function?.arguments) {
+        call.arguments += part.function.arguments;
+        if (call.name) onProgress({ type: 'args', name: call.name, arguments: call.arguments });
+      }
     }
   };
 
