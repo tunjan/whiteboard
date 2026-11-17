@@ -1,10 +1,3 @@
-import {
-  Signal,
-  SignalHigh,
-  SignalLow,
-  SignalMedium,
-  SignalZero,
-} from 'lucide-react';
 import type { ConnectionStatus } from '@/collab/use-connection-store';
 import { useConnectionStore } from '@/collab/use-connection-store';
 import {
@@ -15,8 +8,6 @@ import {
 } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 
-const SIGNAL_ICONS = [SignalZero, SignalLow, SignalMedium, SignalHigh, Signal];
-
 /**
  * Bar count carries the quality; colour is held back until the connection
  * actually needs attention. A healthy link is the normal case and reads as
@@ -24,7 +15,7 @@ const SIGNAL_ICONS = [SignalZero, SignalLow, SignalMedium, SignalHigh, Signal];
  * something is wrong rather than "still fine, still fine, still fine".
  *
  * Severity is still double-encoded for anyone who can't separate the hues:
- * four bars vs one says the same thing as grey vs red.
+ * dot and two arcs vs the dot alone says the same thing as grey vs red.
  */
 function connectionQuality(
   status: ConnectionStatus,
@@ -48,7 +39,7 @@ function connectionQuality(
   }
   if (latencyMs <= 100) {
     return {
-      activeBars: 4,
+      activeBars: 3,
       label: 'Excellent connection',
       colorClass: 'text-fg-muted',
       pending: false,
@@ -87,12 +78,23 @@ function SignalBars({
   className?: string;
   pending: boolean;
 }) {
-  const Icon = SIGNAL_ICONS[activeBars] ?? SignalZero;
+  // A dot with two concentric arcs spreading upward from it (dot = 1, each arc
+  // adds one); unlit parts stay as faint ghosts so the scale is readable.
+  const on = (i: number) => (i < activeBars ? 1 : 0.25);
   return (
-    <Icon
+    <svg
       aria-hidden="true"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={4}
+      strokeLinecap="round"
       className={cn('size-4', pending && 'animate-pulse', className)}
-    />
+    >
+      <circle cx={12} cy={18} r={2.75} fill="currentColor" stroke="none" opacity={on(0)} />
+      <path d="M7.05 13.05a7 7 0 0 1 9.9 0" opacity={on(1)} />
+      <path d="M3.161 9.161a12.5 12.5 0 0 1 17.678 0" opacity={on(2)} />
+    </svg>
   );
 }
 
