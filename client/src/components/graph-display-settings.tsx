@@ -7,6 +7,11 @@ const ANGLE_UNITS = [
   { value: 'deg', label: 'Degrees' },
 ] as const;
 
+const DIMENSIONS = [
+  { value: '2d', label: '2D' },
+  { value: '3d', label: '3D' },
+] as const;
+
 const TOGGLES = [
   { key: 'showAxisLabels', label: 'Axis numbers' },
   { key: 'showIntersections', label: 'Intersections' },
@@ -27,12 +32,16 @@ const ATLASSIAN_TOGGLE =
  * control right.
  */
 export function DisplaySettings({
+  threeD,
+  onThreeD,
   showAxisLabels,
   showIntersections,
   angleUnit,
   onAngleUnit,
   onPatch,
 }: {
+  threeD: boolean;
+  onThreeD: (threeD: boolean) => void;
   showAxisLabels: boolean;
   showIntersections: boolean;
   angleUnit: 'rad' | 'deg';
@@ -40,8 +49,28 @@ export function DisplaySettings({
   onPatch: (patch: Partial<GraphProps>) => void;
 }) {
   const values = { showAxisLabels, showIntersections };
+  // Intersections are found between 2D curves only.
+  const toggles = threeD ? TOGGLES.filter(({ key }) => key !== 'showIntersections') : TOGGLES;
   return (
     <div className="flex shrink-0 flex-col border-t border-border px-4 py-2">
+      <div className="flex h-10 items-center justify-between gap-3 text-sm text-fg">
+        <span id="graph-dimensions" className="select-none">
+          Plot
+        </span>
+        <ChoiceGroup
+          aria-labelledby="graph-dimensions"
+          value={[threeD ? '3d' : '2d']}
+          onValueChange={(value) => {
+            if (value[0]) onThreeD(value[0] === '3d');
+          }}
+        >
+          {DIMENSIONS.map(({ value, label }) => (
+            <ChoiceItem key={value} value={value} className="flex-none px-2.5 text-sm">
+              {label}
+            </ChoiceItem>
+          ))}
+        </ChoiceGroup>
+      </div>
       <div className="flex h-10 items-center justify-between gap-3 text-sm text-fg">
         <span id="graph-angle-unit" className="select-none">
           Angles
@@ -65,7 +94,7 @@ export function DisplaySettings({
           ))}
         </ChoiceGroup>
       </div>
-      {TOGGLES.map(({ key, label }) => (
+      {toggles.map(({ key, label }) => (
         <label
           key={key}
           className="flex h-10 cursor-pointer items-center justify-between gap-3 text-sm text-fg select-none"

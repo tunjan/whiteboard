@@ -531,12 +531,14 @@ export class GestureArbiter {
   }
 
   // The sole selected graph whose plot area contains `screen` (container px), or
-  // null. Used to route a pinch to a graph viewport instead of the camera.
+  // null. Used to route a pinch to a graph viewport instead of the camera. A
+  // 3D graph has no window to pan, so a pinch over it moves the board and a
+  // one-finger drag turns it (the select tool's orbit).
   private graphAtScreenPoint(screen: { x: number; y: number }): string | null {
     const sel = useSelectionStore.getState().selectedIds;
     if (sel.length !== 1) return null;
     const shape = editor.getShape(sel[0]!);
-    if (!shape || shape.type !== 'graph') return null;
+    if (!shape || shape.type !== 'graph' || shape.props.view3d) return null;
     // The plot area is upright in the shape's own frame.
     const world = unrotatedPoint(
       shape.x,

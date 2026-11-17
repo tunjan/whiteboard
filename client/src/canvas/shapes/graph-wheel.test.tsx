@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { act, useRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GraphShape } from '@whiteboard/shared';
 import { graphUtil, plotArea } from './graph';
 import { screenToGraph } from './graph-interaction';
@@ -153,4 +153,30 @@ it('leaves an unselected graph alone and lets the board handle the wheel', async
   await wheel({ clientX: 920, clientY: 680, deltaY: 40 });
   expect(viewport()).toEqual(graph.props.viewport);
   expect(useCameraStore.getState().camera.y).toBeCloseTo(camera.y + 20);
+});
+
+describe('a 3D graph', () => {
+  const view = { yaw: -125, pitch: 25, zMin: -10, zMax: 10 };
+  const view3d = () => (editor.getShape(graph.id) as GraphShape).props.view3d!;
+
+  beforeEach(async () => {
+    graph = { ...graph, props: { ...graph.props, view3d: view } };
+    editor.updateShape(graph.id, { props: { view3d: view } });
+    await act(() => root.render(<Surface />));
+  });
+
+  it('turns under a plain wheel, the box following the fingers', async () => {
+    await wheel({ clientX: 920, clientY: 680, deltaX: 20, deltaY: 10 });
+    expect(view3d().yaw).toBeCloseTo(view.yaw - 10);
+    expect(view3d().pitch).toBeCloseTo(view.pitch - 5);
+    expect(viewport()).toEqual(graph.props.viewport);
+    expect(useCameraStore.getState().camera).toEqual(camera);
+  });
+
+  it('zooms all three ranges together with ctrl', async () => {
+    await wheel({ clientX: 920, clientY: 680, deltaY: -10, ctrlKey: true });
+    expect(viewport().xMax - viewport().xMin).toBeCloseTo(20 / 1.1);
+    expect(view3d().zMax - view3d().zMin).toBeCloseTo(20 / 1.1);
+    expect(useCameraStore.getState().camera).toEqual(camera);
+  });
 });

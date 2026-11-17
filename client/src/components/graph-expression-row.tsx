@@ -26,6 +26,7 @@ import {
   parametricDomain,
 } from '@/canvas/graph-defaults';
 import {
+  parseGraph3dExpression,
   parseGraphExpression,
   type GraphFunctionDefinitions,
 } from '@/canvas/graph-parser';
@@ -45,11 +46,14 @@ const ROW_REVEAL =
 function useParsedExpression(
   source: string,
   definitions: GraphFunctionDefinitions,
+  threeD: boolean,
 ) {
-  return useMemo(
-    () => (source.trim() ? parseGraphExpression(source, definitions) : null),
-    [source, definitions],
-  );
+  return useMemo(() => {
+    if (!source.trim()) return null;
+    return threeD
+      ? parseGraph3dExpression(source, definitions)
+      : parseGraphExpression(source, definitions);
+  }, [source, definitions, threeD]);
 }
 
 function capitalize(word: string) {
@@ -296,6 +300,7 @@ export function ExpressionRow({
   registerField,
   definitions,
   angleUnit,
+  threeD,
 }: {
   expression: GraphExpression;
   index: number;
@@ -308,18 +313,22 @@ export function ExpressionRow({
   registerField: (el: MathfieldElement | null) => void;
   definitions: GraphFunctionDefinitions;
   angleUnit: 'rad' | 'deg';
+  threeD: boolean;
 }) {
   const errorId = useId();
   const settled = useDebouncedValue(expression.expression, 400);
   // One parse serves both the error line and the parametric domain row; the
   // error additionally waits for typing to settle so it doesn't flash on every
   // keystroke.
-  const parsed = useParsedExpression(settled, definitions);
+  const parsed = useParsedExpression(settled, definitions, threeD);
   const error =
     settled === expression.expression && parsed && !parsed.ok
       ? parsed.message
       : null;
-  const parametric = parsed?.ok === true && parsed.kind === 'parametric';
+  // A 3D line has no domain: it is drawn across the whole box.
+  const parametric =
+    parsed?.ok === true && (parsed.kind === 'parametric' || parsed.kind === 'curve');
+  const polar = parsed?.ok === true && 'polar' in parsed && parsed.polar === true;
 
   const fieldRef = useRef<MathfieldElement | null>(null);
 
@@ -357,7 +366,7 @@ export function ExpressionRow({
             aria-describedby={error ? errorId : undefined}
             className="graph-expression-field w-full"
             value={expression.expression}
-            placeholder="y = sin(x)"
+            placeholder={threeD ? 'z = x^2 - y^2' : 'y = sin(x)'}
             elementRef={(el) => {
               fieldRef.current = el;
               registerField(el);
@@ -434,7 +443,7 @@ export function ExpressionRow({
       {parametric ? (
         <DomainRow
           domain={parametricDomain(expression.domain, angleUnit)}
-          variable={parsed.polar ? 'θ' : 't'}
+          variable={polar ? 'θ' : 't'}
           onChange={(domain) => onPatch({ domain })}
         />
       ) : null}

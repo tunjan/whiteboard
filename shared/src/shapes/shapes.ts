@@ -364,6 +364,21 @@ export interface GraphProps {
   yScale?: 'linear' | 'log';
   /** What trig functions read and return. Absent is radians. */
   angleUnit?: 'rad' | 'deg';
+  /**
+   * Present on a graph plotted in three dimensions: x and y keep their range
+   * in `viewport`, z keeps its own here. Absent is a flat 2D graph.
+   */
+  view3d?: Graph3dView;
+}
+
+/** How a 3D graph is turned and how tall its box is. Angles in degrees. */
+export interface Graph3dView {
+  /** Turn about the vertical z axis. */
+  yaw: number;
+  /** Eye height above the x–y plane, −90 (from below) to 90 (from above). */
+  pitch: number;
+  zMin: number;
+  zMax: number;
 }
 
 export interface EquationProps {

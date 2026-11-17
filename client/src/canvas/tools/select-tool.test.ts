@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { rotatePoint, type Shape } from '@whiteboard/shared';
+import { rotatePoint, type GraphShape, type Shape } from '@whiteboard/shared';
 import '../shapes/register';
+import { createDefaultGraphProps } from '../graph-defaults';
 import type { Editor } from '../editor';
 import { getSelectionInfo, shapeRotatedBounds } from '../selection-geometry';
 import { spatialIndex } from '../use-document-store';
@@ -250,6 +251,60 @@ describe('select tool state machine', () => {
     tool.onPointerMove?.(pointer(70, 10, { altKey: true }), ctx);
     tool.onCancel?.(ctx);
     expect(shapes.get('a')?.x).toBe(30);
+  });
+
+  describe('a 3D graph', () => {
+    const view = { yaw: -125, pitch: 25, zMin: -5, zMax: 5 };
+    // A 200 × 200 card whose plot is inset 16 on every side.
+    const graph3d = (): GraphShape => ({
+      id: 'g',
+      type: 'graph',
+      x: 0,
+      y: 0,
+      rotation: 0,
+      index: 'a0',
+      props: { ...createDefaultGraphProps(), w: 200, h: 200, view3d: view },
+    });
+    const graphOf = (shapes: Map<string, Shape>) => shapes.get('g') as GraphShape;
+
+    it('turns under a drag inside its plot once selected, and moves otherwise', () => {
+      const { ctx, shapes } = context([graph3d()]);
+      const tool = createSelectTool();
+
+      // Not selected yet: the drag picks it up and moves it.
+      tool.onPointerDown?.(pointer(100, 100), ctx);
+      tool.onPointerMove?.(pointer(110, 100), ctx);
+      tool.onPointerUp?.(pointer(110, 100), ctx);
+      expect(graphOf(shapes).x).toBe(10);
+      expect(graphOf(shapes).props.view3d).toEqual(view);
+
+      // Selected: the same drag turns it, in screen pixels, and leaves it put.
+      tool.onPointerDown?.(pointer(110, 100), ctx);
+      tool.onPointerMove?.(pointer(150, 120), ctx);
+      tool.onPointerUp?.(pointer(150, 120), ctx);
+      const turned = graphOf(shapes);
+      expect(turned.x).toBe(10);
+      expect(turned.props.view3d!.yaw).toBeCloseTo(view.yaw + 20);
+      expect(turned.props.view3d!.pitch).toBeCloseTo(view.pitch + 10);
+      expect(turned.props.viewport).toEqual(graph3d().props.viewport);
+
+      // The card's border still moves it.
+      tool.onPointerDown?.(pointer(16, 100), ctx);
+      tool.onPointerMove?.(pointer(36, 100), ctx);
+      tool.onPointerUp?.(pointer(36, 100), ctx);
+      expect(graphOf(shapes).x).toBe(30);
+    });
+
+    it('puts the view back when the turn is cancelled', () => {
+      const { ctx, shapes } = context([graph3d()]);
+      useSelectionStore.getState().setSelection(['g']);
+      const tool = createSelectTool();
+      tool.onPointerDown?.(pointer(100, 100), ctx);
+      tool.onPointerMove?.(pointer(160, 100), ctx);
+      expect(graphOf(shapes).props.view3d!.yaw).not.toBe(view.yaw);
+      tool.onCancel?.(ctx);
+      expect(graphOf(shapes).props.view3d).toEqual(view);
+    });
   });
 
   it('flags the selection as transforming only while it is dragged', () => {

@@ -919,14 +919,14 @@ function normalizeTokens(tokens: readonly Token[]): string {
 }
 
 /**
- * The two halves of a coordinate `(a, b)` — the whole expression wrapped in one
- * pair of parentheses around a single top-level comma. Null for anything else,
- * including function calls like `max(1, x)`, which open with a name token.
+ * The parts of a tuple `(a, b, …)` — the whole expression wrapped in one pair
+ * of parentheses around top-level commas. Null for anything else, including
+ * function calls like `max(1, x)`, which open with a name token.
  */
-function splitCoordinate(tokens: Token[]): [Token[], Token[]] | null {
+function splitTuple(tokens: readonly Token[]): Token[][] | null {
   if (tokens[0]?.type !== 'lparen') return null;
   let depth = 0;
-  let commaIndex = -1;
+  const commas: number[] = [];
 
   for (let index = 0; index < tokens.length; index += 1) {
     const token = tokens[index]!;
@@ -937,15 +937,24 @@ function splitCoordinate(tokens: Token[]): [Token[], Token[]] | null {
       // expression — `(1, 2) + 3` is arithmetic, not a coordinate.
       if (depth === 0 && index !== tokens.length - 1) return null;
     } else if (token.type === 'comma' && depth === 1) {
-      if (commaIndex !== -1) return null;
-      commaIndex = index;
+      commas.push(index);
     }
   }
 
-  if (depth !== 0 || commaIndex === -1) return null;
-  const x = tokens.slice(1, commaIndex);
-  const y = tokens.slice(commaIndex + 1, tokens.length - 1);
-  return x.length && y.length ? [x, y] : null;
+  if (depth !== 0 || commas.length === 0) return null;
+  const parts: Token[][] = [];
+  let from = 1;
+  for (const end of [...commas, tokens.length - 1]) {
+    parts.push(tokens.slice(from, end));
+    from = end + 1;
+  }
+  return parts.every((part) => part.length > 0) ? parts : null;
+}
+
+/** The two halves of a coordinate `(a, b)`, or null for anything else. */
+function splitCoordinate(tokens: Token[]): [Token[], Token[]] | null {
+  const parts = splitTuple(tokens);
+  return parts?.length === 2 ? [parts[0]!, parts[1]!] : null;
 }
 
 function containsY(tokens: readonly Token[]): boolean {
@@ -2131,4 +2140,344 @@ function parseGraphExpressionUncached(
         error instanceof Error ? friendlyMessage(error.message) : 'Invalid expression',
     };
   }
+}
+
+/* ─── 3D ──────────────────────────────────────────────────────────────────── */
+
+/** A point in a 3D graph's own units. */
+export interface GraphPoint3 {
+  x: number;
+  y: number;
+  z: number;
+}
+
+/** The plane `normal · p = offset`. */
+export interface GraphPlane {
+  normal: GraphPoint3;
+  offset: number;
+}
+
+interface Parsed3dBase {
+  ok: true;
+  source: string;
+  /** The sliders it reads: never `x`, `y`, `z` or `t`. */
+  variables: string[];
+}
+
+/**
+ * What a 3D graph draws for a row:
+ * - `surface`: `z = f(x, y)`, or a bare `f(x, y)`
+ * - `plane`: an equation linear in x, y and z, like `2x - y + z = 4`
+ * - `point`: `(1, 2, 3)`; `curve`: `(cos(t), sin(t), t)`
+ * - `line`: `r = (1, 2, 3) + λ(2, -1, 0)`, unbounded, so it is drawn across
+ *   the whole box rather than over a `t` domain
+ * - `definition`: an `f(x) = …` row, a helper the others call
+ */
+export type ParsedGraph3dExpression =
+  | (Parsed3dBase & {
+      kind: 'surface';
+      createEvaluator: (
+        parameters: Record<string, GraphParameter>,
+      ) => (x: number, y: number) => number;
+    })
+  | (Parsed3dBase & {
+      kind: 'plane';
+      /** Null when these slider values bend it out of a plane. */
+      createPlane: (parameters: Record<string, GraphParameter>) => GraphPlane | null;
+    })
+  | (Parsed3dBase & {
+      kind: 'point' | 'curve' | 'line';
+      createEvaluator: (
+        parameters: Record<string, GraphParameter>,
+      ) => (t: number) => GraphPoint3;
+    })
+  | (Parsed3dBase & { kind: 'definition' });
+
+export type Graph3dExpressionParseResult =
+  | ParsedGraph3dExpression
+  | GraphExpressionError;
+
+const AXIS_NAMES = new Set(['x', 'y', 'z']);
+
+/** MathLive can hand a vector line's λ or μ over as the letter itself. */
+const GREEK_NAMES: Record<string, string> = { λ: 'lambda', μ: 'mu' };
+
+/**
+ * Off-axis probes a plane must also pass through. Fixed rather than random so
+ * a parse is repeatable; irrational-ish so no polynomial term vanishes on them.
+ */
+const PLANE_PROBES: readonly GraphPoint3[] = [
+  { x: 0.37, y: -1.31, z: 2.13 },
+  { x: -2.71, y: 0.61, z: -0.47 },
+];
+
+function containsName(tokens: readonly Token[], name: string): boolean {
+  return tokens.some(
+    (token) =>
+      (token.type === 'identifier' && token.value === name) ||
+      (token.type === 'aggregate' &&
+        (containsName(token.from, name) ||
+          containsName(token.to, name) ||
+          containsName(token.body, name))),
+  );
+}
+
+function isName(tokens: readonly Token[], name?: string): boolean {
+  return (
+    tokens.length === 1 &&
+    tokens[0]!.type === 'identifier' &&
+    (name === undefined || tokens[0]!.value === name)
+  );
+}
+
+/**
+ * `(a) + λ(b)`, `(a) - λ*(b)`: a point, then a direction scaled by any one
+ * name that isn't an axis. Null for anything else.
+ */
+function splitVectorLine(
+  tokens: readonly Token[],
+): { point: Token[][]; direction: Token[][]; sign: string } | null {
+  if (tokens[0]?.type !== 'lparen') return null;
+  const close = closingParen(tokens, 0);
+  const point = close > 0 ? splitTuple(tokens.slice(0, close + 1)) : null;
+  const sign = tokens[close + 1];
+  const parameter = tokens[close + 2];
+  if (
+    !point ||
+    sign?.type !== 'operator' ||
+    (sign.value !== '+' && sign.value !== '-') ||
+    parameter?.type !== 'identifier' ||
+    AXIS_NAMES.has(parameter.value)
+  ) {
+    return null;
+  }
+  const times = tokens[close + 3];
+  const from = times?.type === 'operator' && times.value === '*' ? close + 4 : close + 3;
+  const direction = splitTuple(tokens.slice(from));
+  return direction ? { point, direction, sign: sign.value } : null;
+}
+
+/** One coordinate of `a + sign·t·b`, the curve a vector line traces. */
+function lineComponent(a: Token[], b: Token[], sign: string): Token[] {
+  return [
+    LPAREN,
+    ...a,
+    RPAREN,
+    operator(sign),
+    { type: 'identifier', value: PARAMETRIC_VARIABLE },
+    operator('*'),
+    LPAREN,
+    ...b,
+    RPAREN,
+  ];
+}
+
+function parseTuple3d(
+  source: string,
+  parts: Token[][],
+  definitions: GraphFunctionDefinitions,
+  line: boolean,
+): ParsedGraph3dExpression {
+  if (parts.length !== 3) {
+    throw new Error('A point in 3D has three coordinates, like (1, 2, 3)');
+  }
+  const variables = new Set<string>();
+  const sides = parts.map((part) =>
+    compileCoordinateSide(inDegreesIf(part, definitions), variables, definitions),
+  );
+  if (variables.has('z')) {
+    throw new Error('Coordinates vary with t, for example (cos(t), sin(t), t)');
+  }
+  const [xSide, ySide, zSide] = sides as [CompiledSide, CompiledSide, CompiledSide];
+  const createEvaluator = (parameters: Record<string, GraphParameter>) => {
+    const scope = createEvaluationScope(
+      { [PARAMETRIC_VARIABLE]: 0 },
+      parameters,
+      variables,
+      definitions,
+    );
+    installAggregates(scope, sides.flatMap((side) => side.aggregates));
+    return (t: number): GraphPoint3 => {
+      scope.set(PARAMETRIC_VARIABLE, t);
+      return { x: xSide.evaluate(scope), y: ySide.evaluate(scope), z: zSide.evaluate(scope) };
+    };
+  };
+  return {
+    ok: true,
+    source,
+    kind: line ? 'line' : sides.some((side) => side.usesParameter) ? 'curve' : 'point',
+    variables: [...variables].sort((a, b) => a.localeCompare(b)),
+    createEvaluator,
+  };
+}
+
+/**
+ * The plane `F = 0` is, read off F at the origin and one step along each
+ * axis; or why it isn't one. `at(z)` binds z and hands back F in x and y.
+ */
+function fitPlane(
+  at: (z: number) => (x: number, y: number) => number,
+): GraphPlane | 'curved' | 'constant' {
+  const flat = at(0);
+  const f0 = flat(0, 0);
+  const normal = { x: flat(1, 0) - f0, y: flat(0, 1) - f0, z: at(1)(0, 0) - f0 };
+  for (const p of PLANE_PROBES) {
+    const value = at(p.z)(p.x, p.y);
+    const expected = normal.x * p.x + normal.y * p.y + normal.z * p.z + f0;
+    // Negated so a NaN anywhere (outside a domain, say) fails too.
+    if (!(Math.abs(value - expected) <= 1e-9 * (1 + Math.abs(value) + Math.abs(expected)))) {
+      return 'curved';
+    }
+  }
+  if (normal.x === 0 && normal.y === 0 && normal.z === 0) return 'constant';
+  return { normal, offset: -f0 };
+}
+
+function parseGraph3dExpressionUncached(
+  source: string,
+  definitions: GraphFunctionDefinitions,
+): Graph3dExpressionParseResult {
+  const trimmed = source.trim();
+  if (!trimmed) return { ok: false, source, message: 'Enter an expression' };
+
+  try {
+    const definition = functionDefinitionSource(trimmed);
+    if (definition) {
+      const parsed = parseFunctionDefinitionExpression(source, definition, definitions);
+      return { ok: true, source, kind: 'definition', variables: parsed.variables };
+    }
+    const { body, restrictions } = splitRestrictions(trimmed);
+    if (restrictions.length > 0) {
+      throw new Error('Restrictions like {x > 0} are not drawn in 3D');
+    }
+    if (!body) return { ok: false, source, message: 'Enter an expression' };
+    const named = body.replace(/[λμ]/g, (letter) => ` ${GREEK_NAMES[letter]} `);
+    const typed = tokenize(named, new Set(definitions.keys()));
+    if (typed.some((token) => token.type === 'compare')) {
+      throw new Error('Inequalities are not drawn in 3D');
+    }
+    const sides = splitOnEquals(typed);
+    if (sides.length > 2) throw new Error('Use a single equals sign');
+    const [left, right] = sides as [Token[], Token[] | undefined];
+
+    // `r = …` names a point, curve or line; the name itself draws nothing.
+    const tupleTokens =
+      right === undefined
+        ? left
+        : isName(left) && !AXIS_NAMES.has(left[0]!.value)
+          ? right
+          : null;
+    if (tupleTokens) {
+      const line = splitVectorLine(tupleTokens);
+      if (line) {
+        if (line.point.length !== 3 || line.direction.length !== 3) {
+          throw new Error('A line in 3D is a point plus a direction, like (1, 2, 3) + λ(2, -1, 0)');
+        }
+        const parts = line.point.map((a, i) => lineComponent(a, line.direction[i]!, line.sign));
+        return parseTuple3d(source, parts, definitions, true);
+      }
+      const parts = splitTuple(tupleTokens);
+      if (parts) return parseTuple3d(source, parts, definitions, false);
+    }
+    if (right !== undefined && !normalizeTokens(left)) {
+      throw new Error('Enter both sides of the equation');
+    }
+    if (right !== undefined && !normalizeTokens(right)) {
+      throw new Error('Enter both sides of the equation');
+    }
+
+    // `z = f(x, y)` either way round, or `f(x, y)` alone.
+    const height =
+      right === undefined
+        ? left
+        : isName(left, 'z') && !containsName(right, 'z')
+          ? right
+          : isName(right, 'z') && !containsName(left, 'z')
+            ? left
+            : null;
+    if (height) {
+      if (containsName(height, 'z')) {
+        throw new Error('Write an equation, like x + y + z = 1');
+      }
+      const tokens = inDegreesIf(height, definitions);
+      const variables = new Set<string>();
+      const relation = compileRelation(
+        normalizeTokens(tokens),
+        tokens,
+        true,
+        definitions,
+        variables,
+      );
+      return {
+        ok: true,
+        source,
+        kind: 'surface',
+        variables: [...variables].sort((a, b) => a.localeCompare(b)),
+        createEvaluator: relation,
+      };
+    }
+
+    // Anything else has to be a plane. z rides in as if it were a slider, so
+    // the relation compiles (on Rust too) and is then bound one height at a time.
+    const leftTokens = inDegreesIf(left, definitions);
+    const rightTokens = inDegreesIf(right!, definitions);
+    const variables = new Set<string>();
+    const relation = compileRelation(
+      `(${normalizeTokens(leftTokens)})-(${normalizeTokens(rightTokens)})`,
+      [...leftTokens, ...rightTokens],
+      true,
+      definitions,
+      variables,
+    );
+    variables.delete('z');
+    const planeAt = (parameters: Record<string, GraphParameter>) =>
+      fitPlane((z) => relation({ ...parameters, z: { ...DEFAULT_GRAPH_PARAMETER, value: z } }));
+    // Checked against the sliders' starting values: a plane for those is one
+    // for any, short of a slider multiplying two axes together.
+    const fitted = planeAt({});
+    if (fitted === 'curved') {
+      throw new Error('In 3D, equations draw as planes; curved ones need the form z = f(x, y)');
+    }
+    if (fitted === 'constant') {
+      throw new Error('This equation has no x, y or z to draw');
+    }
+    return {
+      ok: true,
+      source,
+      kind: 'plane',
+      variables: [...variables].sort((a, b) => a.localeCompare(b)),
+      createPlane: (parameters) => {
+        const plane = planeAt(parameters);
+        return typeof plane === 'object' ? plane : null;
+      },
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      source,
+      message:
+        error instanceof Error ? friendlyMessage(error.message) : 'Invalid expression',
+    };
+  }
+}
+
+const parse3dCache = new Map<string, Graph3dExpressionParseResult>();
+
+/** {@link parseGraphExpression}, for a graph drawn in three dimensions. */
+export function parseGraph3dExpression(
+  source: string,
+  definitions: GraphFunctionDefinitions = EMPTY_GRAPH_FUNCTIONS,
+): Graph3dExpressionParseResult {
+  if (!graphMathReady()) {
+    return { ok: false, source, message: 'Loading the graph parser…' };
+  }
+  const key = `${definitionSignature(definitions)}\u0000${source}`;
+  const cached = cacheGet(parse3dCache, key);
+  if (cached) return cached;
+  return cacheSet(
+    parse3dCache,
+    key,
+    parseGraph3dExpressionUncached(source, definitions),
+    PARSE_CACHE_LIMIT,
+  );
 }

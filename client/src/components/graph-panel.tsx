@@ -26,9 +26,10 @@ import {
   reconcileGraphParameters,
 } from '@/canvas/graph-parameters';
 import { createGraphFunctionDefinitions } from '@/canvas/graph-parser';
-import { GRAPH_MATH_PRESETS } from '@/canvas/graph-presets';
+import { GRAPH_3D_PRESETS, GRAPH_MATH_PRESETS } from '@/canvas/graph-presets';
 import { fitViewport, graphAxes, type GraphAxes } from '@/canvas/graph-scale';
 import { plotsTrig, usesAngles } from '@/canvas/graph-ticks';
+import { DEFAULT_GRAPH_3D_ANGLE } from '@/canvas/graph3d';
 import { editor } from '@/canvas/use-document-store';
 import { useShape } from '@/canvas/use-shapes';
 import { useSelectionStore } from '@/canvas/use-selection-store';
@@ -38,6 +39,7 @@ import { ExpressionRow } from './graph-expression-row';
 import { SECTION } from './graph-panel-styles';
 import { SliderRow } from './graph-slider-row';
 import { ViewRange } from './graph-view-range';
+import { Graph3dRange } from './graph-view-range-3d';
 
 export function GraphPanelContent({ shape }: { shape: GraphShape }) {
   const fieldRefs = useRef(new Map<string, MathfieldElement>());
@@ -56,6 +58,8 @@ export function GraphPanelContent({ shape }: { shape: GraphShape }) {
   const props = shape.props;
   const axes = graphAxes(props);
   const angleUnit = props.angleUnit ?? 'rad';
+  const view3d = props.view3d;
+  const threeD = view3d !== undefined;
   const functionDefinitions = useMemo(
     () => createGraphFunctionDefinitions(props.expressions, angleUnit),
     [props.expressions, angleUnit],
@@ -66,7 +70,7 @@ export function GraphPanelContent({ shape }: { shape: GraphShape }) {
   };
 
   const updateExpressions = (expressions: GraphExpression[]) => {
-    const parameters = reconcileGraphParameters(expressions, props.parameters);
+    const parameters = reconcileGraphParameters(expressions, props.parameters, threeD);
     // Most edits don't change which sliders exist, and writing an identical
     // parameter set back would rewrite that whole field of the shape for every
     // keystroke.
@@ -158,6 +162,21 @@ export function GraphPanelContent({ shape }: { shape: GraphShape }) {
     updateGraph(patch);
   };
 
+  // The rows stay as typed and the sliders are re-read for the new mode: in
+  // 2D a `z` is a slider, in 3D an axis. z starts on y's range, so a square
+  // window opens as a cube.
+  const setThreeD = (next: boolean) => {
+    if (next === threeD) return;
+    const parameters = reconcileGraphParameters(props.expressions, props.parameters, next);
+    updateGraph({
+      view3d: next
+        ? { ...DEFAULT_GRAPH_3D_ANGLE, zMin: props.viewport.yMin, zMax: props.viewport.yMax }
+        : undefined,
+      ...(graphParametersEqual(parameters, props.parameters) ? {} : { parameters }),
+    });
+  };
+
+  const presets = view3d ? GRAPH_3D_PRESETS : GRAPH_MATH_PRESETS;
   const parameterNames = Object.keys(props.parameters).sort((a, b) =>
     a.localeCompare(b),
   );
@@ -191,6 +210,7 @@ export function GraphPanelContent({ shape }: { shape: GraphShape }) {
                   }}
                   definitions={functionDefinitions}
                   angleUnit={angleUnit}
+                  threeD={threeD}
                 />
               </li>
             ))}
@@ -228,7 +248,7 @@ export function GraphPanelContent({ shape }: { shape: GraphShape }) {
                 <TooltipContent side="top">Examples</TooltipContent>
               </Tooltip>
               <DropdownMenuContent align="end" className="w-56 p-1">
-                {GRAPH_MATH_PRESETS.map((preset) => (
+                {presets.map((preset) => (
                   <DropdownMenuItem
                     key={preset.name}
                     onClick={() => addExpression(preset.expression)}
@@ -267,17 +287,23 @@ export function GraphPanelContent({ shape }: { shape: GraphShape }) {
         {/* Pinned below the scroller with the display settings: the view
             controls stay in reach however many rows there are. */}
         <section aria-label="View" className={`${SECTION} shrink-0`}>
-          <ViewRange
-            viewport={props.viewport}
-            shapeProps={{ w: props.w, h: props.h }}
-            axes={axes}
-            angleUnit={angleUnit}
-            onChange={(viewport) => updateGraph({ viewport })}
-            onScaleChange={setScale}
-          />
+          {view3d ? (
+            <Graph3dRange viewport={props.viewport} view3d={view3d} onChange={updateGraph} />
+          ) : (
+            <ViewRange
+              viewport={props.viewport}
+              shapeProps={{ w: props.w, h: props.h }}
+              axes={axes}
+              angleUnit={angleUnit}
+              onChange={(viewport) => updateGraph({ viewport })}
+              onScaleChange={setScale}
+            />
+          )}
         </section>
 
         <DisplaySettings
+          threeD={threeD}
+          onThreeD={setThreeD}
           showAxisLabels={props.showAxisLabels !== false}
           showIntersections={props.showIntersections === true}
           angleUnit={angleUnit}

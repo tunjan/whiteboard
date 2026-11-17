@@ -2,16 +2,24 @@ import type { GraphExpression, GraphParameter } from '@whiteboard/shared';
 import { DEFAULT_GRAPH_PARAMETER } from './graph-defaults';
 import {
   createGraphFunctionDefinitions,
+  parseGraph3dExpression,
   parseGraphExpression,
 } from './graph-parser';
 
+/** The parser a graph's rows are read with: a 3D graph has no `z` slider. */
+function parserFor(threeD: boolean) {
+  return threeD ? parseGraph3dExpression : parseGraphExpression;
+}
+
 export function collectGraphVariables(
   expressions: GraphExpression[],
+  threeD = false,
 ): string[] {
   const definitions = createGraphFunctionDefinitions(expressions);
+  const parse = parserFor(threeD);
   const variables = new Set<string>();
   for (const expression of expressions) {
-    const parsed = parseGraphExpression(expression.expression, definitions);
+    const parsed = parse(expression.expression, definitions);
     if (!parsed.ok) continue;
     for (const variable of parsed.variables) variables.add(variable);
   }
@@ -21,16 +29,17 @@ export function collectGraphVariables(
 export function reconcileGraphParameters(
   expressions: GraphExpression[],
   previous: Record<string, GraphParameter>,
+  threeD = false,
 ): Record<string, GraphParameter> {
   const definitions = createGraphFunctionDefinitions(expressions);
+  const parse = parserFor(threeD);
   // A draft may temporarily lose all its variables (including when cleared).
   // Retain settings until every row can be parsed; hidden rows still own theirs.
   const hasDraft = expressions.some(
-    (expression) =>
-      !parseGraphExpression(expression.expression, definitions).ok,
+    (expression) => !parse(expression.expression, definitions).ok,
   );
   const next: Record<string, GraphParameter> = hasDraft ? { ...previous } : {};
-  for (const variable of collectGraphVariables(expressions)) {
+  for (const variable of collectGraphVariables(expressions, threeD)) {
     next[variable] = previous[variable] ?? { ...DEFAULT_GRAPH_PARAMETER };
   }
   return next;

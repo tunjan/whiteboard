@@ -1,6 +1,7 @@
 import { LassoGlyph } from '@/components/ui/glyphs';
 import {
   type Bounds,
+  type Graph3dView,
   type Point,
   type Shape,
   boundsCenter,
@@ -38,6 +39,7 @@ import {
 import { requestEquationFocus } from '../equation-focus';
 import { mirrorShapeLocally } from '../flip';
 import { getSnapGridStep } from '../grid';
+import { orbitView } from '../graph3d';
 import { safeLinkUrl } from '../link-url';
 import { isSelectable } from '../selectable';
 import { useHiddenStore } from '../use-hidden-store';
@@ -48,6 +50,8 @@ import {
   findBindableShapeAt,
   isBindableShape,
 } from '../shapes/connector-routing';
+import { unrotatedPoint } from '../shapes/box-geometry';
+import { plotArea } from '../shapes/graph-card';
 import { FLAT_SPAN } from '../shapes/line-geometry';
 import { textIndexAtWorldPoint } from '../shapes/text';
 import { MIN_TEXT_WIDTH } from '../shapes/text-measure';
@@ -70,7 +74,7 @@ import {
   snapPoint,
   snapResizeBounds,
 } from '../snapping';
-import { spatialIndex } from '../use-document-store';
+import { continueUndoStep, lastUndoStep, spatialIndex } from '../use-document-store';
 import { useCameraStore } from '../use-camera-store';
 import { useCanvasUiStore } from '../use-canvas-ui-store';
 import { useSelectionStore } from '../use-selection-store';
@@ -256,7 +260,31 @@ type SelectState =
       start: Point;
       current: Point;
       selectionBefore: string[];
+    }
+  | {
+      type: 'orbit';
+      shapeId: string;
+      /** Its view when the drag began, put back on cancel. */
+      initial: Graph3dView;
+      /** Where the pointer last was, on screen: the turn follows screen travel. */
+      last: Point;
+      /** The undo step the turn writes into, so it undoes whole. */
+      step?: unknown;
     };
+
+/** The view of `shape` when it is a 3D graph whose plot holds `point`: a drag there turns it. */
+function orbitableView(shape: Shape | undefined, point: Point): Graph3dView | null {
+  if (shape?.type !== 'graph' || !shape.props.view3d || shape.locked) return null;
+  const { w, h } = shape.props;
+  const local = unrotatedPoint(shape.x, shape.y, w, h, shape.rotation, point);
+  const area = plotArea(shape);
+  const inside =
+    local.x >= area.x &&
+    local.x <= area.x + area.w &&
+    local.y >= area.y &&
+    local.y <= area.y + area.h;
+  return inside ? shape.props.view3d : null;
+}
 
 /**
  * Topmost selectable shape under a world point, after an R-tree broad phase.
@@ -1391,8 +1419,23 @@ export function createSelectTool(): Tool {
         }
       }
 
-      // 2. A shape under the pointer resolves to its outer group unless entered.
       const hitLeaf = topmostHit(shapes, info.point, SHAPE_HIT_SCREEN / zoom);
+
+      // 1c. A drag inside a selected 3D graph's plot turns it, unless something
+      // lies on top of it there. Its border, and the plot while it isn't
+      // selected yet, still move it.
+      const soleId = selectionInfo?.isSingle ? selectionInfo.ids[0]! : null;
+      const view =
+        soleId && hitLeaf === soleId && !info.shiftKey
+          ? orbitableView(ctx.editor.getShape(soleId), info.point)
+          : null;
+      if (soleId && view) {
+        state = { type: 'orbit', shapeId: soleId, initial: view, last: info.screenPoint };
+        useSelectionStore.getState().setGestureCursor('grabbing');
+        return;
+      }
+
+      // 2. A shape under the pointer resolves to its outer group unless entered.
       if (hitLeaf) {
         const targetId = selectionTargetId(
           ctx.editor.getShape,
@@ -1851,6 +1894,30 @@ export function createSelectTool(): Tool {
         case 'marquee':
           updateMarquee(state, info.point, info, ctx.editor);
           return;
+        case 'orbit': {
+          const shape = ctx.editor.getShape(state.shapeId);
+          const view = shape?.type === 'graph' ? shape.props.view3d : undefined;
+          if (!shape || !view) return;
+          // Measured in the card's own frame, so a card turned on the board
+          // still turns its plot the way the pointer goes.
+          const travel = rotatePoint(
+            {
+              x: info.screenPoint.x - state.last.x,
+              y: info.screenPoint.y - state.last.y,
+            },
+            { x: 0, y: 0 },
+            -shape.rotation,
+          );
+          state.last = info.screenPoint;
+          // Held open by hand: someone turning a plot pauses to look, and a
+          // pause past Yjs's capture window would split the turn in two.
+          if (state.step !== undefined) continueUndoStep(state.step);
+          ctx.editor.updateShape(shape.id, {
+            props: { view3d: orbitView(view, travel.x, travel.y) },
+          });
+          state.step = lastUndoStep();
+          return;
+        }
       }
     },
 
@@ -1971,6 +2038,11 @@ export function createSelectTool(): Tool {
           return;
         case 'marquee':
           useSelectionStore.getState().setSelection(cancelled.selectionBefore);
+          return;
+        case 'orbit':
+          ctx.editor.updateShape(cancelled.shapeId, {
+            props: { view3d: cancelled.initial },
+          });
           return;
         case 'idle':
           return;

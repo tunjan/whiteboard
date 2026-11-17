@@ -20,6 +20,17 @@ export const GRAPH_MATH_PRESETS: GraphMathPreset[] = [
   { name: 'Absolute Value', expression: 'y=abs(x)', description: 'Piecewise linear ray' },
 ];
 
+/** The Examples menu on a 3D graph. Parsed by a test, like the 2D ones. */
+export const GRAPH_3D_PRESETS: GraphMathPreset[] = [
+  { name: 'Saddle', expression: 'z=(x^2-y^2)/10', description: 'Hyperbolic paraboloid' },
+  { name: 'Paraboloid', expression: 'z=(x^2+y^2)/10', description: 'Bowl opening upward' },
+  { name: 'Ripple', expression: 'z=3*cos(sqrt(x^2+y^2))', description: 'Radial wave' },
+  { name: 'Plane', expression: '2x-y+z=4', description: 'Linear equation in x, y and z' },
+  { name: 'Line', expression: 'r=(1,2,3)+lambda(2,-1,0)', description: 'Point plus a direction' },
+  { name: 'Helix', expression: '(4cos(t),4sin(t),t)', description: 'Parametric space curve' },
+  { name: 'Point', expression: '(1,2,3)', description: 'A single point' },
+];
+
 export interface GraphViewportPreset {
   name: string;
   shortLabel: string;

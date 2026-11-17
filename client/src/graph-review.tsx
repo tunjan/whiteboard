@@ -59,6 +59,35 @@ const initial: GraphShape[] = [
       expressions: [{ ...base.expressions[0]!, id: 'd1', expression: 'y=sin(x)' }],
     },
   } as GraphShape,
+  {
+    id: 'e', type: 'graph', x: 0, y: 0, rotation: 0, index: 'a5',
+    props: {
+      ...base,
+      w: 420,
+      h: 420,
+      viewport: { xMin: -5, xMax: 5, yMin: -5, yMax: 5 },
+      view3d: { yaw: -125, pitch: 25, zMin: -5, zMax: 5 },
+      expressions: [
+        { ...base.expressions[0]!, id: 'e1', expression: 'z=(x^2-y^2)/5' },
+        { ...base.expressions[0]!, id: 'e2', expression: '2x-y+z=4', color: '#4465e9' },
+        { ...base.expressions[0]!, id: 'e3', expression: 'r=(1,2,3)+lambda(2,-1,0)', color: '#e03131', dash: 'dashed' },
+        { ...base.expressions[0]!, id: 'e4', expression: '(4cos(t),4sin(t),t/2)', color: '#e16919', domain: { min: -10, max: 10 } },
+        { ...base.expressions[0]!, id: 'e5', expression: '(1,2,3)', color: '#099268' },
+        { ...base.expressions[0]!, id: 'e6', expression: 'x^2+y^2+z^2=4', color: '#099268' },
+      ],
+    },
+  } as GraphShape,
+  {
+    id: 'f', type: 'graph', x: 0, y: 0, rotation: 0, index: 'a6',
+    props: {
+      ...base,
+      w: 420,
+      h: 420,
+      view3d: { yaw: -60, pitch: 40, zMin: -4, zMax: 4 },
+      expressions: [{ ...base.expressions[0]!, id: 'f1', expression: 'z=a*sin(x/2)cos(y/2)', color: '#ae3ec9' }],
+      parameters: { a: { value: 3, min: -4, max: 4, step: 0.1 } },
+    },
+  } as GraphShape,
 ];
 
 function Review() {
