@@ -9,7 +9,8 @@
 //
 // `?theme=dark` opens in dark. `?empty=1` seeds nothing. `?as=student` joins
 // as a student with a tutor present (the follow feature); `?followers=1` seeds
-// students following the tutor.
+// students following the tutor. `?ai=1` mounts the agent bar against stubbed
+// `/api/ai/*` answers (about a second each, like the real models).
 import { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import './index.css';
@@ -19,6 +20,7 @@ import { useCameraStore } from './canvas/use-camera-store';
 import { BoardChrome } from './components/board-chrome';
 import { BoardUiLayer } from './components/board-ui-layer';
 import { Toolbar } from './components/toolbar';
+import { AgentBar } from './components/agent-bar';
 import { Toaster } from './components/ui/toast';
 import { applyTheme } from './use-theme-store';
 import { TUTOR_COLOR } from './collab/identity';
@@ -35,6 +37,77 @@ loadBoard('temporary-board-review', { persist: false, collab: false });
 useCameraStore.setState({ camera: { x: -40, y: -40, z: 1 }, activeKey: '' });
 
 if (params.get('empty') !== '1') seed();
+
+const withAi = params.get('ai') === '1';
+if (withAi) {
+  const realFetch = window.fetch.bind(window);
+  const reply = (body: unknown, ms = 0) =>
+    new Promise<Response>((resolve) =>
+      setTimeout(() => resolve(new Response(JSON.stringify(body))), ms),
+    );
+  // The agent answers as the server does when asked to stream: progress
+  // events a beat apart, then the result.
+  const streamed = (result: unknown, tools: string[]) => {
+    const events = [{ progress: { step: 'thinking' } }, ...tools.map((name) => ({ progress: { step: 'tool', name } })), { result }];
+    const encoder = new TextEncoder();
+    return Promise.resolve(
+      new Response(
+        new ReadableStream({
+          async start(controller) {
+            for (const event of events) {
+              await new Promise((r) => setTimeout(r, 700));
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+            }
+            controller.close();
+          },
+        }),
+      ),
+    );
+  };
+  window.fetch = (input, init) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+    if (url.endsWith('/api/ai/config')) return reply({ enabled: true });
+    // Kept for a console check of what the bar sends (previous, image).
+    if (url.endsWith('/api/ai/agent'))
+      ((window as { agentBodies?: unknown[] }).agentBodies ??= []).push(JSON.parse(String(init?.body)));
+    // "explain …" gets edits and an answer beside them.
+    if (url.endsWith('/api/ai/agent') && String(init?.body).includes('"text":"explain'))
+      return streamed(
+        {
+          reply: 'A parabola is the graph of a quadratic; this one opens **upward** because $a > 0$.',
+          actions: [
+            { type: 'create_graph', expressions: ['y = x^2'] },
+            { type: 'create_equation', latex: 'y = ax^2 + bx + c', x: 600, y: 120 },
+            { type: 'create_equation', latex: 'a > 0', x: 600, y: 200 },
+          ],
+        },
+        ['create_graph', 'create_equation', 'create_equation', 'say'],
+      );
+    // An instruction ending in "?" gets a written answer instead of edits.
+    if (url.endsWith('/api/ai/agent') && String(init?.body).includes('?"'))
+      return streamed(
+        {
+          reply:
+            // A real answer from the agent (eval, 2026-11-11): aligned working in display maths.
+            'Use $\\log_{ab}(ab)=1$ and split the product:\n\n$$\\begin{aligned}\\log_{ab} a+\\log_{ab} b&=\\log_{ab}(ab)=1\\\\ 3+\\log_{ab} b&=1\\\\ \\log_{ab} b&=-2\\end{aligned}$$\n\nSo **$\\log_{ab} b=-2$**, because the two logs must add to $1$.',
+          actions: [],
+        },
+        [],
+      );
+    if (url.endsWith('/api/ai/agent'))
+      return streamed(
+        {
+          actions: [
+            { type: 'create_equation', latex: 'x = \\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}', x: 300, y: 120 },
+          ],
+        },
+        ['create_equation'],
+      );
+    if (url.endsWith('/api/ai/check'))
+      return reply({ errors: [{ line: 1, message: 'Sign error when expanding', correction: 'x^2-2x+1' }] }, 1500);
+    return realFetch(input, init);
+  };
+}
 
 const asStudent = params.get('as') === 'student';
 const peer = (
@@ -172,6 +245,7 @@ function Review() {
           }
         />
         <Toolbar />
+        {withAi ? <AgentBar /> : null}
       </BoardUiLayer>
       <Toaster />
     </div>

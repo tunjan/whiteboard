@@ -8,6 +8,7 @@ import {
   LIFT_TAPER_MAX_WIDTHS,
   LIFT_TAPER_MIN_SPEED,
   STROKE_PROFILES,
+  anchorAtDefault,
   getInkCenterlineGeometry,
   getInkCenterlinePath,
   getInkPathData,
@@ -1408,5 +1409,27 @@ describe('screen-referenced simplification', () => {
       maxDeviation(curveSamples(exact.path), curveSamples(simplified.path)) *
         0.12,
     ).toBeLessThanOrEqual(INK_ERROR_SCREEN_PX);
+  });
+});
+
+describe('stabilization slider', () => {
+  it('only ever adds smoothing as it rises, and keeps the profile at its default', () => {
+    for (const width of [2, 12, 20]) {
+      const tuned = STROKE_PROFILES.solid(width).streamline;
+      const at = (s: number) =>
+        anchorAtDefault(
+          pencilStabilizationToStreamline(s),
+          pencilStabilizationToStreamline(DEFAULT_PENCIL_STABILIZATION),
+          tuned,
+          0,
+          1,
+        );
+      expect(at(DEFAULT_PENCIL_STABILIZATION)).toBe(tuned);
+      expect(at(0)).toBe(0);
+      expect(at(1)).toBe(1);
+      for (let step = 1; step <= 100; step++) {
+        expect(at(step / 100)).toBeGreaterThanOrEqual(at((step - 1) / 100));
+      }
+    }
   });
 });

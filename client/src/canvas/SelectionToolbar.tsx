@@ -19,6 +19,7 @@ import {
   EyeOff,
   Group,
   ImageDown,
+  ListChecks,
   Loader2,
   Lock,
   MoreHorizontal,
@@ -27,6 +28,8 @@ import {
   Trash2,
   Ungroup,
   Unlock,
+  WandSparkles,
+  X,
 } from 'lucide-react';
 import { aiLatexEnabled } from '@/board/latex-ai';
 import { type Point, worldToScreen } from './camera';
@@ -42,12 +45,16 @@ import {
   copySelectionToPngClipboard,
   exportSelectionToPng,
 } from './export-png';
+import { hasTidyableInk, refineHandwriting } from './handwriting-refine';
 import { deleteTargetIds } from './hierarchy';
 import {
+  cancelConversion,
   convertSelectionToEquation,
   convertibleShapeIds,
 } from './ink-to-latex';
+import { useConversionStore } from './use-conversion-store';
 import { convertSelectionToGraph } from './ink-to-graph';
+import { checkShapes, isCheckable } from './work-checker';
 import { GraphGlyph } from '@/components/ui/glyphs';
 import { isCoarsePointer, isDarwin } from './platform';
 import { getSelectionInfo } from './selection-geometry';
@@ -143,6 +150,7 @@ export function SelectionToolbar() {
     setBelow(below);
   });
   const marquee = useSelectionStore((s) => s.marquee);
+  const transforming = useSelectionStore((s) => s.transforming);
   // Only the selected shapes — the toolbar just needs to follow their bounds.
   // Subscribing to the whole `shapes` array re-rendered it (and re-ran the
   // full-document scan in `getSelectionInfo`) once per frame of every stroke.
@@ -163,11 +171,27 @@ export function SelectionToolbar() {
       cancelled = true;
     };
   }, []);
-  const [converting, setConverting] = useState(false);
+  // Read from the store rather than held here: the conversion outlives a
+  // selection change, and the key must say so for whatever is selected.
+  const converting = useConversionStore((s) => s.reading !== null);
   const [graphing, setGraphing] = useState(false);
+  const [checking, setChecking] = useState(false);
 
-  // Hide while a drag-select is in progress to avoid flicker.
-  if (marquee) return null;
+  // Escape cancels a conversion in flight. Captured and kept from the canvas's
+  // own listener, where the same key would also drop the selection.
+  useEffect(() => {
+    if (!converting) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.stopImmediatePropagation();
+      cancelConversion();
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [converting]);
+
+  // Hide while a drag-select or a move, resize or rotate is in progress.
+  if (marquee || transforming) return null;
 
   const info = getSelectionInfo(
     shapes,
@@ -217,6 +241,9 @@ export function SelectionToolbar() {
     convertibleIds !== null &&
     !selectedIds.some((id) => editor.getShape(id)?.locked);
 
+  // Local geometry, so unlike the conversions it needs no AI.
+  const canTidy = hasTidyableInk(selectedIds);
+
   const setLocked = (locked: boolean) => {
     for (const id of selectedIds) editor.updateShape(id, { locked });
   };
@@ -224,8 +251,9 @@ export function SelectionToolbar() {
   const setSelection = useSelectionStore.getState().setSelection;
 
   const convertToEquation = async () => {
-    if (!convertibleIds || converting) return;
-    setConverting(true);
+    // A second press while it is reading is the way out.
+    if (converting) return cancelConversion();
+    if (!convertibleIds) return;
     try {
       await convertSelectionToEquation(convertibleIds);
     } catch (err) {
@@ -233,8 +261,24 @@ export function SelectionToolbar() {
         title: err instanceof Error ? err.message : 'Conversion failed',
         type: 'error',
       });
+    }
+  };
+
+  const canCheck =
+    aiEnabled && selectedIds.some((id) => isCheckable(editor.getShape(id)));
+
+  const checkWork = async () => {
+    if (checking) return;
+    setChecking(true);
+    try {
+      await checkShapes(selectedIds);
+    } catch (err) {
+      toast.add({
+        title: err instanceof Error ? err.message : 'Check failed',
+        type: 'error',
+      });
     } finally {
-      setConverting(false);
+      setChecking(false);
     }
   };
 
@@ -269,11 +313,19 @@ export function SelectionToolbar() {
         >
           {canConvertToEquation && (
             <Key
-              label="Convert to equation"
-              disabled={converting}
+              label={converting ? 'Cancel' : 'Convert to equation'}
+              shortcut={converting ? 'Esc' : undefined}
+              busy={converting}
               onClick={convertToEquation}
             >
-              {converting ? <Loader2 className="animate-spin" /> : <Sigma />}
+              {converting ? (
+                <>
+                  <Loader2 className="fxp-busy-spin animate-spin" />
+                  <X className="fxp-busy-x" />
+                </>
+              ) : (
+                <Sigma />
+              )}
             </Key>
           )}
           {canConvertToEquation && (
@@ -283,6 +335,16 @@ export function SelectionToolbar() {
               onClick={convertToGraph}
             >
               {graphing ? <Loader2 className="animate-spin" /> : <GraphGlyph />}
+            </Key>
+          )}
+          {canTidy && (
+            <Key label="Tidy handwriting" onClick={() => refineHandwriting(selectedIds)}>
+              <WandSparkles />
+            </Key>
+          )}
+          {canCheck && (
+            <Key label="Check work" disabled={checking} onClick={checkWork}>
+              {checking ? <Loader2 className="animate-spin" /> : <ListChecks />}
             </Key>
           )}
 
@@ -368,6 +430,7 @@ function Key({
   shortcut,
   onClick,
   disabled,
+  busy,
   danger,
   pressed,
   children,
@@ -376,6 +439,8 @@ function Key({
   shortcut?: string;
   onClick: () => void;
   disabled?: boolean;
+  /** Working, but still pressable (to cancel): focus and the tooltip stay. */
+  busy?: boolean;
   danger?: boolean;
   pressed?: boolean;
   children: ReactNode;
@@ -387,6 +452,7 @@ function Key({
         disabled={disabled}
         aria-label={label}
         aria-pressed={pressed}
+        aria-busy={busy || undefined}
         className={`fxp-key${danger ? ' fxp-key--danger' : ''}`}
       >
         {children}

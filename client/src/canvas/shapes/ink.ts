@@ -145,6 +145,33 @@ export function pencilStabilizationToStreamline(
 }
 
 /**
+ * A slider reading re-mapped so its default lands on `atDefault`, piecewise
+ * linear on each side, keeping `min`, `max` and the order between them.
+ *
+ * The pen profiles tune their own value at the default (stabilization by brush
+ * width, thinning by input), and the slider's own curve reaches something else
+ * one step either side of it. Substituting the profile at exactly the default
+ * made one notch up *less* stable than the default; anchoring the curve there
+ * keeps the tuned value and a slider that only ever moves one way.
+ */
+export function anchorAtDefault(
+  value: number,
+  defaultValue: number,
+  atDefault: number,
+  min: number,
+  max: number,
+): number {
+  if (value <= defaultValue) {
+    if (defaultValue <= min) return atDefault;
+    return min + ((atDefault - min) * (value - min)) / (defaultValue - min);
+  }
+  if (defaultValue >= max) return atDefault;
+  return (
+    atDefault + ((max - atDefault) * (value - defaultValue)) / (max - defaultValue)
+  );
+}
+
+/**
  * Re-quote a per-nominal-step filter weight for a camera scale, so the filter
  * closes the same fraction of a gap over the same distance *on screen*.
  *
@@ -480,6 +507,24 @@ export function maxInkRadius(
     dynamics.simulatePressure ?? false,
   );
   return size * easing(0.5 + Math.abs(thinning) / 2) * tilt;
+}
+
+/**
+ * Half-width the engine gives a stroke at `pressure`, before tapers and tilt —
+ * `baseRadius` in the engine, with the same easing resolution as a render.
+ */
+export function inkRadiusAt(
+  size: number,
+  dynamics: InkStrokeDynamics,
+  pressure: number,
+): number {
+  const thinning = Math.max(-1, Math.min(1, dynamics.thinning ?? 0));
+  if (thinning === 0) return size / 2;
+  const easing = pressureEasingFor(
+    dynamics.pressureEasing,
+    dynamics.simulatePressure ?? false,
+  );
+  return size * easing(0.5 - thinning * (0.5 - clamp01(pressure)));
 }
 
 /**

@@ -19,9 +19,11 @@ import {
   Pointer,
   RotateCcw,
   Scaling,
+  Sparkles,
   Volume2,
   Zap,
 } from 'lucide-react';
+import { AiModelsDialog } from '@/components/ai-models-dialog';
 import { boardKey } from '@/board/board-access';
 
 import {
@@ -65,6 +67,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Slider } from '@/components/ui/slider';
+import { cn } from '@/lib/utils';
 import { useThemeStore } from '@/use-theme-store';
 
 /**
@@ -116,6 +119,8 @@ function MenuSliderItem({
   max,
   step,
   disabled,
+  inline = false,
+  bipolar = false,
   onChange,
 }: {
   label: string;
@@ -128,6 +133,10 @@ function MenuSliderItem({
   max: number;
   step: number;
   disabled?: boolean;
+  /** Label, fader and readout on one line, for a panel of short labels. */
+  inline?: boolean;
+  /** Zero is mid-travel, so a fill from the left end would mean nothing. */
+  bipolar?: boolean;
   onChange: (value: number) => void;
 }) {
   const nudge = (direction: 1 | -1) => {
@@ -137,12 +146,46 @@ function MenuSliderItem({
     onChange(Number(next.toFixed(4)));
   };
 
+  const readout = (
+    <span
+      className={cn(
+        'text-xs tabular-nums text-fg-subtle',
+        inline && 'w-9 shrink-0 text-right',
+      )}
+    >
+      {display}
+    </span>
+  );
+  // The toolbar's opacity fader: an amount fills grey, not the blue that marks
+  // a choice, and the thumb is a white pill big enough to read as one — at
+  // half height the fill ringed it like an outline.
+  const fader = (
+    <Slider
+      aria-label={label}
+      className={cn(
+        '[--wb-slider-thumb:1.125rem] [--wb-slider-track:1rem]',
+        inline
+          ? 'min-w-0 flex-1 [&_[data-slot=slider-range]]:bg-fg-subtle/40'
+          : '[&_[data-slot=slider-range]]:bg-fg-subtle',
+        bipolar && '[&_[data-slot=slider-range]]:bg-transparent',
+      )}
+      min={min}
+      max={max}
+      step={step}
+      value={value}
+      disabled={disabled}
+      onValueChange={(next) =>
+        onChange(Array.isArray(next) ? next[0]! : next)
+      }
+    />
+  );
+
   return (
     <DropdownMenuItem
       closeOnClick={false}
       disabled={disabled}
       label={label}
-      className="flex-col items-stretch gap-1.5 py-2"
+      className={inline ? 'h-8 gap-3 py-0' : 'flex-col items-stretch gap-1.5 py-2'}
       onKeyDown={(event) => {
         if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
         event.stopPropagation();
@@ -152,30 +195,24 @@ function MenuSliderItem({
         nudge(event.key === 'ArrowRight' ? 1 : -1);
       }}
     >
-      <span className="flex items-center justify-between gap-3">
-        <span className="flex items-center gap-2">
-          {icon}
-          {label}
-        </span>
-        <span className="text-xs tabular-nums text-fg-subtle">
-          {display}
-        </span>
-      </span>
-      {/* The toolbar's opacity fader: an amount fills grey, not the blue that
-          marks a choice, and the thumb is a white pill big enough to read as
-          one — at half height the fill ringed it like an outline. */}
-      <Slider
-        aria-label={label}
-        className="[--wb-slider-thumb:1.125rem] [--wb-slider-track:1rem] [&_[data-slot=slider-range]]:bg-fg-subtle"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        disabled={disabled}
-        onValueChange={(next) =>
-          onChange(Array.isArray(next) ? next[0]! : next)
-        }
-      />
+      {inline ? (
+        <>
+          <span className="w-24 shrink-0">{label}</span>
+          {fader}
+          {readout}
+        </>
+      ) : (
+        <>
+          <span className="flex items-center justify-between gap-3">
+            <span className="flex items-center gap-2">
+              {icon}
+              {label}
+            </span>
+            {readout}
+          </span>
+          {fader}
+        </>
+      )}
     </DropdownMenuItem>
   );
 }
@@ -258,7 +295,15 @@ function TouchSubmenu() {
   );
 }
 
-/** The pen's feel: the board menu's Pen panel, and the tray's pen chevron. */
+/** The width of the pen's panels, which hold one-line faders. */
+const PEN_PANEL = 'w-[min(18rem,calc(100vw-1rem))]';
+
+/**
+ * The pen's feel: the board menu's Pen panel, and the tray's pen chevron.
+ *
+ * Only what changes how handwriting looks day to day is on the first level.
+ * The rest is calibration: set once for a device, then left alone.
+ */
 export function PenSettingsItems() {
   const pencilStabilization = useCanvasUiStore((s) => s.pencilStabilization);
   const setPencilStabilization = useCanvasUiStore(
@@ -286,11 +331,16 @@ export function PenSettingsItems() {
   );
   const pencilPrediction = useCanvasUiStore((s) => s.pencilPrediction);
   const setPencilPrediction = useCanvasUiStore((s) => s.setPencilPrediction);
+  const autoRefineHandwriting = useCanvasUiStore((s) => s.autoRefineHandwriting);
+  const setAutoRefineHandwriting = useCanvasUiStore(
+    (s) => s.setAutoRefineHandwriting,
+  );
   const resetPencil = useCanvasUiStore((s) => s.resetPencil);
 
   return (
     <>
       <MenuSliderItem
+        inline
         label="Stabilisation"
         value={pencilStabilization}
         display={`${Math.round(pencilStabilization * 100)}%`}
@@ -300,6 +350,8 @@ export function PenSettingsItems() {
         onChange={setPencilStabilization}
       />
       <MenuSliderItem
+        inline
+        bipolar
         label="Pressure"
         value={pencilThinning}
         display={`${pencilThinning > 0 ? '+' : ''}${Math.round(
@@ -310,37 +362,7 @@ export function PenSettingsItems() {
         step={0.05}
         onChange={setPencilThinning}
       />
-      <MenuSliderItem
-        label="Tilt"
-        value={pencilTilt}
-        display={`${Math.round(pencilTilt * 100)}%`}
-        min={0}
-        max={1}
-        step={0.05}
-        onChange={setPencilTilt}
-      />
-      <MenuSliderItem
-        label="Smoothing"
-        value={pencilSmoothing}
-        display={`${Math.round(pencilSmoothing * 100)}%`}
-        min={0}
-        max={1}
-        step={0.01}
-        onChange={setPencilSmoothing}
-      />
-      <MenuSliderItem
-        label="Start taper"
-        value={pencilStartTaper}
-        display={`${Math.round(pencilStartTaper)}px`}
-        min={0}
-        max={50}
-        step={1}
-        onChange={setPencilStartTaper}
-      />
       <DropdownMenuSeparator />
-      {/* Two enums, each behind its own trigger carrying the current value,
-          rather than six more rows in a panel that already holds five
-          faders. Same shape as Resolution below. */}
       <DropdownMenuSub>
         <DropdownMenuSubTrigger>
           Stroke ends
@@ -349,9 +371,7 @@ export function PenSettingsItems() {
         <DropdownMenuSubContent className="w-40">
           <DropdownMenuRadioGroup
             value={pencilEndTaper}
-            onValueChange={(value) =>
-              setPencilEndTaper(value as EndTaperMode)
-            }
+            onValueChange={(value) => setPencilEndTaper(value as EndTaperMode)}
           >
             {END_TAPER_MODES.map((mode) => (
               <DropdownMenuRadioItem key={mode} value={mode}>
@@ -361,46 +381,88 @@ export function PenSettingsItems() {
           </DropdownMenuRadioGroup>
         </DropdownMenuSubContent>
       </DropdownMenuSub>
+      <DropdownMenuCheckboxItem
+        checked={autoRefineHandwriting}
+        onCheckedChange={setAutoRefineHandwriting}
+      >
+        Tidy mouse handwriting
+      </DropdownMenuCheckboxItem>
+      <DropdownMenuSeparator />
       <DropdownMenuSub>
-        <DropdownMenuSubTrigger>
-          Response
-          <MenuValue>{PRESSURE_CURVE_LABELS[pencilPressureCurve]}</MenuValue>
-        </DropdownMenuSubTrigger>
-        <DropdownMenuSubContent className="w-40">
-          <DropdownMenuRadioGroup
-            value={pencilPressureCurve}
-            onValueChange={(value) =>
-              setPencilPressureCurve(value as PencilPressureCurve)
-            }
+        <DropdownMenuSubTrigger>Advanced</DropdownMenuSubTrigger>
+        <DropdownMenuSubContent className={PEN_PANEL}>
+          <MenuSliderItem
+            inline
+            label="Tilt"
+            value={pencilTilt}
+            display={`${Math.round(pencilTilt * 100)}%`}
+            min={0}
+            max={1}
+            step={0.05}
+            onChange={setPencilTilt}
+          />
+          <MenuSliderItem
+            inline
+            label="Smoothing"
+            value={pencilSmoothing}
+            display={`${Math.round(pencilSmoothing * 100)}%`}
+            min={0}
+            max={1}
+            step={0.01}
+            onChange={setPencilSmoothing}
+          />
+          <MenuSliderItem
+            inline
+            label="Start taper"
+            value={pencilStartTaper}
+            display={`${Math.round(pencilStartTaper)}px`}
+            min={0}
+            max={50}
+            step={1}
+            onChange={setPencilStartTaper}
+          />
+          <DropdownMenuSeparator />
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>
+              Response
+              <MenuValue>{PRESSURE_CURVE_LABELS[pencilPressureCurve]}</MenuValue>
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent className="w-40">
+              <DropdownMenuRadioGroup
+                value={pencilPressureCurve}
+                onValueChange={(value) =>
+                  setPencilPressureCurve(value as PencilPressureCurve)
+                }
+              >
+                {PRESSURE_CURVES.map((curve) => (
+                  <DropdownMenuRadioItem key={curve} value={curve}>
+                    {PRESSURE_CURVE_LABELS[curve]}
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+          <DropdownMenuCheckboxItem
+            checked={pencilSimulatePressure}
+            onCheckedChange={setPencilSimulatePressure}
           >
-            {PRESSURE_CURVES.map((curve) => (
-              <DropdownMenuRadioItem key={curve} value={curve}>
-                {PRESSURE_CURVE_LABELS[curve]}
-              </DropdownMenuRadioItem>
-            ))}
-          </DropdownMenuRadioGroup>
+            Simulate pressure
+          </DropdownMenuCheckboxItem>
+          <DropdownMenuCheckboxItem
+            checked={pencilPrediction}
+            onCheckedChange={setPencilPrediction}
+          >
+            Predict stroke ahead
+          </DropdownMenuCheckboxItem>
+          <DropdownMenuSeparator />
+          {/* Stays open: the point of restoring defaults is watching the
+              faders snap back. */}
+          <DropdownMenuItem closeOnClick={false} onClick={resetPencil}>
+            <RotateCcw />
+            Restore defaults
+          </DropdownMenuItem>
         </DropdownMenuSubContent>
       </DropdownMenuSub>
-      <DropdownMenuSeparator />
-      <DropdownMenuCheckboxItem
-        checked={pencilSimulatePressure}
-        onCheckedChange={setPencilSimulatePressure}
-      >
-        Simulate pressure
-      </DropdownMenuCheckboxItem>
-      <DropdownMenuCheckboxItem
-        checked={pencilPrediction}
-        onCheckedChange={setPencilPrediction}
-      >
-        Predict stroke ahead
-      </DropdownMenuCheckboxItem>
-      <DropdownMenuSeparator />
-      {/* Stays open: the point of restoring defaults is watching the five
-          faders above snap back. */}
-      <DropdownMenuItem closeOnClick={false} onClick={resetPencil}>
-        <RotateCcw />
-        Restore defaults
-      </DropdownMenuItem>
     </>
   );
 }
@@ -412,7 +474,7 @@ function PenSubmenu() {
         <PenTool />
         Pen
       </DropdownMenuSubTrigger>
-      <DropdownMenuSubContent className="w-[min(16rem,calc(100vw-1rem))]">
+      <DropdownMenuSubContent className={PEN_PANEL}>
         <PenSettingsItems />
       </DropdownMenuSubContent>
     </DropdownMenuSub>
@@ -614,6 +676,7 @@ export function BoardActionsMenu({
   triggerContent?: ReactNode;
 }) {
   const [exporting, setExporting] = useState(false);
+  const [aiModelsOpen, setAiModelsOpen] = useState(false);
   const theme = useThemeStore((s) => s.theme);
   const toggleTheme = useThemeStore((s) => s.toggle);
   const pngExportScale = useCanvasUiStore((s) => s.pngExportScale);
@@ -641,6 +704,7 @@ export function BoardActionsMenu({
   };
 
   return (
+    <>
     <DropdownMenu>
       <DropdownMenuTrigger
         render={
@@ -777,6 +841,13 @@ export function BoardActionsMenu({
           {isCoarsePointer() && <TouchSubmenu />}
           <SoundSubmenu />
           {isTutor && <AttentionSubmenu />}
+          {/* The tutor's bill, so the tutor's choice; app-wide, not per board. */}
+          {isTutor && (
+            <DropdownMenuItem onClick={() => setAiModelsOpen(true)}>
+              <Sparkles />
+              AI models…
+            </DropdownMenuItem>
+          )}
           {/* A student's boards get the default and no control: how much of a
               document belongs on the board is the tutor's call, and the limit
               is only ever met while pasting one. */}
@@ -820,5 +891,7 @@ export function BoardActionsMenu({
         </div>
       </DropdownMenuContent>
     </DropdownMenu>
+    <AiModelsDialog open={aiModelsOpen} onOpenChange={setAiModelsOpen} />
+    </>
   );
 }

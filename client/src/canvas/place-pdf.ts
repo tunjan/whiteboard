@@ -1,6 +1,7 @@
 import { genId, type Point, type Shape } from '@whiteboard/shared';
 import { uploadImageBlob, uploadImageThumb } from '../board/blobs';
 import { toast } from '@/components/ui/toast';
+import { shortFileName } from '@/lib/utils';
 import { getTopIndex, jitterKeyBetween } from './order';
 import { openPdf, type PdfPageRaster } from './pdf-render';
 import { useCanvasUiStore } from './use-canvas-ui-store';
@@ -12,6 +13,7 @@ export const PDF_MIME = 'application/pdf';
 
 /** Vertical space between two pages of the same document, in world units. */
 const PDF_PAGE_GAP = 24;
+const DONE_TIMEOUT_MS = 2_000;
 
 /** A page, sized and positioned, ready to become a shape. */
 interface PlacedPage extends PdfPageRaster {
@@ -46,12 +48,13 @@ export async function placePdfFiles(
 }
 
 async function importOnePdf(file: File, at: Point): Promise<string[]> {
+  const title = shortFileName(file.name);
   let pdf;
   try {
     pdf = await openPdf(file);
   } catch (err) {
     toast.add({
-      title: file.name,
+      title,
       description:
         err instanceof Error ? err.message : 'That PDF could not be opened.',
       type: 'error',
@@ -73,10 +76,10 @@ async function importOnePdf(file: File, at: Point): Promise<string[]> {
 
     const total = range.to - range.from + 1;
     const progress = toast.add({
-      title: file.name,
+      title,
       description: `Importing ${total === 1 ? 'the page' : `${total} pages`}…`,
       // A 'loading' toast carries no dismiss timer, so it stays up until the
-      // import closes it.
+      // import turns it into the result.
       type: 'loading',
     });
 
@@ -86,40 +89,42 @@ async function importOnePdf(file: File, at: Point): Promise<string[]> {
     const rasters: Array<
       PdfPageRaster & { blobId: string; thumbBlobId?: string }
     > = [];
-    try {
-      for (let page = range.from; page <= range.to; page++) {
-        toast.update(progress, {
-          description: `Importing page ${page - range.from + 1} of ${total}…`,
-        });
-        try {
-          const raster = await pdf.renderPage(page);
-          const [blobId, thumbBlobId] = await Promise.all([
-            uploadImageBlob(raster.blob, 'image/png'),
-            uploadImageThumb(raster.blob, raster.rasterW, raster.rasterH),
-          ]);
-          rasters.push({ ...raster, blobId, thumbBlobId });
-        } catch (err) {
-          // One bad page should not cost the reader the other nineteen.
-          console.error('[pdf] page %d failed', page, err);
-        }
+    for (let page = range.from; page <= range.to; page++) {
+      const done = page - range.from;
+      toast.update(progress, {
+        description: `Importing page ${done + 1} of ${total}…`,
+        data: { progress: done / total },
+      });
+      try {
+        const raster = await pdf.renderPage(page);
+        const [blobId, thumbBlobId] = await Promise.all([
+          uploadImageBlob(raster.blob, 'image/png'),
+          uploadImageThumb(raster.blob, raster.rasterW, raster.rasterH),
+        ]);
+        rasters.push({ ...raster, blobId, thumbBlobId });
+      } catch (err) {
+        // One bad page should not cost the reader the other nineteen.
+        console.error('[pdf] page %d failed', page, err);
       }
-    } finally {
-      toast.close(progress);
     }
 
     if (!rasters.length) {
-      toast.add({
-        title: file.name,
+      toast.update(progress, {
         description: 'None of those pages could be imported.',
         type: 'error',
       });
       return [];
     }
     if (rasters.length < total) {
-      toast.add({
-        title: file.name,
+      toast.update(progress, {
         description: `${total - rasters.length} of ${total} pages could not be imported.`,
         type: 'warning',
+      });
+    } else {
+      toast.update(progress, {
+        description: total === 1 ? 'Page added' : `${total} pages added`,
+        timeout: DONE_TIMEOUT_MS,
+        type: 'success',
       });
     }
 

@@ -49,7 +49,15 @@ const boards: BoardMeta[] = Array.from({ length: count }, (_, i) => ({
   lastOpenedAt: now - (i * i + 1) * 5 * HOUR,
   favorite: i % 5 === 2,
 }));
-const live = boards.slice(0, Number(params.get('live') ?? 1)).map((b) => b.id);
+// `?afk=N` makes the first N live students idle.
+const afk = Number(params.get('afk') ?? 0);
+const live = boards
+  .slice(0, Number(params.get('live') ?? 1))
+  .map((b, i) => ({
+    id: b.id,
+    afk:
+      i < afk ? [{ name: b.name.split(' ')[0]!, idleMinutes: 7 + i * 5 }] : [],
+  }));
 
 const realFetch = window.fetch.bind(window);
 window.fetch = async (input, init) => {

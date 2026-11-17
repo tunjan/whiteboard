@@ -4,7 +4,12 @@ import type { Context } from 'hono';
 import { getCookie } from 'hono/cookie';
 import { createMiddleware } from 'hono/factory';
 import { parse } from 'hono/utils/cookie';
-import { PAGE_DOCUMENT_INFIX, type ShareMode } from '@whiteboard/shared';
+import {
+  AGENT_HELP_MODES,
+  PAGE_DOCUMENT_INFIX,
+  type AgentHelp,
+  type ShareMode,
+} from '@whiteboard/shared';
 import { verifySession } from '../auth/jwt';
 import { SESSION_COOKIE } from '../auth/routes';
 import { db } from '../db/client';
@@ -88,3 +93,17 @@ export const requireBoardEdit = createMiddleware(async (c, next) => {
   }
   await next();
 });
+
+/**
+ * How much the board agent may do for this request: always everything for
+ * the tutor, and what the tutor chose for the board for anyone on its link.
+ */
+export async function agentHelpFor(c: Context, boardId: string): Promise<AgentHelp> {
+  if ((await requestAccess(c, boardId)) === 'tutor') return 'full';
+  const [row] = await db
+    .select({ agentHelp: boards.agentHelp })
+    .from(boards)
+    .where(eq(boards.id, boardId));
+  const help = row?.agentHelp as AgentHelp | undefined;
+  return help && AGENT_HELP_MODES.includes(help) ? help : 'full';
+}

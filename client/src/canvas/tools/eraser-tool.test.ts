@@ -11,8 +11,11 @@ import { useCameraStore } from '../use-camera-store';
 import { useCanvasUiStore } from '../use-canvas-ui-store';
 import { useEraserCutStore } from '../use-eraser-cut-store';
 import { useEraserStore } from '../use-eraser-store';
-import { useEraserTrailStore } from '../use-eraser-trail-store';
-import { createEraserTool } from './eraser-tool';
+import {
+  ERASER_TRAIL_SIZE,
+  useEraserTrailStore,
+} from '../use-eraser-trail-store';
+import { createEraserTool, ERASER_SCREEN_RADIUS } from './eraser-tool';
 import type { ToolContext, ToolPointerInfo } from './types';
 
 function rectangle(): Extract<Shape, { type: 'rectangle' }> {
@@ -177,24 +180,40 @@ describe('eraser tool stroke lifecycle', () => {
 
     tool.onPointerDown?.(pointer(20, 12), ctx);
     expect(useEraserStore.getState().isMarked('label')).toBe(true);
-    expect(useEraserTrailStore.getState().scribbles).toEqual([]);
     tool.onPointerUp?.(pointer(20, 12), ctx);
 
     expect(shapes.has('label')).toBe(false);
   });
 
-  it('promotes a sustained unmodified press into an erasing trail', () => {
+  it('lands the contact patch on the press, and lifts it on release', () => {
+    const { ctx } = context(rectangle());
+    const tool = createEraserTool();
+
+    tool.onPointerDown?.(pointer(20, 15), ctx);
+    expect(useEraserTrailStore.getState().scribbles[0]).toMatchObject({
+      state: 'active',
+      points: [{ x: 20, y: 15 }],
+    });
+
+    tool.onPointerUp?.(pointer(20, 15), ctx);
+    expect(useEraserTrailStore.getState().scribbles[0]?.state).toBe('stopping');
+  });
+
+  it('sizes the ribbon to what the swipe actually takes', () => {
+    expect(ERASER_TRAIL_SIZE).toBe(ERASER_SCREEN_RADIUS * 2);
+  });
+
+  it('promotes a sustained unmodified press so a wobble still erases', () => {
     vi.useFakeTimers();
     try {
       const { ctx } = context(rectangle());
       const tool = createEraserTool();
 
-      tool.onPointerDown?.(pointer(20, 15), ctx);
-      expect(useEraserTrailStore.getState().scribbles).toEqual([]);
-
+      tool.onPointerDown?.(pointer(500, 500), ctx);
       vi.advanceTimersByTime(500);
+      tool.onPointerMove?.(pointer(21, 15), ctx);
 
-      expect(useEraserTrailStore.getState().scribbles[0]?.state).toBe('active');
+      expect(useEraserStore.getState().isMarked('target')).toBe(true);
       tool.onCancel?.(ctx);
     } finally {
       vi.useRealTimers();
@@ -550,7 +569,7 @@ describe('eraser trail reaches collaborators', () => {
     tool.onPointerUp?.(pointer(20, 15), ctx);
     // Peers keep the shape faded until release, then let go at once.
     expect(awareness.getLocalState()?.erasing).toBeNull();
-    useEraserTrailStore.getState().tick(false);
+    useEraserTrailStore.getState().tick(performance.now() + 1000, 1);
 
     // The clear rides the throttle's trailing flush.
     await new Promise((resolve) => setTimeout(resolve, 100));

@@ -29,6 +29,7 @@ import {
   Sigma,
   Slash,
   Square,
+  Sparkles,
   Sticker,
   Type,
   Undo2,
@@ -88,6 +89,7 @@ export const GraphGlyph = glyph(ChartSpline, 'GraphGlyph');
 export const SigmaGlyph = glyph(Sigma, 'SigmaGlyph');
 export const CommentGlyph = glyph(MessageCircle, 'CommentGlyph');
 export const StickerGlyph = glyph(Sticker, 'StickerGlyph');
+export const SparklesGlyph = glyph(Sparkles, 'SparklesGlyph');
 export const ImageGlyph = glyph(Image, 'ImageGlyph');
 export const VideoGlyph = glyph(Video, 'VideoGlyph');
 

@@ -78,6 +78,12 @@ interface CanvasUiStore {
    */
   pencilPrediction: boolean;
   /**
+   * Tidy mouse handwriting once the hand pauses (see `handwriting-refine.ts`).
+   * Off by default: it rewrites what was drawn, and undo is the only way back.
+   * Pen and touch are never tidied — only the mouse writes badly enough.
+   */
+  autoRefineHandwriting: boolean;
+  /**
    * What one finger on the glass does — see {@link FingerAction}. The tablet
    * counterpart of the pen settings above: those shape the stroke a stylus
    * lays down, this decides whether a finger is allowed to lay one at all.
@@ -108,6 +114,8 @@ interface CanvasUiStore {
    * outweighed the drawing it was a map of.
    */
   minimapVisible: boolean;
+  /** Whether a newly created equation is given the next free number. */
+  autoNumberEquations: boolean;
   /**
    * Where the tool bar docks. The left rail gives a widescreen board back its
    * bottom edge, where students write, at the cost of height it rarely needs.
@@ -175,6 +183,7 @@ interface CanvasUiStore {
   pngExportScale: number;
   setBackground: (background: BackgroundType) => void;
   setMinimapVisible: (minimapVisible: boolean) => void;
+  setAutoNumberEquations: (autoNumberEquations: boolean) => void;
   setToolbarPlacement: (toolbarPlacement: ToolbarPlacement) => void;
   setGroundFade: (groundFade: boolean) => void;
   setInvertScroll: (invertScroll: boolean) => void;
@@ -189,6 +198,7 @@ interface CanvasUiStore {
   setPencilPressureCurve: (pencilPressureCurve: PencilPressureCurve) => void;
   setPencilTilt: (pencilTilt: number) => void;
   setPencilPrediction: (pencilPrediction: boolean) => void;
+  setAutoRefineHandwriting: (autoRefineHandwriting: boolean) => void;
   setFingerAction: (fingerAction: FingerAction) => void;
   /** Record that a stylus has been used here. Idempotent, called per stroke. */
   notePenSeen: () => void;
@@ -351,6 +361,7 @@ export const useCanvasUiStore = create<CanvasUiStore>()(
       eraserMode: 'object',
       invertScroll: false,
       minimapVisible: false,
+      autoNumberEquations: true,
       toolbarPlacement: 'bottom',
       debugPerformance: false,
       shapeRenderer: 'auto',
@@ -363,10 +374,13 @@ export const useCanvasUiStore = create<CanvasUiStore>()(
       pdfPageLimit: 10,
       pngExportScale: DEFAULT_PNG_EXPORT_SCALE,
       fingerAction: 'auto',
+      autoRefineHandwriting: false,
       penSeen: false,
       ...PENCIL_DEFAULTS,
       setBackground: (background) => set({ background }),
       setMinimapVisible: (minimapVisible) => set({ minimapVisible }),
+      setAutoNumberEquations: (autoNumberEquations) =>
+        set({ autoNumberEquations }),
       setToolbarPlacement: (toolbarPlacement) => set({ toolbarPlacement }),
       setGroundFade: (groundFade) => set({ groundFade }),
       setInvertScroll: (invertScroll) => set({ invertScroll }),
@@ -384,6 +398,8 @@ export const useCanvasUiStore = create<CanvasUiStore>()(
         set({ pencilPressureCurve }),
       setPencilTilt: (pencilTilt) => set({ pencilTilt }),
       setPencilPrediction: (pencilPrediction) => set({ pencilPrediction }),
+      setAutoRefineHandwriting: (autoRefineHandwriting) =>
+        set({ autoRefineHandwriting }),
       setFingerAction: (fingerAction) => set({ fingerAction }),
       notePenSeen: () => {
         if (!useCanvasUiStore.getState().penSeen) set({ penSeen: true });

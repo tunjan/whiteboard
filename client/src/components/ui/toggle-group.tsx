@@ -78,7 +78,7 @@ function ToggleGroup({
         <span
           ref={plateRef}
           aria-hidden
-          className="pointer-events-none absolute z-0 rounded-control bg-surface opacity-0 shadow-[0_0_0_1px_rgba(0,0,0,0.04),0_1px_2px_rgba(0,0,0,0.06)] transition-[left,top,width,height] duration-200 ease-[cubic-bezier(0.2,0,0,1)] dark:bg-[#404040]"
+          className="pointer-events-none absolute z-0 rounded-[8px] bg-surface opacity-0 shadow-[0_0_0_1px_rgba(0,0,0,0.04),0_1px_2px_rgba(0,0,0,0.06)] transition-[left,top,width,height] duration-200 ease-[cubic-bezier(0.2,0,0,1)] dark:bg-[#404040]"
         />
       )}
       <ToggleGroupContext.Provider
@@ -111,7 +111,7 @@ function ToggleGroupItem({
           variant: context.variant || variant,
           size: context.size || size,
         }),
-        "relative z-10 shrink-0 text-fg-secondary transition-[color,scale] duration-150 ease-out hover:bg-transparent active:scale-[0.96] aria-pressed:bg-transparent aria-pressed:text-fg group-data-multiple/toggle-group:aria-pressed:bg-surface group-data-multiple/toggle-group:aria-pressed:shadow-[0_0_0_1px_rgba(0,0,0,0.04),0_1px_2px_rgba(0,0,0,0.06)] dark:group-data-multiple/toggle-group:aria-pressed:bg-[#404040]",
+        "relative z-10 shrink-0 rounded-[8px] text-fg-secondary transition-[color,scale] duration-150 ease-out hover:bg-transparent active:scale-[0.96] aria-pressed:bg-transparent aria-pressed:text-fg group-data-multiple/toggle-group:aria-pressed:bg-surface group-data-multiple/toggle-group:aria-pressed:shadow-[0_0_0_1px_rgba(0,0,0,0.04),0_1px_2px_rgba(0,0,0,0.06)] dark:group-data-multiple/toggle-group:aria-pressed:bg-[#404040]",
         className
       )}
       {...props}

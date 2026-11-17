@@ -42,7 +42,10 @@ scope.addEventListener('message', (event) => {
   // which is what the main thread would have drawn too.
   void ensureGraphMath().catch(() => undefined).then(() => {
     const output = packGraphSample(
-      sampleGraph(input, createGraphFunctionDefinitions(input.expressions)),
+      sampleGraph(
+        input,
+        createGraphFunctionDefinitions(input.expressions, input.angleUnit),
+      ),
     );
     scope.postMessage({ id, output }, [output.coords.buffer]);
   });

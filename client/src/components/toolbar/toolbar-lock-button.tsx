@@ -13,6 +13,7 @@ export function ToolLockButton() {
       hotkey="q"
       mark="pressed"
       selected={locked}
+      className="tray-lock"
       onClick={toggle}
     >
       <Icon />

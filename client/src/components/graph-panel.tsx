@@ -27,6 +27,8 @@ import {
 } from '@/canvas/graph-parameters';
 import { createGraphFunctionDefinitions } from '@/canvas/graph-parser';
 import { GRAPH_MATH_PRESETS } from '@/canvas/graph-presets';
+import { fitViewport, graphAxes, type GraphAxes } from '@/canvas/graph-scale';
+import { plotsTrig, usesAngles } from '@/canvas/graph-ticks';
 import { editor } from '@/canvas/use-document-store';
 import { useShape } from '@/canvas/use-shapes';
 import { useSelectionStore } from '@/canvas/use-selection-store';
@@ -52,9 +54,11 @@ export function GraphPanelContent({ shape }: { shape: GraphShape }) {
   };
 
   const props = shape.props;
+  const axes = graphAxes(props);
+  const angleUnit = props.angleUnit ?? 'rad';
   const functionDefinitions = useMemo(
-    () => createGraphFunctionDefinitions(props.expressions),
-    [props.expressions],
+    () => createGraphFunctionDefinitions(props.expressions, angleUnit),
+    [props.expressions, angleUnit],
   );
 
   const updateGraph = (patch: Partial<GraphProps>) => {
@@ -121,19 +125,52 @@ export function GraphPanelContent({ shape }: { shape: GraphShape }) {
     if (target) focusField(target.id);
   };
 
+  const setScale = (axis: 'x' | 'y', scale: GraphAxes['x']) => {
+    const next = { ...axes, [axis]: scale };
+    updateGraph({
+      [axis === 'x' ? 'xScale' : 'yScale']: scale,
+      viewport: fitViewport(props.viewport, next),
+    });
+  };
+
+  // A trig plot keeps its shape across the switch: the window and any angle
+  // domain are rescaled with it, so sin(x) over [−2π, 2π] lands on
+  // [−360, 360] rather than flattening into a sliver. One undo step.
+  const setAngleUnit = (unit: 'rad' | 'deg') => {
+    if (unit === angleUnit) return;
+    const k = unit === 'deg' ? 180 / Math.PI : Math.PI / 180;
+    const scaled = (v: number) => Number((v * k).toPrecision(12));
+    const patch: Partial<GraphProps> = { angleUnit: unit };
+    if (axes.x === 'linear' && plotsTrig(props.expressions)) {
+      patch.viewport = {
+        ...props.viewport,
+        xMin: scaled(props.viewport.xMin),
+        xMax: scaled(props.viewport.xMax),
+      };
+    }
+    if (props.expressions.some((e) => e.domain && usesAngles(e.expression))) {
+      patch.expressions = props.expressions.map((e) =>
+        e.domain && usesAngles(e.expression)
+          ? { ...e, domain: { min: scaled(e.domain.min), max: scaled(e.domain.max) } }
+          : e,
+      );
+    }
+    updateGraph(patch);
+  };
+
   const parameterNames = Object.keys(props.parameters).sort((a, b) =>
     a.localeCompare(b),
   );
 
   // One surface, top to bottom in the order you reach for things: what is
   // plotted, what moves it, where you are looking, how it is drawn. Groups
-  // are ruled off by hairlines, never boxed.
+  // are ruled off by hairlines, never boxed. Only the first two scroll.
   return (
     <TooltipProvider delay={300}>
       <Surface
         role="region"
         aria-label="Graph"
-        className="touch-targets flex max-h-[var(--anchor-max-h,calc(100dvh-2rem))] w-[min(23rem,calc(100vw-2rem))] flex-col overflow-hidden border-0 bg-[var(--ds-surface-overlay)] p-0 [--chrome-hover:var(--color-tb-track)]"
+        className="touch-targets flex max-h-[min(var(--anchor-max-h,calc(100dvh-2rem)),32rem)] w-[min(23rem,calc(100vw-2rem))] flex-col overflow-hidden border-0 bg-[var(--ds-surface-overlay)] p-0 [--chrome-hover:var(--color-tb-track)]"
       >
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">
           <ul aria-label="Expressions" className="flex flex-col gap-1 px-2 pt-2">
@@ -153,6 +190,7 @@ export function GraphPanelContent({ shape }: { shape: GraphShape }) {
                     else fieldRefs.current.delete(expression.id);
                   }}
                   definitions={functionDefinitions}
+                  angleUnit={angleUnit}
                 />
               </li>
             ))}
@@ -224,19 +262,26 @@ export function GraphPanelContent({ shape }: { shape: GraphShape }) {
               ))}
             </ul>
           )}
-
-          <section aria-label="View" className={SECTION}>
-            <ViewRange
-              viewport={props.viewport}
-              shapeProps={{ w: props.w, h: props.h }}
-              onChange={(viewport) => updateGraph({ viewport })}
-            />
-          </section>
         </div>
+
+        {/* Pinned below the scroller with the display settings: the view
+            controls stay in reach however many rows there are. */}
+        <section aria-label="View" className={`${SECTION} shrink-0`}>
+          <ViewRange
+            viewport={props.viewport}
+            shapeProps={{ w: props.w, h: props.h }}
+            axes={axes}
+            angleUnit={angleUnit}
+            onChange={(viewport) => updateGraph({ viewport })}
+            onScaleChange={setScale}
+          />
+        </section>
 
         <DisplaySettings
           showAxisLabels={props.showAxisLabels !== false}
           showIntersections={props.showIntersections === true}
+          angleUnit={angleUnit}
+          onAngleUnit={setAngleUnit}
           onPatch={updateGraph}
         />
       </Surface>

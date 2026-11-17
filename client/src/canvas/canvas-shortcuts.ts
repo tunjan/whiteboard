@@ -1,4 +1,5 @@
 import { useEffect, type RefObject } from 'react';
+import { isViewOnly } from '@/board/board-access';
 import { noteActivity } from '@/collab/attention';
 import { stopFollowingForManualCameraChange } from '@/collab/use-follow-store';
 import { writeShapesToOsClipboard } from '@/board/clipboard-os';
@@ -16,6 +17,7 @@ import { copySelectionToPngClipboard } from './export-png';
 import { flipShapes } from './flip';
 import type { GestureArbiter } from './gesture-arbiter';
 import { deleteTargetIds, moveTargetIds } from './hierarchy';
+import { pickAndPlaceImages } from './place-image';
 import { isSelectable } from './selectable';
 import { copyStyle, pasteStyle } from './style-clipboard';
 import { toolRegistry } from './tools/tool-registry';
@@ -105,7 +107,7 @@ export function useCanvasShortcuts({
         }
         return;
       }
-      if (mod && e.key === 'a') {
+      if (mod && (e.key === 'a' || e.key === 'A')) {
         e.preventDefault();
         useSelectionStore.getState().setSelection(
           editor
@@ -139,11 +141,12 @@ export function useCanvasShortcuts({
       // Clipboard. Copy/cut also push to the OS clipboard; paste is handled by
       // the window 'paste' listener below so OS-image and in-app paths agree.
       //
-      // Shift+Mod+C rasterizes the selection instead (`e.key` is uppercase
-      // while shift is held, so this can't collide with the plain copy below).
+      // Shift+Mod+C rasterizes the selection instead. Matched on `shiftKey`,
+      // not the case of `e.key`, which Caps Lock flips: the plain copy below
+      // accepts either case, so this has to claim every shifted C first.
       // Deliberately not awaited: the clipboard write must be issued while this
       // keydown is still the current task — see `writePngToClipboard`.
-      if (mod && e.shiftKey && e.key === 'C') {
+      if (mod && e.shiftKey && (e.key === 'C' || e.key === 'c')) {
         e.preventDefault();
         if (ids.length) {
           copySelectionToPngClipboard(ids).catch((err: unknown) =>
@@ -166,14 +169,14 @@ export function useCanvasShortcuts({
         if (ids.length) pasteStyle(editor, ids);
         return;
       }
-      if (mod && !e.altKey && e.key === 'c') {
+      if (mod && !e.altKey && (e.key === 'c' || e.key === 'C')) {
         if (ids.length) {
           copyShapes(editor, ids);
           void writeShapesToOsClipboard(editor, ids, clipboardToken());
         }
         return;
       }
-      if (mod && e.key === 'x') {
+      if (mod && (e.key === 'x' || e.key === 'X')) {
         if (ids.length) {
           copyShapes(editor, ids);
           void writeShapesToOsClipboard(editor, ids, clipboardToken());
@@ -349,6 +352,13 @@ export function useCanvasShortcuts({
       if (e.key === 'q' || e.key === 'Q') {
         e.preventDefault();
         useToolLockStore.getState().toggle();
+        return;
+      }
+      // Add image is a command rather than a tool, so the registry has no key
+      // for it.
+      if (e.key === 'u' || e.key === 'U') {
+        e.preventDefault();
+        if (!e.repeat && !isViewOnly()) void pickAndPlaceImages();
         return;
       }
       const tool = toolRegistry.byHotkey(e.key);

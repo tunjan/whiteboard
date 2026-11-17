@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import * as Y from 'yjs';
-import { PAGE_DOCUMENT_INFIX } from '@whiteboard/shared';
+import { type LiveBoard, PAGE_DOCUMENT_INFIX } from '@whiteboard/shared';
 import { verifySession } from '../auth/jwt';
 import { SESSION_COOKIE } from '../auth/routes';
 import { db } from '../db/client';
@@ -96,6 +96,11 @@ function isPageDocument(documentName: string): boolean {
  * enough to read a question or work it on paper, short of a tab left open.
  */
 export const AFK_GRACE_MS = 5 * 60_000;
+
+/** Whether `entry` had gone without input past the grace by `at`. */
+function idleAt(entry: Live, at: number): boolean {
+  return entry.tracksInput && at - entry.lastInputAt > AFK_GRACE_MS;
+}
 
 /**
  * Shapes an update adds: new keys on a document's root `shapes` map, each a
@@ -214,7 +219,7 @@ export function createSessionTracker(options: SessionTrackerOptions = {}) {
 
   /** Input happened: close the AFK stretch it ends, if the gap ran past grace. */
   function input(entry: Live, at: number): void {
-    if (entry.tracksInput && at - entry.lastInputAt > AFK_GRACE_MS) {
+    if (idleAt(entry, at)) {
       entry.afk.push([entry.lastInputAt + AFK_GRACE_MS, at]);
     }
     entry.lastInputAt = at;
@@ -282,10 +287,7 @@ export function createSessionTracker(options: SessionTrackerOptions = {}) {
     // The stretch still open runs to the row's end, so a student who walked
     // away and whose tab was later closed — or whose server died — is covered.
     const afk = [...entry.afk];
-    if (
-      entry.tracksInput &&
-      entry.lastSeenAt - entry.lastInputAt > AFK_GRACE_MS
-    ) {
+    if (idleAt(entry, entry.lastSeenAt)) {
       afk.push([entry.lastInputAt + AFK_GRACE_MS, entry.lastSeenAt]);
     }
     await store.update(entry.id, {
@@ -316,6 +318,35 @@ export function createSessionTracker(options: SessionTrackerOptions = {}) {
     );
   }
 
+  /**
+   * Boards a student is connected to right now, for the tutor's library, with
+   * who has gone idle. The same rule attendance applies: a tutor on the board
+   * means nobody on it is AFK, and neither is a student active in another tab.
+   */
+  function liveBoards(): LiveBoard[] {
+    const at = now();
+    const entries = [...live.values()];
+    const boards = new Map<string, LiveBoard>();
+    for (const entry of entries) {
+      if (entry.isTutor) continue;
+      const board = boards.get(entry.boardId) ?? { id: entry.boardId, afk: [] };
+      boards.set(entry.boardId, board);
+      const onBoard = entries.filter((e) => e.boardId === entry.boardId);
+      const own = onBoard.filter((e) => !e.isTutor && e.name === entry.name);
+      if (onBoard.some((e) => e.isTutor) || !own.every((e) => idleAt(e, at))) {
+        continue;
+      }
+      const name = entry.name || 'Unnamed';
+      if (board.afk.some((student) => student.name === name)) continue;
+      const lastInputAt = Math.max(...own.map((e) => e.lastInputAt));
+      board.afk.push({
+        name,
+        idleMinutes: Math.floor((at - lastInputAt) / 60_000),
+      });
+    }
+    return [...boards.values()];
+  }
+
   const timer =
     options.autoFlush === false
       ? null
@@ -332,12 +363,7 @@ export function createSessionTracker(options: SessionTrackerOptions = {}) {
     change,
     disconnected,
     flush,
-    /** Boards a student is connected to right now, for the tutor's library. */
-    liveStudentBoardIds: () => [
-      ...new Set(
-        [...live.values()].filter((e) => !e.isTutor).map((e) => e.boardId),
-      ),
-    ],
+    liveBoards,
     stop: () => {
       if (timer) clearInterval(timer);
     },

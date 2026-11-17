@@ -20,6 +20,7 @@ import {
 } from './shapes/equation';
 import { DEFAULT_SHAPE_STYLE } from './shapes/style';
 import { editor } from './use-document-store';
+import { markArrived, useConversionStore } from './use-conversion-store';
 import { useSelectionStore } from './use-selection-store';
 
 /**
@@ -124,6 +125,7 @@ async function swapForEquation(
   ids: string[],
   latex: string,
   color: string,
+  signal: AbortSignal,
 ): Promise<boolean> {
   // Typeset before writing anything, so the equation lands already sized. The
   // shape's box is a cache of its render: created at the default size, it would
@@ -132,7 +134,10 @@ async function swapForEquation(
 
   const bounds = sourceBounds(ids);
   const live = ids.filter((id) => editor.getShape(id));
-  if (!bounds || live.length === 0) return false;
+  // Cancelled while the formula was typesetting: the user has already been told
+  // it stopped, so nothing may land now.
+  if (!bounds || live.length === 0 || signal.aborted) return false;
+  const sources = live.flatMap((sourceId) => editor.getShape(sourceId) ?? []);
 
   const box =
     render && !('error' in render)
@@ -172,6 +177,14 @@ async function swapForEquation(
     } as Shape);
   });
 
+  // Keep the handwriting for the compare key, and let the equation settle in
+  // as the strokes fade rather than appearing in the frame they vanish.
+  useConversionStore.setState({
+    original: { equationId: id, shapes: sources },
+    peeking: false,
+  });
+  markArrived(id);
+
   useSelectionStore.getState().setSelection([id]);
   // Open the equation panel on the result: a transcription is a draft, and the
   // first thing anyone does with one is check it.
@@ -193,18 +206,41 @@ function transcriptionColor(ids: string[]): string {
   return DEFAULT_SHAPE_STYLE.color;
 }
 
+/** The conversion in flight, if any; one at a time, so the key doubles as cancel. */
+let inFlight: AbortController | null = null;
+
+/** Stop the conversion in flight. The shapes are untouched and nothing is toasted. */
+export function cancelConversion(): void {
+  inFlight?.abort();
+}
+
 /**
  * The whole conversion. Resolves true when an equation replaced the source,
  * false when there was nothing left to replace by the time the answer came
- * back. Throws with a message fit for a toast on any failure.
+ * back, or the user cancelled. Throws with a message fit for a toast on any
+ * other failure.
  */
 export async function convertSelectionToEquation(
   ids: string[],
 ): Promise<boolean> {
-  const color = transcriptionColor(ids);
+  if (inFlight) return false;
+  const controller = new AbortController();
+  inFlight = controller;
+  // The board shows what is being read for as long as the request is out.
+  useConversionStore.setState({ reading: sourceBounds(ids) });
+  try {
+    const color = transcriptionColor(ids);
 
-  const png = await renderShapesForRecognition(ids);
-  if (!png) throw new Error('Nothing to convert');
+    const png = await renderShapesForRecognition(ids);
+    if (!png) throw new Error('Nothing to convert');
 
-  return swapForEquation(ids, await latexFromImage(png), color);
+    const latex = await latexFromImage(png, controller.signal);
+    return await swapForEquation(ids, latex, color, controller.signal);
+  } catch (err) {
+    if (controller.signal.aborted) return false;
+    throw err;
+  } finally {
+    inFlight = null;
+    useConversionStore.setState({ reading: null });
+  }
 }

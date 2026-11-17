@@ -30,6 +30,7 @@ import { LatencyWarningToast } from '@/components/latency-warning-toast';
 import { NameDialog } from '@/components/name-dialog';
 import { PdfRangeDialog } from '@/components/pdf-range-dialog';
 import { StickerCutOutDialog } from '@/components/sticker-cutout-dialog';
+import { AgentBar } from '@/components/agent-bar';
 import { Toolbar } from '@/components/toolbar';
 import { Toaster } from '@/components/ui/toast';
 import { VideoPanel } from '@/components/video-panel';
@@ -111,11 +112,17 @@ export function BoardView({ boardId }: { boardId: string }) {
   // Deep link: jump to the shared page once it exists in the synced doc.
   useEffect(() => {
     const target = pendingPage.current;
-    if (target && pages[target]) {
+    if (!target) return;
+    if (pages[target]) {
       setCurrentPage(target);
       pendingPage.current = null;
+    } else if (useBoardLoadingStore.getState().ready) {
+      // Loaded and still absent: the page is gone. Stop waiting for it, or
+      // the address bar never tracks the open page. Read from the store, not
+      // `boardReady`: on mount that can still be the previous board's answer.
+      pendingPage.current = null;
     }
-  }, [pages]);
+  }, [pages, boardReady]);
 
   // Keep the address bar's `?p=` pointed at the active page (no history spam),
   // so the Share link always reflects the slide you're on.
@@ -125,7 +132,8 @@ export function BoardView({ boardId }: { boardId: string }) {
     if (url.searchParams.get('p') === currentPageId) return;
     url.searchParams.set('p', currentPageId);
     window.history.replaceState({}, '', url);
-  }, [currentPageId]);
+    // `boardReady`: a deep link given up on above has to be replaced here.
+  }, [currentPageId, boardReady]);
 
   // Resolve who we are (tutor vs. student) once.
   useEffect(() => {
@@ -200,6 +208,7 @@ export function BoardView({ boardId }: { boardId: string }) {
         />
         <VoiceAudioSinks />
         {access === 'view' ? null : <Toolbar />}
+        {access === 'view' ? null : <AgentBar />}
         <Suspense fallback={null}>
           <GraphPanel />
           <EquationPanel />
@@ -210,7 +219,6 @@ export function BoardView({ boardId }: { boardId: string }) {
       <LatencyWarningToast />
       {/* Tutor-only, and silent by design: the student is told nothing. */}
       {identity?.isTutor ? <AttentionToast /> : null}
-      {/* Bottom-right, clear of the latency warning's top-left viewport. */}
       <Toaster />
 
       {/* Opened from the paste handler, not from a control, when a pasted PDF

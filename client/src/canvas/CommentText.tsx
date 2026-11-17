@@ -10,6 +10,7 @@
  */
 import { Fragment, type ReactNode } from 'react';
 import {
+  inlineMathBox,
   requestEquationTypeset,
   useEquationRender,
   type EquationRender,
@@ -21,38 +22,16 @@ import {
 } from '@/canvas/comment-markdown';
 import { cn } from '@/lib/utils';
 
-/** The em `convertEquation` typesets at. Dividing by it turns MathJax's pixel
- *  geometry into `em`, so math scales with whatever text it sits in. */
-const MATHJAX_BASE_PX = 16;
-
 type TypesetRender = Extract<EquationRender, { svg: string }>;
 
-/**
- * How much of a formula hangs below the baseline of the line it sits on.
- *
- * MathJax reports this as a `vertical-align` style, which the sanitizer strips
- * (see `equation-convert`), so it is recovered from the viewBox instead: the
- * box runs from `minY` above the baseline to `minY + height` below it. Without
- * it every parenthesis, subscript and fraction in a sentence would float,
- * resting its *bottom* on the baseline.
- */
 function mathBoxStyle(render: TypesetRender): {
   width: string;
   height: string;
   verticalAlign: string;
 } {
-  const viewBox = /viewBox="\s*[-\d.]+\s+(-?[\d.]+)\s+[-\d.]+\s+([\d.]+)/.exec(
-    render.svg,
-  );
-  const height = render.height / MATHJAX_BASE_PX;
-  const boxTop = Number(viewBox?.[1]);
-  const boxHeight = Number(viewBox?.[2]);
-  const depth =
-    Number.isFinite(boxTop) && boxHeight > 0
-      ? ((boxTop + boxHeight) / boxHeight) * height
-      : 0;
+  const { width, height, depth } = inlineMathBox(render);
   return {
-    width: `${render.width / MATHJAX_BASE_PX}em`,
+    width: `${width}em`,
     height: `${height}em`,
     verticalAlign: `${-depth}em`,
   };

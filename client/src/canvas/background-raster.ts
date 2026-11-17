@@ -2,7 +2,9 @@ import type { Camera } from './camera';
 import {
   getDotGridLayers,
   getGridLevels,
+  isTriangleGrid,
   pmod,
+  triangleTile,
   type BackgroundType,
 } from './grid';
 import { rasterZoom } from './raster-grid';
@@ -12,6 +14,7 @@ export interface BackgroundRaster {
   band: number;
   level: string;
   period: number;
+  periodY: number;
   ratio: number;
 }
 
@@ -36,15 +39,21 @@ export function paintBackgroundRaster(
   const origin = { x: 0, y: 0, z: camera.z };
   const layers = getDotGridLayers(origin).filter((l) => l.opacity > 0.01);
   const grid = getGridLevels(origin);
-  const period = type === 'dot' ? layers[0]!.screenStep : grid.majorScreen;
+  const major = isTriangleGrid(type)
+    ? triangleTile(type, grid.majorScreen)
+    : null;
+  const period =
+    type === 'dot' ? layers[0]!.screenStep : (major?.w ?? grid.majorScreen);
+  const periodY = major?.h ?? period;
   const ratio = Math.min(window.devicePixelRatio || 1, 2);
   const tile = document.createElement('canvas');
-  tile.width = tile.height = Math.max(1, Math.ceil(period * ratio));
+  tile.width = Math.max(1, Math.ceil(period * ratio));
+  tile.height = Math.max(1, Math.ceil(periodY * ratio));
   const ctx = tile.getContext('2d');
   const wallpaper = canvas.getContext('2d');
   if (!ctx || !wallpaper) return null;
   const style = getComputedStyle(document.documentElement);
-  ctx.scale(tile.width / period, tile.height / period);
+  ctx.scale(tile.width / period, tile.height / periodY);
   if (type === 'dot') {
     ctx.fillStyle = style.getPropertyValue('--grid-dot-ink').trim();
     for (const layer of layers) {
@@ -62,6 +71,25 @@ export function paintBackgroundRaster(
           ctx.fill();
         }
       }
+    }
+  } else if (isTriangleGrid(type)) {
+    ctx.lineWidth = 1;
+    for (const [step, color] of [
+      [grid.minorScreen, '--grid-minor'],
+      [grid.majorScreen, '--grid-major'],
+    ] as const) {
+      const t = triangleTile(type, step);
+      ctx.strokeStyle = style.getPropertyValue(color).trim();
+      ctx.beginPath();
+      for (let y = 0; y < periodY - 0.001; y += t.h) {
+        for (let x = 0; x < period - 0.001; x += t.w) {
+          for (const [x1, y1, x2, y2] of t.lines) {
+            ctx.moveTo(x + x1!, y + y1!);
+            ctx.lineTo(x + x2!, y + y2!);
+          }
+        }
+      }
+      ctx.stroke();
     }
   } else {
     ctx.lineWidth = 1;
@@ -83,7 +111,7 @@ export function paintBackgroundRaster(
   // A cache made at the top of a band can be shrunk by 1/√2 before crossing
   // its bottom. Extra periods cover the modulo translation in both axes.
   const w = Math.ceil(width * Math.SQRT2 + 2 * period);
-  const h = Math.ceil(height * Math.SQRT2 + 2 * period);
+  const h = Math.ceil(height * Math.SQRT2 + 2 * periodY);
   // Bound background allocations too, including very large external displays.
   const dpr = Math.min(ratio, Math.sqrt((32 * 1024 * 1024) / (w * h * 4)));
   canvas.width = Math.ceil(w * dpr);
@@ -93,7 +121,9 @@ export function paintBackgroundRaster(
   wallpaper.scale(canvas.width / w, canvas.height / h);
   const pattern = wallpaper.createPattern(tile, 'repeat');
   if (!pattern) return null;
-  pattern.setTransform(new DOMMatrix().scale(period / tile.width));
+  pattern.setTransform(
+    new DOMMatrix().scale(period / tile.width, periodY / tile.height),
+  );
   wallpaper.fillStyle = pattern;
   // The tile holds opaque ink; the dot alpha is applied once here, matching
   // the vector grid's group opacity.
@@ -109,6 +139,7 @@ export function paintBackgroundRaster(
     zoom: camera.z,
     band: rasterZoom(camera.z),
     period,
+    periodY,
     level: backgroundLevel(type, camera),
     ratio,
   };
@@ -120,9 +151,10 @@ export function backgroundRasterTransform(
 ): string {
   const scale = camera.z / raster.zoom;
   const period = raster.period * scale;
+  const periodY = raster.periodY * scale;
   // Phase is in screen units. Modulo keeps arbitrarily long pans within the
   // prepainted wallpaper instead of eventually exposing an empty edge.
   const x = pmod(-camera.x * camera.z, period) - period;
-  const y = pmod(-camera.y * camera.z, period) - period;
+  const y = pmod(-camera.y * camera.z, periodY) - periodY;
   return `translate3d(${x}px, ${y}px, 0) scale(${scale})`;
 }

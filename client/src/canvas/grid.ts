@@ -1,12 +1,15 @@
 import type { Camera } from './camera';
 
-export type BackgroundType = 'blank' | 'dot' | 'graph' | 'coordinate';
+export type BackgroundType =
+  'blank' | 'dot' | 'graph' | 'coordinate' | 'isometric' | 'triangle';
 
 export const BACKGROUND_TYPES: readonly BackgroundType[] = [
   'blank',
   'dot',
   'graph',
   'coordinate',
+  'isometric',
+  'triangle',
 ];
 
 export const BACKGROUND_LABELS: Record<BackgroundType, string> = {
@@ -14,7 +17,37 @@ export const BACKGROUND_LABELS: Record<BackgroundType, string> = {
   dot: 'Dot grid',
   graph: 'Graph paper',
   coordinate: 'Coordinate plane',
+  isometric: 'Isometric',
+  triangle: 'Triangle grid',
 };
+
+export function isTriangleGrid(
+  type: BackgroundType,
+): type is 'isometric' | 'triangle' {
+  return type === 'isometric' || type === 'triangle';
+}
+
+/**
+ * One repeat of a triangular lattice whose parallel rules sit `step` apart, so
+ * the major level (5 × step) is a sublattice of the minor one. `isometric`
+ * keeps one family vertical with the others at ±30°; `triangle` keeps one
+ * horizontal with the others at ±60°. Diagonals run a tile past each edge so
+ * a clipped tile still leaves its neighbour the other half of the stroke.
+ */
+export function triangleTile(type: 'isometric' | 'triangle', step: number) {
+  const side = (2 * step) / Math.sqrt(3);
+  const upright = type === 'isometric';
+  const w = upright ? 2 * step : side;
+  const h = upright ? side : 2 * step;
+  const rules = [0, step, 2 * step].map((p) =>
+    upright ? [p, 0, p, h] : [0, p, w, p],
+  );
+  return {
+    w,
+    h,
+    lines: [...rules, [-w, -h, 2 * w, 2 * h], [-w, 2 * h, 2 * w, -h]],
+  };
+}
 
 /**
  * Fades the grid out toward the edges of the screen, so it reads as a sheet of

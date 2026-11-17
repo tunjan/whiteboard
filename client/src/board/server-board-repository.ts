@@ -1,7 +1,9 @@
 import {
   type BoardMeta,
   type BoardRepository,
+  type LiveBoard,
   genBoardId,
+  pageDocumentPrefix,
 } from '@whiteboard/shared';
 import { boardKey } from '@/board/board-access';
 import { boardRoom } from '@/canvas/use-document-store';
@@ -14,7 +16,9 @@ const CACHE_KEY = 'whiteboard:boards-cache';
 const OUTBOX_KEY = 'whiteboard:boards-outbox';
 
 type OutboxOp =
-  | { kind: 'upsert'; board: BoardMeta }
+  // Only the id and name are sent; a rename of a board this browser never
+  // listed has nothing else to give.
+  | { kind: 'upsert'; board: Pick<BoardMeta, 'id' | 'name'> }
   | { kind: 'delete'; id: string }
   | { kind: 'opened'; id: string }
   | { kind: 'favorite'; id: string; favorite: boolean };
@@ -49,18 +53,21 @@ function api(path: string, init?: RequestInit): Promise<Response> {
 }
 
 /**
- * Boards a student is connected to right now. Outside `BoardRepository` on
- * purpose: it is live server state, not board metadata, and has no offline
- * answer — an empty set is the honest one.
+ * Boards a student is connected to right now, by id. Outside `BoardRepository`
+ * on purpose: it is live server state, not board metadata, and has no offline
+ * answer — an empty map is the honest one.
  */
-export async function fetchLiveBoardIds(): Promise<Set<string>> {
+export async function fetchLiveBoards(): Promise<Map<string, LiveBoard>> {
   try {
     const res = await api('/live');
-    if (res.ok) return new Set((await res.json()) as string[]);
+    if (res.ok) {
+      const boards = (await res.json()) as LiveBoard[];
+      return new Map(boards.map((board) => [board.id, board]));
+    }
   } catch {
     // Offline — nobody is known to be live.
   }
-  return new Set();
+  return new Map();
 }
 
 export class ServerBoardRepository implements BoardRepository {
@@ -122,7 +129,14 @@ export class ServerBoardRepository implements BoardRepository {
   async rename(id: string, name: string): Promise<void> {
     const cache = loadCache();
     const board = cache[id];
-    if (!board) return;
+    if (!board) {
+      // Opened by URL in a browser that never listed boards: still reach the
+      // server, but leave the cache alone rather than invent the timestamps the
+      // home list sorts by — its next `list()` brings the real row.
+      if (name.trim()) this.enqueue({ kind: 'upsert', board: { id, name } });
+      await this.flush();
+      return;
+    }
     board.name = name.trim() || board.name;
     board.updatedAt = Date.now();
     saveCache(cache);
@@ -136,6 +150,17 @@ export class ServerBoardRepository implements BoardRepository {
     saveCache(cache);
     this.enqueue({ kind: 'delete', id });
     indexedDB.deleteDatabase(boardRoom(id));
+    // Each page caches into a database of its own. A browser without
+    // `databases()` can't list them, so there only the board's own goes.
+    const pages = boardRoom(pageDocumentPrefix(id));
+    void indexedDB
+      .databases?.()
+      .then((dbs) => {
+        for (const { name } of dbs) {
+          if (name?.startsWith(pages)) indexedDB.deleteDatabase(name);
+        }
+      })
+      .catch(() => {});
     await this.flush();
   }
 
@@ -188,6 +213,7 @@ export class ServerBoardRepository implements BoardRepository {
                     method: 'POST',
                   });
         if (res.status === 401) return; // not signed in yet — retry after login
+        if (res.status >= 500) return; // server or tunnel down — retry later
         // Drop the op on success or any other 4xx (avoid a stuck queue).
         ops = ops.slice(1);
         saveOutbox(ops);

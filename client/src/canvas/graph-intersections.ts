@@ -12,6 +12,12 @@ import {
   sampleParsedGraphExpression,
   type GraphSampleResult,
 } from './graph-sampler';
+import {
+  LINEAR_AXES,
+  toPlotViewport,
+  warpParsed,
+  type GraphAxes,
+} from './graph-scale';
 
 export type IntersectionKind = 'curve-curve' | 'x-axis' | 'y-axis';
 
@@ -262,23 +268,31 @@ const Y_AXIS: Residual = (x) => x;
  * an implicit relation walks that relation's sampled contour (`boundaries`,
  * aligned with `expressions`, else sampled here). Results are deduped at
  * sampling resolution and capped at MAX_INTERSECTIONS.
+ *
+ * With log `axes` the search runs in plot space and answers there, like the
+ * curves. A log axis has no zero to cross, so it contributes no crossings.
  */
 export function findGraphIntersections(
   expressions: GraphExpression[],
-  viewport: GraphViewport,
+  dataViewport: GraphViewport,
   parameters: Record<string, GraphParameter>,
   samples = 240,
   definitions: GraphFunctionDefinitions = createGraphFunctionDefinitions(
     expressions,
   ),
   boundaries?: readonly GraphSampleResult[],
+  axes: GraphAxes = LINEAR_AXES,
 ): IntersectionPoint[] {
+  const viewport = toPlotViewport(dataViewport, axes);
+  const crossesXAxis = axes.y === 'linear';
+  const crossesYAxis = axes.x === 'linear';
   const curves: ((x: number) => number)[] = [];
   const implicits: { F: Residual; segments: { x: number; y: number }[][] }[] = [];
   expressions.forEach((expression, index) => {
     if (!expression.visible) return;
-    const parsed = parseGraphExpression(expression.expression, definitions);
-    if (!parsed.ok) return;
+    const typed = parseGraphExpression(expression.expression, definitions);
+    if (!typed.ok) return;
+    const parsed = warpParsed(typed, axes);
     // Root finding evaluates each curve thousands of times, so bind the
     // sliders once rather than rebuilding the scope on every probe.
     if (parsed.kind === 'explicit') {
@@ -313,12 +327,12 @@ export function findGraphIntersections(
         }
       }
     }
-    if (viewport.yMin <= 0 && 0 <= viewport.yMax) {
+    if (crossesXAxis && viewport.yMin <= 0 && 0 <= viewport.yMax) {
       for (const root of findRoots(f, fs, viewport, samples)) {
         candidates.push({ x: root, y: 0, kind: 'x-axis' });
       }
     }
-    if (viewport.xMin <= 0 && 0 <= viewport.xMax) {
+    if (crossesYAxis && viewport.xMin <= 0 && 0 <= viewport.xMax) {
       const y = f(0);
       if (Number.isFinite(y)) {
         candidates.push({ x: 0, y, kind: 'y-axis' });
@@ -335,8 +349,8 @@ export function findGraphIntersections(
       residual: ((x: number, y: number) => y - f(x)) as Residual,
       kind: 'curve-curve' as const,
     })),
-    { residual: X_AXIS, kind: 'x-axis' },
-    { residual: Y_AXIS, kind: 'y-axis' },
+    ...(crossesXAxis ? [{ residual: X_AXIS, kind: 'x-axis' as const }] : []),
+    ...(crossesYAxis ? [{ residual: Y_AXIS, kind: 'y-axis' as const }] : []),
   ];
   implicits.forEach(({ F, segments }, i) => {
     // Other implicits only after this one, so each pair is walked once.
@@ -388,20 +402,27 @@ export function findGraphIntersections(
 }
 
 /**
- * Format an intersection coordinate with at most two decimal places.
- * Trailing zeros are omitted (e.g. 2 -> "2", 2.5 -> "2.5", 2.567 -> "2.57").
+ * Format an intersection coordinate with at most two decimal places and a
+ * true minus. Trailing zeros are omitted (2 -> "2", 2.567 -> "2.57").
+ *
+ * On a log axis small values are the point of the plot, so they keep three
+ * significant digits instead: 0.00123, not 0.
  */
-export function formatIntersectionCoordinate(value: number): string {
+export function formatIntersectionCoordinate(
+  value: number,
+  scale: GraphAxes['x'] = 'linear',
+): string {
   if (!Number.isFinite(value)) return '';
-  const rounded = Number(value.toFixed(2));
+  const rounded =
+    scale === 'log' ? Number(value.toPrecision(3)) : Number(value.toFixed(2));
   if (Object.is(rounded, -0) || rounded === 0) return '0';
-  return rounded.toString();
+  return rounded.toString().replace('-', '\u2212');
 }
 
 /** Format an intersection point into a label, e.g. `(1.25, 0)` */
-export function formatIntersectionLabel(point: {
-  x: number;
-  y: number;
-}): string {
-  return `(${formatIntersectionCoordinate(point.x)}, ${formatIntersectionCoordinate(point.y)})`;
+export function formatIntersectionLabel(
+  point: { x: number; y: number },
+  axes: GraphAxes = LINEAR_AXES,
+): string {
+  return `(${formatIntersectionCoordinate(point.x, axes.x)}, ${formatIntersectionCoordinate(point.y, axes.y)})`;
 }

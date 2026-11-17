@@ -29,6 +29,12 @@
   --d-star: var(--ds-icon-accent-yellow);
   --d-lift: var(--ds-shadow-raised);
 
+  /* Attendance's three states, the only colour its charts carry: a student
+   * with the tutor, a student on their own, and connected but not there. */
+  --d-with: var(--d-blue);
+  --d-alone: var(--ds-background-accent-blue-subtle);
+  --d-afk: var(--ds-border-bold);
+
   /* Avatar inks, one per student: the accent "bolder" backgrounds, so initials
    * in the inverse text colour keep the contrast Atlassian designed them for.
    * No blue and no green: blue is the tutor, green is "live". */

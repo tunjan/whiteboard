@@ -14,7 +14,7 @@ import { ShapeTray } from '@/components/toolbar/toolbar-shape-tray';
 import {
   EraserMode,
   styleSections,
-  WEIGHT_NAMES,
+  WEIGHT_STROKES,
   WeightRow,
   type Section,
 } from '@/components/toolbar/toolbar-style-sections';
@@ -35,7 +35,7 @@ import { cn, swatchBorder } from '@/lib/utils';
  */
 
 /** Tools whose tray leads with their defining choice, drawn in the open. */
-const OPEN_TRAY_TOOLS = new Set(['arrow', 'text']);
+const OPEN_TRAY_TOOLS = new Set(['arrow']);
 
 /** Tools that stay on after use, so tool lock has nothing to keep. */
 const NEVER_COMPLETE = new Set([
@@ -54,14 +54,21 @@ export function ToolPropertiesSatellite({
   activeToolId,
   placement = 'bottom',
   fullPalette = false,
+  fewColours = false,
+  barHidden = false,
 }: {
   activeToolId: string;
   /** Which bar it serves: centred above a bottom bar, or beside a left rail. */
   placement?: 'bottom' | 'left';
   /** Every colour on the ramp, not eight and a key for the rest. */
   fullPalette?: boolean;
+  /** Two colours rather than four under the narrow bar: a phone's width. */
+  fewColours?: boolean;
+  /** The bar has been put away, so its tray goes with it. */
+  barHidden?: boolean;
 }) {
-  const { visible, show, values, apply } = useStyleControls(activeToolId);
+  const { visible: applies, show, values, apply } = useStyleControls(activeToolId);
+  const visible = applies && !barHidden;
 
   // Keep the last tool's controls while the bar animates out.
   const shown = useRef(show);
@@ -71,40 +78,43 @@ export function ToolPropertiesSatellite({
     shownTool.current = activeToolId;
   }
   const on = shown.current;
-  // A shape tool under a bottom bar gets the shape tray: one row, the shapes
-  // themselves, then each setting as its value behind a chevron.
-  const shapeTray =
-    placement === 'bottom' && SHAPE_MENU_TOOLS.includes(shownTool.current);
-  // Arrow and text get the same tray: what kind of arrow or type it lays down
-  // out in the open, the rest behind chevrons.
-  const drawnTray =
-    shapeTray ||
-    (placement === 'bottom' && OPEN_TRAY_TOOLS.has(shownTool.current));
-
-  const inking = (INKING_TOOLS as readonly string[]).includes(activeToolId);
-  // The ink tray is one row under a bottom bar: seven colours (four under
-  // the narrow bar), then a menu per setting.
-  const oneRow = inking && placement === 'bottom';
-  // In the tray the settings sit behind a chevron, with room to name them.
-  const inTray = oneRow || drawnTray;
+  const tool = shownTool.current;
+  // Under a bottom bar every tray is one row of one height, so changing tool
+  // changes what is in the tray and never where the board's edge is.
+  const bottom = placement === 'bottom';
+  // A shape tool gets the shape tray: the shapes themselves, then each
+  // setting as its value behind a chevron.
+  const shapeTray = bottom && SHAPE_MENU_TOOLS.includes(tool);
+  // The arrow gets the same tray: what kind of arrow it lays down out in the
+  // open, the rest behind chevrons.
+  const drawnTray = shapeTray || (bottom && OPEN_TRAY_TOOLS.has(tool));
+  const inking = (INKING_TOOLS as readonly string[]).includes(tool);
+  // Anything else leads with its colours, then a menu per setting.
+  const oneRow = bottom && !drawnTray;
 
   // The second row: what the shape is first, then how it is painted, then
   // how solid it is. In the tray each is a menu of its own, shown by its value.
-  const sections = styleSections(on, { values, apply }, inTray);
+  const sections = styleSections(on, { values, apply }, bottom);
+  const open = sections.filter((section) => section.open);
 
   const zones: ReactNode[] = [];
   if (inking) {
-    zones.push(<InkTray key="ink" activeToolId={activeToolId} />);
+    zones.push(<InkTray key="ink" activeToolId={tool} />);
   }
   if (on.eraserMode) zones.push(<EraserMode key="eraser" />);
   if (on.color) {
+    // Where something else shares the row, the eight that keys 1–8 reach: the
+    // strong hues, with the light ones behind the colour key. Four under the
+    // narrow bar, two on a phone.
+    const crowded = inking || open.length > 0;
+    const trayCount = fullPalette ? (crowded ? 8 : undefined) : fewColours ? 2 : 4;
     zones.push(
       <ColorRamp
         key="color"
         color={values.color}
         onSelect={apply.color}
         barVisible={visible}
-        count={oneRow ? (fullPalette ? 7 : 4) : fullPalette ? undefined : 8}
+        count={oneRow ? trayCount : fullPalette ? undefined : 8}
       />,
     );
   }
@@ -113,24 +123,20 @@ export function ToolPropertiesSatellite({
       key="size"
       value={values.size}
       onSelect={apply.size}
-      inTray={inTray}
+      inTray={bottom}
     />
   );
-  if (on.size && !oneRow) zones.push(sizeControl);
+  if (on.size && !bottom) zones.push(sizeControl);
   if (on.sticker) zones.push(<StickerStrip key="sticker" />);
   // Placing a shape hands back to Select unless the tool is locked; the key
   // sits with the tools that do that, so the choice is where it applies.
-  const lock =
-    visible && !NEVER_COMPLETE.has(activeToolId) ? (
-      <ToolLockButton key="lock" />
-    ) : null;
-  if (lock) zones.push(lock);
+  const lock = !NEVER_COMPLETE.has(tool) ? <ToolLockButton key="lock" /> : null;
+  if (lock && !bottom) zones.push(lock);
 
-  const sizeName = SIZE_OPTIONS.find((option) => option.value === values.size)?.name;
+  const sizeIndex = SIZE_OPTIONS.findIndex((option) => option.value === values.size);
 
-  // The tray's menus: the stroke first, right after the colours, then the
-  // rest in row order, then the weight. Under the narrow bar the rest share
-  // the weight's menu.
+  // The tray's menus: the stroke and its weight together, then the rest in row
+  // order. Under the narrow bar the rest share the weight's menu.
   const menuOf = (section: Section) => (
     <TrayMenu
       key={section.key}
@@ -141,30 +147,43 @@ export function ToolPropertiesSatellite({
       {section.node}
     </TrayMenu>
   );
-  const open = sections.filter((section) => section.open);
   const stroke = sections.find((section) => section.key === 'stroke');
   const rest = sections.filter(
     (section) => section !== stroke && !section.open,
   );
   const folded = !fullPalette && on.size;
+  // Each drawn group folds behind one key under the narrow bar, as the shapes do.
+  const openGroups = open.map((section) =>
+    fullPalette ? section.node : menuOf(section),
+  );
+  // What the row ends on stays at the tray's end, so the settings have one
+  // place to be found whatever the tool. A sticker strip reaches that end by
+  // itself.
+  const spacer = on.sticker ? null : <span aria-hidden="true" className="tray-spacer" />;
   const trayMenus = [
     stroke && menuOf(stroke),
-    ...(folded ? [] : rest.map(menuOf)),
     on.size && (
       <TrayMenu
         key="size"
         label="Stroke weight"
         barVisible={visible}
         value={
-          <span className="tray-value">
-            {(sizeName && WEIGHT_NAMES[sizeName]) ?? sizeName}
-          </span>
+          sizeIndex < 0 ? (
+            <span className="tray-value">Custom</span>
+          ) : (
+            <span
+              aria-hidden="true"
+              className="tbar-weight"
+              style={{ height: WEIGHT_STROKES[sizeIndex] }}
+            />
+          )
         }
       >
         {folded && rest.map((section) => section.node)}
         {sizeControl}
       </TrayMenu>
     ),
+    ...(folded ? [] : rest.map(menuOf)),
   ];
 
   return (
@@ -174,7 +193,8 @@ export function ToolPropertiesSatellite({
       data-visible={visible}
       data-placement={placement}
       className={cn(
-        'absolute w-max max-w-[calc(100vw-1rem)]',
+        // The wrapper is scaled by `--drawer-scale`, so the limit is too.
+        'absolute w-max max-w-[calc((100vw-1rem)/var(--drawer-scale))]',
         // Over a bottom bar it is the drawer's tray: as wide as the bar at
         // least, and tucked behind its top edge. The shape tray is exactly as
         // wide; its shapes give way rather than overhang.
@@ -182,7 +202,7 @@ export function ToolPropertiesSatellite({
           ? 'top-1/2 left-full ml-2 -translate-y-1/2'
           : cn(
               'bottom-[calc(100%-var(--drawer-tuck))] left-1/2 -translate-x-1/2',
-              drawnTray ? 'w-full' : 'min-w-full',
+              drawnTray || on.sticker ? 'w-full' : 'min-w-full',
             ),
         'style-bar-motion',
       )}
@@ -191,50 +211,57 @@ export function ToolPropertiesSatellite({
         role="group"
         aria-label="Style controls"
         className="tbar tbar-style"
-        data-one-row={oneRow || drawnTray || undefined}
+        data-one-row={bottom || undefined}
         data-shape-tray={drawnTray || undefined}
       >
-        {drawnTray ? (
-          <div className="tbar-style-row">
-            {shapeTray && (
-              <ShapeTray
-                activeToolId={shownTool.current}
-                barVisible={visible}
-                compact={!fullPalette}
-              />
+        {bottom ? (
+          // Keyed by kind of tray, so a change of tool settles in rather than
+          // cutting; pen to highlighter is the same tray and does not.
+          <div
+            key={inking ? 'ink' : shapeTray ? 'shape' : tool}
+            className="tbar-style-row tray-swap"
+          >
+            {drawnTray ? (
+              <>
+                {shapeTray && (
+                  <ShapeTray
+                    activeToolId={tool}
+                    barVisible={visible}
+                    compact={!fullPalette}
+                  />
+                )}
+                {openGroups}
+                {spacer}
+                <TrayMenu
+                  label="Color"
+                  barVisible={visible}
+                  value={
+                    <span
+                      aria-hidden="true"
+                      className="tray-dot"
+                      style={{
+                        backgroundColor: values.color,
+                        borderColor: swatchBorder(values.color),
+                      }}
+                    />
+                  }
+                >
+                  <ColorRamp
+                    color={values.color}
+                    onSelect={apply.color}
+                    barVisible={visible}
+                  />
+                </TrayMenu>
+              </>
+            ) : (
+              <>
+                {zones}
+                {openGroups}
+                {spacer}
+              </>
             )}
-            {/* Under the narrow bar each drawn group folds behind one key
-                showing its value, as the shapes do. */}
-            {open.map((section) => (fullPalette ? section.node : menuOf(section)))}
-            <TrayMenu
-              label="Color"
-              barVisible={visible}
-              value={
-                <span
-                  aria-hidden="true"
-                  className="tray-dot"
-                  style={{
-                    backgroundColor: values.color,
-                    borderColor: swatchBorder(values.color),
-                  }}
-                />
-              }
-            >
-              <ColorRamp
-                color={values.color}
-                onSelect={apply.color}
-                barVisible={visible}
-              />
-            </TrayMenu>
             {trayMenus}
-            {lock}
-          </div>
-        ) : oneRow ? (
-          // Like the shape tray: the colours in the open, each other setting
-          // behind a chevron of its own.
-          <div className="tbar-style-row">
-            {zones}
-            {trayMenus}
+            {lock ?? (fullPalette && <span aria-hidden="true" className="tray-lock-slot" />)}
           </div>
         ) : (
           <>

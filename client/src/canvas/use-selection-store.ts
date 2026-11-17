@@ -11,6 +11,8 @@ export interface MarqueeSelection {
   mode: MarqueeMode;
 }
 
+export type SelectionGesture = 'move' | 'resize' | 'rotate';
+
 interface SelectionStore {
   selectedIds: string[];
   /** Live rectangle selection while drag-selecting, else null. */
@@ -23,6 +25,11 @@ interface SelectionStore {
    * to be pinned to the surface rather than left to the handle's own hover.
    */
   gestureCursor: string | null;
+  /**
+   * The gesture transforming the selection, if any. Its box, handles and
+   * toolbar step aside for it, as tldraw's do.
+   */
+  transforming: SelectionGesture | null;
   setSelection: (ids: string[]) => void;
   add: (ids: string[]) => void;
   toggle: (id: string) => void;
@@ -31,6 +38,7 @@ interface SelectionStore {
   setMarquee: (marquee: MarqueeSelection | null) => void;
   setSnapGuides: (guides: SnapGuide[]) => void;
   setGestureCursor: (cursor: string | null) => void;
+  setTransforming: (gesture: SelectionGesture | null) => void;
 }
 
 // Selection is per-user, local UI state — never in the shared CRDT. It is
@@ -41,6 +49,7 @@ export const useSelectionStore = create<SelectionStore>((set, get) => ({
   marquee: null,
   snapGuides: [],
   gestureCursor: null,
+  transforming: null,
   setSelection: (selectedIds) => {
     const current = get().selectedIds;
     // A marquee drag calls this every frame, almost always with the same ids.
@@ -73,4 +82,8 @@ export const useSelectionStore = create<SelectionStore>((set, get) => ({
   setMarquee: (marquee) => set({ marquee }),
   setSnapGuides: (snapGuides) => set({ snapGuides }),
   setGestureCursor: (gestureCursor) => set({ gestureCursor }),
+  // Called on every pointer sample of a gesture; only a change notifies.
+  setTransforming: (transforming) => {
+    if (get().transforming !== transforming) set({ transforming });
+  },
 }));

@@ -1,4 +1,6 @@
 import type {
+  AgentAsk,
+  AnalyticsAiModel,
   AnalyticsBoard,
   AnalyticsJoiner,
   AnalyticsSummary,
@@ -71,6 +73,8 @@ interface Visit {
   aloneMinutes: number;
   /** AFK minutes left out of `minutes` because no tutor was there. */
   afkMinutes: number;
+  afkSpans: Interval[];
+  aloneSpans: Interval[];
 }
 
 type Interval = [start: number, end: number];
@@ -99,15 +103,21 @@ function tutorPresence(rows: SessionRow[]): Map<string, Interval[]> {
   return byBoard;
 }
 
-/** Milliseconds of [start, end] not covered by any of `spans`. */
-function uncovered(start: number, end: number, spans: Interval[]): number {
-  let covered = 0;
+/** The parts of [start, end] not covered by any of `spans`, which are sorted. */
+function uncovered(start: number, end: number, spans: Interval[]): Interval[] {
+  const gaps: Interval[] = [];
+  let cursor = start;
   for (const [from, to] of spans) {
     if (from >= end) break;
-    covered += Math.max(0, Math.min(end, to) - Math.max(start, from));
+    if (from > cursor) gaps.push([cursor, from]);
+    cursor = Math.max(cursor, to);
   }
-  return end - start - covered;
+  if (cursor < end) gaps.push([cursor, end]);
+  return gaps;
 }
+
+const minutesIn = (spans: Interval[]) =>
+  spans.reduce((sum, [from, to]) => sum + (to - from) / 60_000, 0);
 
 /**
  * Collapse rows into visits. A visit belongs to the day it started on, so a
@@ -135,18 +145,22 @@ export function toVisits(rows: SessionRow[]): Visit[] {
       const presence = tutors.get(row.boardId) ?? [];
       // AFK only costs a student time the tutor was not there for: with the
       // tutor on, a still student may be listening on the call.
-      let afk = 0;
+      const afkSpans: Interval[] = [];
       if (!row.isTutor) {
         for (const [from, to] of row.afk) {
           const start = Math.max(started, from);
           const end = Math.min(ended, to);
-          if (end > start) afk += uncovered(start, end, presence) / 60_000;
+          if (end > start) afkSpans.push(...uncovered(start, end, presence));
         }
       }
+      const afk = minutesIn(afkSpans);
       const minutes = (ended - started) / 60_000 - afk;
-      const alone = row.isTutor
-        ? 0
-        : uncovered(started, ended, presence) / 60_000 - afk;
+      const aloneSpans = row.isTutor
+        ? []
+        : uncovered(started, ended, presence).flatMap(([from, to]) =>
+            uncovered(from, to, afkSpans),
+          );
+      const alone = minutesIn(aloneSpans);
       if (current && started - current.endedAt <= VISIT_GAP_MS) {
         current.endedAt = Math.max(current.endedAt, ended);
         current.minutes += minutes;
@@ -154,6 +168,8 @@ export function toVisits(rows: SessionRow[]): Visit[] {
         current.drawings += row.drawings;
         current.aloneMinutes += alone;
         current.afkMinutes += afk;
+        current.afkSpans.push(...afkSpans);
+        current.aloneSpans.push(...aloneSpans);
         // The identity can arrive after the first row of a visit opened.
         if (row.name && !current.name) current.name = row.name;
         if (row.color && !current.color) current.color = row.color;
@@ -173,6 +189,8 @@ export function toVisits(rows: SessionRow[]): Visit[] {
         drawings: row.drawings,
         aloneMinutes: alone,
         afkMinutes: afk,
+        afkSpans,
+        aloneSpans,
       };
     }
     if (current) visits.push(current);
@@ -194,6 +212,13 @@ export interface AggregateInput {
    * here in a 30-day view and would otherwise read as never visited at all.
    */
   lastStudentAt?: Map<string, number>;
+  /** AI spend in range, per board and per model. */
+  ai?: {
+    byBoard: Map<string, { requests: number; cost: number }>;
+    byModel: AnalyticsAiModel[];
+  };
+  /** Students' instructions to the board agent in range, per board, newest first. */
+  agentAsks?: Map<string, AgentAsk[]>;
   days: number;
   now: Date;
 }
@@ -216,6 +241,7 @@ export function aggregate(input: AggregateInput): AnalyticsSummary {
     studentMinutes: number;
     tutorMinutes: number;
     aloneMinutes: number;
+    afkMinutes: number;
     sessions: number;
     drawings: number;
     activeDays: Set<string>;
@@ -231,6 +257,7 @@ export function aggregate(input: AggregateInput): AnalyticsSummary {
         studentMinutes: 0,
         tutorMinutes: 0,
         aloneMinutes: 0,
+        afkMinutes: 0,
         sessions: 0,
         drawings: 0,
         activeDays: new Set(),
@@ -263,6 +290,7 @@ export function aggregate(input: AggregateInput): AnalyticsSummary {
       minutes: 0,
       drawings: 0,
       aloneMinutes: 0,
+      afkMinutes: 0,
       lastSeenAt: 0,
     };
     // Counted within the range, but last seen across all of it: a student who
@@ -278,6 +306,7 @@ export function aggregate(input: AggregateInput): AnalyticsSummary {
     joiner.minutes += visit.minutes;
     joiner.drawings += visit.drawings;
     joiner.aloneMinutes += visit.aloneMinutes;
+    joiner.afkMinutes += visit.afkMinutes;
     entry.visits.push({
       name,
       isTutor: visit.isTutor,
@@ -288,6 +317,8 @@ export function aggregate(input: AggregateInput): AnalyticsSummary {
       drawings: visit.drawings,
       aloneMinutes: Math.round(visit.aloneMinutes),
       afkMinutes: Math.round(visit.afkMinutes),
+      afkSpans: visit.afkSpans,
+      aloneSpans: visit.aloneSpans,
     });
     if (visit.isTutor) {
       entry.tutorMinutes += visit.minutes;
@@ -295,6 +326,7 @@ export function aggregate(input: AggregateInput): AnalyticsSummary {
     }
     entry.studentMinutes += visit.minutes;
     entry.aloneMinutes += visit.aloneMinutes;
+    entry.afkMinutes += visit.afkMinutes;
     entry.drawings += visit.drawings;
     entry.sessions += 1;
     entry.activeDays.add(visit.day);
@@ -313,18 +345,23 @@ export function aggregate(input: AggregateInput): AnalyticsSummary {
       studentMinutes: Math.round(entry?.studentMinutes ?? 0),
       tutorMinutes: Math.round(entry?.tutorMinutes ?? 0),
       aloneMinutes: Math.round(entry?.aloneMinutes ?? 0),
+      afkMinutes: Math.round(entry?.afkMinutes ?? 0),
       sessions: entry?.sessions ?? 0,
       activeDays: entry?.activeDays.size ?? 0,
       drawings: entry?.drawings ?? 0,
       pages: content?.pages ?? 0,
       bytes: content?.bytes ?? 0,
       notedSessions: content?.notedSessions ?? 0,
+      aiRequests: input.ai?.byBoard.get(board.id)?.requests ?? 0,
+      aiCost: input.ai?.byBoard.get(board.id)?.cost ?? 0,
+      agentAsks: input.agentAsks?.get(board.id) ?? [],
       visits: entry?.visits ?? [],
       joiners: [...(entry?.joiners.values() ?? [])]
         .map((joiner) => ({
           ...joiner,
           minutes: Math.round(joiner.minutes),
           aloneMinutes: Math.round(joiner.aloneMinutes),
+          afkMinutes: Math.round(joiner.afkMinutes),
         }))
         .sort((a, b) => b.minutes - a.minutes || b.sessions - a.sessions),
     };
@@ -339,6 +376,7 @@ export function aggregate(input: AggregateInput): AnalyticsSummary {
       a.name.localeCompare(b.name),
   );
 
+  const byModel = input.ai?.byModel ?? [];
   const sum = (pick: (b: AnalyticsBoard) => number) =>
     boards.reduce((total, b) => total + pick(b), 0);
   return {
@@ -349,6 +387,7 @@ export function aggregate(input: AggregateInput): AnalyticsSummary {
       studentMinutes: sum((b) => b.studentMinutes),
       tutorMinutes: sum((b) => b.tutorMinutes),
       aloneMinutes: sum((b) => b.aloneMinutes),
+      afkMinutes: sum((b) => b.afkMinutes),
       sessions: sum((b) => b.sessions),
       activeBoards: boards.filter((b) => b.sessions > 0).length,
       boards: boards.length,
@@ -356,5 +395,10 @@ export function aggregate(input: AggregateInput): AnalyticsSummary {
       drawings: sum((b) => b.drawings),
     },
     boards,
+    ai: {
+      requests: byModel.reduce((total, m) => total + m.requests, 0),
+      cost: byModel.reduce((total, m) => total + m.cost, 0),
+      byModel,
+    },
   };
 }

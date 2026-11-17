@@ -16,6 +16,7 @@ import { useStyleStore } from '@/canvas/use-style-store';
 import { useToolStore } from '@/canvas/use-tool-store';
 import { getLocalUser } from '@/collab/presence';
 import { uploadImageBlob } from './blobs';
+import { stickerImageFromPrompt } from './latex-ai';
 import {
   applyCutOut,
   decodeStickerSource,
@@ -36,16 +37,18 @@ const FAILED = 'Could not add that sticker';
 
 /**
  * Cut out and publish PNG, JPEG or WebP files as board stickers. Uploads run one at a time;
- * a file that fails leaves the others alone and surfaces the last error.
+ * a file that fails leaves the others alone and surfaces the last error. Resolves
+ * the stickers that made it into the library.
  */
-export async function addStickerFiles(files: File[]): Promise<void> {
+export async function addStickerFiles(files: File[]): Promise<CustomStickerMeta[]> {
+  const added: CustomStickerMeta[] = [];
   const store = useCustomStickersStore.getState();
   const addedBy = getLocalUser()?.name ?? 'Someone';
   for (const file of files) {
     if (!ACCEPT.split(',').includes(file.type)) continue;
     if (customStickersFull()) {
       store.setError(LIBRARY_FULL);
-      return;
+      return added;
     }
     let source: ImageData;
     try {
@@ -62,7 +65,7 @@ export async function addStickerFiles(files: File[]): Promise<void> {
       const art = await encodeSticker(applyCutOut(source, options));
       const blobId = await uploadImageBlob(art.blob, 'image/png');
       const id = genId();
-      addCustomSticker({
+      const meta: CustomStickerMeta = {
         id,
         blobId,
         label: stickerLabelFromFilename(file.name),
@@ -70,7 +73,9 @@ export async function addStickerFiles(files: File[]): Promise<void> {
         height: art.height,
         addedBy,
         createdAt: Date.now(),
-      } satisfies CustomStickerMeta);
+      };
+      addCustomSticker(meta);
+      added.push(meta);
       // Arm what was just added: the upload was asked for to be stamped.
       useStyleStore.getState().setStickerId(id);
       useToolStore.getState().setTool('sticker');
@@ -81,6 +86,36 @@ export async function addStickerFiles(files: File[]): Promise<void> {
       useCustomStickersStore.getState().endUpload();
     }
   }
+  return added;
+}
+
+/**
+ * Generate a sticker from a description and send it down the upload path, so
+ * it stops at the same cut-out review — the model paints a white backdrop.
+ * Resolves the library entry, or null when it failed or the review was cancelled.
+ */
+export async function generateSticker(prompt: string): Promise<CustomStickerMeta | null> {
+  const store = useCustomStickersStore.getState();
+  if (customStickersFull()) {
+    store.setError(LIBRARY_FULL);
+    return null;
+  }
+  store.beginUpload();
+  let file: File;
+  try {
+    const blob = await (await fetch(await stickerImageFromPrompt(prompt))).blob();
+    // The prompt is the name: it becomes the label via stickerLabelFromFilename.
+    file = new File([blob], `${prompt}.png`, { type: blob.type });
+  } catch (error) {
+    console.error('[stickers] generation failed', error);
+    useCustomStickersStore
+      .getState()
+      .setError(error instanceof Error ? error.message : FAILED);
+    return null;
+  } finally {
+    useCustomStickersStore.getState().endUpload();
+  }
+  return (await addStickerFiles([file]))[0] ?? null;
 }
 
 /** Open a native file picker and add the chosen images to the board's library. */

@@ -1,8 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BookmarkShape, LinkUnfurl } from '@whiteboard/shared';
 import './shapes/register';
+import { createPage, deletePage } from './page-actions';
+import { residentPageDoc } from './page-docs';
 import { placeLinkUrls } from './place-link';
-import { breakUndoCapture, editor, loadBoard, undo } from './use-document-store';
+import {
+  breakUndoCapture,
+  currentSession,
+  editor,
+  loadBoard,
+  setCurrentPage,
+  undo,
+} from './use-document-store';
 
 // Driven against the real Yjs-backed editor (like the eraser suite) so the
 // optimistic create, the background patch and the undo grouping are exercised
@@ -95,6 +104,19 @@ describe('placeLinkUrls', () => {
     expect(lefts[1]! - lefts[0]!).toBeGreaterThanOrEqual(cards[0]!.props.w);
   });
 
+  it('stacks a multi-link paste in paste order', () => {
+    respondWith({ url: 'https://a.example/x' });
+    const ids = placeLinkUrls(
+      [
+        ...Array.from({ length: 5 }, (_, i) => `https://z${i}.example/`),
+        'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+      ],
+      { x: 0, y: 0 },
+    );
+    const indexes = ids.map((id) => editor.getShape(id)!.index);
+    expect(indexes).toEqual([...indexes].sort());
+  });
+
   it('wraps a long list into rows instead of one wide strip', () => {
     respondWith({ url: 'https://a.example/x' });
     const ids = placeLinkUrls(
@@ -176,6 +198,50 @@ describe('placeLinkUrls', () => {
     respondWith({ url: 'x' });
     expect(placeLinkUrls(['javascript:alert(1)'], { x: 0, y: 0 })).toEqual([]);
     expect(bookmarks()).toHaveLength(0);
+  });
+
+  it('fills in a card on the page it was pasted on after a page switch', async () => {
+    let resolve!: (meta: LinkUnfurl) => void;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        const meta = await new Promise<LinkUnfurl>((r) => (resolve = r));
+        return { ok: true, json: async () => meta } as Response;
+      }),
+    );
+    const home = currentSession()!.currentPageId;
+    const [id] = placeLinkUrls(['https://a.example/9'], { x: 0, y: 0 });
+    await vi.waitFor(() => expect(resolve).toBeDefined());
+
+    createPage();
+    resolve({ url: 'https://a.example/9', title: 'Away' });
+    await new Promise((r) => setTimeout(r, 0));
+
+    setCurrentPage(home);
+    expect(shape(id!).props.status).toBe('ready');
+    expect(shape(id!).props.title).toBe('Away');
+  });
+
+  it('drops the write when the page was deleted meanwhile', async () => {
+    let resolve!: (meta: LinkUnfurl) => void;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        const meta = await new Promise<LinkUnfurl>((r) => (resolve = r));
+        return { ok: true, json: async () => meta } as Response;
+      }),
+    );
+    const home = currentSession()!.currentPageId;
+    placeLinkUrls(['https://a.example/10'], { x: 0, y: 0 });
+    await vi.waitFor(() => expect(resolve).toBeDefined());
+
+    createPage();
+    deletePage(home);
+    resolve({ url: 'https://a.example/10', title: 'Gone' });
+    await new Promise((r) => setTimeout(r, 0));
+    // Not resurrected: acquiring it would recreate a document for a page that
+    // no longer exists.
+    expect(residentPageDoc(home)).toBeUndefined();
   });
 
   it('undoes a paste in one step, metadata included', async () => {

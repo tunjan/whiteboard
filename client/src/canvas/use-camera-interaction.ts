@@ -118,6 +118,12 @@ export function useCameraPlacement<T extends HTMLElement>(
     [apply],
   );
 
+  // Placements clamp to the window, so a resize moves them as a pan would.
+  useLayoutEffect(() => {
+    window.addEventListener('resize', apply);
+    return () => window.removeEventListener('resize', apply);
+  }, [apply]);
+
   return useCallback(
     (next: T | null) => {
       element.current = next;

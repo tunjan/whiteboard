@@ -6,13 +6,17 @@ import {
 } from '@hocuspocus/provider';
 import { create } from 'zustand';
 import {
+  readShapeBase,
+  type EquationProps,
   type Page,
   type Shape,
   type WhiteboardDocument,
 } from '@whiteboard/shared';
-import type { Editor } from './editor';
+import type { Editor, ShapePatch } from './editor';
 import { generateKeyBetween } from './order';
 import { applyPatchToY, shapeToY } from './shape-yjs';
+import { autoEquationTag } from './equation-number';
+import { useCanvasUiStore } from './use-canvas-ui-store';
 import { BindingGraph } from './binding-graph';
 import { SpatialIndex } from './spatial-index';
 import { bindBoardRecords } from './board-records';
@@ -46,6 +50,7 @@ import {
 import { useConnectionStore } from '@/collab/use-connection-store';
 import { startForegroundReconnect } from '@/collab/foreground-reconnect';
 import { startLatencyMonitor } from '@/collab/latency';
+import { startAgentAskToasts } from '@/collab/agent-asks';
 import { noteActivity, startAttentionMonitor } from '@/collab/attention';
 import { bindVoiceProvider } from '@/collab/voice/voice-session';
 import {
@@ -536,8 +541,15 @@ function applyAffected(ids: Set<string>, paced = false): void {
   //
   // Any other id in the batch — a peer's edit, an arrow rerouting — publishes as
   // usual, so remote work is never held up behind a local gesture.
+  //
+  // A live highlighter publishes too: the scene paints its underlay pass (see
+  // `deriveSceneUi`), and skipping left that pass at the seed dot until
+  // pointer-up, when the whole wash appeared at once.
   const live = getLiveStrokeShapeId();
-  if (live !== null && ids.size === 1 && ids.has(live)) return;
+  if (live !== null && ids.size === 1 && ids.has(live)) {
+    const shape = derived.shapes.get(live);
+    if (shape?.type !== 'draw' || shape.props.inkKind !== 'highlight') return;
+  }
   if (paced) publishSnapshotSoon();
   else rebuildSnapshot();
 }
@@ -558,9 +570,12 @@ function fullResync(): void {
 // fallback faces, and text bounds — along with their entries in the spatial
 // index — are derived from those metrics. Re-derive everything once the real
 // faces land, otherwise hit-testing and selection boxes stay subtly wrong for
-// the life of the tab.
+// the life of the tab. Parked pages hold an index built on the old metrics too,
+// so drop them and let the next visit re-derive from the document.
 subscribeToTextMetrics(() => {
-  if (session) fullResync();
+  if (!session) return;
+  for (const pageId of session.parked.keys()) discardParkedPage(pageId);
+  fullResync();
 });
 watchFontLoading();
 
@@ -602,7 +617,23 @@ function makeShapesObserver(): (
         pendingContentDirty,
       );
     applyAffected(affected, paced);
+    if (localShapeListeners.size && events[0]?.transaction.origin === LOCAL_ORIGIN) {
+      for (const listener of localShapeListeners) listener(affected);
+    }
   };
+}
+
+const localShapeListeners = new Set<(ids: ReadonlySet<string>) => void>();
+
+/**
+ * Hear about the shapes this user's own edits touch on the open page —
+ * not peers', not undo's. Ids may include shapes the edit deleted.
+ */
+export function onLocalShapesChanged(
+  listener: (ids: ReadonlySet<string>) => void,
+): () => void {
+  localShapeListeners.add(listener);
+  return () => localShapeListeners.delete(listener);
 }
 
 /** Idempotently seed page-default. Only runs when the registry is truly empty. */
@@ -706,9 +737,12 @@ export function loadBoard(
   let socket: HocuspocusProviderWebsocket | null = null;
   let provider: HocuspocusProvider | null = null;
   let stopLatencyMonitor = () => {};
+  let stopAgentAskToasts = () => {};
   let stopAttentionMonitor = () => {};
   let stopVoiceProvider = () => {};
   let stopForegroundReconnect = () => {};
+  // The connection gave up, so the local cache is all there is for now.
+  let offline = false;
   if (opts.collab) {
     // One socket for the board document and every page document on it. Each
     // provider syncs its own document over it, so opening a page adds sync
@@ -735,8 +769,11 @@ export function loadBoard(
     provider.attach();
     provider.on('status', (event: { status: string }) => {
       useConnectionStore.getState().setStatus(event.status);
+      offline = event.status === 'disconnected';
+      if (offline) restorePageFromSession();
     });
     stopLatencyMonitor = startLatencyMonitor(provider, setLocalLatency);
+    stopAgentAskToasts = startAgentAskToasts(provider);
     stopAttentionMonitor = startAttentionMonitor();
     stopVoiceProvider = bindVoiceProvider(provider);
     stopForegroundReconnect = startForegroundReconnect(socket);
@@ -791,6 +828,7 @@ export function loadBoard(
       // Tears down every resident page, which releases their parked state.
       closePageDocs();
       stopLatencyMonitor();
+      stopAgentAskToasts();
       stopAttentionMonitor();
       stopForegroundReconnect();
       stopBoardLoad();
@@ -806,9 +844,12 @@ export function loadBoard(
   setLocalPage(DEFAULT_PAGE_ID);
   trackPageSyncForLoading(pageDoc);
 
-  // Restore only after every configured document source has hydrated. A manual
-  // switch (including a deep link) clears `pageRestorePending`, so late sync
-  // events can never pull the user back to an older stored page.
+  // Restore only after every configured document source has hydrated — or,
+  // with the server unreachable, after the local cache alone: it is the only
+  // source there is, and waiting would leave the user on the first page for as
+  // long as they are offline. A manual switch (including a deep link) clears
+  // `pageRestorePending`, so late sync events can never pull the user back to
+  // an older stored page.
   let persistenceReady = !persistence;
   let providerReady = !provider;
   restorePageFromSession = () => {
@@ -817,7 +858,7 @@ export function loadBoard(
       session.doc !== doc ||
       !session.pageRestorePending ||
       !persistenceReady ||
-      !providerReady
+      (!providerReady && !offline)
     ) {
       return;
     }
@@ -889,6 +930,8 @@ export function loadBoard(
 
 /** Undo one step on the open page. */
 export function undo(): void {
+  // As with `transactLocal`: the server would refuse the change.
+  if (isViewOnly()) return;
   session?.history.undo();
 }
 
@@ -898,6 +941,7 @@ export function breakUndoCapture(): void {
 }
 
 export function redo(): void {
+  if (isViewOnly()) return;
   session?.history.redo();
 }
 
@@ -934,6 +978,9 @@ function cleanupDeletedPageState(pageId: string): void {
  * to be empty rather than merely unsynced. Two clients doing this at the same
  * time converge: every shape is written under the id it already had, and
  * emptying the legacy map is idempotent.
+ *
+ * Never from a view-only link: the server would refuse the write, leaving it
+ * in this client's local cache as copies that diverge from the real migration.
  */
 export function migrateLegacyPageShapes(pageId: string): void {
   if (!session) return;
@@ -943,7 +990,7 @@ export function migrateLegacyPageShapes(pageId: string): void {
   if (!page) return;
   const boardDoc = session.doc;
   void page.whenSynced.then(() => {
-    if (!session || session.doc !== boardDoc) return;
+    if (!session || session.doc !== boardDoc || isViewOnly()) return;
     migrateLegacyShapes(boardDoc, legacy, page, MIGRATION_ORIGIN);
   });
 }
@@ -994,11 +1041,12 @@ export function switchToPageInternal(
 
   session.currentShapes.unobserveDeep(session.shapesObserver);
   // Park before releasing the pin: the page just left is the one most likely to
-  // be asked for next, and this is what makes coming back to it free.
+  // be asked for next, and this is what makes coming back to it free. Pin the
+  // target first, so releasing the old pin cannot evict the page we are going to.
   parkActivePage();
+  pinPageDoc(pageId);
   unpinPageDoc(previousPageId);
 
-  pinPageDoc(pageId);
   const page = acquirePageDoc(pageId);
   const map = page.shapes;
   session.pageDoc = page;
@@ -1071,6 +1119,29 @@ function transactLocal(fn: () => void): void {
   }
 }
 
+/** `shape` with its auto-number, when it is an equation and numbering is on. */
+function numbered(shape: Shape): Shape {
+  if (
+    shape.type !== 'equation' ||
+    !session ||
+    !useCanvasUiStore.getState().autoNumberEquations
+  ) {
+    return shape;
+  }
+  // Read from the Y map rather than the derived cache, which does not yet see
+  // equations created earlier in this transaction (a paste of several).
+  // ponytail: walks every shape on the page per equation created; keep a
+  // running max in PageDerivedState if bulk equation pastes ever get slow.
+  const tags: (string | undefined)[] = [];
+  session.currentShapes.forEach((m) => {
+    if (readShapeBase(m)?.type === 'equation') {
+      tags.push((m.get('props') as EquationProps | undefined)?.tag);
+    }
+  });
+  const tag = autoEquationTag(shape.props.tag, tags);
+  return { ...shape, props: { ...shape.props, tag } };
+}
+
 /**
  * Run shape mutations outside undo history. Yjs transactions are reentrant and
  * only the outermost one carries an origin, so the `transactLocal` calls inside
@@ -1095,6 +1166,52 @@ export function withoutUndo(fn: () => void): void {
   }
 }
 
+/**
+ * Patch a shape on `pageId` outside undo history, or delete it when `change`
+ * returns null; undefined leaves it alone. `change` sees the shape as it is at
+ * write time.
+ *
+ * For a write that lands after an await (an upload, an unfurl): `editor` only
+ * reaches the open page, and the user may have switched since. Another page is
+ * written through its own document — re-acquired and synced first if it was
+ * evicted meanwhile, since a patch needs the shape it patches. A page deleted
+ * meanwhile is skipped.
+ */
+export async function updateShapeOnPage(
+  pageId: string,
+  id: string,
+  change: (shape: Shape) => ShapePatch | null | undefined,
+): Promise<void> {
+  const owner = session;
+  if (!owner || !owner.pages.has(pageId)) return;
+  const viaEditor = () =>
+    withoutUndo(() => {
+      const shape = editor.getShape(id);
+      const patch = shape ? change(shape) : undefined;
+      if (patch === null) editor.deleteShapes([id]);
+      else if (patch) editor.updateShape(id, patch);
+    });
+  if (pageId === owner.currentPageId) return viaEditor();
+
+  pinPageDoc(pageId);
+  try {
+    const page = acquirePageDoc(pageId);
+    await page.whenSynced;
+    if (session !== owner || !owner.pages.has(pageId) || isViewOnly()) return;
+    if (pageId === owner.currentPageId) return viaEditor();
+    const m = page.shapes.get(id);
+    const shape = m ? yToShape(m) : null;
+    const patch = shape ? change(shape) : undefined;
+    if (!m || patch === undefined) return;
+    page.doc.transact(() => {
+      if (patch === null) page.shapes.delete(id);
+      else applyPatchToY(m, patch);
+    }, EPHEMERAL_ORIGIN);
+  } finally {
+    unpinPageDoc(pageId);
+  }
+}
+
 export const editor: Editor = {
   getShape: (id) => {
     // Outside a transaction the cache mirrors the document, so hot read paths
@@ -1114,7 +1231,9 @@ export const editor: Editor = {
     return derived.sortedShapes();
   },
   createShape: (shape) =>
-    transactLocal(() => session?.currentShapes.set(shape.id, shapeToY(shape))),
+    transactLocal(() =>
+      session?.currentShapes.set(shape.id, shapeToY(numbered(shape))),
+    ),
   updateShape: (id, patch) =>
     transactLocal(() => {
       const m = session?.currentShapes.get(id);

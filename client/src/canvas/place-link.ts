@@ -8,7 +8,7 @@ import {
 } from '@whiteboard/shared';
 import { boardHeaders } from '@/board/board-access';
 import { isValidHttpUrl } from './link-url';
-import { getTopIndex } from './order';
+import { getTopIndex, jitterKeyBetween } from './order';
 import { createYoutubeShape, parseYoutubeId } from './place-video';
 import { shapeRotatedBounds } from './shape-bounds';
 import {
@@ -16,7 +16,11 @@ import {
   bookmarkHeight,
   BOOKMARK_LOADING_HEIGHT,
 } from './shapes/bookmark';
-import { editor, withoutUndo } from './use-document-store';
+import {
+  currentSession,
+  editor,
+  updateShapeOnPage,
+} from './use-document-store';
 
 /**
  * Placing pasted links on the canvas, in two phases.
@@ -99,6 +103,9 @@ export function placeLinkUrls(urls: string[], at: Point): string[] {
 
   const ids: string[] = [];
   const toHydrate: { id: string; url: string }[] = [];
+  // The page the cards land on; the metadata is written back to it even if the
+  // user has switched page by the time it arrives.
+  const pageId = currentSession()?.currentPageId;
 
   // One transaction: a multi-link paste is a single document update, a single
   // re-render, and — with the centering pass below — a single undo step.
@@ -110,11 +117,15 @@ export function placeLinkUrls(urls: string[], at: Point): string[] {
     let rowTop = 0;
     let rowHeight = 0;
     let column = 0;
+    // Taken once: `getShapes()` is stale inside the transaction, so each card
+    // steps above the last rather than every one jittering above the same top.
+    let index = getTopIndex(editor.getShapes());
     for (const url of links) {
       const videoId = parseYoutubeId(url);
+      index = jitterKeyBetween(index, null);
       let id: string;
       if (videoId) {
-        id = createYoutubeShape(videoId, { x: 0, y: 0 });
+        id = createYoutubeShape(videoId, { x: 0, y: 0 }, index);
       } else {
         const cached = unfurled.get(url);
         const shape = {
@@ -123,7 +134,7 @@ export function placeLinkUrls(urls: string[], at: Point): string[] {
           x: 0,
           y: 0,
           rotation: 0,
-          index: getTopIndex(editor.getShapes()),
+          index,
           props: cached
             ? readyProps(url, cached)
             : {
@@ -169,7 +180,9 @@ export function placeLinkUrls(urls: string[], at: Point): string[] {
     }
   });
 
-  for (const { id, url } of toHydrate) void hydrateBookmark(id, url);
+  if (pageId) {
+    for (const { id, url } of toHydrate) void hydrateBookmark(pageId, id, url);
+  }
   return ids;
 }
 
@@ -180,7 +193,11 @@ export function placeLinkUrls(urls: string[], at: Point): string[] {
  * network response, so Ctrl+Z should step back over the whole paste rather than
  * peeling the preview off it first. Peers still receive the update.
  */
-async function hydrateBookmark(id: string, url: string): Promise<void> {
+async function hydrateBookmark(
+  pageId: string,
+  id: string,
+  url: string,
+): Promise<void> {
   let meta: LinkUnfurl;
   try {
     meta = await requestUnfurl(url);
@@ -191,26 +208,24 @@ async function hydrateBookmark(id: string, url: string): Promise<void> {
     meta = { url };
   }
 
-  // The fetch was in flight for a while; make sure the shape it was for is
-  // still there, still points at this URL, and hasn't been filled in already.
-  const shape = editor.getShape(id);
-  if (
-    !shape ||
-    shape.type !== 'bookmark' ||
-    shape.props.url !== url ||
-    shape.props.status !== 'loading'
-  ) {
-    return;
-  }
+  await updateShapeOnPage(pageId, id, (shape) => {
+    // The fetch was in flight for a while; make sure the shape it was for still
+    // points at this URL and hasn't been filled in already.
+    if (
+      shape.type !== 'bookmark' ||
+      shape.props.url !== url ||
+      shape.props.status !== 'loading'
+    ) {
+      return undefined;
+    }
 
-  // Keep a card the user already resized; only a still-default one is re-fit to
-  // the metadata that arrived.
-  const untouched =
-    shape.props.w === BOOKMARK_WIDTH &&
-    shape.props.h === BOOKMARK_LOADING_HEIGHT;
+    // Keep a card the user already resized; only a still-default one is re-fit
+    // to the metadata that arrived.
+    const untouched =
+      shape.props.w === BOOKMARK_WIDTH &&
+      shape.props.h === BOOKMARK_LOADING_HEIGHT;
 
-  withoutUndo(() => {
-    editor.updateShape(id, {
+    return {
       props: {
         status: 'ready',
         title: meta.title,
@@ -219,6 +234,6 @@ async function hydrateBookmark(id: string, url: string): Promise<void> {
         faviconBlobId: meta.faviconBlobId,
         ...(untouched ? { h: bookmarkHeight(meta) } : {}),
       },
-    });
+    };
   });
 }

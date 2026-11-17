@@ -1265,9 +1265,9 @@ function writeForwardTrack(count: number): void {
     midpointCenti(buffers.trackLeftY[1]!, buffers.trackLeftY[2]!),
   );
   for (let i = 2; i < count - 1; i++) {
-    writer.smoothTo(
-      midpointCenti(buffers.trackLeftX[i]!, buffers.trackLeftX[i + 1]!),
-      midpointCenti(buffers.trackLeftY[i]!, buffers.trackLeftY[i + 1]!),
+    writer.smoothToward(
+      buffers.trackLeftX[i + 1]! * 100,
+      buffers.trackLeftY[i + 1]! * 100,
     );
   }
   writer.smoothTo(
@@ -1299,9 +1299,9 @@ function writeReverseTrack(count: number): void {
     ),
   );
   for (let i = count - 3; i > 0; i--) {
-    writer.smoothTo(
-      midpointCenti(buffers.trackRightX[i]!, buffers.trackRightX[i - 1]!),
-      midpointCenti(buffers.trackRightY[i]!, buffers.trackRightY[i - 1]!),
+    writer.smoothToward(
+      buffers.trackRightX[i - 1]! * 100,
+      buffers.trackRightY[i - 1]! * 100,
     );
   }
   writer.smoothTo(
@@ -1441,20 +1441,6 @@ export function buildInkCenterline(
 }
 
 /**
- * SVG path data for a conditioned centerline, drawn as quadratics through the
- * midpoints of its samples.
- *
- * Shares the outline's byte writer rather than building the string with
- * `toFixed` and concatenation. That is not a micro-optimization here: at 600
- * samples the formatting was ~140µs against ~7µs for the centerline itself, so
- * a dashed stroke cost several times what the solid one it traces does.
- *
- * The chained `t` commands are exactly the explicit quadratics they replace —
- * reflecting control `p[i-1]` about endpoint `(p[i-1] + p[i]) / 2` gives
- * `p[i]`, the control the next segment wants — and the closing `t` onto the
- * final sample degenerates to the straight run to the lift position.
- */
-/**
  * Choose the centerline samples the emitted path will be drawn through, under
  * the same windowed perpendicular bound {@link simplifyTracks} applies to the
  * outline, and write them to `buffers.centerlineKeep`.
@@ -1506,6 +1492,21 @@ function simplifyCenterline(line: InkCenterline, tolerance: number): number {
   return output;
 }
 
+/**
+ * SVG path data for a conditioned centerline, drawn as quadratics through the
+ * midpoints of its samples.
+ *
+ * Shares the outline's byte writer rather than building the string with
+ * `toFixed` and concatenation. That is not a micro-optimization here: at 600
+ * samples the formatting was ~140µs against ~7µs for the centerline itself, so
+ * a dashed stroke cost several times what the solid one it traces does.
+ *
+ * The chained `t` commands are the explicit quadratics they replace, to within
+ * a hundredth — reflecting control `p[i-1]` about endpoint `(p[i-1] + p[i]) / 2`
+ * gives `p[i]`, the control the next segment wants, and `smoothToward` picks
+ * each rounded endpoint so the error does not accumulate — and the closing `t`
+ * onto the final sample degenerates to the straight run to the lift position.
+ */
 export function getInkCenterlinePathData(
   line: InkCenterline,
   tolerance = 0,
@@ -1532,7 +1533,7 @@ export function getInkCenterlinePathData(
     midpointCenti(y(1), y(2)),
   );
   for (let i = 2; i < count - 1; i++) {
-    writer.smoothTo(midpointCenti(x(i), x(i + 1)), midpointCenti(y(i), y(i + 1)));
+    writer.smoothToward(x(i + 1) * 100, y(i + 1) * 100);
   }
   writer.smoothTo(toCenti(x(count - 1)), toCenti(y(count - 1)));
   return writer.finish();

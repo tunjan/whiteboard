@@ -1,4 +1,4 @@
-import { useRef, type RefObject } from 'react';
+import { useEffect, useRef, type RefObject } from 'react';
 import { useHoverCursor } from '@/hooks/use-hover-cursor';
 
 /**
@@ -72,8 +72,26 @@ interface EraserCursorProps {
 /** An eraser that follows mouse and pen hover without re-rendering. */
 export function EraserCursor({ containerRef }: EraserCursorProps) {
   const cursorRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
 
   useHoverCursor(containerRef, cursorRef);
+
+  // Written straight to the element, like the position: a press must not cost a
+  // render, and the release can land anywhere in the window.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const press = () => bodyRef.current?.setAttribute('data-pressed', '');
+    const release = () => bodyRef.current?.removeAttribute('data-pressed');
+    container.addEventListener('pointerdown', press, { passive: true });
+    window.addEventListener('pointerup', release, { passive: true });
+    window.addEventListener('pointercancel', release, { passive: true });
+    return () => {
+      container.removeEventListener('pointerdown', press);
+      window.removeEventListener('pointerup', release);
+      window.removeEventListener('pointercancel', release);
+    };
+  }, [containerRef]);
 
   return (
     // Same zero-size wrapper as the pencil: the origin sits on the pointer and
@@ -83,7 +101,13 @@ export function EraserCursor({ containerRef }: EraserCursorProps) {
       aria-hidden="true"
       className="pointer-events-none absolute top-0 left-0 z-[var(--z-canvas-front)] size-0 opacity-0 will-change-transform"
     >
-      <EraserGlyph />
+      {/* Zero-size too, so the glyph presses into the hotspot on the page. */}
+      <div
+        ref={bodyRef}
+        className="size-0 transition-[scale] duration-150 ease-out data-[pressed]:scale-90 data-[pressed]:duration-75 motion-reduce:transition-none"
+      >
+        <EraserGlyph />
+      </div>
     </div>
   );
 }

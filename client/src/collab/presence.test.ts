@@ -337,8 +337,7 @@ const eraserScribble: EraserScribble = {
   state: 'active',
   color: 'muted-1',
   size: 12,
-  opacity: 0.8,
-  shrink: 0.1,
+  opacity: 0.5,
   taper: true,
 };
 

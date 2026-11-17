@@ -13,7 +13,7 @@ export function canvasObjectLabel(shape: Shape, ordinal: number): string {
     case 'text':
       return `Text: ${conciseText(shape.props.text, 'Empty text')}`;
     case 'equation':
-      return `Equation: ${conciseText(shape.props.latex, 'Empty equation')}`;
+      return `Equation${shape.props.tag ? ` (${shape.props.tag})` : ''}: ${conciseText(shape.props.latex, 'Empty equation')}`;
     case 'frame':
       return `Frame: ${conciseText(shape.props.name, `Frame ${ordinal + 1}`)}`;
     case 'line':

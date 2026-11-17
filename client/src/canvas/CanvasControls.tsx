@@ -1,5 +1,6 @@
 import type { ComponentProps, ComponentType, ReactNode } from 'react';
 import {
+  Box,
   CircleDot,
   Crosshair,
   Grid2x2,
@@ -10,6 +11,7 @@ import {
   Plus,
   Sigma,
   Square,
+  Triangle,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -174,7 +176,7 @@ export function CanvasControls({
       data-ui-layer
       data-arrive="up"
       style={{ '--arrive-i': 3 } as React.CSSProperties}
-      className="absolute right-[calc(0.75rem+env(safe-area-inset-right))] bottom-[calc(0.75rem+var(--wb-inset-bottom))] z-[var(--z-canvas-hud)] max-sm:bottom-[calc(4.75rem+var(--wb-inset-bottom))] [@media(pointer:coarse)]:bottom-[calc(7.75rem+var(--wb-inset-bottom))] select-none"
+      className="absolute right-[calc(0.75rem+env(safe-area-inset-right))] bottom-[calc(0.75rem+var(--wb-inset-bottom))] z-[var(--z-canvas-hud)] max-sm:bottom-[calc(var(--drawer-reach)+0.5rem+var(--wb-inset-bottom))] [@media(pointer:coarse)]:bottom-[calc(var(--drawer-reach)+0.5rem+var(--wb-inset-bottom))] select-none"
     >
       <TooltipProvider delay={300}>
         <Surface
@@ -328,4 +330,6 @@ const BACKGROUND_ICONS: Record<
   dot: CircleDot,
   graph: Grid2x2,
   coordinate: Crosshair,
+  isometric: Box,
+  triangle: Triangle,
 };

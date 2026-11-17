@@ -5,7 +5,6 @@ import {
   LockGlyph,
   MoreGlyph,
   PlusGlyph,
-  PolygonGlyph,
   StickerGlyph,
   UnitCircleGlyph,
   VideoGlyph,
@@ -41,15 +40,13 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import type { PolygonKind } from '@whiteboard/shared';
 import {
   COMPACT_MORE_TOOLS,
   CONSTRUCTION_TOOLS,
-  POLYGON_KINDS,
-  MiniShape,
+  HIDE_KEYS,
 } from './toolbar-constants';
-import { useToolbarSide } from './toolbar-primitives';
-import { ToolKey } from './toolbar-tool-button';
+import { refocusForKeyboard, useToolbarSide } from './toolbar-primitives';
+import { ToolKey, toolArt, toolGlyph } from './toolbar-tool-button';
 
 interface CompactMoreMenuProps {
   activeToolId: string;
@@ -104,9 +101,11 @@ const STICKER_CELL =
 
 /**
  * The overflow: every tool that does not earn a key, plus the bar's settings.
+ * Nothing the bar already offers is repeated here: polygons live behind the
+ * Shapes key, and stickers and images appear only where their keys folded away.
  *
  * A real menu, so it gets menu keyboard handling for free: the tools are one
- * radio group (exactly one tool is on), polygons and stickers are submenus,
+ * radio group (exactly one tool is on), stickers and templates are submenus,
  * and tool lock is a checkbox item.
  */
 export function CompactMoreMenu({
@@ -122,8 +121,6 @@ export function CompactMoreMenu({
   const setTool = useToolStore((state) => state.setTool);
   const locked = useToolLockStore((state) => state.locked);
   const toggleLock = useToolLockStore((state) => state.toggle);
-  const polygonKind = useStyleStore((state) => state.polygonKind);
-  const setPolygonKind = useStyleStore((state) => state.setPolygonKind);
   const stickerId = useStyleStore((state) => state.stickerId);
   const setStickerId = useStyleStore((state) => state.setStickerId);
   const boardStickers = sortedCustomStickers(
@@ -136,9 +133,12 @@ export function CompactMoreMenu({
   // Lit only for a tool with no key of its own.
   const active =
     (!expanded && activeToolId === 'sticker') || menuTools.includes(activeToolId);
-  const activeLabel = toolRegistry.get(activeToolId)?.label;
-  const label =
-    active && activeLabel ? `More tools, ${activeLabel} selected` : 'More tools';
+  const activeTool = active ? toolRegistry.get(activeToolId) : undefined;
+  const label = activeTool ? `More tools, ${activeTool.label} selected` : 'More tools';
+  // A tool held from in here shows on the key, or nothing would say which.
+  const ActiveIcon = activeTool?.icon;
+  const activeArt = activeTool ? toolArt(activeTool.id) : null;
+  const activeGlyph = activeTool ? toolGlyph(activeTool.id) : null;
 
   const pickSticker = (id: string) => {
     setStickerId(id);
@@ -169,11 +169,22 @@ export function CompactMoreMenu({
   return (
     <>
       <DropdownMenu>
-        <ToolKey label={label} pressed={active} render={<DropdownMenuTrigger />}>
-          <MoreGlyph />
+        <ToolKey
+          label={label}
+          pressed={active}
+          render={<DropdownMenuTrigger />}
+          art={activeArt !== null}
+        >
+          {activeArt ?? activeGlyph ?? (ActiveIcon ? <ActiveIcon /> : <MoreGlyph />)}
         </ToolKey>
 
-        <DropdownMenuContent side={side} align="end" sideOffset={8} className="w-56">
+        <DropdownMenuContent
+          side={side}
+          align="end"
+          sideOffset={8}
+          finalFocus={refocusForKeyboard}
+          className="drawer-popup w-56"
+        >
           <DropdownMenuRadioGroup value={activeToolId} onValueChange={setTool}>
             {menuTools.map((toolId) => {
               const tool = toolRegistry.get(toolId);
@@ -184,7 +195,7 @@ export function CompactMoreMenu({
                   {Icon ? <Icon className="size-4" /> : null}
                   {tool.label}
                   {tool.hotkey ? (
-                    <DropdownMenuShortcut>
+                    <DropdownMenuShortcut className="pointer-coarse:hidden">
                       {tool.hotkey.toUpperCase()}
                     </DropdownMenuShortcut>
                   ) : null}
@@ -196,60 +207,39 @@ export function CompactMoreMenu({
           <DropdownMenuSeparator />
 
           <DropdownMenuGroup>
-            <DropdownMenuSub>
-              <DropdownMenuSubTrigger>
-                <PolygonGlyph className="size-4" />
-                Polygons
-              </DropdownMenuSubTrigger>
-              <DropdownMenuSubContent className="w-44">
-                <DropdownMenuRadioGroup
-                  value={activeToolId === 'polygon' ? polygonKind : null}
-                  onValueChange={(kind: PolygonKind) => {
-                    setPolygonKind(kind);
-                    setTool('polygon');
-                  }}
-                >
-                  {POLYGON_KINDS.map(({ kind, label: polygonLabel }) => (
-                    <DropdownMenuRadioItem key={kind} value={kind}>
-                      <MiniShape kind={kind} size={16} strokeWidth={1.5} />
-                      {polygonLabel}
-                    </DropdownMenuRadioItem>
-                  ))}
-                </DropdownMenuRadioGroup>
-              </DropdownMenuSubContent>
-            </DropdownMenuSub>
-
-            <DropdownMenuSub>
-              <DropdownMenuSubTrigger>
-                <StickerGlyph className="size-4" />
-                Stickers
-              </DropdownMenuSubTrigger>
-              <DropdownMenuSubContent>
-                <div className="grid max-h-56 grid-cols-4 gap-0.5 overflow-y-auto">
-                  {stickers.map(({ id, label: stickerLabel, preview }) => (
-                    <DropdownMenuItem
-                      key={id}
-                      title={stickerLabel}
-                      aria-label={stickerLabel}
-                      aria-current={
-                        activeToolId === 'sticker' && stickerId === id
-                          ? 'true'
-                          : undefined
-                      }
-                      onClick={() => pickSticker(id)}
-                      className={STICKER_CELL}
-                    >
-                      {preview}
-                    </DropdownMenuItem>
-                  ))}
-                </div>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => void pickAndAddStickers()}>
-                  <PlusGlyph className="size-4" />
-                  Add sticker
-                </DropdownMenuItem>
-              </DropdownMenuSubContent>
-            </DropdownMenuSub>
+            {!expanded && (
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger>
+                  <StickerGlyph className="size-4" />
+                  Stickers
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent>
+                  <div className="grid max-h-56 grid-cols-4 gap-0.5 overflow-y-auto">
+                    {stickers.map(({ id, label: stickerLabel, preview }) => (
+                      <DropdownMenuItem
+                        key={id}
+                        title={stickerLabel}
+                        aria-label={stickerLabel}
+                        aria-current={
+                          activeToolId === 'sticker' && stickerId === id
+                            ? 'true'
+                            : undefined
+                        }
+                        onClick={() => pickSticker(id)}
+                        className={STICKER_CELL}
+                      >
+                        {preview}
+                      </DropdownMenuItem>
+                    ))}
+                  </div>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => void pickAndAddStickers()}>
+                    <PlusGlyph className="size-4" />
+                    Add sticker
+                  </DropdownMenuItem>
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+            )}
 
             <DropdownMenuSub>
               <DropdownMenuSubTrigger>
@@ -266,10 +256,13 @@ export function CompactMoreMenu({
               </DropdownMenuSubContent>
             </DropdownMenuSub>
 
-            <DropdownMenuItem onClick={() => void pickAndPlaceImages()}>
-              <ImageGlyph className="size-4" />
-              Add image
-            </DropdownMenuItem>
+            {!expanded && (
+              <DropdownMenuItem onClick={() => void pickAndPlaceImages()}>
+                <ImageGlyph className="size-4" />
+                Add image
+                <DropdownMenuShortcut>U</DropdownMenuShortcut>
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem onClick={() => setVideoOpen(true)}>
               <VideoGlyph className="size-4" />
               Add YouTube video
@@ -299,6 +292,7 @@ export function CompactMoreMenu({
             <DropdownMenuItem onClick={onHide}>
               <ChevronDownGlyph className="size-4" />
               Hide toolbar
+              <DropdownMenuShortcut className="pointer-coarse:hidden">{HIDE_KEYS}</DropdownMenuShortcut>
             </DropdownMenuItem>
           </DropdownMenuGroup>
         </DropdownMenuContent>

@@ -6,7 +6,7 @@ import {
   rotationTransform,
   unrotatedPoint,
 } from './box-geometry';
-import { polygonPointsForBox, polygonVerticesForBox } from './polygon-geometry';
+import { polygonVerticesForBox } from './polygon-geometry';
 import { polylineDrawCommands } from './geometry-synthesis';
 import { DashedOutline, DrawnOutline, fillFor } from './render-style';
 import { useLodDash } from '../lod';
@@ -35,7 +35,7 @@ export const polygonUtil: ShapeUtil<'polygon'> = {
     const { w, h, kind, size, fillStyle } = s.props;
     const margin = tol + size / 2;
     if (!boxHitTest(s.x, s.y, w, h, s.rotation, p, margin)) return false;
-    return new Polygon2d(polygonVerticesForBox(kind, s.x, s.y, w, h), {
+    return new Polygon2d(polygonVerticesForBox(kind, s.x, s.y, w, h, s.id, size), {
       isFilled: fillStyle !== 'none',
     }).hitTestPoint(unrotatedPoint(s.x, s.y, w, h, s.rotation, p), margin);
   },
@@ -54,12 +54,12 @@ export const polygonUtil: ShapeUtil<'polygon'> = {
     const { w, h, kind, color, fillStyle, size } = shape.props;
     const dash = useLodDash(shape.props.dash, size);
     const f = fillFor(shape.id, color, fillStyle);
-    const points = polygonVerticesForBox(kind, shape.x, shape.y, w, h);
+    const points = polygonVerticesForBox(kind, shape.x, shape.y, w, h, shape.id, size);
     return (
       <g transform={rotationTransform(shape.x, shape.y, w, h, shape.rotation)}>
         {f.pattern ? <defs>{f.pattern}</defs> : null}
         <polygon
-          points={polygonPointsForBox(kind, shape.x, shape.y, w, h)}
+          points={points.map((p) => `${p.x},${p.y}`).join(' ')}
           fill={f.fill}
           fillOpacity={f.fillOpacity}
           stroke={dash === 'solid' ? color : 'none'}

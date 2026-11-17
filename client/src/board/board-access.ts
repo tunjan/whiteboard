@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { BoardShare, ShareMode } from '@whiteboard/shared';
+import type { AgentHelp, BoardShare, ShareMode } from '@whiteboard/shared';
 import { parseBoardId } from '@/router';
 
 /**
@@ -62,6 +62,12 @@ export const setShareMode = (boardId: string, mode: ShareMode) =>
   shareRequest(`${encodeURIComponent(boardId)}/access`, {
     method: 'PATCH',
     body: JSON.stringify({ mode }),
+  });
+
+export const setAgentHelp = (boardId: string, agentHelp: AgentHelp) =>
+  shareRequest(`${encodeURIComponent(boardId)}/access`, {
+    method: 'PATCH',
+    body: JSON.stringify({ agentHelp }),
   });
 
 export const resetShareLink = (boardId: string) =>

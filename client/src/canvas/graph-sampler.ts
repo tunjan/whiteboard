@@ -6,6 +6,12 @@ import type {
 } from '@whiteboard/shared';
 import { parametricDomain } from './graph-defaults';
 import {
+  LINEAR_AXES,
+  toPlotViewport,
+  warpParsed,
+  type GraphAxes,
+} from './graph-scale';
+import {
   EMPTY_GRAPH_FUNCTIONS,
   isCoordinateExpression,
   parseGraphExpression,
@@ -966,7 +972,10 @@ export function sampleParsedGraphExpression(
     : boundary;
 }
 
-/** Parse (cached) and sample one expression from a graph shape. */
+/**
+ * Parse (cached) and sample one expression from a graph shape. With log
+ * `axes` the segments come back in plot space (see `graph-scale`).
+ */
 export function sampleGraphExpression(
   expression: GraphExpression,
   viewport: GraphViewport,
@@ -974,17 +983,19 @@ export function sampleGraphExpression(
   samples: number,
   verticalSamples = samples,
   definitions: GraphFunctionDefinitions = EMPTY_GRAPH_FUNCTIONS,
+  axes: GraphAxes = LINEAR_AXES,
+  angleUnit: 'rad' | 'deg' = 'rad',
 ): GraphSampleResult {
   if (!expression.visible) return { ok: true, segments: [] };
   const parsed = parseGraphExpression(expression.expression, definitions);
   if (!parsed.ok) {
     return { ok: false, message: parsed.message, segments: [] };
   }
-  return sampleParsedGraphExpression(parsed, {
-    viewport,
+  return sampleParsedGraphExpression(warpParsed(parsed, axes), {
+    viewport: toPlotViewport(viewport, axes),
     parameters,
     samples,
     verticalSamples,
-    domain: expression.domain,
+    domain: parametricDomain(expression.domain, angleUnit),
   });
 }

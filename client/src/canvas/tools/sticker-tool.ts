@@ -5,7 +5,7 @@ import { shapeRegistry } from '../shapes/shape-registry';
 import { customStickerSize } from '../shapes/sticker';
 import { useCustomStickersStore } from '../use-custom-stickers-store';
 import { useStickerPopStore } from '../use-sticker-pop-store';
-import { nextShapeStyle, useStyleStore } from '../use-style-store';
+import { useStyleStore } from '../use-style-store';
 import type { Tool, ToolContext, ToolPointerInfo } from './types';
 
 /**
@@ -52,7 +52,7 @@ export function createStickerTool(): Tool {
         x: info.point.x - props.w / 2,
         y: info.point.y - props.h / 2,
         rotation: 0,
-        opacity: nextShapeStyle().opacity,
+        opacity: 1,
         index: getTopIndex(ctx.editor.getShapes()),
         props,
       } as Shape);

@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react';
 import type { GraphViewport } from '@whiteboard/shared';
-import { formatAxisLabel, niceStep, tickValues } from '../grid';
 import {
   DEFAULT_GRAPH_CURVE_WIDTH,
   createDefaultGraphProps,
@@ -10,15 +9,17 @@ import { mergeGraphParameters } from '../graph-parameters';
 import { createGraphFunctionDefinitions } from '../graph-parser';
 import { useGraphCurves } from '../graph-sample-client';
 import { useGraphAnimationStore } from '../use-graph-animation-store';
-import { formatIntersectionLabel } from '../graph-intersections';
-import { placePointLabels, type LabelBox } from '../graph-label-layout';
+import { formatIntersectionCoordinate } from '../graph-intersections';
+import { fitViewport, fromPlot, graphAxes, isLinear, toPlot, toPlotViewport } from '../graph-scale';
+import { axisTicks, exactPi, plotsTrig, type TickStyle } from '../graph-ticks';
+import { placePointLabels, touchesLine, type LabelBox } from '../graph-label-layout';
 import { useLodDetail } from '../lod';
 import { normalizeWheelDelta } from '../use-wheel';
 import { breakUndoCapture, editor } from '../use-document-store';
 import { useSelectionStore } from '../use-selection-store';
 import { boxBounds, boxHitTest, rotationTransform } from './box-geometry';
 import { graphToScreen, panViewport, zoomViewport } from './graph-interaction';
-import { GraphTrace } from './graph-trace';
+import { GraphTrace, POINT_LABEL_STYLE } from './graph-trace';
 import { createGraphViewportWriter } from './graph-viewport-writer';
 import { PaintedShadow, roundedRectPath } from './painted-shadow';
 import { polylineLength } from './perfect-dash';
@@ -75,11 +76,6 @@ function regionPath(
     d += `M${left} ${topLeft.y.toFixed(2)}H${bottomRight.x.toFixed(2)}V${bottomRight.y.toFixed(2)}H${left}Z`;
   }
   return d;
-}
-
-function stepFor(range: number, size: number): number {
-  const targetCount = Math.max(2, Math.floor(size / 70));
-  return niceStep(Math.abs(range) / targetCount);
 }
 
 const GRAPH_CARD_RADIUS = 8;
@@ -177,15 +173,33 @@ export const graphUtil: ShapeUtil<'graph'> = {
     }, [shapeId]);
 
     const area = plotArea(shape);
-    const viewport = props.viewport;
-    const xStep = stepFor(viewport.xMax - viewport.xMin, area.w);
-    const yStep = stepFor(viewport.yMax - viewport.yMin, area.h);
-    const xTicks = tickValues(viewport.xMin, viewport.xMax, xStep);
-    const yTicks = tickValues(viewport.yMin, viewport.yMax, yStep);
-    const xAxis = graphToScreen({ x: 0, y: 0 }, viewport, area).y;
-    const yAxis = graphToScreen({ x: 0, y: 0 }, viewport, area).x;
-    const clippedXAxis = Math.max(area.y, Math.min(area.y + area.h, xAxis));
-    const clippedYAxis = Math.max(area.x, Math.min(area.x + area.w, yAxis));
+    const axes = graphAxes(props);
+    const angleUnit = props.angleUnit ?? 'rad';
+    // A peer's log switch can land before its window does; draw a fitting one.
+    const dataViewport = fitViewport(props.viewport, axes);
+    // Everything below is drawn in plot space, where a log axis is linear.
+    const viewport = toPlotViewport(dataViewport, axes);
+    const xStyle: TickStyle =
+      axes.x === 'log'
+        ? 'log'
+        : plotsTrig(props.expressions)
+          ? angleUnit === 'deg'
+            ? 'degrees'
+            : 'pi'
+          : 'linear';
+    const xTicks = axisTicks(dataViewport.xMin, dataViewport.xMax, area.w, xStyle);
+    const yTicks = axisTicks(
+      dataViewport.yMin,
+      dataViewport.yMax,
+      area.h,
+      axes.y === 'log' ? 'log' : 'linear',
+    );
+    // A log axis has no zero: its partner axis rides the plot's edge.
+    const origin = graphToScreen(toPlot({ x: 0, y: 0 }, axes), viewport, area);
+    const clippedXAxis = Math.max(area.y, Math.min(area.y + area.h, origin.y));
+    const clippedYAxis = Math.max(area.x, Math.min(area.x + area.w, origin.x));
+    const originVisible =
+      isLinear(axes) && clippedXAxis === origin.y && clippedYAxis === origin.x;
     const clipId = `graph-clip-${safeId(shape.id)}`;
     // Zoomed far out the card drop shadow is sub-pixel; skip it.
     const shadow = detail === 'high';
@@ -197,9 +211,9 @@ export const graphUtil: ShapeUtil<'graph'> = {
     // reads as unparsable, so each memo below has to recompute when it arrives.
     const mathReady = useGraphMathReady();
     const functionDefinitions = useMemo(
-      () => createGraphFunctionDefinitions(props.expressions),
+      () => createGraphFunctionDefinitions(props.expressions, angleUnit),
       // eslint-disable-next-line react-hooks/exhaustive-deps
-      [props.expressions, mathReady],
+      [props.expressions, angleUnit, mathReady],
     );
 
     // A slider being played sweeps its value locally rather than through the
@@ -219,11 +233,13 @@ export const graphUtil: ShapeUtil<'graph'> = {
     const { curves, intersections } = useGraphCurves(
       {
         expressions: props.expressions,
-        viewport,
+        viewport: dataViewport,
         parameters,
         samples,
         verticalSamples,
         intersections: props.showIntersections === true,
+        ...(isLinear(axes) ? {} : { axes }),
+        ...(angleUnit === 'deg' ? { angleUnit } : {}),
       },
       functionDefinitions,
       mathReady,
@@ -238,6 +254,17 @@ export const graphUtil: ShapeUtil<'graph'> = {
           )
         : [],
     }));
+    // A plot-space point as the reader wants it: back in data units, on a
+    // trig plot in degrees with its degree sign.
+    const formatPoint = (point: { x: number; y: number }) => {
+      const value = fromPlot(point, axes);
+      // On a π axis, `−5π/2` rather than the −7.85 no tick would match.
+      const x =
+        (xStyle === 'pi' ? exactPi(value.x) : null) ??
+        formatIntersectionCoordinate(value.x, axes.x);
+      const y = formatIntersectionCoordinate(value.y, axes.y);
+      return `(${x}${xStyle === 'degrees' ? '°' : ''}, ${y})`;
+    };
     const xLabelsBelow = clippedXAxis <= area.y + area.h - 18;
     const xLabelY = xLabelsBelow ? clippedXAxis + 13 : clippedXAxis - 7;
     const yLabelsRight = clippedYAxis <= area.x + area.w - 34;
@@ -247,60 +274,99 @@ export const graphUtil: ShapeUtil<'graph'> = {
       fontSize: 10,
       fill: 'var(--color-muted-foreground)',
       stroke: 'var(--color-panel)',
-      strokeWidth: 3,
+      strokeWidth: 2,
       paintOrder: 'stroke' as const,
-    };
-    const intersectionLabelStyle = {
-      fontSize: 13,
-      fontWeight: 600 as const,
-      fill: 'var(--color-foreground)',
-      stroke: 'var(--color-panel)',
-      strokeWidth: 3.5,
-      paintOrder: 'stroke' as const,
+      style: { fontVariantNumeric: 'tabular-nums' },
     };
 
-    // Tick labels paint over the plot, so point labels must steer clear of them.
+    // Tick labels, placed once: drawn below, and steered clear of by point
+    // labels. One the plot edge would cut in half is dropped, not clipped.
     const tickLabelBoxes: LabelBox[] = [];
+    const xLabels: { key: string; x: number; shift: number; text: string }[] = [];
+    const yLabels: { key: string; y: number; shift: number; text: string }[] = [];
     if (showAxisLabels) {
+      // A curve through a number strikes it out: the number slides just off
+      // the curve, staying beside its tick. With no clear side it stays put.
+      const curveLines = drawn.flatMap(({ screens }) => screens);
+      const clearShift = (b: LabelBox, axis: 'x' | 'y', step: number) =>
+        [0, -step, step].find(
+          (shift) =>
+            !curveLines.some((line) =>
+              touchesLine({ ...b, [axis]: b[axis] + shift }, line),
+            ),
+        ) ?? 0;
       const box = (text: string, x: number, y: number, anchor: string) => {
         const w = measureTextWidth(text, axisLabelStyle.fontSize);
         const left = anchor === 'middle' ? x - w / 2 : anchor === 'end' ? x - w : x;
         return { x: left, y: y - 8, w, h: 10 };
       };
-      for (const x of xTicks) {
-        if (x === 0) continue;
-        const screen = graphToScreen({ x, y: 0 }, viewport, area);
-        tickLabelBoxes.push(box(formatAxisLabel(x), screen.x, xLabelY, 'middle'));
+      for (const { at, label } of xTicks.major) {
+        // The origin writes its own single 0.
+        if (label === null || (originVisible && at === 0)) continue;
+        const x = graphToScreen({ x: at, y: 0 }, viewport, area).x;
+        const b = box(label, x, xLabelY, 'middle');
+        const shift = clearShift(b, 'x', b.w / 2 + 3);
+        const left = b.x + shift;
+        if (left < area.x + 2 || left + b.w > area.x + area.w - 2) continue;
+        tickLabelBoxes.push({ ...b, x: left });
+        xLabels.push({ key: `x-label-${at}`, x, shift, text: label });
       }
-      for (const y of yTicks) {
-        if (y === 0) continue;
-        const screen = graphToScreen({ x: 0, y }, viewport, area);
-        tickLabelBoxes.push(box(formatAxisLabel(y), yLabelX, screen.y + 4, yLabelAnchor));
+      for (const { at, label } of yTicks.major) {
+        if (label === null || (originVisible && at === 0)) continue;
+        const y = graphToScreen({ x: 0, y: at }, viewport, area).y;
+        if (y - 6 < area.y || y + 6 > area.y + area.h) continue;
+        const b = box(label, yLabelX, y + 4, yLabelAnchor);
+        const shift = clearShift(b, 'y', 9);
+        tickLabelBoxes.push({ ...b, y: b.y + shift });
+        yLabels.push({ key: `y-label-${at}`, y, shift, text: label });
       }
-      tickLabelBoxes.push(box('0', yLabelX, xLabelY, yLabelAnchor));
+      if (originVisible) tickLabelBoxes.push(box('0', yLabelX, xLabelY, yLabelAnchor));
     }
+    // A point sitting on an axis, at a number that axis already prints, has
+    // nothing to add: the tick beside it says the same thing.
+    const printedByAxis = ({ x, y }: { x: number; y: number }) =>
+      (Math.abs(y - clippedXAxis) < 0.5 &&
+        xLabels.some((label) => Math.abs(label.x - x) < 0.5)) ||
+      (Math.abs(x - clippedYAxis) < 0.5 &&
+        yLabels.some((label) => Math.abs(label.y - y) < 0.5)) ||
+      (showAxisLabels &&
+        originVisible &&
+        Math.hypot(x - clippedYAxis, y - clippedXAxis) < 0.5);
     const intersectionMarks = intersections.map((point) => ({
       screen: graphToScreen(point, viewport, area),
-      text: formatIntersectionLabel(point),
+      text: formatPoint(point),
     }));
-    // Crowded points keep their dot and drop the label to a hover tooltip.
+    // Only what stands clear gets text: a label never sits on a curve, an axis
+    // or another label. The rest read out on hover, through the trace.
     const intersectionLabels = placePointLabels(
       intersectionMarks.map(({ screen, text }) => ({
         x: screen.x,
         y: screen.y,
+        silent: printedByAxis(screen),
         width: measureTextWidth(
           text,
-          intersectionLabelStyle.fontSize,
+          POINT_LABEL_STYLE.fontSize,
           'sans',
-          intersectionLabelStyle.fontWeight,
+          POINT_LABEL_STYLE.fontWeight,
         ),
       })),
       area,
       {
-        fontSize: intersectionLabelStyle.fontSize,
-        dotRadius: 7,
-        offset: 8,
+        fontSize: POINT_LABEL_STYLE.fontSize,
+        dotRadius: 5,
+        offset: 7,
         obstacles: tickLabelBoxes,
+        lines: [
+          ...drawn.flatMap(({ screens }) => screens),
+          [
+            { x: area.x, y: clippedXAxis },
+            { x: area.x + area.w, y: clippedXAxis },
+          ],
+          [
+            { x: clippedYAxis, y: area.y },
+            { x: clippedYAxis, y: area.y + area.h },
+          ],
+        ],
       },
     );
 
@@ -355,31 +421,23 @@ export const graphUtil: ShapeUtil<'graph'> = {
         />
 
         <g clipPath={`url(#${clipId})`}>
-          {xTicks.map((x) => {
-            const screen = graphToScreen({ x, y: 0 }, viewport, area);
+          {/* Graph paper: faint subdivisions under the numbered lines. */}
+          {[
+            ...xTicks.minor.map((at) => ['x', at, 'minor'] as const),
+            ...yTicks.minor.map((at) => ['y', at, 'minor'] as const),
+            ...xTicks.major.map(({ at }) => ['x', at, 'major'] as const),
+            ...yTicks.major.map(({ at }) => ['y', at, 'major'] as const),
+          ].map(([axis, at, weight]) => {
+            const screen = graphToScreen({ x: at, y: at }, viewport, area);
+            const vertical = axis === 'x';
             return (
               <line
-                key={`x-grid-${x}`}
-                x1={screen.x}
-                y1={area.y}
-                x2={screen.x}
-                y2={area.y + area.h}
-                stroke="var(--grid-minor)"
-                strokeWidth={1}
-                vectorEffect="non-scaling-stroke"
-              />
-            );
-          })}
-          {yTicks.map((y) => {
-            const screen = graphToScreen({ x: 0, y }, viewport, area);
-            return (
-              <line
-                key={`y-grid-${y}`}
-                x1={area.x}
-                y1={screen.y}
-                x2={area.x + area.w}
-                y2={screen.y}
-                stroke="var(--grid-minor)"
+                key={`${axis}-${weight}-${at}`}
+                x1={vertical ? screen.x : area.x}
+                y1={vertical ? area.y : screen.y}
+                x2={vertical ? screen.x : area.x + area.w}
+                y2={vertical ? area.y + area.h : screen.y}
+                stroke={weight === 'major' ? 'var(--grid-major)' : 'var(--grid-minor)'}
                 strokeWidth={1}
                 vectorEffect="non-scaling-stroke"
               />
@@ -456,7 +514,7 @@ export const graphUtil: ShapeUtil<'graph'> = {
           {/* Points from the retired points list; new ones are `(x, y)` expressions. */}
           {points.map((point) => {
             if (!point.visible) return null;
-            const screen = graphToScreen(point, viewport, area);
+            const screen = graphToScreen(toPlot(point, axes), viewport, area);
             return (
               <circle
                 key={point.id}
@@ -476,19 +534,17 @@ export const graphUtil: ShapeUtil<'graph'> = {
                 <circle
                   cx={screen.x}
                   cy={screen.y}
-                  r={5}
+                  r={3.5}
                   fill="var(--color-foreground)"
                   stroke="var(--color-panel)"
-                  strokeWidth={1.75}
-                >
-                  {label ? null : <title>{text}</title>}
-                </circle>
+                  strokeWidth={1.5}
+                />
                 {label ? (
                   <text
                     x={label.x}
                     y={label.y}
                     textAnchor={label.anchor}
-                    {...intersectionLabelStyle}
+                    {...POINT_LABEL_STYLE}
                   >
                     {text}
                   </text>
@@ -496,48 +552,25 @@ export const graphUtil: ShapeUtil<'graph'> = {
               </g>
             );
           })}
-          {showAxisLabels
-            ? xTicks.map((x) => {
-                if (x === 0) return null;
-                const screen = graphToScreen({ x, y: 0 }, viewport, area);
-                return (
-                  <text
-                    key={`x-label-${x}`}
-                    x={screen.x}
-                    y={xLabelY}
-                    textAnchor="middle"
-                    {...axisLabelStyle}
-                  >
-                    {formatAxisLabel(x)}
-                  </text>
-                );
-              })
-            : null}
-          {showAxisLabels
-            ? yTicks.map((y) => {
-                if (y === 0) return null;
-                const screen = graphToScreen({ x: 0, y }, viewport, area);
-                return (
-                  <text
-                    key={`y-label-${y}`}
-                    x={yLabelX}
-                    y={screen.y}
-                    textAnchor={yLabelAnchor}
-                    dominantBaseline="middle"
-                    {...axisLabelStyle}
-                  >
-                    {formatAxisLabel(y)}
-                  </text>
-                );
-              })
-            : null}
-          {showAxisLabels ? (
+          {xLabels.map(({ key, x, shift, text }) => (
+            <text key={key} x={x + shift} y={xLabelY} textAnchor="middle" {...axisLabelStyle}>
+              {text}
+            </text>
+          ))}
+          {yLabels.map(({ key, y, shift, text }) => (
             <text
+              key={key}
               x={yLabelX}
-              y={xLabelY}
+              y={y + shift}
               textAnchor={yLabelAnchor}
+              dominantBaseline="middle"
               {...axisLabelStyle}
             >
+              {text}
+            </text>
+          ))}
+          {showAxisLabels && originVisible ? (
+            <text x={yLabelX} y={xLabelY} textAnchor={yLabelAnchor} {...axisLabelStyle}>
               0
             </text>
           ) : null}
@@ -549,8 +582,30 @@ export const graphUtil: ShapeUtil<'graph'> = {
             }))}
             viewport={viewport}
             area={area}
+            axisLines={{ x: clippedXAxis, y: clippedYAxis }}
+            format={formatPoint}
+            marks={intersectionMarks.map(({ screen }, index) => ({
+              ...screen,
+              labelled: intersectionLabels[index] !== null,
+            }))}
           />
         </g>
+        {/* Like a calculator's DEG: whoever reads the board can't see the
+            panel, and sin(90) means something else in radians. */}
+        {angleUnit === 'deg' ? (
+          <text
+            x={shape.x + props.w - PLOT_PADDING}
+            y={shape.y + PLOT_PADDING - 4.5}
+            textAnchor="end"
+            fontSize={8.5}
+            fontWeight={600}
+            letterSpacing="0.08em"
+            fill="var(--color-muted-foreground)"
+            style={{ pointerEvents: 'none', userSelect: 'none' }}
+          >
+            DEG
+          </text>
+        ) : null}
       </g>
     );
   },

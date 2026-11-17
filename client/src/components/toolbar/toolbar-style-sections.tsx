@@ -30,9 +30,9 @@ import { Input } from '@/components/ui/input';
 import { Segmented, TrayCells } from './toolbar-tray-controls';
 
 /** Sample-stroke thickness for each weight, at chrome scale. */
-const WEIGHT_STROKES = [2, 4, 7, 11];
+export const WEIGHT_STROKES = [2, 4, 7, 11];
 
-export const WEIGHT_NAMES: Record<string, string> = {
+const WEIGHT_NAMES: Record<string, string> = {
   S: 'Small',
   M: 'Medium',
   L: 'Large',
@@ -48,7 +48,7 @@ const FONT_NAMES: Record<FontFamily, string> = {
 
 /** Each route drawn as the path it takes, at the Stroke row's size. */
 const ROUTE_PATHS: Record<ArrowTopology, string> = {
-  straight: 'M2 6 H20',
+  straight: 'M4 11 L18 1',
   arc: 'M2 9 Q11 -1 20 9',
   elbow: 'M2 3 V9 H20',
 };
@@ -94,11 +94,10 @@ function StrokeGlyph({ dash }: { dash: StrokeDash }) {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true" className="tray-stroke">
       {dash === 'draw' ? (
-        // A pen line: full at the start, thinning toward the tip.
+        // A freehand scribble, where the others are ruled.
         <path
-          d="M3.4 17.4 L18.5 4.5 A0.75 0.75 0 0 1 19.5 5.5 L6.6 20.6 A2.25 2.25 0 0 1 3.4 17.4 Z"
-          fill="currentColor"
-          stroke="none"
+          d="M3.5 16 C5.5 8 8 6.5 9.5 10 C11 13.5 9.6 18 11.6 18.5 C14 19 14.6 12 16.4 10.2 C17.6 9 19 10 20.5 7"
+          strokeWidth={2}
         />
       ) : (
         <path
@@ -111,17 +110,30 @@ function StrokeGlyph({ dash }: { dash: StrokeDash }) {
   );
 }
 
+/** A square turning to a transparency check, so a percentage reads as opacity. */
+function OpacityGlyph() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true" className="tray-glyph">
+      <rect x={2.5} y={2.5} width={11} height={11} rx={1.5} fill="none" stroke="currentColor" strokeWidth={1} />
+      <path d="M8 2.5h2.75v2.75H8zM10.75 5.25h2.75V8h-2.75zM8 8h2.75v2.75H8zM10.75 10.75h2.75v2.75h-2.75z" fill="currentColor" />
+    </svg>
+  );
+}
+
 type Ends = 'none' | 'start' | 'end' | 'both';
 
 /** Each route at tray scale, with where it leaves and arrives and which way
- *  it is heading there, so a head can sit on either end. */
+ *  it is heading there, so a head can sit on either end. A straight route runs
+ *  on the diagonal, and only the ends row is level, so the two rows never
+ *  draw the same glyph. */
 const ROUTES: Record<
-  ArrowTopology,
+  ArrowTopology | 'level',
   { d: string; start: [number, number, number, number]; end: [number, number, number, number] }
 > = {
-  straight: { d: 'M4 12H20', start: [4, 12, -1, 0], end: [20, 12, 1, 0] },
+  straight: { d: 'M5 19L19 5', start: [5, 19, -0.71, 0.71], end: [19, 5, 0.71, -0.71] },
   arc: { d: 'M4 17Q12 1 20 17', start: [4, 17, -0.5, 0.87], end: [20, 17, 0.5, 0.87] },
   elbow: { d: 'M5 5V18H20', start: [5, 5, 0, -1], end: [20, 18, 1, 0] },
+  level: { d: 'M4 12H20', start: [4, 12, -1, 0], end: [20, 12, 1, 0] },
 };
 
 /** An open arrowhead: two strokes back from the tip, 35° either side. */
@@ -139,7 +151,7 @@ function ArrowGlyph({
   route,
   ends,
 }: {
-  route: ArrowTopology;
+  route: keyof typeof ROUTES;
   ends: Ends;
 }) {
   const { d, start, end } = ROUTES[route];
@@ -245,6 +257,9 @@ export function styleSections(
     apply.arrowStart(next === 'start' || next === 'both');
     apply.arrowEnd(next === 'end' || next === 'both');
   };
+  // With no heads a route is drawn as a line, so it is named as one.
+  const routeLabel = (label: string) =>
+    ends === 'none' ? label.replace('arrow', 'line') : label;
 
   const sections: Section[] = [];
   if (on.font && inTray) {
@@ -256,7 +271,6 @@ export function styleSections(
           Aa
         </span>
       ),
-      open: true,
       node: (
         <TrayCells
           key="font"
@@ -346,7 +360,6 @@ export function styleSections(
       key: 'align',
       label: 'Align',
       value: Align ? <Align aria-hidden="true" /> : null,
-      open: inTray,
       node: inTray ? (
         <TrayCells
           key="align"
@@ -391,7 +404,7 @@ export function styleSections(
             label="Route"
             options={ARROW_TOPOLOGIES.map((option) => ({
               value: option.value,
-              label: option.label,
+              label: routeLabel(option.label),
               glyph: <ArrowGlyph route={option.value} ends={ends} />,
             }))}
             value={values.arrowTopology}
@@ -401,7 +414,7 @@ export function styleSections(
             label="Ends"
             options={ENDS.map((option) => ({
               ...option,
-              glyph: <ArrowGlyph route="straight" ends={option.value} />,
+              glyph: <ArrowGlyph route="level" ends={option.value} />,
             }))}
             value={ends}
             onSelect={setEnds}
@@ -414,7 +427,7 @@ export function styleSections(
             tooltips
             options={ARROW_TOPOLOGIES.map((option) => ({
               value: option.value,
-              label: option.label,
+              label: routeLabel(option.label),
               glyph: <RoutePreview route={option.value} />,
             }))}
             value={values.arrowTopology}
@@ -458,7 +471,7 @@ export function styleSections(
     sections.push({
       key: 'fill',
       label: 'Fill',
-      value: <FillPreview style={values.fill} />,
+      value: <FillPreview style={values.fill} color={values.color} className="tray-glyph" />,
       node: (
         <Segmented
           key="fill"
@@ -469,7 +482,7 @@ export function styleSections(
             value: fillStyle,
             label: FILL_LABELS[fillStyle],
             text: FILL_NAMES[fillStyle],
-            glyph: <FillPreview style={fillStyle} />,
+            glyph: <FillPreview style={fillStyle} color={values.color} />,
           }))}
           value={values.fill}
           onSelect={apply.fill}
@@ -504,7 +517,12 @@ export function styleSections(
     sections.push({
       key: 'opacity',
       label: 'Opacity',
-      value: <span className="tray-value">{Math.round(values.opacity * 100)}%</span>,
+      value: (
+        <>
+          <OpacityGlyph />
+          <span className="tray-value tray-percent">{Math.round(values.opacity * 100)}%</span>
+        </>
+      ),
       node: (
         <div key="opacity" className="tbar-opacity">
           <OpacitySlider

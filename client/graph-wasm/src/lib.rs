@@ -213,8 +213,9 @@ fn function1(name: &[u8]) -> Option<fn(f64) -> f64> {
 fn function2(name: &[u8]) -> Option<fn(f64, f64) -> f64> {
     Some(match name {
         b"log" => |v: f64, base: f64| v.ln() / base.ln(),
-        b"min" => f64::min,
-        b"max" => f64::max,
+        // mathjs's are NaN if either side is; `f64::min/max` return the other.
+        b"min" => |a: f64, b: f64| if a.is_nan() || b.is_nan() { f64::NAN } else { a.min(b) },
+        b"max" => |a: f64, b: f64| if a.is_nan() || b.is_nan() { f64::NAN } else { a.max(b) },
         // mathjs's: the sign of the divisor, and `mod(x, 0)` is x.
         b"mod" => |a: f64, b: f64| if b == 0.0 { a } else { a - b * (a / b).floor() },
         _ => return None,

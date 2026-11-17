@@ -41,7 +41,7 @@ export const GRAPH_VIEWPORT_PRESETS: readonly GraphViewportPreset[] = [
   {
     name: 'Trig 2π',
     shortLabel: '2π',
-    viewport: { xMin: -6.283, xMax: 6.283, yMin: -2, yMax: 2 },
+    viewport: { xMin: -2 * Math.PI, xMax: 2 * Math.PI, yMin: -2, yMax: 2 },
     label: '[-2π, 2π]',
     category: 'Trigonometric',
     description: 'Trig cycle [-2π, 2π] × [-2, 2]',
@@ -49,7 +49,7 @@ export const GRAPH_VIEWPORT_PRESETS: readonly GraphViewportPreset[] = [
   {
     name: 'Trig 4π',
     shortLabel: '4π',
-    viewport: { xMin: -12.566, xMax: 12.566, yMin: -3, yMax: 3 },
+    viewport: { xMin: -4 * Math.PI, xMax: 4 * Math.PI, yMin: -3, yMax: 3 },
     label: '[-4π, 4π]',
     category: 'Trigonometric',
     description: 'Extended cycle [-4π, 4π] × [-3, 3]',

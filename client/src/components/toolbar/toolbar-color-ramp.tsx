@@ -1,7 +1,5 @@
 import { useRef, useState } from 'react';
 import {
-  paletteColors,
-  quickSwatches,
   rampColors,
   useStyleStore,
   type PaletteColor,
@@ -17,7 +15,12 @@ import {
 import { Tooltip, TooltipTrigger } from '@/components/ui/tooltip';
 import { useThemeStore } from '@/use-theme-store';
 import { swatchBorder } from '@/lib/utils';
-import { KeyTip, ToolbarItem, useToolbarSide } from './toolbar-primitives';
+import {
+  KeyTip,
+  refocusForKeyboard,
+  ToolbarItem,
+  useToolbarSide,
+} from './toolbar-primitives';
 import { arrowDelta, useCloseWithBar } from './toolbar-tray-controls';
 
 function Swatch({
@@ -69,7 +72,8 @@ function Swatch({
 /**
  * The user's colours, closed by a key that opens the colour panel: pick from
  * the whole set, take colours off the bar, put palette or custom ones on.
- * That key is the ramp's last slot: a wheel at rest, and the chosen colour
+ * That key is the ramp's last slot: a hollow spectrum at rest, so it is not
+ * taken for one more colour, and the chosen colour
  * itself — ringed — when the choice is not one of the swatches showing.
  *
  * The bar shows the first `count` (all of them when unset) and the panel
@@ -91,7 +95,8 @@ export function ColorRamp({
   const ramp = useStyleStore((s) => s.ramp);
   const all = rampColors(ramp, theme);
   const swatches = all.slice(0, count);
-  const onRamp = swatches.some((swatch) => swatch.value === color);
+  const index = swatches.findIndex((swatch) => swatch.value === color);
+  const onRamp = index >= 0;
   const refs = useRef<(HTMLButtonElement | null)[]>([]);
   const [open, setOpen] = useState(false);
 
@@ -108,10 +113,6 @@ export function ColorRamp({
     refs.current[next]?.focus();
   };
 
-  const hues = quickSwatches(paletteColors(theme))
-    .slice(1, -1)
-    .map((swatch) => swatch.value);
-  const wheel = `conic-gradient(${[...hues, hues[0]].join(', ')})`;
   const current = all.find((c) => c.value === color)?.name ?? color;
 
   return (
@@ -120,8 +121,16 @@ export function ColorRamp({
         role="radiogroup"
         aria-label="Color"
         onKeyDown={onKeyDown}
-        className="flex items-center"
+        className="relative flex items-center"
       >
+        {/* One ring that travels, like the weight row's chip: the choice moves
+            along the ramp rather than going out here and on there. */}
+        <span
+          aria-hidden="true"
+          className="tbar-ramp-ring"
+          data-off={onRamp ? undefined : ''}
+          style={{ '--ramp-index': Math.max(index, 0) } as React.CSSProperties}
+        />
         {swatches.map((swatch, i) => (
           <Swatch
             key={swatch.value}
@@ -147,9 +156,10 @@ export function ColorRamp({
             aria-hidden="true"
             className="tbar-swatch"
             data-selected={onRamp ? undefined : ''}
+            data-wheel={onRamp ? '' : undefined}
             style={
               onRamp
-                ? { background: wheel, borderColor: 'transparent' }
+                ? undefined
                 : { backgroundColor: color, borderColor: swatchBorder(color) }
             }
           />
@@ -158,8 +168,10 @@ export function ColorRamp({
         <PopoverContent
           side={side}
           align="end"
-          sideOffset={8}
-          className="tbar-surface tbar-panel w-auto"
+          // 8px past the tray's edge, which stands 10px above a swatch's key.
+          sideOffset={side === 'top' ? 15 : 8}
+          finalFocus={refocusForKeyboard}
+          className="drawer-popup tbar-surface tbar-panel w-auto"
         >
           <PopoverHeader className="sr-only">
             <PopoverTitle>Colors</PopoverTitle>

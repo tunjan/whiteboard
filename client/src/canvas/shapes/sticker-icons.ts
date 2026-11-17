@@ -13,36 +13,31 @@ import { createLucideIcon, type LucideIcon } from 'lucide-react';
  * roughly one unit of every edge.
  */
 
-/** A head cracked open, its cap tumbling off ahead of the blast. */
+/** A head with its top blown off in a burst. */
 export const MindBlown: LucideIcon = createLucideIcon('mind-blown', [
   [
     'path',
     {
-      d: 'M14 5.6L10.99 6.75L11.2 9.41L9 7.8L6.4 10.1L6.92 6.8L4.5 5.6L7.09 4.5L6.6 1.44L9 3.3L11.15 1.88L10.91 4.5Z',
+      d: 'M12.00 0.30L13.03 3.21L15.82 1.88L14.49 4.67L17.40 5.70L14.49 6.73L15.82 9.52L13.03 8.19L12.00 11.10L10.97 8.19L8.18 9.52L9.51 6.73L6.60 5.70L9.51 4.67L8.18 1.88L10.97 3.21Z',
       key: 'blast',
     },
   ],
-  ['path', { d: 'M15.65 2.28A3.8 3.8 0 0 1 21.95 6.52Z', key: 'cap' }],
   [
     'path',
     {
-      d: 'M5 12.4Q12 14.6 19 12.4V15a7 7 0 0 1-14 0ZM6.9 17a2.1 2.1 0 1 0 4.2 0a2.1 2.1 0 1 0 -4.2 0ZM12.9 17a2.1 2.1 0 1 0 4.2 0a2.1 2.1 0 1 0 -4.2 0ZM10.2 19.8a1.8 1.8 0 1 0 3.6 0a1.8 1.8 0 1 0 -3.6 0Z',
+      d: 'M4.6 12.2L7.4 13.8L9.7 12.2L12 13.8L14.3 12.2L16.6 13.8L19.4 12.2V15.4a7.4 7 0 0 1-14.8 0ZM7 16.4a2 2 0 1 0 4 0a2 2 0 1 0 -4 0ZM13 16.4a2 2 0 1 0 4 0a2 2 0 1 0 -4 0ZM10.2 19.9a1.8 1.8 0 1 0 3.6 0a1.8 1.8 0 1 0 -3.6 0Z',
       key: 'face',
     },
   ],
 ]);
 
-/** Cranium with the jaw sitting a halo's width below it, so the gap reads as teeth. */
+/** Cranium and jaw in one piece, so it cannot read as a bulb on a stand. */
 export const Skull: LucideIcon = createLucideIcon('skull-stamp', [
   [
     'path',
     {
-      d: 'M12 1C6.2 1 2.6 5.7 2.6 11c0 2.3 1 4.2 2.7 5.4h13.4c1.7-1.2 2.7-3.1 2.7-5.4C21.4 5.7 17.8 1 12 1ZM5.7 9.4a2.9 2.9 0 1 1 5.8 0a2.9 2.9 0 1 1 -5.8 0ZM12.5 9.4a2.9 2.9 0 1 1 5.8 0a2.9 2.9 0 1 1 -5.8 0ZM12 10.8l2.3 4.6H9.7Z',
+      d: 'M12 1C6.2 1 2.6 5.7 2.6 11c0 2.5 1.1 4.6 3 5.9V20a2 2 0 0 0 2 2h8.8a2 2 0 0 0 2-2v-3.1c1.9-1.3 3-3.4 3-5.9C21.4 5.7 17.8 1 12 1ZM5.7 9.4a2.9 2.9 0 1 1 5.8 0a2.9 2.9 0 1 1 -5.8 0ZM12.5 9.4a2.9 2.9 0 1 1 5.8 0a2.9 2.9 0 1 1 -5.8 0ZM12 12.6l2.6 5H9.4Z',
       key: 'cranium',
     },
-  ],
-  [
-    'path',
-    { d: 'M8.2 19.8h7.6a1.2 1.2 0 0 1 0 2.4H8.2a1.2 1.2 0 0 1 0-2.4Z', key: 'jaw' },
   ],
 ]);

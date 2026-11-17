@@ -5,6 +5,7 @@ import {
   MAX_DOCUMENTS_PER_BOARD,
   genId,
   type BoardDocumentMeta,
+  type Bounds,
   type CustomStickerMeta,
   type MusicPlaybackState,
   type MusicPlaybackStatus,
@@ -185,6 +186,9 @@ export function addComment(input: {
   y: number;
   text: string;
   author: { name: string; color: string };
+  box?: Bounds;
+  correction?: string;
+  shapeIds?: string[];
 }): string {
   const id = genId();
   if (!bound) return id;
@@ -200,6 +204,9 @@ export function addComment(input: {
     authorColor: input.author.color,
     createdAt: Date.now(),
     resolved: false,
+    ...(input.box ? { box: input.box } : {}),
+    ...(input.correction ? { correction: input.correction } : {}),
+    ...(input.shapeIds ? { shapeIds: input.shapeIds } : {}),
   };
   doc.transact(() => {
     comments.set(id, message);
@@ -233,14 +240,17 @@ export function addCommentReply(
   return id;
 }
 
-/** Mark a thread resolved/unresolved. Resolved threads are hidden on canvas. */
-export function setThreadResolved(threadId: string, resolved: boolean): void {
+/**
+ * Mark a thread resolved/unresolved. Resolved threads are hidden on canvas.
+ * `byUser` records that a person resolved it, which the work checker reads.
+ */
+export function setThreadResolved(threadId: string, resolved: boolean, byUser = false): void {
   if (!bound) return;
   const { doc, comments } = bound;
   const root = comments.get(threadId);
   if (!root) return;
   doc.transact(() => {
-    comments.set(threadId, { ...root, resolved });
+    comments.set(threadId, { ...root, resolved, ...(byUser ? { dismissed: true } : {}) });
   }, COMMENT_ORIGIN);
 }
 

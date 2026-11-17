@@ -15,8 +15,10 @@ import {
   getDotGridLayers,
   GROUND_FADE_MASK,
   getGridLevels,
+  isTriangleGrid,
   pmod,
   tickValues,
+  triangleTile,
 } from './grid';
 
 interface BackgroundProps {
@@ -175,69 +177,70 @@ const VectorBackground = memo(function VectorBackground({
           (layer) => layer.opacity > 0.01,
         )
       : [];
-  const minorPhase = `translate(${pmod(g.originX, g.minorScreen)} ${pmod(g.originY, g.minorScreen)})`;
-  const majorPhase = `translate(${pmod(g.originX, g.majorScreen)} ${pmod(g.originY, g.majorScreen)})`;
+  const rules = (['minor', 'major'] as const).map((level) => {
+    const step = level === 'minor' ? g.minorScreen : g.majorScreen;
+    const tile = isTriangleGrid(type)
+      ? triangleTile(type, step)
+      : { w: step, h: step, lines: [] };
+    return {
+      level,
+      ...tile,
+      d: isTriangleGrid(type)
+        ? tile.lines
+            .map(([x1, y1, x2, y2]) => `M ${x1} ${y1} L ${x2} ${y2}`)
+            .join(' ')
+        : `M ${step} 0 L 0 0 L 0 ${step}`,
+      phase: `translate(${pmod(g.originX, tile.w)} ${pmod(g.originY, tile.h)})`,
+    };
+  });
 
   return (
     <svg
       className="pointer-events-none absolute inset-0 z-[var(--z-canvas-background)] h-full w-full [contain:strict]"
       aria-hidden="true"
-      // Dots are round, so let them antialias; rules stay on crisp pixels.
-      shapeRendering={type === 'dot' ? 'auto' : 'crispEdges'}
+      // Dots and diagonals antialias; square rules stay on crisp pixels.
+      shapeRendering={
+        type === 'dot' || isTriangleGrid(type) ? 'auto' : 'crispEdges'
+      }
     >
       <defs>
-        {type === 'dot' ? (
-          dotLayers.map((layer) => (
-            <pattern
-              key={layer.id}
-              id={`bg-${layer.id}`}
-              width={layer.screenStep}
-              height={layer.screenStep}
-              patternUnits="userSpaceOnUse"
-              // The dot sits mid-tile and the tile moves, so the tile edge
-              // never clips it the way a phased circle would be.
-              patternTransform={`translate(${layer.offsetX - layer.screenStep / 2} ${layer.offsetY - layer.screenStep / 2})`}
-            >
-              <circle
-                cx={layer.screenStep / 2}
-                cy={layer.screenStep / 2}
-                r={layer.radius}
-                fill={DOT}
-              />
-            </pattern>
-          ))
-        ) : (
-          <>
-            <pattern
-              id="bg-minor"
-              width={g.minorScreen}
-              height={g.minorScreen}
-              patternUnits="userSpaceOnUse"
-              patternTransform={minorPhase}
-            >
-              <path
-                d={`M ${g.minorScreen} 0 L 0 0 L 0 ${g.minorScreen}`}
-                fill="none"
-                stroke={MINOR}
-                strokeWidth={1}
-              />
-            </pattern>
-            <pattern
-              id="bg-major"
-              width={g.majorScreen}
-              height={g.majorScreen}
-              patternUnits="userSpaceOnUse"
-              patternTransform={majorPhase}
-            >
-              <path
-                d={`M ${g.majorScreen} 0 L 0 0 L 0 ${g.majorScreen}`}
-                fill="none"
-                stroke={MAJOR}
-                strokeWidth={1}
-              />
-            </pattern>
-          </>
-        )}
+        {type === 'dot'
+          ? dotLayers.map((layer) => (
+              <pattern
+                key={layer.id}
+                id={`bg-${layer.id}`}
+                width={layer.screenStep}
+                height={layer.screenStep}
+                patternUnits="userSpaceOnUse"
+                // The dot sits mid-tile and the tile moves, so the tile edge
+                // never clips it the way a phased circle would be.
+                patternTransform={`translate(${layer.offsetX - layer.screenStep / 2} ${layer.offsetY - layer.screenStep / 2})`}
+              >
+                <circle
+                  cx={layer.screenStep / 2}
+                  cy={layer.screenStep / 2}
+                  r={layer.radius}
+                  fill={DOT}
+                />
+              </pattern>
+            ))
+          : rules.map((r) => (
+              <pattern
+                key={r.level}
+                id={`bg-${r.level}`}
+                width={r.w}
+                height={r.h}
+                patternUnits="userSpaceOnUse"
+                patternTransform={r.phase}
+              >
+                <path
+                  d={r.d}
+                  fill="none"
+                  stroke={r.level === 'minor' ? MINOR : MAJOR}
+                  strokeWidth={1}
+                />
+              </pattern>
+            ))}
       </defs>
 
       {type === 'dot' ? (

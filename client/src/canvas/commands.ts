@@ -1,6 +1,11 @@
 import { genId, type Shape } from '@whiteboard/shared';
 import type { Editor } from './editor';
-import { childrenOf, descendantsOf, findCommonAncestor } from './hierarchy';
+import {
+  childrenOf,
+  deleteTargetIds,
+  descendantsOf,
+  findCommonAncestor,
+} from './hierarchy';
 import { getIndexAboveTopmostOf, getTopIndex, jitterKeyBetween } from './order';
 
 const DUPLICATE_OFFSET = 16;
@@ -246,17 +251,20 @@ export function pruneDegenerateGroups(
 }
 
 /**
- * Delete `ids` and prune whatever groups they leave degenerate. Use this for
- * user-facing deletes (selection, cut, eraser); a tool discarding a shape it
- * just created can keep calling `editor.deleteShapes` — a fresh shape has no
- * group parent to orphan.
+ * Delete `ids`, with their descendants, and prune whatever groups they leave
+ * degenerate. Use this for user-facing deletes (selection, cut, eraser); a tool
+ * discarding a shape it just created can keep calling `editor.deleteShapes` — a
+ * fresh shape has no group parent to orphan.
  */
 export function deleteShapesWithCleanup(editor: Editor, ids: string[]): void {
+  // `deleteShapes` does not cascade: a container goes with its subtree, or its
+  // children are left naming a parent that no longer exists.
+  const gone = deleteTargetIds(editor.getShapes(), ids);
   const parents = new Set<string>();
   for (const id of ids) {
     const parentId = editor.getShape(id)?.parentId;
     if (parentId) parents.add(parentId);
   }
-  editor.deleteShapes(ids);
-  if (parents.size) pruneDegenerateGroups(editor, parents, ids);
+  editor.deleteShapes(gone);
+  if (parents.size) pruneDegenerateGroups(editor, parents, gone);
 }

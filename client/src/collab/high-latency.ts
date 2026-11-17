@@ -1,4 +1,6 @@
 const HIGH_LATENCY_THRESHOLD_MS = 1_000;
+/** Lower than the way in, so a link hovering at the threshold can't flap. */
+const RECOVERED_THRESHOLD_MS = 700;
 
 export interface HighLatencyEpisodeTransition {
   active: boolean;
@@ -11,7 +13,9 @@ export function nextHighLatencyEpisode(
   latencyMs: number | null,
 ): HighLatencyEpisodeTransition {
   const active =
-    latencyMs !== null && latencyMs > HIGH_LATENCY_THRESHOLD_MS;
+    latencyMs !== null &&
+    latencyMs >
+      (wasActive ? RECOVERED_THRESHOLD_MS : HIGH_LATENCY_THRESHOLD_MS);
 
   return {
     active,

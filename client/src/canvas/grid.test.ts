@@ -4,6 +4,7 @@ import {
   getDotGridLayers,
   getSnapGridStep,
   pmod,
+  triangleTile,
 } from './grid';
 
 describe('dot grid overdraw', () => {
@@ -103,4 +104,22 @@ describe('dot grid snapping', () => {
   ])('snaps to the finest clearly visible lattice at zoom %s', (z, step) => {
     expect(getSnapGridStep('dot', { x: 0, y: 0, z: z as number })).toBe(step);
   });
+});
+
+describe('triangle grid tile', () => {
+  it.each(['isometric', 'triangle'] as const)(
+    '%s: all three rule families are equilateral and step apart',
+    (type) => {
+      const { w, h, lines } = triangleTile(type, 10);
+      // Copy one tile along the rules: the nearest parallel line.
+      const shift = type === 'isometric' ? [0, h] : [w, 0];
+      for (const [x1, y1, x2, y2] of lines.slice(-2)) {
+        const len = Math.hypot(x2! - x1!, y2! - y1!);
+        const [ux, uy] = [(x2! - x1!) / len, (y2! - y1!) / len];
+        const along = type === 'isometric' ? Math.abs(uy) : Math.abs(ux);
+        expect(along).toBeCloseTo(Math.cos(Math.PI / 3));
+        expect(Math.abs(shift[0]! * -uy + shift[1]! * ux)).toBeCloseTo(10);
+      }
+    },
+  );
 });

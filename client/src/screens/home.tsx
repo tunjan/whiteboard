@@ -22,11 +22,11 @@ import {
   Upload,
   X,
 } from 'lucide-react';
-import type { BoardMeta } from '@whiteboard/shared';
+import type { BoardMeta, LiveBoard } from '@whiteboard/shared';
 import { type AuthState, getAuth, logout } from '@/board/auth';
 import {
   boardRepository,
-  fetchLiveBoardIds,
+  fetchLiveBoards,
 } from '@/board/server-board-repository';
 import { BoardTitleDialog } from '@/components/board-title-dialog';
 import { Button } from '@/components/ui/button';
@@ -206,6 +206,14 @@ function liveClause(names: string[]): string {
   return `${names[0]}, ${names[1]} and ${names.length - 2} more are on canvases right now`;
 }
 
+// "Amara: no input for 12m, no tutor on the board" — the lozenge said in full.
+function afkTitle(afk: LiveBoard['afk']): string {
+  const who = afk
+    .map((student) => `${student.name}: no input for ${student.idleMinutes}m`)
+    .join(', ');
+  return `${who}, no tutor on the board`;
+}
+
 // The part of a name a search matched, set apart so it is clear why a card is
 // still here. Case-insensitive; only the first occurrence is marked.
 function Highlight({ text, query }: { text: string; query: string }) {
@@ -360,14 +368,16 @@ export function Home() {
     new Set(),
   );
   const pendingCommits = useRef(new Set<() => void>());
-  const [liveIds, setLiveIds] = useState<Set<string>>(new Set());
+  // The Undo on the newest delete toast, for ⌘Z to press.
+  const undoDelete = useRef<(() => void) | null>(null);
+  const [liveById, setLiveById] = useState<Map<string, LiveBoard>>(new Map());
   const searchRef = useRef<HTMLInputElement>(null);
   const importRef = useRef<HTMLInputElement>(null);
   const ready = auth?.authenticated === true && boards !== null;
 
   // A student joining shows on the tab itself, for when this page is behind
   // the board the tutor is teaching on.
-  const liveInTitle = boards?.filter((b) => liveIds.has(b.id)).length ?? 0;
+  const liveInTitle = boards?.filter((b) => liveById.has(b.id)).length ?? 0;
   useEffect(() => {
     if (!ready) return;
     const before = document.title;
@@ -416,7 +426,7 @@ export function Home() {
     if (!auth?.authenticated) return;
     const poll = () => {
       if (document.visibilityState === 'visible') {
-        void fetchLiveBoardIds().then(setLiveIds);
+        void fetchLiveBoards().then(setLiveById);
       }
     };
     poll();
@@ -443,6 +453,17 @@ export function Home() {
         !document.querySelector('[role="menu"]')
       ) {
         setSelectedBoardIds(new Set());
+        return;
+      }
+      if (
+        key === 'z' &&
+        (event.metaKey || event.ctrlKey) &&
+        !event.shiftKey &&
+        undoDelete.current &&
+        !isTypingTarget(event.target)
+      ) {
+        event.preventDefault();
+        undoDelete.current();
         return;
       }
       if (key === 'k' && (event.metaKey || event.ctrlKey)) {
@@ -481,7 +502,7 @@ export function Home() {
   const loading = auth === null || boards === null;
   const allBoards = (boards ?? []).filter((b) => !pendingDeleteIds.has(b.id));
   const favoriteCount = allBoards.filter((b) => b.favorite).length;
-  const liveCount = allBoards.filter((b) => liveIds.has(b.id)).length;
+  const liveCount = allBoards.filter((b) => liveById.has(b.id)).length;
   const viewBoards =
     activeView === 'favorites'
       ? allBoards.filter((board) => board.favorite)
@@ -500,12 +521,12 @@ export function Home() {
   // each bucket (a day range, or a first letter by name) is one contiguous run.
   const startOfToday = new Date().setHours(0, 0, 0, 0);
   const groups: { label: string; boards: BoardMeta[] }[] = [];
-  const liveBoards = filteredBoards.filter((b) => liveIds.has(b.id));
+  const liveBoards = filteredBoards.filter((b) => liveById.has(b.id));
   if (liveBoards.length > 0) {
     groups.push({ label: LIVE_GROUP, boards: liveBoards });
   }
   for (const board of filteredBoards) {
-    if (liveIds.has(board.id)) continue;
+    if (liveById.has(board.id)) continue;
     const label =
       sortMode === 'name'
         ? letterGroup(board.name)
@@ -572,6 +593,7 @@ export function Home() {
       if (settled) return;
       settled = true;
       pendingCommits.current.delete(commit);
+      if (undoDelete.current === undo) undoDelete.current = null;
       void (async () => {
         try {
           for (const id of ids) await boardRepository.delete(id);
@@ -584,22 +606,23 @@ export function Home() {
         }
       })();
     };
+    const undo = () => {
+      if (settled) return;
+      settled = true;
+      pendingCommits.current.delete(commit);
+      undoDelete.current = null;
+      hide(false);
+      toast.close(toastId);
+    };
     pendingCommits.current.add(commit);
+    undoDelete.current = undo;
 
     const toastId = toast.add({
       title,
       timeout: UNDO_MS,
       onClose: commit,
-      actionProps: {
-        children: 'Undo',
-        onClick: () => {
-          if (settled) return;
-          settled = true;
-          pendingCommits.current.delete(commit);
-          hide(false);
-          toast.close(toastId);
-        },
-      },
+      data: { countdown: true },
+      actionProps: { children: 'Undo', onClick: undo },
     });
   };
 
@@ -636,12 +659,18 @@ export function Home() {
         | (BoardMeta & { error?: string })
         | null;
       if (!res.ok || !body) {
-        toast.add({ title: body?.error ?? 'Could not import that file' });
+        toast.add({
+          title: body?.error ?? 'Could not import that file',
+          type: 'error',
+        });
         return;
       }
       navigate(boardHref(body.id));
     } catch {
-      toast.add({ title: 'Could not import — you appear to be offline' });
+      toast.add({
+        title: 'Could not import — you appear to be offline',
+        type: 'error',
+      });
     }
   };
 
@@ -720,7 +749,8 @@ export function Home() {
   const renderCard = (board: BoardMeta, group: string) => {
     const selected = selectedBoardIds.has(board.id);
     const favorite = board.favorite === true;
-    const live = liveIds.has(board.id);
+    const live = liveById.has(board.id);
+    const afk = liveById.get(board.id)?.afk ?? [];
     const shownAt = sortTime(board, sortMode);
     const { primary, secondary } = splitName(board.name);
     const stamp = stampInGroup(shownAt, group);
@@ -781,6 +811,13 @@ export function Home() {
             <span aria-hidden="true" className="d-pulse size-1.5 rounded-full bg-current" />
             Live
           </Lozenge>
+        ) : null}
+        {afk.length > 0 ? (
+          <span title={afkTitle(afk)} className="shrink-0">
+            <Lozenge tone="warning" label={afkTitle(afk)}>
+              {afk.length === 1 ? `AFK ${afk[0]!.idleMinutes}m` : `${afk.length} AFK`}
+            </Lozenge>
+          </span>
         ) : null}
         {favorite ? (
           <Star
@@ -1054,7 +1091,7 @@ export function Home() {
   const plural = (n: number, one: string, many: string) =>
     `${n.toLocaleString()} ${n === 1 ? one : many}`;
   const liveNames = allBoards
-    .filter((b) => liveIds.has(b.id))
+    .filter((b) => liveById.has(b.id))
     .map((b) => splitName(b.name).primary);
   const summary = loading
     ? ' '

@@ -30,6 +30,34 @@ export function playPenSound(active: boolean): void {
 }
 
 /**
+ * A held stroke settling into its clean shape: the same knock as the pen, far
+ * lighter and higher, so it reads as the nib clicking into place rather than
+ * as the pen being picked up.
+ */
+export function playSnapSound(): void {
+  withAudio((context) => {
+    const volume = soundVolume();
+    const now = context.currentTime + 0.004;
+    knock(context, now, 420, 260, 0.03, 0.09, 0.05 * volume);
+    contact(context, now, 2600, 0.012, 0.03 * volume);
+  });
+}
+
+/**
+ * An erase landing: the snap's knock, dropped low and given more breath, so it
+ * reads as rubber lifting off paper rather than a nib clicking home. Only for a
+ * swipe that actually took something.
+ */
+export function playEraseSound(): void {
+  withAudio((context) => {
+    const volume = soundVolume();
+    const now = context.currentTime + 0.004;
+    knock(context, now, 210, 118, 0.05, 0.13, 0.04 * volume);
+    contact(context, now, 1300, 0.045, 0.03 * volume);
+  });
+}
+
+/**
  * The body: a sine whose pitch collapses through the first tenth of a second.
  * A pitch that never settles is what separates a struck object from a note —
  * it is the whole reason this doesn't sound like a chime.

@@ -67,4 +67,28 @@ export const env = {
   /** Speech-to-text for dictating a description. Accepts webm and mp4 as-is. */
   openRouterSttModel:
     process.env.OPENROUTER_STT_MODEL ?? 'openai/whisper-large-v3-turbo',
+  /**
+   * Text-to-image for generated stickers. Recraft's flash tier is $0.007 per
+   * image, the cheapest flat-priced listing on OpenRouter (checked
+   * 2026-10-23), and illustration is what it is tuned for.
+   */
+  openRouterImageModel:
+    process.env.OPENROUTER_IMAGE_MODEL ?? 'recraft/recraft-v4.1-flash',
+  /**
+   * The board agent: picks and chains tool calls from an instruction. Sonnet
+   * over the cheaper DeepSeek text model because a wrong tool call is a wrong
+   * edit on a live lesson board.
+   */
+  openRouterAgentModel:
+    process.env.OPENROUTER_AGENT_MODEL ?? 'anthropic/claude-sonnet-5.5',
+  /**
+   * The work checker: reads a page of working and finds the mistakes.
+   * Measured 2026-10-25 on seven tagged pages (three runs each): Haiku 5.5 got
+   * all right at ~2 s median and $0.0002; `typesafe/jev-router` also got all
+   * right but took ~4–5 s (it routes to Gemini 3.8 Flash, whose thinking can't
+   * be switched off through the router) and once hung for 200 s; Gemini 3.5
+   * Flash-Lite was ~1 s but misjudged a log and an integration-by-parts page.
+   */
+  openRouterCheckModel:
+    process.env.OPENROUTER_CHECK_MODEL ?? 'anthropic/claude-haiku-5.5',
 } as const;

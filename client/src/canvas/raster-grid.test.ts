@@ -64,7 +64,14 @@ describe('raster geometry', () => {
 
 describe('background wallpaper', () => {
   it('wraps arbitrarily long pans to a single period', () => {
-    const raster = { zoom: 1, band: 1, period: 32, level: 'dot-4', ratio: 2 };
+    const raster = {
+      zoom: 1,
+      band: 1,
+      period: 32,
+      periodY: 32,
+      level: 'dot-4',
+      ratio: 2,
+    };
     const values = (x: number, y: number) =>
       backgroundRasterTransform(raster, { x, y, z: 1.1 })
         .match(/-?\d+(?:\.\d+)?(?=px)/g)!

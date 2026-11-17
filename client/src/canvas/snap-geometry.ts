@@ -9,7 +9,7 @@ import type { PointSnapTarget } from './snapping';
 import { arrowPoints, curvePoints } from './shapes/line-geometry';
 import {
   CLOUD_BUMP_SAMPLES,
-  normalizedPolygonPoints,
+  polygonVerticesForBox,
 } from './shapes/polygon-geometry';
 import { shapeRegistry } from './shapes/shape-registry';
 
@@ -104,10 +104,15 @@ function polygonTarget(
     y: shape.y + shape.props.h / 2,
   };
   const outline = rotate(
-    normalizedPolygonPoints(shape.props.kind).map((point) => ({
-      x: shape.x + point.x * shape.props.w,
-      y: shape.y + point.y * shape.props.h,
-    })),
+    polygonVerticesForBox(
+      shape.props.kind,
+      shape.x,
+      shape.y,
+      shape.props.w,
+      shape.props.h,
+      shape.id,
+      shape.props.size,
+    ),
     center,
     shape.rotation,
   );

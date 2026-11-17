@@ -2,7 +2,10 @@ import { useRef } from 'react';
 import type { EquationShape } from '@whiteboard/shared';
 import { centeredMove } from '@/canvas/shapes/equation';
 import { editor } from '@/canvas/use-document-store';
+import { useCanvasUiStore } from '@/canvas/use-canvas-ui-store';
 import { paletteColors } from '@/canvas/use-style-store';
+import { Input } from '@/components/ui/input';
+import { Toggle } from '@/components/ui/toggle';
 import {
   Tooltip,
   TooltipContent,
@@ -58,6 +61,7 @@ export function EquationStyleControls({
 }) {
   const inline = shape.props.inline ?? false;
   const theme = useThemeStore((state) => state.theme);
+  const autoNumber = useCanvasUiStore((state) => state.autoNumberEquations);
   const swatchRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   // Always include the equation's own color: a shape can carry a value the
@@ -216,6 +220,40 @@ export function EquationStyleControls({
             </Tooltip>
           ))}
         </ChoiceGroup>
+      </div>
+
+      <div className="flex items-center gap-2">
+        <Input
+          type="text"
+          autoComplete="off"
+          spellCheck={false}
+          maxLength={24}
+          aria-label="Equation number or name"
+          placeholder="Number or name"
+          value={shape.props.tag ?? ''}
+          onChange={(event) =>
+            editor.updateShape(shape.id, {
+              props: { tag: event.target.value },
+            })
+          }
+        />
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Toggle
+                size="sm"
+                className="text-fg-secondary aria-pressed:bg-tb-sel-bg aria-pressed:text-tb-sel-fg aria-pressed:hover:bg-tb-sel-bg-hover"
+                pressed={autoNumber}
+                onPressedChange={(pressed) =>
+                  useCanvasUiStore.getState().setAutoNumberEquations(pressed)
+                }
+              />
+            }
+          >
+            Auto
+          </TooltipTrigger>
+          <TooltipContent side="top">Number new equations</TooltipContent>
+        </Tooltip>
       </div>
     </div>
   );

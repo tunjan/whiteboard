@@ -131,10 +131,10 @@ export function ShapeTray({
     event.stopPropagation();
     const index = TRAY_SHAPES.findIndex((shape) => shape.id === current);
     pick((index + delta + TRAY_SHAPES.length) % TRAY_SHAPES.length);
+    // React clears `currentTarget` once the handler returns.
+    const group = event.currentTarget;
     requestAnimationFrame(() =>
-      event.currentTarget
-        ?.querySelector<HTMLElement>('[aria-checked="true"]')
-        ?.focus(),
+      group.querySelector<HTMLElement>('[aria-checked="true"]')?.focus(),
     );
   };
   return (

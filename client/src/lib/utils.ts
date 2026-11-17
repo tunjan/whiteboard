@@ -19,7 +19,7 @@ import { extendTailwindMerge } from "tailwind-merge"
 const twMerge = extendTailwindMerge({
   extend: {
     theme: {
-      radius: ["panel"],
+      radius: ["panel", "control"],
       shadow: ["e0", "e1", "e2", "e3", "e4", "e5", "control", "panel", "overlay", "hover", "floating"],
     },
   },
@@ -32,4 +32,14 @@ export function cn(...inputs: ClassValue[]) {
 /** Darkened border for a color swatch, so a light swatch still reads against a light panel. */
 export function swatchBorder(color: string) {
   return `color-mix(in srgb, ${color} 75%, #000)`
+}
+
+/**
+ * A file name that fits one line, cut from the middle: the end of a name is
+ * where its version and extension live, and those are what tell two files apart.
+ */
+export function shortFileName(name: string, max = 32) {
+  if (name.length <= max) return name
+  const tail = Math.min(name.length - name.lastIndexOf('.') + 4, 12)
+  return `${name.slice(0, max - tail - 1)}…${name.slice(-tail)}`
 }

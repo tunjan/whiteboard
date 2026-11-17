@@ -35,4 +35,37 @@ describe('CentiPixelPathWriter', () => {
     expect(result.length).toBeGreaterThan(SVG_PATH_BUFFER_SIZE);
     expect(result.endsWith(' l 1 -1')).toBe(true);
   });
+
+  it('keeps reflected t controls on target however long the chain', () => {
+    // Controls a quadratic B-spline wants, in unrounded hundredths.
+    const controls = Array.from({ length: 4000 }, (_, k) => ({
+      x: k * 71.23 + 0.37,
+      y: Math.sin(k * 0.05) * 4000 + k * 0.37,
+    }));
+    const writer = new CentiPixelPathWriter();
+    writer.reset();
+    writer.moveTo(0, 0);
+    const first = controls[0]!;
+    writer.quadraticTo(Math.round(first.x), Math.round(first.y), 0, 0);
+    // Replay the renderer: each `t` reflects the previous control about the
+    // current point.
+    let cx = Math.round(first.x);
+    let cy = Math.round(first.y);
+    let px = 0;
+    let py = 0;
+    let worst = 0;
+    for (let k = 1; k < controls.length; k++) {
+      const next = controls[k]!;
+      const reflectedX = 2 * px - cx;
+      const reflectedY = 2 * py - cy;
+      writer.smoothToward(next.x, next.y);
+      px = Math.round((reflectedX + next.x) / 2);
+      py = Math.round((reflectedY + next.y) / 2);
+      cx = reflectedX;
+      cy = reflectedY;
+      worst = Math.max(worst, Math.hypot(2 * px - cx - next.x, 2 * py - cy - next.y));
+    }
+    // One hundredth, plus the half-unit rounding of the coordinates themselves.
+    expect(worst).toBeLessThanOrEqual(Math.SQRT2);
+  });
 });

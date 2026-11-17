@@ -159,7 +159,7 @@ function Review() {
           value={background}
           onChange={(e) => setBackground(e.target.value as BackgroundType)}
         >
-          {['dot', 'graph', 'coordinate', 'blank'].map((type) => (
+          {['dot', 'graph', 'coordinate', 'isometric', 'triangle', 'blank'].map((type) => (
             <option key={type}>{type}</option>
           ))}
         </select>

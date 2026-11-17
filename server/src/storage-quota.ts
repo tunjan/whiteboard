@@ -24,7 +24,14 @@ export async function reserveStorage(bytes: number): Promise<void> {
     dirBytes(resolve(env.blobDir)),
     dirBytes(resolve(env.docDir)),
   ]).then(([a, b]) => a + b);
-  const total = await used;
-  if (total + bytes > env.uploadQuotaBytes) throw new StorageFullError();
-  used = Promise.resolve(total + bytes);
+  // Chained, not read-then-written: two concurrent callers awaiting the same
+  // total would each write `total + bytes` and lose one reservation.
+  const prior = used;
+  const next = prior.then((total) => {
+    if (total + bytes > env.uploadQuotaBytes) throw new StorageFullError();
+    return total + bytes;
+  });
+  // A refused reservation leaves the total where it was for the next caller.
+  used = next.catch(() => prior);
+  await next;
 }

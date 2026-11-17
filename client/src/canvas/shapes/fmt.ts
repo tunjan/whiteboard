@@ -30,12 +30,22 @@ export class CentiPixelPathWriter {
   private length = 0;
   private currentX = 0;
   private currentY = 0;
+  /** The control point of the last segment as a renderer will reflect it. */
+  private controlX = 0;
+  private controlY = 0;
 
   reset(estimatedBytes = 0): void {
     this.ensure(estimatedBytes);
     this.length = 0;
     this.currentX = 0;
     this.currentY = 0;
+    this.controlX = 0;
+    this.controlY = 0;
+  }
+
+  private settle(x: number, y: number): void {
+    this.currentX = this.controlX = x;
+    this.currentY = this.controlY = y;
   }
 
   private ensure(required: number): void {
@@ -103,15 +113,13 @@ export class CentiPixelPathWriter {
     if (this.length > 0) this.writeByte(32);
     this.writeLiteral('M ');
     this.writePair(x, y);
-    this.currentX = x;
-    this.currentY = y;
+    this.settle(x, y);
   }
 
   lineTo(targetX: number, targetY: number): void {
     this.writeLiteral(' l ');
     this.writePair(targetX - this.currentX, targetY - this.currentY);
-    this.currentX = targetX;
-    this.currentY = targetY;
+    this.settle(targetX, targetY);
   }
 
   quadraticTo(
@@ -126,6 +134,8 @@ export class CentiPixelPathWriter {
     this.writePair(targetX - this.currentX, targetY - this.currentY);
     this.currentX = targetX;
     this.currentY = targetY;
+    this.controlX = controlX;
+    this.controlY = controlY;
   }
 
   cubicTo(
@@ -142,15 +152,34 @@ export class CentiPixelPathWriter {
     this.writePair(control2X - this.currentX, control2Y - this.currentY);
     this.writeByte(32);
     this.writePair(targetX - this.currentX, targetY - this.currentY);
-    this.currentX = targetX;
-    this.currentY = targetY;
+    this.settle(targetX, targetY);
   }
 
   smoothTo(targetX: number, targetY: number): void {
     this.writeLiteral(' t ');
     this.writePair(targetX - this.currentX, targetY - this.currentY);
+    this.controlX = 2 * this.currentX - this.controlX;
+    this.controlY = 2 * this.currentY - this.controlY;
     this.currentX = targetX;
     this.currentY = targetY;
+  }
+
+  /**
+   * `t` onto the midpoint between the control this segment reflects and the
+   * one the next segment should have, given in unrounded hundredths.
+   *
+   * A `t` has no control of its own: the renderer reflects the previous one
+   * about the start point. Rounding each midpoint on its own let that
+   * reflection walk — measured at half a world unit by a 600-sample stroke —
+   * because every rounding error is mirrored into all the controls after it.
+   * Choosing the midpoint against the control actually in force keeps every
+   * control within one hundredth of where it was meant to be.
+   */
+  smoothToward(nextControlX: number, nextControlY: number): void {
+    this.smoothTo(
+      Math.round((2 * this.currentX - this.controlX + nextControlX) / 2),
+      Math.round((2 * this.currentY - this.controlY + nextControlY) / 2),
+    );
   }
 
   /** Clockwise half-circle used by the ink outline's round caps. */
@@ -179,8 +208,7 @@ export class CentiPixelPathWriter {
     this.writeByte(sweep ? 49 : 48);
     this.writeByte(32);
     this.writePair(targetX - this.currentX, targetY - this.currentY);
-    this.currentX = targetX;
-    this.currentY = targetY;
+    this.settle(targetX, targetY);
   }
 
   close(): void {

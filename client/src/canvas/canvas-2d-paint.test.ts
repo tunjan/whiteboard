@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import type { Shape } from '@whiteboard/shared';
 import {
   buildPaint,
+  fillOp,
   lodDash,
+  paintCompiled,
   CANVAS_PAINTED_TYPES,
   DOM_SHAPE_TYPES,
   type PaintEnv,
@@ -353,5 +355,47 @@ describe('the LOD dash rule', () => {
     expect(lodDash('solid', 1, { patternCutoff: 4, detail: 'high' })).toBe(
       'solid',
     );
+  });
+});
+
+describe('hatch fills', () => {
+  // The SVG reference is a 7-unit `<pattern>` whose 1-wide line sits on the
+  // tile's edge, so the tile clips it to its inner half: 0.5 wide, lying on
+  // [7k, 7k + 0.5] of the pattern's rotated axes.
+  it('paints the line weight the SVG pattern shows', () => {
+    const strokes: { width: number; moves: [number, number][] }[] = [];
+    let moves: [number, number][] = [];
+    const ctx = {
+      lineWidth: 1,
+      save: () => undefined,
+      restore: () => undefined,
+      clip: () => undefined,
+      rotate: () => undefined,
+      setLineDash: () => undefined,
+      beginPath: () => void (moves = []),
+      moveTo: (x: number, y: number) => void moves.push([x, y]),
+      lineTo: () => undefined,
+      stroke: () => void strokes.push({ width: ctx.lineWidth, moves }),
+    };
+    const op = fillOp('M0 0', '#111111', 'crosshatch', 30, 20)!;
+    paintCompiled(
+      ctx as unknown as CanvasRenderingContext2D,
+      [{ op, path: {} as Path2D }],
+      1,
+      { zoom: 1, image: () => null },
+    );
+
+    expect(strokes).toHaveLength(1);
+    expect(strokes[0]!.width).toBe(0.5);
+    const moved = strokes[0]!.moves;
+    // Each line starts on the far edge of the area it sweeps.
+    const top = Math.min(...moved.map(([, y]) => y));
+    const left = Math.min(...moved.map(([x]) => x));
+    const vertical = moved.filter(([, y]) => y === top);
+    const horizontal = moved.filter(([x]) => x === left);
+    for (const [x] of vertical) expect(((x % 7) + 7) % 7).toBeCloseTo(0.25);
+    for (const [, y] of horizontal) expect(((y % 7) + 7) % 7).toBeCloseTo(0.25);
+    expect(vertical.length).toBeGreaterThan(0);
+    expect(horizontal.length).toBeGreaterThan(0);
   });
 });

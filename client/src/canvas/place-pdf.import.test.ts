@@ -52,7 +52,9 @@ vi.mock('@/components/ui/toast', () => ({
       h.toasts.push(options);
       return 'toast-id';
     },
-    update: () => {},
+    update: (_id: string, options: { type?: string; description?: unknown }) => {
+      h.toasts.push(options);
+    },
     close: () => {},
   },
 }));

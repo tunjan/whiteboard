@@ -1,0 +1,1 @@
+ALTER TABLE "boards" ADD COLUMN "agent_help" text DEFAULT 'full' NOT NULL;

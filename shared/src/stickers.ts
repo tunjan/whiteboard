@@ -34,6 +34,14 @@ export const CUSTOM_STICKER_MAX_PX = 512;
 /** Labels are a tooltip, not a filename — long ones are truncated to this. */
 export const MAX_STICKER_LABEL_LENGTH = 40;
 
+/** Longest description accepted by `POST /api/ai/sticker`. */
+export const MAX_STICKER_PROMPT_CHARS = 200;
+
+export interface StickerImageResponse {
+  /** PNG, JPEG or WebP data URL of the generated artwork, backdrop and all. */
+  image: string;
+}
+
 /** A filename turned into a sticker label: drop the extension, tidy separators. */
 export function stickerLabelFromFilename(filename: string): string {
   const dot = filename.lastIndexOf('.');

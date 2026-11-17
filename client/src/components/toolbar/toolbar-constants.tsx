@@ -1,5 +1,9 @@
 import type { PolygonKind } from '@whiteboard/shared';
+import { isDarwin } from '@/canvas/platform';
 import { polygonPointsForBox } from '@/canvas/shapes/polygon-geometry';
+
+/** The toolbar's show-and-hide chord, as the platform writes it. */
+export const HIDE_KEYS = isDarwin() ? '⌘.' : 'Ctrl+.';
 
 export const POLYGON_KINDS: { kind: PolygonKind; label: string }[] = [
   { kind: 'triangle', label: 'Triangle' },

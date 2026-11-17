@@ -38,6 +38,11 @@ describe('Rust graph evaluator', () => {
     'y = floor(x) + ceil(x) + round(x)',
     'y = min(x, 2) + max(x, -1)',
     'y = mod(x, 3) + mod(x, -2) + mod(x, 0)',
+    // NaN in either argument: mathjs returns NaN, `f64::max` the other one.
+    'y = max(ln(x), -3)',
+    'y = max(-3, ln(x))',
+    'y = min(sqrt(x), 2)',
+    'y = round(x / 0.1) + mod(x, 0.1)',
     'y = log_2(x) + log_(10) x',
     'y = -x^2 + 2^-x + x^3/7 + (-2)^x',
     'y = a*x^2 + b*x + c',
@@ -46,14 +51,14 @@ describe('Rust graph evaluator', () => {
     'sin(x*y) = cos(x) + a*y',
   ])('matches mathjs for %s', (source) => {
     const { rust, mathjs } = bothPaths(source, { a: param(0.7), b: param(-2) });
-    for (let i = -20; i <= 20; i += 1) {
-      const x = i / 2 + 0.013;
-      const y = i / 3 - 0.007;
+    const check = (x: number, y: number) => {
       const expected = mathjs(x, y);
       const actual = rust(x, y);
       if (Number.isNaN(expected)) expect(actual).toBeNaN();
       else expect(actual).toBeCloseTo(expected, 9);
-    }
+    };
+    for (let i = -20; i <= 20; i += 1) check(i / 2 + 0.013, i / 3 - 0.007);
+    for (const x of [0.3, -0.3, 0.7, -0.7]) check(x, x);
   });
 
   it('compiles what it supports and declines the rest', () => {

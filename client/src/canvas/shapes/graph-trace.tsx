@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import type { GraphViewport } from '@whiteboard/shared';
-import { formatIntersectionLabel } from '../graph-intersections';
 import { screenToGraph, type PlotArea } from './graph-interaction';
 
 type Point = { x: number; y: number };
@@ -51,14 +50,18 @@ export function nearestOnCurves(
   return best;
 }
 
-const LABEL_STYLE = {
-  fontSize: 13,
-  fontWeight: 600 as const,
+/** A coordinate on the plot: a step above the axis numbers, below the curves. */
+export const POINT_LABEL_STYLE = {
+  fontSize: 11,
+  fontWeight: 500 as const,
   fill: 'var(--color-foreground)',
   stroke: 'var(--color-panel)',
-  strokeWidth: 3.5,
+  strokeWidth: 2.5,
   paintOrder: 'stroke' as const,
+  style: { fontVariantNumeric: 'tabular-nums' },
 };
+
+type Hover = { point: Point; color: string; quiet?: boolean };
 
 /**
  * A dot and its coordinates where the pointer hovers near a curve.
@@ -71,18 +74,26 @@ export function GraphTrace({
   curves,
   viewport,
   area,
+  axisLines,
+  format,
+  marks,
 }: {
   /** The graph's group: the pointer is read in its coordinates. */
   target: RefObject<SVGGElement | null>;
   curves: readonly TraceCurve[];
+  /** In plot space, as the curves were sampled. */
   viewport: GraphViewport;
   area: PlotArea;
+  /** Where the axes are drawn: the x axis at `x`'s height, the y axis at `y`. */
+  axisLines: { x: number; y: number };
+  /** A plot-space point as it should read. */
+  format: (point: Point) => string;
+  /** Marked points, which the trace snaps to. `labelled` ones show their own text. */
+  marks: readonly (Point & { labelled: boolean })[];
 }) {
-  const [hover, setHover] = useState<{ point: Point; color: string } | null>(
-    null,
-  );
-  const latest = useRef({ curves, area });
-  latest.current = { curves, area };
+  const [hover, setHover] = useState<Hover | null>(null);
+  const latest = useRef({ curves, area, marks });
+  latest.current = { curves, area, marks };
 
   useEffect(() => {
     const el = target.current;
@@ -98,14 +109,24 @@ export function GraphTrace({
       const local = new DOMPoint(event.clientX, event.clientY).matrixTransform(
         matrix.inverse(),
       );
-      const { curves, area } = latest.current;
+      const { curves, area, marks } = latest.current;
       const inPlot =
         local.x >= area.x &&
         local.x <= area.x + area.w &&
         local.y >= area.y &&
         local.y <= area.y + area.h;
       const zoom = Math.hypot(matrix.a, matrix.b) || 1;
-      setHover(inPlot ? nearestOnCurves(curves, local, TRACE_REACH_PX / zoom) : null);
+      const reach = TRACE_REACH_PX / zoom;
+      const mark = marks.find(
+        (m) => Math.hypot(m.x - local.x, m.y - local.y) <= reach,
+      );
+      setHover(
+        !inPlot
+          ? null
+          : mark
+            ? { point: mark, color: 'var(--color-foreground)', quiet: mark.labelled }
+            : nearestOnCurves(curves, local, reach),
+      );
     };
     const onLeave = () => setHover(null);
     el.addEventListener('pointermove', onMove);
@@ -117,13 +138,23 @@ export function GraphTrace({
   }, [target]);
 
   if (!hover) return null;
-  const { point, color } = hover;
+  const { point, color, quiet } = hover;
   const value = screenToGraph(point, viewport, area);
   // Above and to the right, unless that runs off the plot.
   const right = point.x < area.x + area.w - 110;
   const above = point.y > area.y + 24;
+  // Drop lines to both axes, so the coordinates can be read off them too.
+  const guide = {
+    stroke: color,
+    strokeOpacity: 0.45,
+    strokeWidth: 1,
+    strokeDasharray: '2 3',
+    vectorEffect: 'non-scaling-stroke' as const,
+  };
   return (
     <g pointerEvents="none">
+      <line x1={point.x} y1={point.y} x2={point.x} y2={axisLines.x} {...guide} />
+      <line x1={point.x} y1={point.y} x2={axisLines.y} y2={point.y} {...guide} />
       <circle
         cx={point.x}
         cy={point.y}
@@ -132,14 +163,16 @@ export function GraphTrace({
         stroke="var(--color-panel)"
         strokeWidth={1.75}
       />
-      <text
-        x={point.x + (right ? 9 : -9)}
-        y={point.y + (above ? -9 : 19)}
-        textAnchor={right ? 'start' : 'end'}
-        {...LABEL_STYLE}
-      >
-        {formatIntersectionLabel(value)}
-      </text>
+      {quiet ? null : (
+        <text
+          x={point.x + (right ? 9 : -9)}
+          y={point.y + (above ? -9 : 19)}
+          textAnchor={right ? 'start' : 'end'}
+          {...POINT_LABEL_STYLE}
+        >
+          {format(value)}
+        </text>
+      )}
     </g>
   );
 }

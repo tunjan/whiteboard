@@ -1,13 +1,16 @@
 import type { BoardDocumentMeta } from '@whiteboard/shared';
 import { useDocumentsStore } from '@/canvas/use-documents-store';
 import { toast } from '@/components/ui/toast';
+import { shortFileName } from '@/lib/utils';
 
 /**
  * Announces files peers add to the board's repository, and tracks which of
  * them this user has yet to open.
  *
  * Two signals, two jobs:
- *   - A toast, once, for a file that lands while the user is on the board.
+ *   - A toast, once, for a file that lands while the user is on the board with
+ *     the panel shut. One toast per uploader, so a folder dropped in counts up
+ *     rather than stacking, and it goes as soon as the panel opens.
  *   - A dot on the Documents button and on the file's row, which persists
  *     across reloads until the user actually opens that file.
  *
@@ -18,10 +21,8 @@ import { toast } from '@/components/ui/toast';
  * this watch started, which trusts the uploader's clock — the same trust the
  * panel already places in it when it sorts and dates the list. A badly skewed
  * peer clock can therefore misfile one arrival as backlog or vice versa; the
- * toast limit keeps the second case to a stack of three rather than a wall.
+ * per-uploader toast keeps the second case to one toast rather than a wall.
  */
-
-const TOAST_TIMEOUT_MS = 6_000;
 
 const seenStorageKey = (boardId: string) =>
   `whiteboard:documents-seen:${boardId}`;
@@ -38,6 +39,8 @@ interface Watch {
   seen: Set<string>;
   /** Ids already toasted this session, so a re-publish can't announce twice. */
   announced: Set<string>;
+  /** Files in each uploader's open toast. */
+  shared: Map<string, number>;
   /** Last value written to storage, to skip no-op writes. */
   persisted: string;
 }
@@ -71,12 +74,23 @@ function persistSeen(documents: Record<string, BoardDocumentMeta>): void {
   localStorage.setItem(seenStorageKey(watch.boardId), next);
 }
 
+const sharedToastId = (uploader: string) => `shared-files:${uploader}`;
+
 function announce(meta: BoardDocumentMeta): void {
+  if (!watch) return;
+  const { shared } = watch;
+  const uploader = meta.uploadedBy || 'Someone';
+  const count = (shared.get(uploader) ?? 0) + 1;
+  shared.set(uploader, count);
   toast.add({
-    title: `${meta.uploadedBy || 'Someone'} shared a file`,
-    description: meta.name,
+    id: sharedToastId(uploader),
+    title:
+      count === 1
+        ? `${uploader} shared a file`
+        : `${uploader} shared ${count} files`,
+    description: count === 1 ? shortFileName(meta.name) : undefined,
     type: 'info',
-    timeout: TOAST_TIMEOUT_MS,
+    onClose: () => shared.delete(uploader),
     actionProps: {
       children: 'View',
       onClick: () => useDocumentsStore.getState().setPanelOpen(true),
@@ -104,7 +118,8 @@ function sync(documents: Record<string, BoardDocumentMeta>): void {
     // for it would be stale by the time they read it.
     if (!isHistory && !watch.announced.has(meta.id)) {
       watch.announced.add(meta.id);
-      announce(meta);
+      // An open panel already shows it, arriving with its dot.
+      if (!useDocumentsStore.getState().panelOpen) announce(meta);
     }
   }
 
@@ -151,11 +166,17 @@ export function startDocumentNotifications(boardId: string): () => void {
     firstVisit: stored === null,
     seen: stored ?? new Set(),
     announced: new Set(),
+    shared: new Map(),
     persisted: '',
   };
 
   const unsubscribe = useDocumentsStore.subscribe((state, previous) => {
     if (state.documents !== previous.documents) sync(state.documents);
+    if (state.panelOpen && !previous.panelOpen && watch) {
+      for (const uploader of watch.shared.keys()) {
+        toast.close(sharedToastId(uploader));
+      }
+    }
   });
   sync(useDocumentsStore.getState().documents);
 

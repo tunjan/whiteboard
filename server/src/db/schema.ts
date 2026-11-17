@@ -3,6 +3,7 @@ import {
   bigserial,
   boolean,
   customType,
+  doublePrecision,
   index,
   integer,
   jsonb,
@@ -49,6 +50,8 @@ export const boards = pgTable('boards', {
     .default(sql`replace(gen_random_uuid()::text, '-', '')`),
   // What that link grants: 'edit', 'view' or 'off' (see boards/access.ts).
   shareMode: text('share_mode').notNull().default('edit'),
+  // What "Ask the board" does for students: 'full', 'hints' or 'off'.
+  agentHelp: text('agent_help').notNull().default('full'),
 });
 
 /**
@@ -176,4 +179,59 @@ export const boardSessions = pgTable(
   (table) => [
     index('board_sessions_board_idx').on(table.boardId, table.startedAt),
   ],
+);
+
+/**
+ * The tutor's model choice per AI job (`AiJob` in @whiteboard/shared). A job
+ * with no row runs on its `env.ts` default, so an empty table is the old
+ * behaviour exactly.
+ */
+export const aiModels = pgTable('ai_models', {
+  job: text('job').primaryKey(),
+  model: text('model').notNull(),
+});
+
+/**
+ * One row per OpenRouter request, with what it cost — the bill broken down by
+ * board and model for the analytics page. `boardId` is the `X-Board-Id` the
+ * request was authorised against; null only for a request that carried none.
+ */
+export const aiUsage = pgTable(
+  'ai_usage',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    boardId: text('board_id'),
+    job: text('job').notNull(),
+    model: text('model').notNull(),
+    // USD as OpenRouter reported it in `usage.cost`; 0 when it reported none.
+    cost: doublePrecision('cost').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [index('ai_usage_created_idx').on(table.createdAt)],
+);
+
+/**
+ * What students asked the board agent, for the tutor: one row per answered
+ * instruction from an edit-link client (the tutor's own are not kept). `name`
+ * and `color` are what that client published, as in `boardSessions` — a
+ * label, not a credential.
+ */
+export const agentAsks = pgTable(
+  'agent_asks',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    boardId: text('board_id').notNull(),
+    name: text('name').notNull().default(''),
+    color: text('color'),
+    instruction: text('instruction').notNull(),
+    // 'done' | 'reply' | 'nothing' — `AgentAsk['kind']`.
+    kind: text('kind').notNull(),
+    result: text('result').notNull().default(''),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [index('agent_asks_board_idx').on(table.boardId, table.createdAt)],
 );

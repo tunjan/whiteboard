@@ -15,6 +15,22 @@ function clamp(n: number, min: number, max: number): number {
 }
 
 /**
+ * Lowest y in `layer` a panel may reach: the top of the canvas toolbar when it
+ * is docked along the bottom, else the layer's own bottom edge. The toolbar
+ * floats in the same layer, so without this a tall panel runs underneath it.
+ */
+function bottomEdge(layer: HTMLElement): number {
+  const viewH = layer.clientHeight;
+  const toolbar = layer.querySelector<HTMLElement>(
+    '[data-canvas-toolbar][data-placement="bottom"]',
+  );
+  if (!toolbar) return viewH;
+  const top =
+    toolbar.getBoundingClientRect().top - layer.getBoundingClientRect().top;
+  return Math.min(viewH, top);
+}
+
+/**
  * Docks `ref` to a shape's on-screen box, so a panel reads as part of that
  * shape rather than as floating chrome.
  *
@@ -56,7 +72,7 @@ export function useShapeAnchor(
       );
 
       const viewW = layer.clientWidth;
-      const viewH = layer.clientHeight;
+      const viewBottom = bottomEdge(layer);
       // Measured, not assumed: the panel grows with every curve and slider, and
       // both the flip and the clamp below depend on its real size.
       const panelW = element.offsetWidth;
@@ -78,14 +94,14 @@ export function useShapeAnchor(
       const y = clamp(
         topLeft.y,
         MARGIN,
-        Math.max(MARGIN, viewH - MARGIN - panelH),
+        Math.max(MARGIN, viewBottom - MARGIN - panelH),
       );
 
       element.dataset.anchorSide = side;
       element.style.translate = `${Math.round(x)}px ${Math.round(y)}px`;
       element.style.setProperty(
         '--anchor-max-h',
-        `${Math.max(0, viewH - MARGIN * 2)}px`,
+        `${Math.max(0, viewBottom - MARGIN * 2)}px`,
       );
     };
 

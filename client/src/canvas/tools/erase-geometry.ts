@@ -11,7 +11,7 @@ import {
   segmentToSegmentDistance,
 } from '@whiteboard/shared';
 import { curvePoints } from '../shapes/line-geometry';
-import { normalizedPolygonPoints } from '../shapes/polygon-geometry';
+import { polygonVerticesForBox } from '../shapes/polygon-geometry';
 import type { ShapeUtil } from '../shapes/types';
 
 // Collision math for the swipe eraser. The eraser tests the *segment* between
@@ -93,15 +93,6 @@ function insideEllipse(p: Point, b: Bounds): boolean {
   return nx * nx + ny * ny <= 1;
 }
 
-function polygonCorners(b: Bounds, kind: Parameters<typeof normalizedPolygonPoints>[0]): Point[] {
-  const w = b.maxX - b.minX;
-  const h = b.maxY - b.minY;
-  return normalizedPolygonPoints(kind).map((v) => ({
-    x: b.minX + v.x * w,
-    y: b.minY + v.y * h,
-  }));
-}
-
 /** Un-rotate a point into a shape's upright local frame around `center`. */
 function toLocal(p: Point, center: Point, rotation: number): Point {
   return rotation ? rotatePoint(p, center, -rotation) : p;
@@ -168,7 +159,15 @@ export function segmentErasesShape(
         return filled && (insideEllipse(la, box) || insideEllipse(lb, box));
       }
       if (shape.type === 'polygon') {
-        const corners = polygonCorners(box, shape.props.kind);
+        const corners = polygonVerticesForBox(
+          shape.props.kind,
+          box.minX,
+          box.minY,
+          box.maxX - box.minX,
+          box.maxY - box.minY,
+          shape.id,
+          shape.props.size,
+        );
         if (segPolylineDistance(la, lb, corners, true) <= r) return true;
         return filled && (pointInPolygon(la, corners) || pointInPolygon(lb, corners));
       }

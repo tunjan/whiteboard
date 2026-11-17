@@ -20,8 +20,15 @@ describe('nextHighLatencyEpisode', () => {
     });
   });
 
+  it('rides out a link hovering at the threshold', () => {
+    expect(nextHighLatencyEpisode(true, 900)).toEqual({
+      active: true,
+      shouldNotify: false,
+    });
+  });
+
   it('re-arms after latency recovers', () => {
-    const recovered = nextHighLatencyEpisode(true, 1_000);
+    const recovered = nextHighLatencyEpisode(true, 700);
     expect(recovered).toEqual({ active: false, shouldNotify: false });
     expect(nextHighLatencyEpisode(recovered.active, 1_200)).toEqual({
       active: true,

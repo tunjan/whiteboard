@@ -12,7 +12,7 @@ import { shapeRegistry } from './shapes/shape-registry';
 import { useCameraStore } from './use-camera-store';
 import { editor } from './use-document-store';
 import { useSelectionStore } from './use-selection-store';
-import { nextShapeStyle } from './use-style-store';
+import { slotStyle } from './use-style-store';
 import { useToolStore } from './use-tool-store';
 
 /** A preset part before ids and z-order: geometry around the origin. */
@@ -104,7 +104,8 @@ export function placePreset(parts: Part[]): void {
     { x: window.innerWidth / 2, y: window.innerHeight / 2 },
     useCameraStore.getState().camera,
   );
-  const style = nextShapeStyle();
+  // Placed from a menu, with whatever tool in hand: a table is always a diagram.
+  const style = slotStyle('diagram');
   const groupId = genId();
   let index = '';
 

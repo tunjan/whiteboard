@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { Check, Copy, Link2, RotateCw, Share2, UserX } from 'lucide-react';
-import type { BoardShare, ShareMode } from '@whiteboard/shared';
+import type { AgentHelp, BoardShare, ShareMode } from '@whiteboard/shared';
 import {
   boardKey,
   fetchBoardShare,
   removeStudent,
   resetShareLink,
+  setAgentHelp,
   setShareMode,
   useBoardAccessStore,
 } from '@/board/board-access';
@@ -57,6 +58,20 @@ const MODE_DESCRIPTIONS: Record<ShareMode, string> = {
   edit: 'Anyone with the link can view and edit.',
   view: 'Anyone with the link can view.',
   off: 'The link is off. Only you can open this board.',
+};
+
+// What "Ask the board" does for whoever is on the link. Each label says the
+// whole of it, so the row needs no heading.
+const HELP_LABELS: Record<AgentHelp, string> = {
+  full: 'Full AI help',
+  hints: 'AI hints only',
+  off: 'No AI',
+};
+
+const HELP_DESCRIPTIONS: Record<AgentHelp, string> = {
+  full: 'Ask the board answers students fully.',
+  hints: 'Ask the board gives students hints, never worked answers.',
+  off: 'Ask the board is off for students.',
 };
 
 /**
@@ -187,6 +202,30 @@ export function ShareButton({ isTutor }: { isTutor: boolean }) {
             {(Object.keys(MODE_LABELS) as ShareMode[]).map((m) => (
               <ToggleGroupItem key={m} value={m} className="grow basis-0 text-xs">
                 {MODE_LABELS[m]}
+              </ToggleGroupItem>
+            ))}
+          </ToggleGroup>
+        ) : null}
+        {/* A link that can't edit can't ask the board either. */}
+        {isTutor && boardId && share && mode === 'edit' ? (
+          <ToggleGroup
+            className="w-full"
+            aria-label="What Ask the board does for students"
+            value={[share.agentHelp]}
+            onValueChange={(values) =>
+              values[0] &&
+              values[0] !== share.agentHelp &&
+              update(setAgentHelp(boardId, values[0] as AgentHelp))
+            }
+          >
+            {(Object.keys(HELP_LABELS) as AgentHelp[]).map((h) => (
+              <ToggleGroupItem
+                key={h}
+                value={h}
+                title={HELP_DESCRIPTIONS[h]}
+                className="grow basis-0 text-xs"
+              >
+                {HELP_LABELS[h]}
               </ToggleGroupItem>
             ))}
           </ToggleGroup>

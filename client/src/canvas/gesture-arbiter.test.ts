@@ -242,6 +242,19 @@ describe('a mouse', () => {
     expect(pan.onPointerUp).toHaveBeenCalledTimes(1);
   });
 
+  it('ends a pan whose capture the OS took away', () => {
+    down({ button: 1 });
+    arbiter.onLostPointerCapture(event({ button: 1 }));
+    expect(pan.cancel).toHaveBeenCalledTimes(1);
+
+    // The capture loss that trails an ordinary release ends nothing twice.
+    down({ button: 1 });
+    up({ button: 1 });
+    arbiter.onLostPointerCapture(event({ button: 1 }));
+    expect(pan.cancel).toHaveBeenCalledTimes(1);
+    expect(pan.onPointerUp).toHaveBeenCalledTimes(1);
+  });
+
   it('pans while Space is held', () => {
     pan.isSpaceDown = true;
     down();
@@ -331,6 +344,40 @@ describe('a finger', () => {
 
     expect(useCameraStore.getState().camera.z).toBeGreaterThan(1);
     expect(doc.undo).not.toHaveBeenCalled();
+  });
+
+  it.each(['draw', 'pan'] as const)(
+    'keeps pinching when the first finger loses the capture the second took (%s)',
+    (fingerAction) => {
+      useCanvasUiStore.setState({ fingerAction });
+      // As `useSpacePan` does: a finger pan holds the capture too.
+      pan.beginPan.mockImplementation((e: ReactPointerEvent) =>
+        e.currentTarget.setPointerCapture(e.pointerId),
+      );
+      down(finger(1, 300));
+      down(finger(2, 500));
+      // A browser answers the arbiter's own release with this; the finger is
+      // still on the glass.
+      arbiter.onLostPointerCapture(event(finger(1, 300, 8)));
+      move(finger(1, 200, 16));
+      move(finger(2, 600, 32));
+      move(finger(1, 100, 48));
+      move(finger(2, 700, 64));
+      up(finger(1, 100, 80));
+
+      expect(useCameraStore.getState().camera.z).toBeGreaterThan(1);
+    },
+  );
+
+  it('reads a three-finger tap as redo when a finger shifts between lifts', () => {
+    down(finger(1, 100, 1000));
+    down(finger(2, 300, 1010));
+    down(finger(3, 500, 1020));
+    up(finger(1, 100, 1100));
+    move(finger(2, 301, 1105));
+    up(finger(2, 301, 1110));
+    up(finger(3, 500, 1120));
+    expect(doc.redo).toHaveBeenCalledTimes(1);
   });
 
   it('reads a two-finger tap as undo and three as redo', () => {
@@ -523,6 +570,24 @@ describe('Quick Zoom', () => {
     up({ x: 300, y: 200 });
     expect(frames.at(-1)).toBeNull();
     expect(captured.size).toBe(0);
+  });
+
+  it('frames rather than zooms after a one-finger zoom was cut short', () => {
+    useToolStore.setState({ activeToolId: 'select' });
+    down(finger(1, 100, 0));
+    up(finger(1, 100, 50));
+    down(finger(1, 100, 150));
+    down(finger(2, 300, 200));
+    up(finger(1, 100, 250));
+    up(finger(2, 300, 260));
+
+    arbiter.quickZoomArmed = true;
+    down({ id: 7, x: 400, y: 300 });
+    const z = useCameraStore.getState().camera.z;
+    frames.length = 0;
+    move({ id: 7, x: 400, y: 400 });
+    expect(frames).toHaveLength(1);
+    expect(useCameraStore.getState().camera.z).toBe(z);
   });
 });
 

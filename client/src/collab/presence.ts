@@ -10,7 +10,6 @@ import {
 import type { Camera } from '@/canvas/camera';
 import {
   ERASER_TRAIL_OPACITY,
-  ERASER_TRAIL_SHRINK,
   type EraserScribble,
 } from '@/canvas/use-eraser-trail-store';
 import type { LaserStroke } from '@/canvas/use-laser-store';
@@ -99,6 +98,7 @@ const SELECTION_THROTTLE_MS = 60;
 // animation frame rate. Peers interpolate nothing here, but
 // the trail is a momentary decoration and the trailing flush still lands its end.
 const ERASER_SCRIBBLES_THROTTLE_MS = 60;
+const MAX_SCRIBBLE_POINTS = 16;
 const ERASING_THROTTLE_MS = 60;
 
 // Previous peer objects keyed by clientId. Awareness fires `change` on any
@@ -458,7 +458,6 @@ function receiveEphemeral(message: EphemeralMessage): void {
         color: 'muted-1',
         size: scribble.size,
         opacity: ERASER_TRAIL_OPACITY,
-        shrink: ERASER_TRAIL_SHRINK,
         taper: true,
       })),
     );
@@ -559,6 +558,16 @@ export function setLocalSelection(ids: string[]): void {
   }, SELECTION_THROTTLE_MS - elapsed);
 }
 
+/** An even spread of samples, both ends kept; the peer rounds the curve again. */
+function thinScribblePoints<T>(points: T[]): T[] {
+  if (points.length <= MAX_SCRIBBLE_POINTS) return points;
+  const step = (points.length - 1) / (MAX_SCRIBBLE_POINTS - 1);
+  return Array.from(
+    { length: MAX_SCRIBBLE_POINTS },
+    (_, i) => points[Math.round(i * step)]!,
+  );
+}
+
 function sendEraserScribbles(): void {
   if (!awareness || !channel) return;
   lastEraserScribblesSent = performance.now();
@@ -568,7 +577,7 @@ function sendEraserScribbles(): void {
       kind: 'scribbles',
       scribbles: localEraserScribbles.map((scribble) => ({
         id: scribble.id,
-        points: scribble.points.flatMap((p) => [
+        points: thinScribblePoints(scribble.points).flatMap((p) => [
           round(p.x),
           round(p.y),
           round(p.pressure ?? 0.5),

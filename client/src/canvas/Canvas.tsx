@@ -46,6 +46,7 @@ import {
 import { useShallow } from 'zustand/react/shallow';
 import { usePresenceStore } from '@/collab/use-presence-store';
 import { VanishLayer } from './VanishLayer';
+import { ConversionLayer } from './ConversionLayer';
 import { HoverLayer } from './HoverLayer';
 import { SelectionLayer } from './SelectionLayer';
 import { SelectionToolbar } from './SelectionToolbar';
@@ -647,7 +648,9 @@ export function Canvas() {
 
   const toolCursor = toolRegistry.get(activeToolId)?.cursor ?? 'default';
   const gestureCursor = useSelectionStore((state) => state.gestureCursor);
-  const showDrawingCursor = activeToolId === 'draw' && !pan.isSpaceDown;
+  const showDrawingCursor =
+    (activeToolId === 'draw' || activeToolId === 'highlighter') &&
+    !pan.isSpaceDown;
   const showLaserCursor = activeToolId === 'laser' && !pan.isSpaceDown;
   const showEraserCursor = activeToolId === 'eraser' && !pan.isSpaceDown;
   const cursor =
@@ -729,6 +732,8 @@ export function Canvas() {
 
       {/* Mounts only while something is fading out after a delete. */}
       <VanishLayer />
+      {/* Mounts only while handwriting is being read, or compared. */}
+      <ConversionLayer />
 
       <CameraMovingBlocker />
 
@@ -750,7 +755,15 @@ export function Canvas() {
           height={quickZoomFrame.height}
         />
       )}
-      {showDrawingCursor && <DrawingCursor containerRef={containerRef} />}
+      {showDrawingCursor && (
+        <DrawingCursor
+          // Remounted per tool so the footprint never eases from one
+          // instrument's size to the other's.
+          key={activeToolId}
+          containerRef={containerRef}
+          ink={activeToolId === 'draw' ? 'pencil' : 'marker'}
+        />
+      )}
       {showLaserCursor && <LaserCursor containerRef={containerRef} />}
       {showEraserCursor && <EraserCursor containerRef={containerRef} />}
 

@@ -30,7 +30,10 @@ describe('BoardLoadingVeil', () => {
     expect(html).toContain('role="status"');
     expect(html).toContain('Syncing board');
     expect(html).toContain('Algebra');
-    expect(html).not.toContain('pointer-events-none');
+    // The sheet's own class: the pencil cursor inside it is click-through.
+    expect(html.match(/^<div[^>]*class="([^"]*)"/)?.[1]).not.toContain(
+      'pointer-events-none',
+    );
   });
 
   it('lets the board through once it is ready', () => {
@@ -40,13 +43,21 @@ describe('BoardLoadingVeil', () => {
     expect(html).toContain('opacity-0');
   });
 
-  it('paints all three passes when ready', () => {
+  it('finishes the underline when ready', () => {
     const html = render({ ready: true, stage: 'ready' });
-    expect(html.match(/stroke-dashoffset:0;/g)).toHaveLength(3);
+    expect(html.match(/stroke-dashoffset:0;/g)).toHaveLength(1);
   });
 
-  it('holds every pass empty until the figure is shown', () => {
+  it('holds the underline empty until the figure is shown', () => {
     const html = render({ ready: false, stage: 'page' });
-    expect(html.match(/stroke-dashoffset:1;/g)).toHaveLength(3);
+    expect(html.match(/stroke-dashoffset:1;/g)).toHaveLength(1);
+  });
+
+  it('gives each board its own underline, and the same one every time', () => {
+    const algebra = render({ ready: true, stage: 'ready' }, 'Algebra');
+    expect(render({ ready: true, stage: 'ready' }, 'Algebra')).toBe(algebra);
+    expect(render({ ready: true, stage: 'ready' }, 'Geometry')).not.toBe(
+      algebra.replace('Algebra', 'Geometry'),
+    );
   });
 });

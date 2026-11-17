@@ -8,6 +8,8 @@
  * row carries both the practice-level facts and the people behind them.
  */
 
+import type { AgentAsk } from './ai-agent';
+
 /** One visit to a board: a person's reconnects within a sitting, joined up. */
 export interface AnalyticsVisit {
   name: string;
@@ -28,6 +30,10 @@ export interface AnalyticsVisit {
    * past a five-minute grace while no tutor was on the board.
    */
   afkMinutes: number;
+  /** Those stretches, as [startMs, endMs], for drawing on the visit. */
+  afkSpans: [number, number][];
+  /** The stretches `aloneMinutes` counts, drawn the same way. */
+  aloneSpans: [number, number][];
 }
 
 /** One person who joined a board, identified by the name they published. */
@@ -41,6 +47,8 @@ export interface AnalyticsJoiner {
   drawings: number;
   /** Of `minutes`, how many had no tutor on the board. */
   aloneMinutes: number;
+  /** AFK minutes, on top of `minutes`. */
+  afkMinutes: number;
   lastSeenAt: number;
 }
 
@@ -60,6 +68,8 @@ export interface AnalyticsBoard {
   tutorMinutes: number;
   /** Student minutes with no tutor on the board. */
   aloneMinutes: number;
+  /** Student minutes AFK, on top of `studentMinutes`. */
+  afkMinutes: number;
   /** Student joins in range. */
   sessions: number;
   /** Distinct UTC days in range with at least one student join. */
@@ -75,6 +85,11 @@ export interface AnalyticsBoard {
   /** Every visit that started in range, tutor's included, oldest first. */
   visits: AnalyticsVisit[];
   joiners: AnalyticsJoiner[];
+  /** AI requests made on behalf of this board in range, and their USD cost. */
+  aiRequests: number;
+  aiCost: number;
+  /** What students asked the board agent in range, newest first (capped). */
+  agentAsks: AgentAsk[];
 }
 
 export interface AnalyticsSummary {
@@ -86,6 +101,7 @@ export interface AnalyticsSummary {
     studentMinutes: number;
     tutorMinutes: number;
     aloneMinutes: number;
+    afkMinutes: number;
     sessions: number;
     /** Boards with at least one student join in range. */
     activeBoards: number;
@@ -96,6 +112,16 @@ export interface AnalyticsSummary {
     drawings: number;
   };
   boards: AnalyticsBoard[];
+  ai: { requests: number; cost: number; byModel: AnalyticsAiModel[] };
+}
+
+/**
+ * A board with a student on it right now (`GET /api/boards/live`). `afk` is who
+ * has gone idle with no tutor on the board, by the rule `afkMinutes` counts.
+ */
+export interface LiveBoard {
+  id: string;
+  afk: { name: string; idleMinutes: number }[];
 }
 
 /**
@@ -107,4 +133,13 @@ export type AnalyticsRange = (typeof ANALYTICS_RANGES)[number];
 
 export function isAnalyticsRange(value: number): value is AnalyticsRange {
   return (ANALYTICS_RANGES as readonly number[]).includes(value);
+}
+
+/** AI spend in range for one model on one job. */
+export interface AnalyticsAiModel {
+  job: string;
+  model: string;
+  requests: number;
+  /** USD, as OpenRouter billed it. */
+  cost: number;
 }

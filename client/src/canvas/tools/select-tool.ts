@@ -50,7 +50,8 @@ import {
 } from '../shapes/connector-routing';
 import { FLAT_SPAN } from '../shapes/line-geometry';
 import { textIndexAtWorldPoint } from '../shapes/text';
-import { layoutTextProps, MIN_TEXT_WIDTH } from '../shapes/text-measure';
+import { MIN_TEXT_WIDTH } from '../shapes/text-measure';
+import { textBoxSize } from '../shapes/text-rich';
 import type { ShapeUtil } from '../shapes/types';
 import { selfSnapTarget, shapeSnapGeometry } from '../snap-geometry';
 import {
@@ -105,6 +106,12 @@ interface GroupItem {
   quarterTurns: number | null;
   /** See {@link resizedPropsPatch}. */
   touchedProps: Set<string>;
+  /**
+   * A frame's descendants that are not items themselves, at their gesture-start
+   * page positions: they keep their offset from the frame's moving origin, as
+   * in a single-frame resize. Null for anything but a frame.
+   */
+  frameChildren: Map<string, { x: number; y: number }> | null;
 }
 
 /**
@@ -575,12 +582,29 @@ function computeResize(
   };
 }
 
-/** `bounds` re-centred on `center`, keeping the larger half-extent it grew to.
- *  A centre-anchored resize is snapped by its dragged edge like any other, and
- *  this puts the box back around the point it was told to hold. */
-function recenteredBounds(bounds: Bounds, center: Point): Bounds {
-  const hw = Math.max(bounds.maxX - center.x, center.x - bounds.minX);
-  const hh = Math.max(bounds.maxY - center.y, center.y - bounds.minY);
+/** `bounds` re-centred on `center`, keeping the half-extent of the edge
+ *  `handle` drags (the larger one on an axis it leaves alone). A centre-anchored
+ *  resize is snapped by its dragged edge like any other, and this puts the box
+ *  back around the point it was told to hold — inward snaps included. */
+function recenteredBounds(
+  bounds: Bounds,
+  center: Point,
+  handle: ResizeHandleId,
+): Bounds {
+  const east = bounds.maxX - center.x;
+  const west = center.x - bounds.minX;
+  const south = bounds.maxY - center.y;
+  const north = center.y - bounds.minY;
+  const hw = handle.includes('e')
+    ? east
+    : handle.includes('w')
+      ? west
+      : Math.max(east, west);
+  const hh = handle.includes('s')
+    ? south
+    : handle.includes('n')
+      ? north
+      : Math.max(south, north);
   return {
     minX: center.x - hw,
     maxX: center.x + hw,
@@ -658,7 +682,11 @@ function rotationItems(
 ): RotationItem[] {
   const items: RotationItem[] = [];
   const explicit = new Set(selectionInfo.ids);
-  for (const id of moveTargetIds(shapes, selectionInfo.ids)) {
+  // As for a move: a locked container is not expanded into what it carries.
+  const unlocked = selectionInfo.ids.filter(
+    (id) => !editor.getShape(id)?.locked,
+  );
+  for (const id of moveTargetIds(shapes, unlocked)) {
     const initial = editor.getShape(id);
     if (
       !initial ||
@@ -780,7 +808,12 @@ export function createSelectTool(): Tool {
     const shapes = editor.getShapes();
     const selectedIds = useSelectionStore.getState().selectedIds;
     const rootIds = selectionRoots(editor, selectedIds);
-    const ids = moveTargetIds(shapes, selectedIds);
+    // A locked selection is not expanded, so a locked frame or group keeps
+    // what it carries in place along with itself.
+    const ids = moveTargetIds(
+      shapes,
+      selectedIds.filter((id) => !editor.getShape(id)?.locked),
+    );
     const initial = new Map<string, { x: number; y: number }>();
     let bounds0: Bounds | null = null;
     for (const id of ids) {
@@ -1077,6 +1110,7 @@ export function createSelectTool(): Tool {
     useSelectionStore.getState().setMarquee(null);
     useSelectionStore.getState().setSnapGuides([]);
     useSelectionStore.getState().setGestureCursor(null);
+    useSelectionStore.getState().setTransforming(null);
   }
 
   // Finish the gesture, keeping its result. The live drag already wrote the
@@ -1113,6 +1147,7 @@ export function createSelectTool(): Tool {
     }
     clearTransientState();
     state = { type: 'idle' };
+    lastMove = null;
   }
 
   /**
@@ -1145,6 +1180,8 @@ export function createSelectTool(): Tool {
 
     onPointerDown(info: ToolPointerInfo, ctx: ToolContext) {
       if (info.button !== 0) return;
+      // Until this gesture moves, a modifier has no pointer of its own to replay.
+      lastMove = null;
       const zoom = useCameraStore.getState().camera.z;
       const selection = useSelectionStore.getState();
       const shapes = ctx.editor.getShapes();
@@ -1281,8 +1318,18 @@ export function createSelectTool(): Tool {
                     selectionInfo.rotation,
                   ),
                   touchedProps: new Set(),
+                  frameChildren: null,
                 });
               }
+            }
+            const itemIds = new Set(items.map((item) => item.initial.id));
+            for (const item of items) {
+              if (item.initial.type !== 'frame') continue;
+              item.frameChildren = new Map(
+                descendantsOf(shapes, item.initial.id)
+                  .filter((child) => !itemIds.has(child.id))
+                  .map((child) => [child.id, { x: child.x, y: child.y }]),
+              );
             }
             if (items.length) {
               const movingIds = new Set(
@@ -1425,6 +1472,7 @@ export function createSelectTool(): Tool {
             ctx.editor,
           );
           state = move;
+          useSelectionStore.getState().setTransforming('move');
           applyMove(move, info, ctx);
           return;
         }
@@ -1436,6 +1484,7 @@ export function createSelectTool(): Tool {
             ctx.editor,
           );
           state = move;
+          useSelectionStore.getState().setTransforming('move');
           applyMove(move, info, ctx);
           return;
         }
@@ -1455,6 +1504,7 @@ export function createSelectTool(): Tool {
           applyMove(state, info, ctx);
           return;
         case 'resize': {
+          useSelectionStore.getState().setTransforming('resize');
           const lockAspect = resizeLocksAspect(
             state.initial,
             state.handle,
@@ -1506,7 +1556,12 @@ export function createSelectTool(): Tool {
           }
           // The snapper moves the dragged edge alone, which would walk a
           // centre-anchored box off the point it was told to hold.
-          if (fromCenter) bounds = recenteredBounds(bounds, resolved.anchor);
+          if (fromCenter)
+            bounds = recenteredBounds(
+              bounds,
+              resolved.anchor,
+              flippedHandle(state.handle, resolved.flipX, resolved.flipY),
+            );
           if (
             state.initial.type === 'text' &&
             (state.handle === 'e' || state.handle === 'w')
@@ -1516,7 +1571,7 @@ export function createSelectTool(): Tool {
               sizingMode: 'fixed' as const,
               width: Math.max(MIN_TEXT_WIDTH, bounds.maxX - bounds.minX),
             };
-            const nextLayout = layoutTextProps(props);
+            const nextLayout = textBoxSize(props);
             const targetCenterY = (bounds.minY + bounds.maxY) / 2;
             ctx.editor.updateShape(state.initial.id, {
               x: bounds.minX,
@@ -1583,6 +1638,7 @@ export function createSelectTool(): Tool {
           return;
         }
         case 'group-resize': {
+          useSelectionStore.getState().setTransforming('resize');
           // Work in the selection's own frame: an oriented box scales along the
           // axes it is drawn on, not the page's.
           const aligned = rotateAboutOrigin(info.point, -state.rotation);
@@ -1634,7 +1690,11 @@ export function createSelectTool(): Tool {
               w0 / (h0 || 1),
             );
             box = fromCenter
-              ? recenteredBounds(snapped.bounds, anchor)
+              ? recenteredBounds(
+                  snapped.bounds,
+                  anchor,
+                  flippedHandle(state.handle, flipX, flipY),
+                )
               : snapped.bounds;
             // Back to signed factors: the snap moved an edge, and the sign is
             // the flip the drag had already reached.
@@ -1705,6 +1765,12 @@ export function createSelectTool(): Tool {
                   item.touchedProps,
                 ),
               });
+              for (const [id, initial] of item.frameChildren ?? []) {
+                ctx.editor.updateShape(id, {
+                  x: initial.x + resized.x - item.initial.x,
+                  y: initial.y + resized.y - item.initial.y,
+                });
+              }
             }
           });
           return;
@@ -1771,6 +1837,7 @@ export function createSelectTool(): Tool {
           return;
         }
         case 'rotate': {
+          useSelectionStore.getState().setTransforming('rotate');
           applyRotation(
             state,
             info.point,
@@ -1846,6 +1913,7 @@ export function createSelectTool(): Tool {
     onCancel(ctx: ToolContext) {
       const cancelled = state;
       state = { type: 'idle' };
+      lastMove = null;
       clearTransientState();
       // `touched` limits the props put back to the ones the gesture wrote, so
       // cancelling does not revert an edit made to the rest meanwhile.
@@ -1894,8 +1962,12 @@ export function createSelectTool(): Tool {
           });
           return;
         case 'group-resize':
-          for (const item of cancelled.items)
+          for (const item of cancelled.items) {
             restore(item.initial, item.touchedProps);
+            for (const [id, initial] of item.frameChildren ?? []) {
+              ctx.editor.updateShape(id, { x: initial.x, y: initial.y });
+            }
+          }
           return;
         case 'marquee':
           useSelectionStore.getState().setSelection(cancelled.selectionBefore);
@@ -1947,19 +2019,35 @@ export function createSelectTool(): Tool {
           selected?.type === 'text' &&
           (selected.props.sizingMode === 'fixed' || selected.props.width > 0)
         ) {
-          const before = layoutTextProps(selected.props);
+          const before = textBoxSize(selected.props);
           const props = {
             ...selected.props,
             sizingMode: 'auto' as const,
             width: 0,
           };
-          const after = layoutTextProps(props);
+          const after = textBoxSize(props);
+          const x =
+            handle === 'e'
+              ? selected.x
+              : selected.x + before.width - after.width;
+          const y = selected.y + (before.height - after.height) / 2;
+          // The box turns about its own centre, which the new size moves.
+          const bounds = anchoredBounds(
+            { minX: x, minY: y, maxX: x + after.width, maxY: y + after.height },
+            {
+              x: handle === 'e' ? selected.x : selected.x + before.width,
+              y: selected.y + before.height / 2,
+            },
+            {
+              x: selected.x + before.width / 2,
+              y: selected.y + before.height / 2,
+            },
+            selected.rotation,
+            selected.rotation,
+          );
           ctx.editor.updateShape(selected.id, {
-            x:
-              handle === 'e'
-                ? selected.x
-                : selected.x + before.width - after.width,
-            y: selected.y + (before.height - after.height) / 2,
+            x: bounds.minX,
+            y: bounds.minY,
             props,
           });
           return;

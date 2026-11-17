@@ -18,7 +18,7 @@ import {
   tangentAnchor,
 } from './shapes/line-geometry';
 import { maxInkRadius } from './shapes/ink';
-import { normalizedPolygonPoints } from './shapes/polygon-geometry';
+import { polygonVerticesForBox } from './shapes/polygon-geometry';
 import { shapeRegistry } from './shapes/shape-registry';
 import type { ShapeHandle } from './shapes/types';
 
@@ -702,10 +702,15 @@ function marqueeGeometry(shape: Shape): MarqueeGeometry | null {
         : { kind: 'region', outline };
     }
     case 'polygon': {
-      const local = normalizedPolygonPoints(shape.props.kind).map((p) => ({
-        x: shape.x + p.x * shape.props.w,
-        y: shape.y + p.y * shape.props.h,
-      }));
+      const local = polygonVerticesForBox(
+        shape.props.kind,
+        shape.x,
+        shape.y,
+        shape.props.w,
+        shape.props.h,
+        shape.id,
+        shape.props.size,
+      );
       const outline = rotateOutline(shape, local, {
         x: shape.x + shape.props.w / 2,
         y: shape.y + shape.props.h / 2,

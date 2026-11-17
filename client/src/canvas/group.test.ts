@@ -248,6 +248,18 @@ describe('deleteShapesWithCleanup', () => {
     expect(editor.getShape(gid)).toBeDefined();
     expect(parentOf(editor, 'a')).toBe(gid);
   });
+
+  it('takes the whole subtree of a deleted container', () => {
+    const editor = makeEditor([
+      { id: 'frame', type: 'frame' },
+      { id: 'g', type: 'group', parentId: 'frame' },
+      { id: 'a', parentId: 'g' },
+      { id: 'b', parentId: 'g' },
+      { id: 'c' },
+    ]);
+    deleteShapesWithCleanup(editor, ['frame']);
+    expect(order(editor)).toEqual(['c']);
+  });
 });
 
 describe('duplicateShapes', () => {

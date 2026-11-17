@@ -26,7 +26,7 @@ import { useDocumentStore } from '@/canvas/use-document-store';
 import { useShapesById } from '@/canvas/use-shapes';
 import { cursorEdgeIndicator } from '@/collab/cursor-edge';
 import { CursorInterpolator } from '@/collab/cursor-interpolation';
-import { outlineColor } from '@/collab/identity';
+import { outlineColor, textOnColor } from '@/collab/identity';
 import { jumpToPeerViewport } from '@/collab/presence';
 import {
   type PeerPresence,
@@ -108,10 +108,9 @@ function OffscreenCursorIndicator({
         </svg>
       </span>
       <span
-        // Same chrome as the on-canvas name tag below, so the two ways a peer
-        // can appear belong to one system — except for the hairline, which
-        // carries the identity colour at full strength so the marker stays
-        // scannable from across the board without flooding the disc.
+        // Surface chrome with a hairline in the identity colour at full
+        // strength, so the marker stays scannable from across the board
+        // without flooding the disc.
         className="absolute inset-0 flex items-center justify-center rounded-full border bg-surface/95 text-2xs font-medium leading-none text-fg shadow-e2 transition-colors duration-instant group-hover:bg-surface-hover"
         style={{ borderColor: color }}
       >
@@ -286,16 +285,18 @@ function PeerCursor({
       )}
       <span
         className={cn(
-          'absolute left-3 flex h-6 max-w-40 items-center gap-1.5 rounded-lg border border-border bg-surface/95 px-2 text-2xs font-medium leading-none text-fg shadow-e2',
-          above ? 'bottom-3' : 'top-3',
+          'absolute left-3 flex h-6 max-w-40 items-center rounded-lg border px-2 text-2xs font-medium shadow-e2',
+          // The corner nearest the pointer stays tight, so the tag hangs off it.
+          above ? 'bottom-3 rounded-bl-sm' : 'top-3 rounded-tl-sm',
         )}
+        style={{
+          backgroundColor: peer.color,
+          borderColor: outlineColor(peer.color),
+          color: textOnColor(peer.color),
+        }}
       >
-        <span
-          aria-hidden="true"
-          className="size-1.5 shrink-0 rounded-full"
-          style={{ backgroundColor: peer.color }}
-        />
-        <span className="truncate">{peer.name}</span>
+        {/* A full line box: `truncate` clips, and a tight one cut descenders. */}
+        <span className="truncate leading-normal">{peer.name}</span>
       </span>
     </div>
   );

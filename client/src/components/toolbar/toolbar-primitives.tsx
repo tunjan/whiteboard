@@ -30,6 +30,27 @@ export function useToolbarSide() {
   return useContext(ToolbarSideContext);
 }
 
+// The last input that was not Escape: Escape closes a menu whichever way it was
+// opened, so it says nothing about how the user is working.
+let usingKeyboard = false;
+if (typeof window !== 'undefined') {
+  window.addEventListener('pointerdown', () => (usingKeyboard = false), true);
+  window.addEventListener(
+    'keydown',
+    (event) => {
+      if (event.key !== 'Escape') usingKeyboard = true;
+    },
+    true,
+  );
+}
+
+/**
+ * A popup's `finalFocus`: focus goes back to its trigger only for someone
+ * working by keyboard. After a pointer, a key left focused would light its
+ * ring at the next hotkey.
+ */
+export const refocusForKeyboard = () => usingKeyboard;
+
 /** A key's tooltip: its name, then its hotkey. */
 export function KeyTip({
   label,

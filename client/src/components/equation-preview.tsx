@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { Check, Copy, Plus } from 'lucide-react';
+import { Check, Copy, PenLine, Plus } from 'lucide-react';
 import type { EquationShape } from '@whiteboard/shared';
 import type { EquationRender } from '@/canvas/equation-render';
 import { wrapMathLatex } from '@/canvas/equation-source';
+import { setPeeking, useConversionStore } from '@/canvas/use-conversion-store';
 import { Button } from '@/components/ui/button';
 import {
   Tooltip,
@@ -99,6 +100,14 @@ export function EquationPreview({
   const copiedTimer = useRef<number | null>(null);
   const [copied, setCopied] = useState(false);
   const overflowing = useOverflowing(() => previewRef.current, currentKey);
+  // Present only for an equation that replaced handwriting this session.
+  const hasOriginal = useConversionStore(
+    (s) => s.original?.equationId === shape.id,
+  );
+  const peeking = useConversionStore((s) => s.peeking);
+  // The control can unmount mid-hold (selection moves on): never leave the
+  // handwriting stuck over the board.
+  useEffect(() => () => setPeeking(false), []);
 
   useEffect(
     () => () => {
@@ -129,6 +138,41 @@ export function EquationPreview({
       className="relative shrink-0 border-b border-border bg-panel"
     >
       <div className="absolute top-1 right-1 z-10 flex gap-0.5">
+          {hasOriginal ? (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label="Compare with handwriting"
+                    aria-pressed={peeking}
+                    // Held, not toggled: letting go is the way back, so it can
+                    // never be left on by accident. Pointer capture keeps the
+                    // hold alive if the cursor drifts off the key.
+                    onPointerDown={(event) => {
+                      event.currentTarget.setPointerCapture(event.pointerId);
+                      setPeeking(true);
+                    }}
+                    onPointerUp={() => setPeeking(false)}
+                    onPointerCancel={() => setPeeking(false)}
+                    onKeyDown={(event) => {
+                      if (event.key === ' ' || event.key === 'Enter') {
+                        event.preventDefault();
+                        setPeeking(true);
+                      }
+                    }}
+                    onKeyUp={() => setPeeking(false)}
+                    onBlur={() => setPeeking(false)}
+                    className="aria-pressed:bg-tb-track"
+                  />
+                }
+              >
+                <PenLine className="size-4" aria-hidden="true" />
+              </TooltipTrigger>
+              <TooltipContent side="top">Hold to compare with handwriting</TooltipContent>
+            </Tooltip>
+          ) : null}
           <Tooltip>
             <TooltipTrigger
               render={

@@ -97,11 +97,32 @@ export function subscribeToTextMetrics(listener: () => void): () => void {
   return () => metricsListeners.delete(listener);
 }
 
+let metricsEpoch = 0;
+
+/** Bumped on every invalidation, so caches built on these metrics elsewhere
+ *  (`text-rich`) can tell they are stale. */
+export function textMetricsEpoch(): number {
+  return metricsEpoch;
+}
+
 /** Drop every cached advance width and notify subscribers. */
 export function invalidateTextMetrics(): void {
+  metricsEpoch++;
   if (widthCache.size === 0 && metricsListeners.size === 0) return;
   widthCache.clear();
   for (const listener of metricsListeners) listener();
+}
+
+let invalidationQueued = false;
+
+/** {@link invalidateTextMetrics} once per frame, however many callers ask. */
+export function scheduleTextMetricsInvalidation(): void {
+  if (invalidationQueued) return;
+  invalidationQueued = true;
+  requestAnimationFrame(() => {
+    invalidationQueued = false;
+    invalidateTextMetrics();
+  });
 }
 
 let fontWatchStarted = false;
@@ -128,18 +149,20 @@ export function measureTextWidth(
   fontSize: number,
   family?: FontFamily,
   weight?: FontWeight,
+  italic = false,
 ): number {
   if (!text) return 0;
   // Weight belongs in the key: a bolder face advances wider, so sharing an
   // entry across weights would wrap and position carets against stale metrics.
-  const key = `${family ?? 'sans'}|${fontWeight(weight)}|${fontSize}|${text}`;
+  // Italic likewise, prefixed so the upright keys stay as they were.
+  const key = `${italic ? 'i|' : ''}${family ?? 'sans'}|${fontWeight(weight)}|${fontSize}|${text}`;
   const cached = widthCache.get(key);
   if (cached !== undefined) return cached;
 
   const c = getCtx();
   let width: number;
   if (c) {
-    c.font = `${fontWeight(weight)} ${fontSize}px ${fontStack(family)}`;
+    c.font = `${italic ? 'italic ' : ''}${fontWeight(weight)} ${fontSize}px ${fontStack(family)}`;
     width = c.measureText(text).width;
   } else {
     width = fallbackWidth(text, fontSize);
@@ -288,7 +311,11 @@ function wrapParagraph(
   return lines;
 }
 
-function fontMetrics(fontSize: number, family: FontFamily, weight: FontWeight) {
+export function fontMetrics(
+  fontSize: number,
+  family: FontFamily,
+  weight: FontWeight,
+): { ascent: number; descent: number } {
   const c = getCtx();
   if (c) {
     c.font = `${weight} ${fontSize}px ${fontStack(family)}`;

@@ -2,11 +2,14 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
   allSwatches,
   defaultStyle,
+  inCurrentTheme,
   migrateStyle,
   nextShapeStyle,
   PALETTE,
   rampColors,
   SIZE_OPTIONS,
+  slotStyle,
+  styleSlot,
   useStyleStore,
 } from './use-style-store';
 import { useToolStore } from './use-tool-store';
@@ -59,7 +62,7 @@ describe('stroke size scale', () => {
   });
 });
 
-describe('one style for every tool', () => {
+describe('a style per group of tools', () => {
   beforeEach(() => {
     useToolStore.setState({ activeToolId: 'select' });
     useStyleStore.setState({ ...defaultStyle(), slot: 'pen', slots: {} });
@@ -96,6 +99,81 @@ describe('one style for every tool', () => {
     expect(nextShapeStyle().color).toBe('#1d1d1d');
     setTool('highlighter');
     expect(nextShapeStyle().color).toBe('#e03131');
+  });
+
+  // The surprises that split exists to end: nothing set on one group reaches
+  // another, whichever of the five settings it is.
+  it('keeps every setting inside its group', () => {
+    const { setTool } = useToolStore.getState();
+    const store = () => useStyleStore.getState();
+    setTool('rectangle');
+    store().setDash('dashed');
+    store().setFill('solid');
+    store().setOpacity(0.4);
+    store().setColor('#e03131');
+
+    setTool('draw');
+    expect(nextShapeStyle()).toMatchObject({ dash: 'solid', fill: 'none', opacity: 1 });
+
+    setTool('text');
+    expect(nextShapeStyle()).toMatchObject({ color: PALETTE.light[0]!.value, opacity: 1 });
+
+    setTool('frame');
+    expect(nextShapeStyle().color, 'a frame opens neutral').toBe(PALETTE.light[1]!.value);
+
+    // Shapes, lines and arrows are one group.
+    for (const tool of ['arrow', 'line', 'polygon', 'ellipse']) {
+      setTool('draw');
+      setTool(tool);
+      expect(nextShapeStyle(), tool).toMatchObject({
+        color: '#e03131',
+        dash: 'dashed',
+        fill: 'solid',
+        opacity: 0.4,
+      });
+    }
+  });
+
+  it('files equations with text and takes no style for stickers', () => {
+    expect(styleSlot('equation')).toBe('text');
+    expect(styleSlot('sticker')).toBeNull();
+  });
+
+  // What a menu places does not depend on the tool in hand.
+  it('reads a group that is not the live one', () => {
+    const { setTool } = useToolStore.getState();
+    setTool('rectangle');
+    useStyleStore.getState().setDash('dotted');
+    setTool('draw');
+    expect(slotStyle('diagram').dash).toBe('dotted');
+  });
+
+  // Upgrading must not change anything someone has set: each group takes a
+  // copy of what used to be shared.
+  it('hands a v2 store its shared values per slot', () => {
+    const migrated = migrateStyle(
+      {
+        color: '#e03131',
+        size: 5,
+        fill: 'hatch',
+        dash: 'dashed',
+        opacity: 0.5,
+        slot: 'other',
+        slots: { pen: { color: '#1d1d1d', size: 2 } },
+        stickerId: 'star',
+      },
+      2,
+    );
+    expect(migrated.slot).toBe('diagram');
+    expect(migrated.slots.pen).toEqual({
+      color: '#1d1d1d',
+      size: 2,
+      fill: 'hatch',
+      dash: 'dashed',
+      opacity: 0.5,
+    });
+    expect(migrated.slots.text).toBeUndefined();
+    expect(migrated).toMatchObject({ color: '#e03131', dash: 'dashed', stickerId: 'star' });
   });
 
   // v0 stored one flat style for every tool, under these same names.
@@ -141,6 +219,13 @@ describe('one style for every tool', () => {
 });
 
 describe('toolbar colours', () => {
+  // A saved style or ramp still holds the old amber; it must land on Yellow's
+  // slot in either theme rather than turn into a custom colour.
+  it('keeps a retired palette value on its slot', () => {
+    expect(inCurrentTheme('#f1ac4b', 'light')).toBe('#f2c12e');
+    expect(inCurrentTheme('#f1ac4b', 'dark')).toBe('#ffc034');
+  });
+
   beforeEach(() => {
     useStyleStore.setState({ ramp: null });
   });

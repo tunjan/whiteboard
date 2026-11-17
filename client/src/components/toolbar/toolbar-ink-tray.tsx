@@ -1,18 +1,22 @@
 import { Fragment } from 'react';
 import { ChevronDown } from 'lucide-react';
 import { toolRegistry } from '@/canvas/tools/tool-registry';
-import { useCanvasUiStore } from '@/canvas/use-canvas-ui-store';
+import { useCanvasUiStore, type EraserMode } from '@/canvas/use-canvas-ui-store';
 import { useToolStore } from '@/canvas/use-tool-store';
 import { PenSettingsItems } from '@/components/board-actions-menu';
+import { ERASER_MODES } from '@/components/style-previews';
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipTrigger } from '@/components/ui/tooltip';
+import { cn } from '@/lib/utils';
 import { INKING_TOOLS } from './toolbar-constants';
-import { KeyTip, useToolbarSide } from './toolbar-primitives';
+import { KeyTip, refocusForKeyboard, useToolbarSide } from './toolbar-primitives';
 import { toolArt } from './toolbar-tool-button';
 import { arrowDelta } from './toolbar-tray-controls';
 
@@ -47,14 +51,16 @@ function InkSlot({ toolId, checked }: { toolId: string; checked: boolean }) {
 }
 
 /**
- * The chevron beside the pen or highlighter: how that instrument feels. The
- * pen has the board menu's whole Pen panel; the highlighter lays a fixed
- * band, so prediction is the one setting it reads.
+ * The chevron beside an inking tool: how that instrument feels. The pen has
+ * the board menu's whole Pen panel; the highlighter lays a fixed band, so
+ * prediction is the one setting it reads; the eraser picks what it takes.
  */
-function InkSettings({ toolId }: { toolId: 'draw' | 'highlighter' }) {
+function InkSettings({ toolId }: { toolId: (typeof INKING_TOOLS)[number] }) {
   const side = useToolbarSide();
   const prediction = useCanvasUiStore((s) => s.pencilPrediction);
   const setPrediction = useCanvasUiStore((s) => s.setPencilPrediction);
+  const eraserMode = useCanvasUiStore((s) => s.eraserMode);
+  const setEraserMode = useCanvasUiStore((s) => s.setEraserMode);
   const label = toolRegistry.get(toolId)?.label ?? toolId;
   return (
     <DropdownMenu>
@@ -71,10 +77,29 @@ function InkSettings({ toolId }: { toolId: 'draw' | 'highlighter' }) {
       </DropdownMenuTrigger>
       <DropdownMenuContent
         side={side}
-        className="w-[min(16rem,calc(100vw-1rem))]"
+        // From the chevron, past the tray's edge, to where the tray's own menus
+        // stand: the scaled tray above the chevron, then their 8px.
+        sideOffset={side === 'top' ? 16 : undefined}
+        finalFocus={refocusForKeyboard}
+        // Not the trigger's width, which is the chevron's.
+        className={cn(
+          'drawer-popup',
+          toolId === 'draw' ? 'w-[min(18rem,calc(100vw-1rem))]' : 'w-max',
+        )}
       >
         {toolId === 'draw' ? (
           <PenSettingsItems />
+        ) : toolId === 'eraser' ? (
+          <DropdownMenuRadioGroup
+            value={eraserMode}
+            onValueChange={(mode) => setEraserMode(mode as EraserMode)}
+          >
+            {ERASER_MODES.map(({ mode, label }) => (
+              <DropdownMenuRadioItem key={mode} value={mode}>
+                {label}
+              </DropdownMenuRadioItem>
+            ))}
+          </DropdownMenuRadioGroup>
         ) : (
           <DropdownMenuCheckboxItem
             checked={prediction}
@@ -98,10 +123,10 @@ export function InkTray({ activeToolId }: { activeToolId: string }) {
     const index = INKING_TOOLS.indexOf(activeToolId as (typeof INKING_TOOLS)[number]);
     const next = INKING_TOOLS[(index + delta + INKING_TOOLS.length) % INKING_TOOLS.length]!;
     useToolStore.getState().setTool(next);
+    // React clears `currentTarget` once the handler returns.
+    const group = event.currentTarget;
     requestAnimationFrame(() =>
-      event.currentTarget
-        ?.querySelector<HTMLElement>('[aria-checked="true"]')
-        ?.focus(),
+      group.querySelector<HTMLElement>('[aria-checked="true"]')?.focus(),
     );
   };
   return (
@@ -114,7 +139,7 @@ export function InkTray({ activeToolId }: { activeToolId: string }) {
       {INKING_TOOLS.map((id) => (
         <Fragment key={id}>
           <InkSlot toolId={id} checked={id === activeToolId} />
-          {id !== 'eraser' && <InkSettings toolId={id} />}
+          <InkSettings toolId={id} />
         </Fragment>
       ))}
     </div>

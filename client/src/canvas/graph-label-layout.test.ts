@@ -44,6 +44,45 @@ describe('placePointLabels', () => {
     expect(labels[0]).not.toBeNull();
   });
 
+  it('keeps clear of lines, and drops a label with nowhere clean to go', () => {
+    const diagonal = [
+      { x: 60, y: 140 },
+      { x: 100, y: 100 },
+      { x: 140, y: 60 },
+    ];
+    const [label] = placePointLabels([{ x: 100, y: 100, width: 60 }], bounds, {
+      ...options,
+      lines: [diagonal],
+    });
+    expect(label?.anchor).toBe('end');
+    expect(label?.y).toBeLessThan(100);
+
+    // Rules through every slot's row: nowhere clean, so no label.
+    const rules = [85, 100, 115].map((y) => [
+      { x: 0, y },
+      { x: 400, y },
+    ]);
+    const [boxedIn] = placePointLabels([{ x: 100, y: 100, width: 60 }], bounds, {
+      ...options,
+      lines: rules,
+    });
+    expect(boxedIn).toBeNull();
+  });
+
+  it('keeps a silent point clear without labelling it', () => {
+    const [a, b] = placePointLabels(
+      [
+        { x: 100, y: 100, width: 60, silent: true },
+        { x: 100, y: 120, width: 60 },
+      ],
+      bounds,
+      options,
+    );
+    expect(a).toBeNull();
+    expect(b).not.toBeNull();
+    expect(b?.y).toBeGreaterThan(100 + options.dotRadius);
+  });
+
   it('avoids obstacles', () => {
     const [label] = placePointLabels([{ x: 100, y: 100, width: 60 }], bounds, {
       ...options,

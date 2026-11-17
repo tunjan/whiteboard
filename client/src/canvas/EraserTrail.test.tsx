@@ -15,7 +15,6 @@ const scribble: EraserScribble = {
   color: 'muted-1',
   size: 12,
   opacity: 0.8,
-  shrink: 0.1,
   taper: true,
 };
 
@@ -62,7 +61,34 @@ describe('EraserScribblePath', () => {
     expect(d).toContain('a 0.01 0.01');
   });
 
-  it('keeps a short trail visible as a round physical tip', () => {
+  it('swells from the contact patch as the ribbon lengthens', () => {
+    const capOf = (length: number) => {
+      const html = renderToStaticMarkup(
+        <svg>
+          <EraserScribblePath
+            scribble={{
+              ...scribble,
+              points: Array.from({ length: 8 }, (_, i) => ({
+                x: (i * length) / 7,
+                y: 0,
+                pressure: 0.5,
+              })),
+            }}
+            zoom={1}
+            color="#000"
+            opacity={0.8}
+          />
+        </svg>,
+      );
+      return Number(/a (\d+(?:\.\d+)?) /.exec(html)?.[1]);
+    };
+
+    expect(capOf(8)).toBeLessThan(capOf(36));
+    expect(capOf(36)).toBeLessThan(capOf(72));
+    expect(capOf(72)).toBe(capOf(144));
+  });
+
+  it('draws a lone point as a round contact patch', () => {
     const html = renderToStaticMarkup(
       <svg>
         <EraserScribblePath
@@ -74,7 +100,7 @@ describe('EraserScribblePath', () => {
       </svg>,
     );
 
-    expect(html).toContain('A 3 3');
+    expect(html).toContain('A 1.5 1.5');
     expect(html).toContain('fill="var(--color-muted-foreground)"');
     expect(html).toContain('opacity="0.8"');
   });

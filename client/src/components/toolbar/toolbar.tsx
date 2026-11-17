@@ -1,6 +1,13 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import {
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type RefObject,
+} from 'react';
 import { Redo2, Undo2 } from 'lucide-react';
 import { ChevronUpGlyph } from '@/components/ui/glyphs';
+import { isTypingTarget } from '@/canvas/canvas-shortcuts';
 import '@/canvas/tools/register';
 import { useHistoryStep, useUndoStore } from '@/canvas/page-history';
 import { pickAndPlaceImages } from '@/canvas/place-image';
@@ -17,7 +24,7 @@ import {
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { CompactMoreMenu } from './toolbar-compact-menu';
-import { INKING_TOOLS, NAVIGATE_TOOLS } from './toolbar-constants';
+import { HIDE_KEYS, INKING_TOOLS, NAVIGATE_TOOLS } from './toolbar-constants';
 import { ToolbarSideContext } from './toolbar-primitives';
 import { ShapeMenu } from './toolbar-shape-menu';
 import {
@@ -51,6 +58,9 @@ const REDO_KEYS = MAC ? '⇧⌘Z' : 'Ctrl+Shift+Z';
 /** Room for all twelve colours on the style bar rather than eight and a key. */
 const FULL_PALETTE_QUERY = '(min-width: 1060px)';
 
+/** A phone, where even four colours push the tray's last key off its end. */
+const FEW_COLOURS_QUERY = '(max-width: 429px)';
+
 /**
  * One layout is mounted at a time, not two toggled in CSS: the toolbar's
  * arrow-key navigation walks every registered button, hidden or not.
@@ -65,6 +75,68 @@ function useMediaQuery(query: string) {
     () => window.matchMedia(query).matches,
     () => true,
   );
+}
+
+/** How long a press on undo or redo waits to become a hold, then its pace. */
+const HOLD_DELAY_MS = 420;
+const HOLD_REPEAT_MS = 110;
+
+/** How close a press may come, in screen px, before the bar clears out. */
+const DUCK_MARGIN = 20;
+
+/**
+ * The bar and tray sit over the board, so ink carried under them is out of
+ * sight just as it is being drawn. While a press that began on the board runs
+ * near them they fade out of its way, and return on release. Panning is left
+ * alone: there the pointer says nothing about where the eye is.
+ */
+function useDuckUnderPress(root: RefObject<HTMLDivElement | null>) {
+  useEffect(() => {
+    let press: { id: number; plates: DOMRect[] } | null = null;
+
+    const onDown = (event: PointerEvent) => {
+      const target = event.target as Element;
+      if (press || !root.current || target.closest('[data-ui-layer]')) return;
+      if (!target.closest('.wb-board')) return;
+      if (useToolStore.getState().activeToolId === 'hand') return;
+      const plates = root.current.querySelectorAll(
+        '[role="toolbar"], [data-visible="true"]',
+      );
+      press = {
+        id: event.pointerId,
+        plates: [...plates].map((plate) => plate.getBoundingClientRect()),
+      };
+    };
+    const onMove = ({ pointerId, clientX: x, clientY: y }: PointerEvent) => {
+      if (pointerId !== press?.id) return;
+      root.current?.toggleAttribute(
+        'data-ducked',
+        press.plates.some(
+          (r) =>
+            x > r.left - DUCK_MARGIN &&
+            x < r.right + DUCK_MARGIN &&
+            y > r.top - DUCK_MARGIN &&
+            y < r.bottom + DUCK_MARGIN,
+        ),
+      );
+    };
+    const onUp = ({ pointerId }: PointerEvent) => {
+      if (pointerId !== press?.id) return;
+      press = null;
+      root.current?.removeAttribute('data-ducked');
+    };
+
+    window.addEventListener('pointerdown', onDown, true);
+    window.addEventListener('pointermove', onMove, true);
+    window.addEventListener('pointerup', onUp, true);
+    window.addEventListener('pointercancel', onUp, true);
+    return () => {
+      window.removeEventListener('pointerdown', onDown, true);
+      window.removeEventListener('pointermove', onMove, true);
+      window.removeEventListener('pointerup', onUp, true);
+      window.removeEventListener('pointercancel', onUp, true);
+    };
+  }, [root]);
 }
 
 /** The bar's keys, in arrow-key order. */
@@ -99,11 +171,16 @@ export function Toolbar() {
   const tallRail = useMediaQuery(TALL_QUERY);
   const wide = rail ? tallRail : wideRow;
   const fullPalette = useMediaQuery(FULL_PALETTE_QUERY);
+  const fewColours = useMediaQuery(FEW_COLOURS_QUERY);
   const [hidden, setHidden] = useState(false);
   const showButtonRef = useRef<HTMLButtonElement | null>(null);
   const toolbarRef = useRef<HTMLDivElement | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const inkId = useLastHeld(INKING_TOOLS, activeToolId);
   const stepFromBar = useRef(false);
+  const heldStep = useRef(false);
+
+  useDuckUnderPress(rootRef);
 
   // A step taken off the bar — ⌘Z, the two-finger tap — turns its key as a
   // press would, so the undo is seen to land even where nothing on screen
@@ -123,10 +200,37 @@ export function Toolbar() {
     [],
   );
 
-  const stepOnBar = (step: () => void) => () => {
+  const stepOnBar = (step: () => void) => {
     stepFromBar.current = true;
     step();
     stepFromBar.current = false;
+  };
+
+  // Held, a history key keeps stepping: backing out of a run of strokes is one
+  // long press rather than a dozen clicks. The release's click must not add
+  // one more.
+  const holdStep = (step: () => void, more: () => boolean) => (event: React.PointerEvent) => {
+    heldStep.current = false;
+    if (event.button !== 0) return;
+    const stop = () => {
+      clearTimeout(timer);
+      window.removeEventListener('pointerup', stop);
+      window.removeEventListener('pointercancel', stop);
+    };
+    const tick = () => {
+      heldStep.current = true;
+      stepOnBar(step);
+      timer = setTimeout(tick, HOLD_REPEAT_MS);
+      if (!more()) stop();
+    };
+    let timer = setTimeout(tick, HOLD_DELAY_MS);
+    window.addEventListener('pointerup', stop);
+    window.addEventListener('pointercancel', stop);
+  };
+
+  const clickStep = (step: () => void) => () => {
+    if (!heldStep.current) stepOnBar(step);
+    heldStep.current = false;
   };
 
   const hideToolbar = () => {
@@ -141,6 +245,29 @@ export function Toolbar() {
       const pressed = keys.find((key) => key.getAttribute('aria-pressed') === 'true');
       (pressed ?? keys[0])?.focus();
     });
+  };
+
+  // Not `hideToolbar`: from the keyboard, focus stays on the board.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.key !== '.') return;
+      if (isTypingTarget(event.target)) return;
+      event.preventDefault();
+      setHidden((value) => !value);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  // A press on the bar picks a tool; the keyboard stays with the board. Left
+  // on a key, focus lights its ring at the next hotkey and lets Space press it
+  // again. React bubbles a portaled menu's press through here too, and a text
+  // field being edited still needs its blur to commit.
+  const onMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
+    const target = event.target as Element;
+    if (!event.currentTarget.contains(target)) return;
+    if (target.closest('input') || isTypingTarget(document.activeElement)) return;
+    event.preventDefault();
   };
 
   // Base UI's toolbar moves by arrow keys only; Home and End are ours.
@@ -159,13 +286,16 @@ export function Toolbar() {
       {/* Bar menus portal below this layer, so the style plate steps aside
           while one of them is open rather than covering it. */}
       <div
+        ref={rootRef}
         data-arrive="up"
+        data-canvas-toolbar=""
         data-placement={rail ? 'left' : 'bottom'}
         style={{ '--arrive-i': 2 } as React.CSSProperties}
         // The browser's own menu has nothing to offer a drawer of tools.
         onContextMenu={(event) => event.preventDefault()}
+        onMouseDown={onMouseDown}
         className={cn(
-          'absolute z-[var(--z-ui)] scale-[var(--drawer-scale)] [&:has([role=toolbar]_[aria-expanded=true])_.tbar-style]:invisible',
+          'absolute z-[var(--z-ui)] scale-[var(--drawer-scale)]',
           rail
             ? 'top-1/2 left-3 origin-left -translate-y-1/2'
             : 'bottom-[calc(0.75rem+var(--wb-inset-bottom))] left-1/2 origin-bottom -translate-x-1/2',
@@ -183,8 +313,8 @@ export function Toolbar() {
             'drawer-bar relative z-[1]',
             'transition-[opacity,translate] duration-base ease-out-quart motion-reduce:transition-none',
             rail
-              ? 'max-h-[calc(100vh-1rem)] origin-left'
-              : 'max-w-[calc(100vw-1rem)] origin-bottom',
+              ? 'max-h-[calc((100vh-1rem)/var(--drawer-scale))] origin-left'
+              : 'max-w-[calc((100vw-1rem)/var(--drawer-scale))] origin-bottom',
             hidden &&
               (rail
                 ? 'pointer-events-none -translate-x-[calc(100%+0.75rem)] opacity-0'
@@ -212,7 +342,7 @@ export function Toolbar() {
             {wide && (
               <>
                 <ToolButton toolId="frame" />
-                <ToolKey label="Add image" onClick={() => void pickAndPlaceImages()} art>
+                <ToolKey label="Add image" hotkey="u" onClick={() => void pickAndPlaceImages()} art>
                   {toolArt('image')}
                 </ToolKey>
                 <ToolButton toolId="graph" />
@@ -226,10 +356,22 @@ export function Toolbar() {
             />
           </ToolbarGroup>
           <ToolbarGroup className="drawer-group drawer-history" aria-label="History">
-            <ToolKey label="Undo" shortcut={UNDO_KEYS} disabled={!canUndo} onClick={stepOnBar(undo)}>
+            <ToolKey
+              label="Undo"
+              shortcut={UNDO_KEYS}
+              disabled={!canUndo}
+              onClick={clickStep(undo)}
+              onPointerDown={holdStep(undo, () => useUndoStore.getState().canUndo)}
+            >
               <Undo2 />
             </ToolKey>
-            <ToolKey label="Redo" shortcut={REDO_KEYS} disabled={!canRedo} onClick={stepOnBar(redo)}>
+            <ToolKey
+              label="Redo"
+              shortcut={REDO_KEYS}
+              disabled={!canRedo}
+              onClick={clickStep(redo)}
+              onPointerDown={holdStep(redo, () => useUndoStore.getState().canRedo)}
+            >
               <Redo2 />
             </ToolKey>
           </ToolbarGroup>
@@ -237,13 +379,13 @@ export function Toolbar() {
 
         {/* The tool's own properties, as a second plate beside the bar
             rather than as an extension of it. */}
-        {!hidden && (
-          <ToolPropertiesSatellite
-            activeToolId={activeToolId}
-            placement={rail ? 'left' : 'bottom'}
-            fullPalette={fullPalette}
-          />
-        )}
+        <ToolPropertiesSatellite
+          activeToolId={activeToolId}
+          placement={rail ? 'left' : 'bottom'}
+          fullPalette={fullPalette}
+          fewColours={fewColours}
+          barHidden={hidden}
+        />
 
         <Button
           ref={showButtonRef}
@@ -266,6 +408,7 @@ export function Toolbar() {
         >
           <ChevronUpGlyph className={cn('text-fg-muted', rail && 'rotate-90')} />
           Show toolbar
+          <span className="text-fg-muted pointer-coarse:hidden">{HIDE_KEYS}</span>
         </Button>
       </div>
       </ToolbarSideContext.Provider>

@@ -73,7 +73,16 @@ linkRoutes.get('/unfurl', requireBoardEdit, async (c) => {
   inFlight.set(url, pending);
   try {
     const result = await pending;
-    cacheSet(url, result);
+    // A bare `{ url }` may be a timeout or a dead host, not the page's answer:
+    // caching it would pin a blank card for the whole TTL.
+    if (
+      result.title ||
+      result.description ||
+      result.imageBlobId ||
+      result.faviconBlobId
+    ) {
+      cacheSet(url, result);
+    }
     return c.json(result);
   } catch (error) {
     if (error instanceof BlockedHostError) {

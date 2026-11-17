@@ -186,9 +186,27 @@ const RECOGNITION_MAX_PX = 1600;
  */
 export async function renderShapesForRecognition(
   ids: string[],
+  /**
+   * Extra marks for the model, drawn in a margin of `left` world units added
+   * to the left of the shapes — the work checker's line tags.
+   */
+  margin?: (bounds: Bounds) => { left: number; node: ReactNode },
 ): Promise<Blob | null> {
-  const scene = await selectionScene(ids);
+  let scene = await selectionScene(ids);
   if (!scene) return null;
+  if (margin) {
+    const { left, node } = margin(scene.bounds);
+    scene = {
+      ...scene,
+      tree: (
+        <>
+          {scene.tree}
+          {node}
+        </>
+      ),
+      bounds: { ...scene.bounds, minX: scene.bounds.minX - left },
+    };
+  }
   const w = scene.bounds.maxX - scene.bounds.minX + scene.padding * 2;
   const h = scene.bounds.maxY - scene.bounds.minY + scene.padding * 2;
   const longest = Math.max(w, h, 1);

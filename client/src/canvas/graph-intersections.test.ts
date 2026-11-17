@@ -193,17 +193,17 @@ describe('graph intersections', () => {
     it('formats integers without decimals', () => {
       expect(formatIntersectionCoordinate(0)).toBe('0');
       expect(formatIntersectionCoordinate(5)).toBe('5');
-      expect(formatIntersectionCoordinate(-3)).toBe('-3');
+      expect(formatIntersectionCoordinate(-3)).toBe('−3');
     });
 
     it('formats single decimal numbers cleanly', () => {
       expect(formatIntersectionCoordinate(2.5)).toBe('2.5');
-      expect(formatIntersectionCoordinate(-0.5)).toBe('-0.5');
+      expect(formatIntersectionCoordinate(-0.5)).toBe('−0.5');
     });
 
     it('formats two decimal places cleanly', () => {
       expect(formatIntersectionCoordinate(1.25)).toBe('1.25');
-      expect(formatIntersectionCoordinate(-3.75)).toBe('-3.75');
+      expect(formatIntersectionCoordinate(-3.75)).toBe('−3.75');
     });
 
     it('rounds to at most two decimal places', () => {
@@ -211,7 +211,7 @@ describe('graph intersections', () => {
       expect(formatIntersectionCoordinate(3.14159)).toBe('3.14');
       expect(formatIntersectionCoordinate(0.333333)).toBe('0.33');
       expect(formatIntersectionCoordinate(0.666666)).toBe('0.67');
-      expect(formatIntersectionCoordinate(-2.666666)).toBe('-2.67');
+      expect(formatIntersectionCoordinate(-2.666666)).toBe('−2.67');
     });
 
     it('avoids negative zero from rounding small negative numbers', () => {
@@ -222,7 +222,7 @@ describe('graph intersections', () => {
     it('formats point labels with (x, y)', () => {
       expect(formatIntersectionLabel({ x: 1.414, y: 2 })).toBe('(1.41, 2)');
       expect(formatIntersectionLabel({ x: 0, y: 0 })).toBe('(0, 0)');
-      expect(formatIntersectionLabel({ x: -0.3333, y: 5.6789 })).toBe('(-0.33, 5.68)');
+      expect(formatIntersectionLabel({ x: -0.3333, y: 5.6789 })).toBe('(−0.33, 5.68)');
     });
   });
 });

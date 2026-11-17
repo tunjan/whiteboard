@@ -6,15 +6,21 @@ import { useToolStore } from '@/canvas/use-tool-store';
 import { Tooltip, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   ArrowArt,
+  CommentArt,
+  CompassArt,
+  EquationArt,
   EraserArt,
   FrameArt,
   GraphArt,
   HandArt,
   HighlighterArt,
   ImageArt,
+  LaserArt,
+  MeasureArt,
   PencilArt,
   PointerArt,
   StickerArt,
+  StraightedgeArt,
   TextArt,
 } from './toolbar-art';
 import { KeyTip } from './toolbar-primitives';
@@ -97,17 +103,29 @@ function MarkerArt() {
   return <HighlighterArt color={useStyleStore((s) => slotColor(s, 'highlighter'))} />;
 }
 
+/** So is the arrow; shapes do the same in `ShapeMenu`. */
+function InkedArrowArt() {
+  const color = useStyleStore((s) => slotColor(s, 'diagram'));
+  return <ArrowArt color={color} />;
+}
+
 /** Tools drawn standing in the drawer. A new one is one entry here. */
 const TOOL_ART: Partial<Record<string, ComponentType>> = {
+  laser: LaserArt,
   draw: PenArt,
   highlighter: MarkerArt,
   eraser: EraserArt,
-  arrow: ArrowArt,
+  arrow: InkedArrowArt,
   text: TextArt,
   frame: FrameArt,
   graph: GraphArt,
   sticker: StickerArt,
   image: ImageArt,
+  comment: CommentArt,
+  equation: EquationArt,
+  straightedge: StraightedgeArt,
+  compass: CompassArt,
+  measure: MeasureArt,
 };
 
 /** Drawn glyphs that replace a tool's registry icon but stay centred. */
@@ -120,6 +138,12 @@ const TOOL_GLYPH: Partial<Record<string, ComponentType>> = {
 export function toolArt(toolId: string): ReactNode {
   const Art = TOOL_ART[toolId];
   return Art ? <Art /> : null;
+}
+
+/** The drawn glyph for a tool, or null for one that keeps its registry icon. */
+export function toolGlyph(toolId: string): ReactNode {
+  const Glyph = TOOL_GLYPH[toolId];
+  return Glyph ? <Glyph /> : null;
 }
 
 /**

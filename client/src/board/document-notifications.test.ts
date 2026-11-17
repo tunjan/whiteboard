@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BoardDocumentMeta } from '@whiteboard/shared';
 
-const announced = vi.hoisted(() => [] as { description?: unknown }[]);
+const announced = vi.hoisted(
+  () => [] as { title?: unknown; description?: unknown; id?: string }[],
+);
+const closed = vi.hoisted(() => [] as (string | undefined)[]);
 
 vi.mock('@/components/ui/toast', () => ({
   toast: {
@@ -9,6 +12,7 @@ vi.mock('@/components/ui/toast', () => ({
       announced.push(options);
       return 'toast-id';
     },
+    close: (id?: string) => closed.push(id),
   },
 }));
 
@@ -61,6 +65,7 @@ function unreadIds(): string[] {
 
 beforeEach(() => {
   announced.length = 0;
+  closed.length = 0;
   vi.stubGlobal('localStorage', memoryStorage());
   useDocumentsStore.getState().reset();
 });
@@ -76,6 +81,32 @@ describe('document notifications', () => {
 
     markDocumentOpened('a');
     expect(unreadIds()).toEqual([]);
+    stop();
+  });
+
+  it('counts one uploader up in a single toast', () => {
+    const stop = startDocumentNotifications(BOARD);
+    const soon = Date.now() + 1_000;
+    publish(doc('a', soon), doc('b', soon));
+
+    expect(announced.map((toast) => toast.id)).toEqual([
+      announced[0]?.id,
+      announced[0]?.id,
+    ]);
+    expect(announced[1]?.title).toMatch(/shared 2 files$/);
+    expect(announced[1]?.description).toBeUndefined();
+    stop();
+  });
+
+  it('stays quiet while the panel shows it, and withdraws on opening', () => {
+    const stop = startDocumentNotifications(BOARD);
+    publish(doc('a', Date.now() + 1_000));
+    useDocumentsStore.getState().setPanelOpen(true);
+    expect(closed).toEqual([announced[0]?.id]);
+
+    publish(doc('a', Date.now() + 1_000), doc('b', Date.now() + 1_000));
+    expect(announced).toHaveLength(1);
+    expect(unreadIds()).toEqual(['a', 'b']);
     stop();
   });
 

@@ -67,12 +67,15 @@ export function ActiveStrokeLayer() {
       // `isClosed` is only ever written by the tool's `finalize`, after this
       // layer is gone, so a live stroke is never filled — the ink is all there
       // is to draw.
+      // Same pattern downgrade `useInkLod` gives the committed shape, or a
+      // dotted stroke drawn zoomed out would turn solid at pointer-up.
+      const belowDetail = isBelowPatternDetail(zoomRef.current, size);
       const render = buildInkRender(
-        frame.props,
+        belowDetail ? { ...frame.props, dash: 'solid' } : frame.props,
         points,
         true,
         dotLength,
-        isBelowPatternDetail(zoomRef.current, size),
+        belowDetail,
         inkErrorLimit(zoomRef.current),
       );
       group.setAttribute(

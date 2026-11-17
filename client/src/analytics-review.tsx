@@ -10,6 +10,7 @@
 import { createRoot } from 'react-dom/client';
 import './index.css';
 import type {
+  AgentAsk,
   AnalyticsBoard,
   AnalyticsJoiner,
   AnalyticsSummary,
@@ -144,6 +145,8 @@ function planVisits(plan: Plan, n: number, now: number): AnalyticsVisit[] {
       drawings: 12 + ((lesson * 37) % 60),
       aloneMinutes: early,
       afkMinutes: 0,
+      afkSpans: [],
+      aloneSpans: early ? [[at, at + early * 60_000]] : [],
     });
     visits.push({
       name: 'Tutor',
@@ -155,6 +158,8 @@ function planVisits(plan: Plan, n: number, now: number): AnalyticsVisit[] {
       drawings: 20 + ((lesson * 23) % 40),
       aloneMinutes: 0,
       afkMinutes: 0,
+      afkSpans: [],
+      aloneSpans: [],
     });
     if (lesson % 3 === 1) {
       const homework = at + 2 * DAY;
@@ -163,11 +168,16 @@ function planVisits(plan: Plan, n: number, now: number): AnalyticsVisit[] {
         isTutor: false,
         color: plan.color,
         startedAt: homework,
-        endedAt: homework + 35 * 60_000,
+        endedAt: homework + 50 * 60_000,
         minutes: 35,
         drawings: 18,
         aloneMinutes: 35,
-        afkMinutes: 0,
+        afkMinutes: 15,
+        afkSpans: [[homework + 20 * 60_000, homework + 35 * 60_000]],
+        aloneSpans: [
+          [homework, homework + 20 * 60_000],
+          [homework + 35 * 60_000, homework + 50 * 60_000],
+        ],
       });
     }
   }
@@ -185,10 +195,58 @@ function planVisits(plan: Plan, n: number, now: number): AnalyticsVisit[] {
         drawings: 21,
         aloneMinutes: 37,
         afkMinutes: 0,
+        afkSpans: [],
+        aloneSpans: [[at, at + 37 * 60_000]],
       });
     }
   }
+  // One student who stayed on after the lesson and wandered off — the shape
+  // that used to be the loudest thing on the page.
+  if (plan.student === 'Ines') {
+    const at = now - 7 * HOUR;
+    const tick = (minutes: number) => at + minutes * 60_000;
+    visits.push({
+      name: plan.student,
+      isTutor: false,
+      color: plan.color,
+      startedAt: at,
+      endedAt: tick(150),
+      minutes: 60,
+      drawings: 14,
+      aloneMinutes: 60,
+      afkMinutes: 90,
+      afkSpans: [
+        [tick(25), tick(70)],
+        [tick(80), tick(100)],
+        [tick(125), tick(150)],
+      ],
+      aloneSpans: [
+        [at, tick(25)],
+        [tick(70), tick(80)],
+        [tick(100), tick(125)],
+      ],
+    });
+  }
   return visits.filter((v) => v.startedAt <= now);
+}
+
+const SAMPLE_ASKS: Omit<AgentAsk, 'name' | 'color' | 'at'>[] = [
+  { instruction: 'Plot y = x² − 4x + 3 and mark where it crosses the x-axis', kind: 'done', result: 'Added a graph' },
+  { instruction: 'Why is the discriminant negative here?', kind: 'reply', result: 'Because $b^2 = 4$ is smaller than $4ac = 12$, so $b^2 - 4ac = -8$: there are no real roots.' },
+  { instruction: 'Just solve question 3 for me', kind: 'reply', result: 'Let’s work through it together. What do you get when you expand the bracket first?' },
+  { instruction: 'Write the quadratic formula', kind: 'done', result: 'Added an equation' },
+  { instruction: 'Move the graph next to my working', kind: 'done', result: 'Changed an item' },
+  { instruction: 'hmm', kind: 'nothing', result: '' },
+  { instruction: 'Draw a right triangle with sides 3, 4, 5 and label them', kind: 'done', result: 'Added a shape and 3 texts' },
+];
+
+function sampleAsks(name: string, now: number, count: number): AgentAsk[] {
+  return SAMPLE_ASKS.slice(0, count).map((ask, i) => ({
+    ...ask,
+    name,
+    color: null,
+    at: now - (i * 9 + 4) * 60_000,
+  }));
 }
 
 function build(days: number): AnalyticsSummary {
@@ -212,6 +270,7 @@ function build(days: number): AnalyticsSummary {
         minutes: 0,
         drawings: 0,
         aloneMinutes: 0,
+        afkMinutes: 0,
         lastSeenAt: 0,
       };
       joiner.lastSeenAt = Math.max(joiner.lastSeenAt, visit.endedAt);
@@ -220,6 +279,7 @@ function build(days: number): AnalyticsSummary {
         joiner.minutes += visit.minutes;
         joiner.drawings += visit.drawings;
         joiner.aloneMinutes += visit.aloneMinutes;
+        joiner.afkMinutes += visit.afkMinutes;
       }
       joiners.set(visit.name, joiner);
     }
@@ -245,6 +305,7 @@ function build(days: number): AnalyticsSummary {
         (v) => v.minutes,
       ),
       aloneMinutes: total(students, (v) => v.aloneMinutes),
+      afkMinutes: total(students, (v) => v.afkMinutes),
       sessions: students.length,
       activeDays: new Set(
         students.map((v) => new Date(v.startedAt).toISOString().slice(0, 10)),
@@ -253,6 +314,12 @@ function build(days: number): AnalyticsSummary {
       pages: plan.pages,
       bytes: 90_000 + n * 140_000,
       notedSessions: plan.notes,
+      // A few cents of transcription per lesson in range.
+      aiRequests: students.length * 3,
+      aiCost: students.length * 0.0042,
+      // A few instructions to the board agent on the first canvases only,
+      // so the list and its absence both show.
+      agentAsks: n > 1 ? [] : sampleAsks(plan.student, now, n === 0 ? 7 : 2),
       visits,
       joiners: [...joiners.values()].sort((a, b) => b.minutes - a.minutes),
     };
@@ -268,6 +335,7 @@ function build(days: number): AnalyticsSummary {
       studentMinutes: sum((b) => b.studentMinutes),
       tutorMinutes: sum((b) => b.tutorMinutes),
       aloneMinutes: sum((b) => b.aloneMinutes),
+      afkMinutes: sum((b) => b.afkMinutes),
       sessions: sum((b) => b.sessions),
       activeBoards: boards.filter((b) => b.sessions > 0).length,
       boards: boards.length,
@@ -281,6 +349,16 @@ function build(days: number): AnalyticsSummary {
       drawings: sum((b) => b.drawings),
     },
     boards,
+    ai: {
+      requests: sum((b) => b.aiRequests),
+      cost: sum((b) => b.aiCost),
+      byModel: [
+        { job: 'check', model: 'anthropic/claude-haiku-5.5', requests: Math.ceil(sum((b) => b.aiRequests) * 0.32), cost: sum((b) => b.aiCost) * 0.42 },
+        { job: 'agent', model: 'anthropic/claude-haiku-5.5', requests: Math.ceil(sum((b) => b.aiRequests) * 0.12), cost: sum((b) => b.aiCost) * 0.41 },
+        { job: 'vision', model: 'anthropic/claude-haiku-5.5', requests: Math.ceil(sum((b) => b.aiRequests) * 0.28), cost: sum((b) => b.aiCost) * 0.12 },
+        { job: 'text', model: 'anthropic/claude-haiku-5.5', requests: Math.ceil(sum((b) => b.aiRequests) * 0.28), cost: sum((b) => b.aiCost) * 0.05 },
+      ],
+    },
   };
 }
 
@@ -292,6 +370,7 @@ function emptyPractice(days: number): AnalyticsSummary {
       studentMinutes: 0,
       tutorMinutes: 0,
       aloneMinutes: 0,
+      afkMinutes: 0,
       sessions: 0,
       activeBoards: 0,
       boards: seeded.boards.length,
@@ -303,6 +382,7 @@ function emptyPractice(days: number): AnalyticsSummary {
       studentMinutes: 0,
       tutorMinutes: 0,
       aloneMinutes: 0,
+      afkMinutes: 0,
       sessions: 0,
       activeDays: 0,
       drawings: 0,
@@ -319,6 +399,35 @@ window.fetch = async (input, init) => {
     typeof input === 'string' ? input : String((input as Request).url);
   if (url.includes('/api/auth/me')) {
     return Response.json({ authenticated: true, name: 'Tutor' });
+  }
+  if (url.includes('/api/ai/models')) {
+    if (init?.method === 'PUT') return Response.json(JSON.parse(String(init.body)));
+    const price = (prompt: string, completion: string) => ({ prompt, completion });
+    return Response.json({
+      selected: {
+        vision: 'deepseek/deepseek-v4-flash-vision-exp',
+        text: 'deepseek/deepseek-v4-flash',
+        stt: 'openai/whisper-large-v3-turbo',
+        image: 'recraft/recraft-v4.1-flash',
+      },
+      options: {
+        vision: [
+          { id: 'deepseek/deepseek-v4-flash-vision-exp', name: 'DeepSeek V4 Flash Vision', pricing: price('0.0000002', '0.0000008') },
+          { id: 'google/gemini-3.1-flash', name: 'Gemini 3.1 Flash', pricing: price('0.0000005', '0.000003') },
+        ],
+        text: [
+          { id: 'deepseek/deepseek-v4-flash', name: 'DeepSeek V4 Flash', pricing: price('0.0000001', '0.0000004') },
+        ],
+        stt: [
+          { id: 'openai/whisper-large-v3-turbo', name: 'Whisper Large v3 Turbo', pricing: price('0.00000333', '0') },
+          { id: 'openai/gpt-4o-transcribe', name: 'GPT-4o Transcribe', pricing: price('0.0000025', '0.00001') },
+        ],
+        image: [
+          { id: 'recraft/recraft-v4.1-flash', name: 'Recraft V4.1 Flash', pricing: { image_output: '0.00000167664670658683' } },
+          { id: 'x-ai/grok-imagine-image-2.0', name: 'Grok Imagine 2.0', pricing: { image: '0.01' } },
+        ],
+      },
+    });
   }
   if (url.includes('/api/analytics')) {
     const days = Number(

@@ -1,5 +1,14 @@
 import { type ReactNode, useState } from 'react';
-import { BarChart2, ChevronRight, LogOut, Menu, Moon, Sun } from 'lucide-react';
+import {
+  BarChart2,
+  ChevronRight,
+  LogOut,
+  Menu,
+  Moon,
+  Sparkles,
+  Sun,
+} from 'lucide-react';
+import { AiModelsDialog } from '@/components/ai-models-dialog';
 import { BrandMark } from '@/components/brand-mark';
 import {
   DropdownMenu,
@@ -185,6 +194,7 @@ const LOZENGE_TONES = {
   neutral: 'bg-[var(--ds-background-neutral)] text-[var(--ds-text)]',
   information:
     'bg-[var(--ds-background-information)] text-[var(--ds-text-information)]',
+  warning: 'bg-[var(--ds-background-warning)] text-[var(--ds-text-warning)]',
 } as const;
 
 /** Atlassian's lozenge: a compact semantic label, 4px radius, 12px semibold. */
@@ -247,53 +257,61 @@ export function AccountMenu({
   onLogout: () => void;
 }) {
   const { theme, toggle: toggleTheme } = useThemeStore();
+  const [aiModelsOpen, setAiModelsOpen] = useState(false);
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        render={
-          <button
-            type="button"
-            aria-label={`Account menu for ${name}`}
-            className={cn(
-              'flex size-8 items-center justify-center rounded-full bg-[var(--ds-background-accent-blue-bolder)] text-(length:--d-fs-caption) font-semibold text-[var(--ds-text-inverse)] transition-[filter] hover:brightness-110 aria-expanded:brightness-90',
-              FOCUS,
-            )}
-          >
-            {initials(name, '?')}
-          </button>
-        }
-      />
-      <DropdownMenuContent align="end" side="bottom" className="w-56">
-        <DropdownMenuGroup>
-          <DropdownMenuLabel className="truncate text-(length:--d-fs-body) font-semibold text-[var(--ds-text)]">
-            {name}
-          </DropdownMenuLabel>
-        </DropdownMenuGroup>
-        <DropdownMenuSeparator />
-        <DropdownMenuGroup>
-          <DropdownMenuItem
-            className="lg:hidden"
-            onClick={() => navigate('/analytics')}
-          >
-            <BarChart2 data-icon="inline-start" />
-            Attendance
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={
+            <button
+              type="button"
+              aria-label={`Account menu for ${name}`}
+              className={cn(
+                'flex size-8 items-center justify-center rounded-full bg-[var(--ds-background-accent-blue-bolder)] text-(length:--d-fs-caption) font-semibold text-[var(--ds-text-inverse)] transition-[filter] hover:brightness-110 aria-expanded:brightness-90',
+                FOCUS,
+              )}
+            >
+              {initials(name, '?')}
+            </button>
+          }
+        />
+        <DropdownMenuContent align="end" side="bottom" className="w-56">
+          <DropdownMenuGroup>
+            <DropdownMenuLabel className="truncate text-(length:--d-fs-body) font-semibold text-[var(--ds-text)]">
+              {name}
+            </DropdownMenuLabel>
+          </DropdownMenuGroup>
+          <DropdownMenuSeparator />
+          <DropdownMenuGroup>
+            <DropdownMenuItem
+              className="lg:hidden"
+              onClick={() => navigate('/analytics')}
+            >
+              <BarChart2 data-icon="inline-start" />
+              Attendance
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={toggleTheme}>
+              {theme === 'dark' ? (
+                <Sun data-icon="inline-start" />
+              ) : (
+                <Moon data-icon="inline-start" />
+              )}
+              {theme === 'dark' ? 'Light theme' : 'Dark theme'}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setAiModelsOpen(true)}>
+              <Sparkles data-icon="inline-start" />
+              AI models…
+            </DropdownMenuItem>
+          </DropdownMenuGroup>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem variant="destructive" onClick={onLogout}>
+            <LogOut data-icon="inline-start" />
+            Log out
           </DropdownMenuItem>
-          <DropdownMenuItem onClick={toggleTheme}>
-            {theme === 'dark' ? (
-              <Sun data-icon="inline-start" />
-            ) : (
-              <Moon data-icon="inline-start" />
-            )}
-            {theme === 'dark' ? 'Light theme' : 'Dark theme'}
-          </DropdownMenuItem>
-        </DropdownMenuGroup>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem variant="destructive" onClick={onLogout}>
-          <LogOut data-icon="inline-start" />
-          Log out
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <AiModelsDialog open={aiModelsOpen} onOpenChange={setAiModelsOpen} />
+    </>
   );
 }
 

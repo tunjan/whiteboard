@@ -1,9 +1,11 @@
 import { Hono } from 'hono';
-import { count, gte, sql } from 'drizzle-orm';
-import { isAnalyticsRange } from '@whiteboard/shared';
+import { count, desc, gte, sql } from 'drizzle-orm';
+import { isAnalyticsRange, type AgentAsk } from '@whiteboard/shared';
 import { requireTutor } from '../auth/middleware';
 import { db } from '../db/client';
 import {
+  agentAsks,
+  aiUsage,
   boardDocumentUpdates,
   boardDocuments,
   boardSessionNotes,
@@ -20,6 +22,10 @@ analyticsRoutes.use('*', requireTutor);
 
 const DEFAULT_RANGE = 30;
 
+// ponytail: a per-board cap applied after one range query; page the list
+// (or group in SQL) if a year of a busy class ever makes the query heavy.
+const MAX_ASKS_PER_BOARD = 100;
+
 /** A document name's board id: `<boardId>/pages/<pageId>` or the board itself. */
 const boardIdExpr = sql<string>`split_part(${boardDocuments.documentName}, '/pages/', 1)`;
 const updatesBoardIdExpr = sql<string>`split_part(${boardDocumentUpdates.documentName}, '/pages/', 1)`;
@@ -30,8 +36,17 @@ analyticsRoutes.get('/', async (c) => {
   const now = new Date();
   const from = rangeStart(days, now);
 
-  const [boardRows, sessionRows, lastSeenRows, docRows, updateRows, noteRows] =
-    await Promise.all([
+  const [
+    boardRows,
+    sessionRows,
+    lastSeenRows,
+    docRows,
+    updateRows,
+    noteRows,
+    aiBoardRows,
+    aiModelRows,
+    askRows,
+  ] = await Promise.all([
       db
         .select({
           id: boards.id,
@@ -90,7 +105,50 @@ analyticsRoutes.get('/', async (c) => {
         })
         .from(boardSessionNotes)
         .groupBy(boardSessionNotes.boardId),
+      // AI spend in range, by the board it was made for...
+      db
+        .select({
+          boardId: aiUsage.boardId,
+          requests: sql<number>`count(*)::int`,
+          cost: sql<number>`sum(${aiUsage.cost})::float8`,
+        })
+        .from(aiUsage)
+        .where(gte(aiUsage.createdAt, from))
+        .groupBy(aiUsage.boardId),
+      // ...and by the model that made it.
+      db
+        .select({
+          job: aiUsage.job,
+          model: aiUsage.model,
+          requests: sql<number>`count(*)::int`,
+          cost: sql<number>`sum(${aiUsage.cost})::float8`,
+        })
+        .from(aiUsage)
+        .where(gte(aiUsage.createdAt, from))
+        .groupBy(aiUsage.job, aiUsage.model)
+        .orderBy(sql`sum(${aiUsage.cost}) desc`),
+      // What students asked the board agent, newest first.
+      db
+        .select()
+        .from(agentAsks)
+        .where(gte(agentAsks.createdAt, from))
+        .orderBy(desc(agentAsks.createdAt)),
     ]);
+
+  const asksByBoard = new Map<string, AgentAsk[]>();
+  for (const row of askRows) {
+    const list = asksByBoard.get(row.boardId) ?? [];
+    if (list.length >= MAX_ASKS_PER_BOARD) continue;
+    list.push({
+      name: row.name,
+      color: row.color,
+      at: new Date(row.createdAt).getTime(),
+      instruction: row.instruction,
+      kind: row.kind as AgentAsk['kind'],
+      result: row.result,
+    });
+    asksByBoard.set(row.boardId, list);
+  }
 
   const lastStudentAt = new Map<string, number>();
   for (const row of lastSeenRows) {
@@ -125,6 +183,22 @@ analyticsRoutes.get('/', async (c) => {
       sessions: sessionRows,
       content,
       lastStudentAt,
+      ai: {
+        byBoard: new Map(
+          aiBoardRows
+            .filter((row) => row.boardId)
+            .map((row) => [
+              row.boardId as string,
+              { requests: Number(row.requests), cost: Number(row.cost) },
+            ]),
+        ),
+        byModel: aiModelRows.map((row) => ({
+          ...row,
+          requests: Number(row.requests),
+          cost: Number(row.cost),
+        })),
+      },
+      agentAsks: asksByBoard,
       days,
       now,
     }),

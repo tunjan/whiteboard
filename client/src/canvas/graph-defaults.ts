@@ -35,9 +35,16 @@ export const DEFAULT_PARAMETRIC_DOMAIN: GraphParametricDomain = {
   max: Math.round(2 * Math.PI * 1000) / 1000,
 };
 
+/** The same turn for a graph in degrees. */
+export const DEGREE_PARAMETRIC_DOMAIN: GraphParametricDomain = {
+  min: 0,
+  max: 360,
+};
+
 /** The domain a parametric expression is sampled over, falling back to the default. */
 export function parametricDomain(
   domain: GraphParametricDomain | undefined,
+  angleUnit: 'rad' | 'deg' = 'rad',
 ): GraphParametricDomain {
   if (
     !domain ||
@@ -45,7 +52,9 @@ export function parametricDomain(
     !Number.isFinite(domain.max) ||
     domain.min >= domain.max
   ) {
-    return DEFAULT_PARAMETRIC_DOMAIN;
+    return angleUnit === 'deg'
+      ? DEGREE_PARAMETRIC_DOMAIN
+      : DEFAULT_PARAMETRIC_DOMAIN;
   }
   return domain;
 }

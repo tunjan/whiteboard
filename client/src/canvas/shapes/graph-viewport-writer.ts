@@ -1,11 +1,13 @@
 import type { GraphViewport } from '@whiteboard/shared';
 import { editor } from '../use-document-store';
+import { fromPlotViewport, graphAxes, toPlotViewport } from '../graph-scale';
 
 export interface GraphViewportWriter {
   readonly shapeId: string;
   /**
    * Apply `edit` on top of any viewport not yet written, so several input
    * events within one frame compose. Written on the next animation frame.
+   * `edit` works in plot space, so pan and zoom on a log axis move by decades.
    */
   update(edit: (viewport: GraphViewport) => GraphViewport): void;
   /** Write whatever is pending now, and cancel the scheduled frame. */
@@ -41,7 +43,14 @@ export function createGraphViewportWriter(
     update(edit) {
       const shape = editor.getShape(shapeId);
       if (!shape || shape.type !== 'graph') return;
-      pending = edit(pending ?? shape.props.viewport);
+      const axes = graphAxes(shape.props);
+      const next = fromPlotViewport(
+        edit(toPlotViewport(pending ?? shape.props.viewport, axes)),
+        axes,
+      );
+      // Zoomed out past 10^308 a log bound overflows; stop at the last window.
+      if (!Object.values(next).every(Number.isFinite)) return;
+      pending = next;
       if (!frame) frame = requestAnimationFrame(flush);
     },
     flush,

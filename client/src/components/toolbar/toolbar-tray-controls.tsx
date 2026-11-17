@@ -13,7 +13,7 @@ import {
 } from '@/components/ui/popover';
 import { Tooltip, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
-import { KeyTip, useToolbarSide } from './toolbar-primitives';
+import { KeyTip, refocusForKeyboard, useToolbarSide } from './toolbar-primitives';
 
 /**
  * The style tray's two controls: a segmented row for one choice among a few,
@@ -87,8 +87,6 @@ export function TrayCells<T extends string | number>({
       aria-label={label}
       onKeyDown={onKeyDown}
       className="tray-shapes tray-open"
-      // Share the row by option count, so every slot comes out one width.
-      style={{ flexGrow: options.length }}
     >
       {options.map((option, i) => (
         <Tooltip key={String(option.value)}>
@@ -217,27 +215,37 @@ export function TrayMenu({
   useCloseWithBar(barVisible, setOpen);
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger
-        render={
-          <button
-            type="button"
-            aria-label={label}
-            data-checked={checked || undefined}
-            className="tray-menu"
-          />
-        }
-      >
-        {value}
-        <ChevronDown aria-hidden="true" className="tray-chevron" />
-      </PopoverTrigger>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <PopoverTrigger
+              render={
+                <button
+                  type="button"
+                  aria-label={label}
+                  data-checked={checked || undefined}
+                  className="tray-menu"
+                />
+              }
+            />
+          }
+        >
+          {value}
+          <ChevronDown aria-hidden="true" className="tray-chevron" />
+        </TooltipTrigger>
+        <KeyTip label={label} />
+      </Tooltip>
       <PopoverContent
         ref={popup}
+        finalFocus={refocusForKeyboard}
         // Opened by pointer, focus rests on the panel, so no choice inside
         // wears a focus ring; by keyboard it goes to the first choice.
         initialFocus={(type) => (type === 'keyboard' ? true : popup.current)}
         side={side}
-        sideOffset={8}
-        className="tbar-surface tbar-panel tray-panel w-auto flex-col items-start"
+        align="end"
+        // 8px past the tray's edge, which stands 6px above a tile.
+        sideOffset={side === 'top' ? 12 : 8}
+        className="drawer-popup tbar-surface tbar-panel tray-panel w-auto flex-col items-start"
       >
         {typeof children === 'function' ? children(() => setOpen(false)) : children}
       </PopoverContent>

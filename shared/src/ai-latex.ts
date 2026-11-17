@@ -79,3 +79,82 @@ export interface GraphFromInkResponse {
   /** Graph-parser expressions, one per row, unvalidated. */
   expressions: string[];
 }
+
+/**
+ * The model slots the tutor can choose (`GET/PUT /api/ai/models`). `vision`
+ * reads ink for both equations and graphs; `text` writes LaTeX from a
+ * description or a dictated transcript; `agent` turns an instruction into
+ * board edits and must support tool calling; `check` reads a page of working
+ * and finds its mistakes.
+ */
+export const AI_JOBS = ['vision', 'text', 'stt', 'image', 'agent', 'check'] as const;
+export type AiJob = (typeof AI_JOBS)[number];
+
+/** Most mistakes one check reports. */
+export const MAX_CHECK_ERRORS = 5;
+
+/**
+ * One mistake the work checker found (`POST /api/ai/check`). The client tags
+ * each line of working in the image it posts with a number, so a mistake is
+ * located by line rather than by coordinates — vision models disagree about
+ * coordinate conventions, and a router's choice of model changes per request.
+ */
+export interface CheckError {
+  /** The tagged line the mistake is on, from 1. */
+  line: number;
+  /** Why it is wrong, for a comment: plain text with `$…$` maths. */
+  message: string;
+  /** The corrected line as a LaTeX body, when there is one to write. */
+  correction?: string;
+}
+
+/** Most typeset sources one check carries; the server drops the rest. */
+export const MAX_CHECK_SOURCES = 30;
+
+/**
+ * Longest typeset source a check carries. Past it the shape is read from the
+ * image alone: truncated LaTeX is broken LaTeX, so it is dropped, not cut.
+ */
+export const MAX_CHECK_SOURCE_CHARS = 500;
+
+/**
+ * The exact source of one typeset shape on a tagged line — an equation's LaTeX
+ * or a text box's text — so the model needn't read it back from pixels. A line
+ * mixing ink and typeset shapes carries only its typeset parts.
+ */
+export interface CheckSource {
+  line: number;
+  kind: 'latex' | 'text';
+  source: string;
+}
+
+export interface CheckRequest {
+  /** PNG data URL of the tagged lines. */
+  image: string;
+  /** Absent from older clients; the image alone is then the whole input. */
+  sources?: CheckSource[];
+  /**
+   * Have a second model call verify each reported mistake before it is sent
+   * back. Costs a second call, and its latency, only when there is a mistake.
+   */
+  confirm?: boolean;
+}
+
+export interface CheckResponse {
+  /** Empty when the working is correct, or holds no mathematics. */
+  errors: CheckError[];
+}
+
+/** One OpenRouter catalogue entry, slimmed to what the picker shows. */
+export interface AiModel {
+  id: string;
+  name: string;
+  /** OpenRouter's USD price strings, keyed as its catalogue keys them. */
+  pricing: Record<string, string>;
+}
+
+export interface AiModelsResponse {
+  selected: Record<AiJob, string>;
+  /** Only the models whose input/output modalities fit each job. */
+  options: Record<AiJob, AiModel[]>;
+}

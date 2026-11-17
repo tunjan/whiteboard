@@ -1,3 +1,8 @@
+type Point = { x: number; y: number };
+
+/** Air kept between a label and any line, so text never touches a stroke. */
+const LINE_CLEARANCE = 2;
+
 export interface LabelBox {
   x: number;
   y: number;
@@ -11,6 +16,8 @@ export interface LabelRequest {
   y: number;
   /** Rendered text advance width. */
   width: number;
+  /** A dot to keep clear that needs no label of its own. */
+  silent?: boolean;
 }
 
 export interface PlacedLabel {
@@ -28,6 +35,8 @@ export interface LabelLayoutOptions {
   offset: number;
   /** Boxes labels must avoid besides dots, e.g. axis tick labels. */
   obstacles?: readonly LabelBox[];
+  /** Polylines labels must not touch, e.g. the curves and axes. */
+  lines?: readonly (readonly Point[])[];
 }
 
 // Preferred slots, in order: above-right, above-left, below-right,
@@ -47,18 +56,40 @@ function overlaps(a: LabelBox, b: LabelBox): boolean {
   );
 }
 
+// Each segment's own bounds: conservative on a long diagonal, but sampled
+// curves are short segments, and this runs for every slot of every label.
+export function touchesLine(box: LabelBox, line: readonly Point[]): boolean {
+  const left = box.x - LINE_CLEARANCE;
+  const right = box.x + box.w + LINE_CLEARANCE;
+  const top = box.y - LINE_CLEARANCE;
+  const bottom = box.y + box.h + LINE_CLEARANCE;
+  for (let i = 1; i < line.length; i += 1) {
+    const a = line[i - 1]!;
+    const b = line[i]!;
+    if (
+      Math.max(a.x, b.x) >= left &&
+      Math.min(a.x, b.x) <= right &&
+      Math.max(a.y, b.y) >= top &&
+      Math.min(a.y, b.y) <= bottom
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /**
  * Greedy point-label placement. Requests are placed in order, so callers put
  * the most important points first. Each label takes the first slot that stays
- * inside `bounds` and clears every dot, obstacle and earlier label; a label
- * with no free slot is dropped (`null`) rather than drawn over another one.
+ * inside `bounds` and clears every dot, obstacle, line and earlier label; a
+ * label with no free slot is dropped (`null`) rather than drawn over anything.
  */
 export function placePointLabels(
   requests: readonly LabelRequest[],
   bounds: LabelBox,
   options: LabelLayoutOptions,
 ): (PlacedLabel | null)[] {
-  const { fontSize, dotRadius, offset } = options;
+  const { fontSize, dotRadius, offset, lines = [] } = options;
   // Digits and parentheses: cap height above the baseline, a little below.
   const ascent = fontSize * 0.8;
   const height = fontSize;
@@ -73,6 +104,7 @@ export function placePointLabels(
   ];
 
   return requests.map((request) => {
+    if (request.silent) return null;
     for (const slot of SLOTS) {
       const left =
         slot.dx > 0 ? request.x + offset : request.x - offset - request.width;
@@ -92,6 +124,7 @@ export function placePointLabels(
         continue;
       }
       if (taken.some((other) => overlaps(box, other))) continue;
+      if (lines.some((line) => touchesLine(box, line))) continue;
       taken.push(box);
       return {
         x: slot.dx > 0 ? box.x : box.x + box.w,

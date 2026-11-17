@@ -359,6 +359,11 @@ export interface GraphProps {
   points?: GraphPoint[];
   /** Render intersection markers for explicit curves. Defaults to false. */
   showIntersections?: boolean;
+  /** Axis scales. Absent is linear; a log axis needs a positive window. */
+  xScale?: 'linear' | 'log';
+  yScale?: 'linear' | 'log';
+  /** What trig functions read and return. Absent is radians. */
+  angleUnit?: 'rad' | 'deg';
 }
 
 export interface EquationProps {
@@ -371,6 +376,8 @@ export interface EquationProps {
    * existed, and on every one since that didn't ask for it.
    */
   inline?: boolean;
+  /** Number or name shown in parentheses beside the equation, e.g. `1`. */
+  tag?: string;
   /** Applied as currentColor to the MathJax SVG paths. */
   color: string;
   /** Typographic scale in world units. */

@@ -44,7 +44,7 @@ interface SegmentInfo {
 }
 
 /** tldraw's seeded xorshift128; returns values in [-1, 1). */
-function rng(seed: string): () => number {
+export function rng(seed: string): () => number {
   let x = 0;
   let y = 0;
   let z = 0;

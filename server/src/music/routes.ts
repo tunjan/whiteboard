@@ -174,7 +174,8 @@ function parseRange(
     end = size - 1;
   } else {
     start = Number(rawStart);
-    end = rawEnd ? Number(rawEnd) : size - 1;
+    // An end past the file means "to the end" (RFC 9110), not unsatisfiable.
+    end = rawEnd ? Math.min(Number(rawEnd), size - 1) : size - 1;
   }
 
   if (

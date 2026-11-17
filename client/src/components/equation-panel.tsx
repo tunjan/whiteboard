@@ -361,8 +361,11 @@ export function EquationPanelContent({ shape }: { shape: EquationShape }) {
   const addEquationBelow = () => {
     const current = editor.getShape(shape.id);
     if (current?.type !== 'equation' || !current.props.latex.trim()) return;
+    // Its own number, not this line's — unless this line had its number removed.
+    const { tag, ...inherited } = current.props;
     const props: EquationProps = {
-      ...current.props,
+      ...inherited,
+      ...(tag === '' ? { tag } : {}),
       latex: '',
       w: EQUATION_DEFAULT_SIZE.w,
       h: EQUATION_DEFAULT_SIZE.h,

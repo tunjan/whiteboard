@@ -186,8 +186,8 @@ export function Minimap() {
         // question, it needs no explaining, and the bottom-left corner of the
         // board goes quiet.
         'bottom-[calc(4rem+var(--wb-inset-bottom))]',
-        'max-sm:bottom-[calc(8rem+var(--wb-inset-bottom))]',
-        '[@media(pointer:coarse)]:bottom-[calc(11.5rem+var(--wb-inset-bottom))]',
+        'max-sm:bottom-[calc(var(--drawer-reach)+3.75rem+var(--wb-inset-bottom))]',
+        '[@media(pointer:coarse)]:bottom-[calc(var(--drawer-reach)+4.25rem+var(--wb-inset-bottom))]',
       )}
     >
       <canvas

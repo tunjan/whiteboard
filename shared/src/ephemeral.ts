@@ -14,7 +14,7 @@ const MAX_ID_LENGTH = 64;
 /** Coordinates in one `add` op. A stroke re-sent whole after a reconnect fits. */
 const MAX_LASER_COORDS = 16_384;
 const MAX_SCRIBBLES = 16;
-/** x, y, pressure triples. The local trail is capped at eight samples. */
+/** x, y, pressure triples. The sender thins a trail to sixteen samples. */
 const MAX_SCRIBBLE_COORDS = 48;
 
 export type LaserOp =

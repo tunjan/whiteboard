@@ -191,12 +191,13 @@ function DropdownMenuCheckboxItem({
       checked={checked}
       {...props}
     >
+      {/* The box stays when off, or an unticked row reads as a command. */}
       <span
-        className="pointer-events-none absolute right-2 flex items-center justify-center"
+        className="pointer-events-none absolute right-2 flex size-4 items-center justify-center rounded-xs border border-control-border bg-surface text-on-check in-data-checked:border-check in-data-checked:bg-check"
         data-slot="dropdown-menu-checkbox-item-indicator"
       >
-        <MenuPrimitive.CheckboxItemIndicator>
-          <CheckIcon />
+        <MenuPrimitive.CheckboxItemIndicator className="flex">
+          <CheckIcon className="size-3" />
         </MenuPrimitive.CheckboxItemIndicator>
       </span>
       {children}

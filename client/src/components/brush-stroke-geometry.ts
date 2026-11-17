@@ -1,108 +1,33 @@
 /**
- * The loading veil's brush figure, built once at module load.
+ * The loading veil's underline: one brush stroke under the board's title, the
+ * way a tutor underlines the heading before the lesson starts.
  *
- * Three strokes, one per wait, traced from a hand-drawn reference: an arch
- * coming down hard into a point, a flick back up and out to the right, and a
- * drop that swings away along the bottom. Each is painted in the direction it
- * was drawn, so the figure fills in the order and the directions a hand would
- * lay it down.
+ * What makes it read as a hand rather than a rule is all here: the brush
+ * lands light and swells to full load, the line sags a hair in the middle and
+ * drifts uphill as the wrist travels, it overshoots the title at both ends,
+ * and it leaves the paper on an upward flick that thins and runs dry.
  *
- * Everything is deterministic (fixed noise offsets), so the figure is the
- * same on every load and in every test snapshot: a hand-made thing that
- * reshuffled itself each visit would read as generated, not drawn. The cost is
- * a few thousand noise samples, paid once; nothing is recomputed per render.
+ * Seeded per board (from the title), so every board has its own underline and
+ * keeps it: the same board loads with the same mark every time, while a
+ * figure that reshuffled itself on each visit would read as generated, not
+ * drawn.
  *
- * Each stroke yields two paths. `outline` is the silhouette — the traced
- * spine plus a low wobble, a width that follows the pen's pressure, nicked
- * edges, uneven round ends and a few dry-brush gaps — used as a clip path.
- * `pass` is one fat line down the same spine that paints the silhouette in.
- * It overshoots both ends so its round caps never show; the clip, not the
- * pass, owns the shape.
+ * The stroke yields two paths. `outline` is the silhouette — spine plus a low
+ * wobble, a width that follows the pressure, a toothed edge, uneven round ends
+ * and a few dry-brush gaps in the flick — used as a clip path. `pass` is one
+ * fat line down the same spine that paints the silhouette in, in the direction
+ * it was drawn. It overshoots both ends so its round caps never show; the
+ * clip, not the pass, owns the shape.
  */
 
 type Pt = [number, number];
 
-type StrokeSpec = {
-  /** Spine through the reference drawing, in drawing pixels, in the order it
-   *  was drawn. */
-  points: Pt[];
-  /** Full thickness where the stroke lands and where it lifts. */
-  from: number;
-  to: number;
-  /** Decorrelates this stroke's noise from the others'. */
-  seed: number;
-  /** Dry-brush gaps: span along the stroke, then lateral position and
-   *  half-width as fractions of the local half-thickness. */
-  streaks: { t0: number; t1: number; lat: number; w: number }[];
-};
+/** Full brush load, in px: about a quarter of the title's 24px type, heavy
+ *  enough to carry texture without outweighing the words. */
+const LOAD = 6;
 
-const STROKES: StrokeSpec[] = [
-  {
-    points: [
-      [135, 200],
-      [210, 172],
-      [265, 172],
-      [330, 198],
-      [382, 240],
-      [424, 292],
-      [462, 368],
-      [484, 440],
-      [492, 512],
-      [497, 588],
-    ],
-    from: 22,
-    to: 44,
-    seed: 1,
-    streaks: [
-      { t0: 0.3, t1: 0.62, lat: -0.42, w: 0.07 },
-      { t0: 0.48, t1: 0.9, lat: 0.3, w: 0.08 },
-      { t0: 0.6, t1: 0.82, lat: -0.05, w: 0.06 },
-    ],
-  },
-  {
-    points: [
-      [533, 597],
-      [556, 540],
-      [592, 470],
-      [642, 404],
-      [720, 320],
-      [830, 236],
-      [950, 186],
-      [1082, 162],
-    ],
-    from: 18,
-    to: 38,
-    seed: 2,
-    streaks: [
-      { t0: 0.22, t1: 0.5, lat: 0.35, w: 0.07 },
-      { t0: 0.4, t1: 0.78, lat: -0.3, w: 0.08 },
-      { t0: 0.62, t1: 0.92, lat: 0.1, w: 0.06 },
-    ],
-  },
-  {
-    points: [
-      [1111, 212],
-      [1110, 292],
-      [1124, 380],
-      [1160, 462],
-      [1222, 532],
-      [1320, 586],
-      [1420, 616],
-      [1490, 634],
-    ],
-    from: 30,
-    to: 34,
-    seed: 3,
-    streaks: [
-      { t0: 0.16, t1: 0.44, lat: -0.3, w: 0.07 },
-      { t0: 0.5, t1: 0.86, lat: 0.34, w: 0.08 },
-      { t0: 0.7, t1: 0.95, lat: -0.12, w: 0.06 },
-    ],
-  },
-];
-
-/** Spine samples per drawing pixel of length. */
-const DENSITY = 1 / 5;
+/** Spine samples per px of length. */
+const DENSITY = 1 / 3;
 
 function mulberry32(seed: number) {
   let a = seed >>> 0;
@@ -152,7 +77,7 @@ function catmullRom(p0: Pt, p1: Pt, p2: Pt, p3: Pt, t: number): Pt {
 }
 
 /** The spine as evenly spaced samples, so noise frequencies mean the same
- *  thing along a tight curve as along a straight run. */
+ *  thing along the tight flick as along the long run. */
 function resampleSpine(points: Pt[]): Pt[] {
   const dense: Pt[] = [];
   for (let i = 0; i < points.length - 1; i++) {
@@ -196,48 +121,110 @@ function normals(pts: Pt[]): Pt[] {
   });
 }
 
-const smoothstep = (x: number) => x * x * (3 - 2 * x);
+const smoothstep = (x: number) => {
+  const c = Math.min(1, Math.max(0, x));
+  return c * c * (3 - 2 * c);
+};
 
-/** Edge roughness: fine tooth everywhere, plus sharp nicks where a bristle
- *  skipped. Coarser than a real brush would show, because the figure is drawn
- *  at about a quarter of the reference's size. */
-function edge(t: number, side: number, seed: number) {
+function pathLength(pts: Pt[]) {
+  let sum = 0;
+  for (let i = 1; i < pts.length; i++) {
+    sum += Math.hypot(pts[i]![0] - pts[i - 1]![0], pts[i]![1] - pts[i - 1]![1]);
+  }
+  return sum;
+}
+
+/** Edge roughness: fine tooth everywhere, plus shallow nicks where a bristle
+ *  skipped. Frequencies are per px, so a long title is not smoother. */
+function edge(px: number, side: number, seed: number) {
   const k = seed * 53 + side * 91;
-  const tooth = 0.1 * fbm(t * 38 + k, 3) + 0.05 * noise(t * 110 + k);
-  const nick = Math.max(0, noise(t * 17 + k) - 0.55) * -0.9;
+  const tooth = 0.1 * fbm(px / 9 + k, 3) + 0.05 * noise(px / 3 + k);
+  const nick = Math.max(0, noise(px / 20 + k) - 0.55) * -0.8;
   return 1 + tooth + nick;
 }
 
 /** An outline can swing at most this far past the local half-thickness. */
 const MAX_REACH = 1.25;
 
-export type BrushStroke = { outline: string; pass: string; passWidth: number };
+/** A stable seed from a title: same board, same hand. */
+export function underlineSeed(title: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < title.length; i++) {
+    h = Math.imul(h ^ title.charCodeAt(i), 16777619);
+  }
+  return (h >>> 0) % 997;
+}
 
-function buildStroke({ points, from, to, seed, streaks }: StrokeSpec) {
-  const base = resampleSpine(points);
+export type Underline = {
+  outline: string;
+  pass: string;
+  passWidth: number;
+  /** In the stroke's own px, origin at the title's left edge on the line. */
+  viewBox: { x: number; y: number; width: number; height: number };
+  /** Where along `pass` (as a fraction of its length, the unit
+   *  `pathLength={1}` dashes in) the ink starts, and where the run ends and
+   *  the flick begins. Progress is laid between these two; the flick is
+   *  saved for the finish. */
+  inkStart: number;
+  runEnd: number;
+};
+
+/** The underline for a title `width` px wide. */
+export function underline(width: number, seed: number): Underline {
+  const r = mulberry32(seed + 1);
+  const w = Math.max(width, 48);
+  // Starts a touch before the first letter and runs a touch past the last,
+  // which is what a hand does and a border never does.
+  const x0 = -w * (0.03 + 0.03 * r());
+  const x1 = w * (0.98 + 0.03 * r());
+  const drift = w * (0.018 + 0.02 * r());
+  const sag = Math.min(w * (0.008 + 0.01 * r()), 4);
+  const run: Pt[] = [];
+  for (let k = 0; k <= 6; k++) {
+    const u = k / 6;
+    run.push([x0 + (x1 - x0) * u, -drift * u + sag * Math.sin(Math.PI * u)]);
+  }
+  // The lift: the wrist turns up and out as the brush leaves the paper. A
+  // long shallow curve, not a hook — a sharp turn at the end reads as a tick.
+  const f = Math.min(Math.max(w * 0.13, 18), 40);
+  const angle = (16 + 10 * r()) * (Math.PI / 180);
+  const [ex, ey] = run[run.length - 1]!;
+  const flick: Pt[] = [
+    [ex + f * 0.5 * Math.cos(angle * 0.4), ey - f * 0.5 * Math.sin(angle * 0.4)],
+    [ex + f * Math.cos(angle), ey - f * Math.sin(angle)],
+  ];
+
+  const base = resampleSpine([...run, ...flick]);
   const baseN = normals(base);
   const last = base.length - 1;
+  const runLen = pathLength(resampleSpine(run));
+  const totalLen = pathLength(base);
+  const flickAt = runLen / totalLen;
+
+  // Pressure: lands at under half load, swells to full within the first
+  // stretch, holds with a slow breathing, then thins hard through the flick.
   const halfWidth = base.map((_, i) => {
     const t = i / last;
-    const pressure = from + (to - from) * smoothstep(t);
-    return (pressure / 2) * (1 + 0.1 * fbm(t * 3 + seed * 19, 2));
+    const land = 0.3 + 0.7 * smoothstep(t / 0.16);
+    const lift = 1 - 0.85 * smoothstep((t - flickAt + 0.14) / (1 - flickAt + 0.14));
+    const breath = 1 + 0.12 * fbm(t * 3 + seed * 0.19, 2);
+    return (LOAD / 2) * land * lift * breath;
   });
 
-  // A low wobble off the traced line: the reference is a clean pen stroke,
-  // and a brush never holds a curve that evenly.
+  // A low wobble off the ideal line: no hand holds a straight that evenly.
   const spine = base.map(([x, y], i): Pt => {
-    const off = halfWidth[i]! * 0.35 * fbm((i / last) * 4 + seed * 7, 2);
+    const off = 0.9 * fbm((i / last) * 3 + seed * 0.07, 2);
     return [x + baseN[i]![0] * off, y + baseN[i]![1] * off];
   });
   const n = normals(spine);
+  const along = spine.map((_, i) => (i / last) * totalLen);
 
   const top: Pt[] = [];
   const bottom: Pt[] = [];
   spine.forEach(([x, y], i) => {
-    const t = i / last;
     const hw = halfWidth[i]!;
-    const up = Math.min(hw * edge(t, 1, seed), hw * MAX_REACH);
-    const down = Math.min(hw * edge(t, -1, seed), hw * MAX_REACH);
+    const up = Math.min(hw * edge(along[i]!, 1, seed), hw * MAX_REACH);
+    const down = Math.min(hw * edge(along[i]!, -1, seed), hw * MAX_REACH);
     top.push([x - n[i]![0] * up, y - n[i]![1] * up]);
     bottom.push([x + n[i]![0] * down, y + n[i]![1] * down]);
   });
@@ -251,18 +238,23 @@ function buildStroke({ points, from, to, seed, streaks }: StrokeSpec) {
     const out: Pt[] = [];
     for (let k = 1; k < 10; k++) {
       const a = (Math.PI * k) / 10;
-      const r = halfWidth[i]! * (1 + 0.12 * noise(k * 1.9 + seed * 11 + dir));
+      const rad = halfWidth[i]! * (1 + 0.12 * noise(k * 1.9 + seed * 0.11 + dir));
       const c = Math.cos(a) * dir;
       const s = Math.sin(a) * dir;
-      out.push([x + (-nx * c + tx * s) * r, y + (-ny * c + ty * s) * r]);
+      out.push([x + (-nx * c + tx * s) * rad, y + (-ny * c + ty * s) * rad]);
     }
     return out;
   };
   const ring = [...top, ...cap(last, 1), ...bottom.reverse(), ...cap(0, -1)];
 
-  // Dry-brush gaps, cut out with `clip-rule="evenodd"`, so they must stay
-  // inside the outline.
-  const holes = streaks.map(({ t0, t1, lat, w }) => {
+  // Dry-brush gaps where the brush is moving fastest and carrying least: the
+  // last of the run and into the flick. Cut out with `clip-rule="evenodd"`,
+  // so they stay inside the outline.
+  const streaks = [
+    { t0: flickAt - 0.3, t1: flickAt + 0.02, lat: -0.35 + 0.1 * r(), w: 0.09 },
+    { t0: flickAt - 0.16, t1: Math.min(0.97, flickAt + 0.1), lat: 0.28, w: 0.1 },
+  ];
+  const holes = streaks.map(({ t0, t1, lat, w: sw }) => {
     const a: Pt[] = [];
     const b: Pt[] = [];
     const i0 = Math.round(t0 * last);
@@ -272,7 +264,7 @@ function buildStroke({ points, from, to, seed, streaks }: StrokeSpec) {
       const [nx, ny] = n[i]!;
       const hw = halfWidth[i]!;
       const off = hw * (lat + 0.06 * noise(i * 0.8 + lat * 50));
-      const half = hw * w * Math.sin((Math.PI * (i - i0)) / (i1 - i0));
+      const half = hw * sw * Math.sin((Math.PI * (i - i0)) / (i1 - i0));
       a.push([x + nx * (off - half), y + ny * (off - half)]);
       b.push([x + nx * (off + half), y + ny * (off + half)]);
     }
@@ -283,20 +275,38 @@ function buildStroke({ points, from, to, seed, streaks }: StrokeSpec) {
   // both ends along the tangent far enough that its round caps sit clear of
   // the silhouette's own ends.
   const passWidth = 2 * Math.max(...halfWidth) * (MAX_REACH + 0.1);
+  const reach = (i: number) => halfWidth[i]! * 1.2 + passWidth / 2 + 2;
   const extend = (i: number, j: number): Pt => {
     const [x, y] = spine[i]!;
     const [px, py] = spine[j]!;
     const len = Math.hypot(x - px, y - py) || 1;
-    const d = halfWidth[i]! * 1.2 + passWidth / 2 + 2;
+    const d = reach(i);
     return [x + ((x - px) / len) * d, y + ((y - py) / len) * d];
   };
-  const pass = toPath([extend(0, 1), ...spine, extend(last, last - 1)], false);
+  const passPts = [extend(0, 1), ...spine, extend(last, last - 1)];
+  const passLen = pathLength(passPts);
+  const lead = reach(0);
+
+  const xs = ring.map((p) => p[0]);
+  const ys = ring.map((p) => p[1]);
+  const PAD = 2;
+  const minX = Math.min(...xs) - PAD;
+  const minY = Math.min(...ys) - PAD;
 
   return {
     outline: `${toPath(ring, true)} ${holes.join(' ')}`,
-    pass,
+    pass: toPath(passPts, false),
     passWidth,
-    ring,
+    viewBox: {
+      x: minX,
+      y: minY,
+      width: Math.max(...xs) + PAD - minX,
+      height: Math.max(...ys) + PAD - minY,
+    },
+    // The pass's round cap reaches `passWidth / 2` ahead of its dash end, so
+    // the ink starts showing that much before `lead`.
+    inkStart: (lead - passWidth / 2) / passLen,
+    runEnd: (lead + runLen) / passLen,
   };
 }
 
@@ -306,20 +316,3 @@ function toPath(pts: Pt[], close: boolean) {
     .join('');
   return close ? `${d}Z` : d;
 }
-
-const built = STROKES.map(buildStroke);
-
-export const BRUSH_STROKES: readonly BrushStroke[] = built.map(
-  ({ outline, pass, passWidth }) => ({ outline, pass, passWidth }),
-);
-
-const extent = built.flatMap((s) => s.ring);
-const PAD = 4;
-const minX = Math.min(...extent.map((p) => p[0])) - PAD;
-const minY = Math.min(...extent.map((p) => p[1])) - PAD;
-const maxX = Math.max(...extent.map((p) => p[0])) + PAD;
-const maxY = Math.max(...extent.map((p) => p[1])) + PAD;
-
-export const BRUSH_VIEW_BOX = [minX, minY, maxX - minX, maxY - minY]
-  .map((v) => v.toFixed(1))
-  .join(' ');

@@ -1,5 +1,4 @@
 import type { ComponentType } from 'react';
-import { AlignCenter, AlignLeft, AlignRight } from 'lucide-react';
 import type {
   ArrowTopology,
   FillStyle,
@@ -54,16 +53,45 @@ export const WEIGHTS: { weight: FontWeight; label: string }[] = [
   { weight: 700, label: 'Bold' },
 ];
 
-export const ALIGNS: {
-  align: TextAlign;
-  Icon: ComponentType<{
-    className?: string;
-    'aria-hidden'?: boolean | 'true' | 'false';
-  }>;
-}[] = [
-  { align: 'start', Icon: AlignLeft },
-  { align: 'middle', Icon: AlignCenter },
-  { align: 'end', Icon: AlignRight },
+type AlignIcon = ComponentType<{
+  className?: string;
+  'aria-hidden'?: boolean | 'true' | 'false';
+}>;
+
+/** Four lines of uneven length, as real text is, set to one side. */
+const ALIGN_LINES = [
+  { y: 5, width: 17 },
+  { y: 9.7, width: 11 },
+  { y: 14.3, width: 14 },
+  { y: 19, width: 8 },
+];
+
+function alignIcon(align: TextAlign): AlignIcon {
+  return function Align(props) {
+    return (
+      <svg
+        width={24}
+        height={24}
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={2}
+        strokeLinecap="round"
+        {...props}
+      >
+        {ALIGN_LINES.map(({ y, width }) => {
+          const x = align === 'start' ? 3.5 : align === 'end' ? 20.5 - width : 12 - width / 2;
+          return <path key={y} d={`M${x} ${y}h${width}`} />;
+        })}
+      </svg>
+    );
+  };
+}
+
+export const ALIGNS: { align: TextAlign; Icon: AlignIcon }[] = [
+  { align: 'start', Icon: alignIcon('start') },
+  { align: 'middle', Icon: alignIcon('middle') },
+  { align: 'end', Icon: alignIcon('end') },
 ];
 
 export const ARROW_TOPOLOGIES: Array<{
@@ -76,30 +104,41 @@ export const ARROW_TOPOLOGIES: Array<{
   { value: 'elbow', label: 'Elbow arrow', glyph: '└' },
 ];
 
-export function FillPreview({ style }: { style: FillStyle }) {
+/** One way of the hatching; crosshatch adds its mirror image. */
+const HATCH = 'M4 12 L12 4 M7 13 L13 7 M3 9 L9 3';
+const HATCH_MIRROR = 'M4 4 L12 12 M9 13 L3 7 M13 9 L7 3';
+
+export function FillPreview({
+  style,
+  color = 'currentColor',
+  className,
+}: {
+  style: FillStyle;
+  /** What a solid fill is painted in. */
+  color?: string;
+  className?: string;
+}) {
   return (
-    <svg width={16} height={16} viewBox="0 0 16 16" aria-hidden="true">
+    <svg width={16} height={16} viewBox="0 0 16 16" aria-hidden="true" className={className}>
       <rect
         x={2.5}
         y={2.5}
         width={11}
         height={11}
         rx={1.5}
-        fill={style === 'solid' ? 'currentColor' : 'none'}
+        fill={style === 'solid' ? color : 'none'}
         fillOpacity={style === 'solid' ? 0.35 : undefined}
         stroke="currentColor"
         strokeWidth={1}
       />
-      {style === 'hatch' ? (
-        <path
-          d="M4 12 L12 4 M7 13 L13 7 M3 9 L9 3"
-          stroke="currentColor"
-          strokeWidth={0.8}
-        />
+      {/* Struck through, so an empty box reads as neither an unticked checkbox
+          nor a dashed stroke. */}
+      {style === 'none' ? (
+        <path d="M3 13 L13 3" stroke="currentColor" strokeWidth={1} />
       ) : null}
-      {style === 'crosshatch' ? (
+      {style === 'hatch' || style === 'crosshatch' ? (
         <path
-          d="M4 12 L12 4 M4 4 L12 12"
+          d={style === 'hatch' ? HATCH : `${HATCH} ${HATCH_MIRROR}`}
           stroke="currentColor"
           strokeWidth={0.8}
         />

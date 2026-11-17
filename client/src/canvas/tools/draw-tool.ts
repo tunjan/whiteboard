@@ -11,14 +11,17 @@ import {
 } from '@whiteboard/shared';
 import { topFrameAtPoint } from '../frame-operations';
 import { getBottomIndex, getIndexAboveTopmostOf, getTopIndex } from '../order';
+import { holdAutoRefine, queueAutoRefine } from '../handwriting-refine';
 import { InputsManager, isPenOrStylus } from '../inputs-manager';
 import {
   DEFAULT_PENCIL_STABILIZATION,
   REFERENCE_PENCIL_DYNAMICS,
   STROKE_PROFILES,
+  anchorAtDefault,
   liftTaperFor,
   pencilStabilizationToStreamline,
   type EndTaperMode,
+  type InkStrokeProfile,
   type PencilPressureCurve,
 } from '../shapes/ink';
 import { NOMINAL_SAMPLE_SPACING } from '../shapes/ink-engine';
@@ -31,7 +34,7 @@ import {
   publishLiveStroke,
 } from '../use-live-stroke-store';
 import { nextShapeStyle } from '../use-style-store';
-import { playPenToolSound } from './pen-tool-sound';
+import { playSnapSound } from '../tool-sounds';
 import type { Tool, ToolContext, ToolPointerInfo } from './types';
 
 /**
@@ -138,6 +141,43 @@ const HOLD_SCREEN_TOLERANCE = 4;
 const SNAP_SAMPLE_SPACING = 2;
 const SNAP_MAX_SAMPLES = 500;
 
+/**
+ * How long the held stroke takes to settle into its clean shape. Replacing it
+ * in a single frame read as the ink being swapped out from under the pen; a
+ * short ease reads as the line being straightened by it.
+ */
+const SNAP_MORPH_MS = 180;
+
+function reducedMotion(): boolean {
+  return (
+    typeof matchMedia === 'function' &&
+    matchMedia('(prefers-reduced-motion: reduce)').matches
+  );
+}
+
+/**
+ * Where each sample of the clean shape starts its morph from: the nearest
+ * point of the stroke as drawn.
+ *
+ * Not arc-length correspondence. The recognizer is free to begin a polygon at
+ * whichever corner it likes, and pairing by distance along the path would
+ * then swing the whole outline round to meet it.
+ */
+function nearestOnStroke(target: readonly Point[], drawn: readonly Point[]): Point[] {
+  return target.map((t) => {
+    let best = drawn[0]!;
+    let bestDistance = Infinity;
+    for (const d of drawn) {
+      const distance = (d.x - t.x) ** 2 + (d.y - t.y) ** 2;
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = d;
+      }
+    }
+    return best;
+  });
+}
+
 function resample(points: Point[], pressure: number): DrawPoint[] {
   let length = 0;
   for (let i = 1; i < points.length; i++) {
@@ -238,7 +278,7 @@ const PENCIL_CONFIG: DrawToolConfig = {
  * size control meaningful for both tools instead of giving the marker a second
  * one to keep in sync.
  */
-const MARKER_SIZE_SCALE = 6;
+export const MARKER_SIZE_SCALE = 6;
 
 /**
  * How translucent a new marker stroke is.
@@ -254,11 +294,9 @@ const MARKER_OPACITY = 1;
  * Marker stabilization and softening, as engine weights rather than the
  * Settings slider the pencil reads.
  *
- * The pencil's zoom correction is deliberately not applied here. It exists
- * because a hand's tremor covers more world units zoomed out and shows in a
- * fine line; a band six times wider than the nib swallows that tremor at every
- * zoom, so correcting for it would only round off the corners of a deliberate
- * gesture.
+ * Fixed rather than read from the Settings slider: a band six times wider than
+ * the nib swallows hand tremor at every setting, so more stabilization would
+ * only round off the corners of a deliberate gesture.
  */
 const MARKER_STREAMLINE = 0.5;
 const MARKER_SMOOTHING = 0.5;
@@ -281,6 +319,56 @@ function markerIndex(shapes: readonly Shape[], at: Point): string {
   return frame === null
     ? getBottomIndex(shapes)
     : getIndexAboveTopmostOf(shapes, [frame.id]);
+}
+
+/**
+ * The width-shaping props a pencil stroke from this input gets: brush profile,
+ * thinning and pressure curve. Shared with the cursor footprint, which has to
+ * preview the nib the next press will actually lay down.
+ *
+ * `medium` is not a curve of its own: it means "whichever curve this input
+ * calls for", which is what every stroke used before the preference existed —
+ * a stylus reading real force wants a different response from a mouse whose
+ * "pressure" is its own speed. The two deliberate ends override that for both,
+ * because someone who says the pen is too soft is saying it about the pointer
+ * they actually have.
+ */
+export function pencilNib(
+  styleSize: number,
+  stylus: boolean,
+  velocity: boolean,
+  pencil: { pencilThinning: number; pencilPressureCurve: PencilPressureCurve },
+): {
+  profile: InkStrokeProfile;
+  thinning: number;
+  pressureEasing: PressureEasing;
+} {
+  const profile = stylus
+    ? STROKE_PROFILES.realPressure(styleSize)
+    : velocity
+      ? STROKE_PROFILES.simulatePressure(styleSize)
+      : STROKE_PROFILES.solid(styleSize);
+  const curve = pencil.pencilPressureCurve;
+  return {
+    profile,
+    thinning: !stylus && !velocity
+      ? 0
+      : anchorAtDefault(
+          pencil.pencilThinning,
+          REFERENCE_PENCIL_DYNAMICS.thinning,
+          profile.thinning,
+          -1,
+          1,
+        ),
+    pressureEasing:
+      curve !== 'medium'
+        ? curve
+        : stylus
+          ? 'stylus'
+          : velocity
+            ? 'ease-out-sine'
+            : 'linear',
+  };
 }
 
 export function createDrawTool(config: DrawToolConfig = PENCIL_CONFIG): Tool {
@@ -369,6 +457,8 @@ export function createDrawTool(config: DrawToolConfig = PENCIL_CONFIG): Tool {
   // Pending hold-to-snap, and where the pen was when it was armed.
   let holdTimer: ReturnType<typeof setTimeout> | null = null;
   let holdAnchorScreen: Point | null = null;
+  // Pending frame of the snap morph. See `SNAP_MORPH_MS`.
+  let morphRaf: number | null = null;
   // The stroke has been replaced by its clean shape; further motion until the
   // lift is ignored so the snapped shape is what gets committed.
   let snapped = false;
@@ -390,6 +480,10 @@ export function createDrawTool(config: DrawToolConfig = PENCIL_CONFIG): Tool {
       clearTimeout(holdTimer);
       holdTimer = null;
     }
+    if (morphRaf !== null) {
+      cancelAnimationFrame(morphRaf);
+      morphRaf = null;
+    }
   };
 
   /**
@@ -409,6 +503,7 @@ export function createDrawTool(config: DrawToolConfig = PENCIL_CONFIG): Tool {
       .map((p) => p.pressure ?? NEUTRAL_PRESSURE)
       .sort((a, b) => a - b);
     const pressure = pressures[pressures.length >> 1] ?? NEUTRAL_PRESSURE;
+    const drawn = points;
     points = resample(shape, pressure);
     predicted = [];
     snapped = true;
@@ -430,7 +525,43 @@ export function createDrawTool(config: DrawToolConfig = PENCIL_CONFIG): Tool {
         points: points.slice(),
       },
     });
-    publishFrame();
+    playSnapSound();
+    if (reducedMotion()) publishFrame();
+    else morphSnap(nearestOnStroke(points, drawn));
+  };
+
+  /**
+   * Ease the live stroke from `from` onto the snapped `points`, locally.
+   *
+   * The document already holds the clean shape — peers and undo see it land at
+   * once — so this only animates what the active-stroke layer draws. A lift
+   * mid-morph cancels it with the rest of the pending work and commits the
+   * clean shape as it is.
+   */
+  const morphSnap = (from: readonly Point[]): void => {
+    const target = points;
+    // A live-stroke flush still pending from the last move would draw the
+    // finished shape for one frame in the middle of the ease.
+    if (rafId !== null) {
+      cancelAnimationFrame(rafId);
+      rafId = null;
+    }
+    const start = performance.now();
+    const step = (now: number): void => {
+      const t = Math.min(1, (now - start) / SNAP_MORPH_MS);
+      const k = 1 - (1 - t) ** 3;
+      morphRaf = t < 1 ? requestAnimationFrame(step) : null;
+      publishFrame(
+        t < 1
+          ? target.map((p, i) => ({
+              ...p,
+              x: from[i]!.x + (p.x - from[i]!.x) * k,
+              y: from[i]!.y + (p.y - from[i]!.y) * k,
+            }))
+          : target,
+      );
+    };
+    step(start);
   };
 
   /** (Re)start the hold-to-snap countdown from where the pen is now. */
@@ -451,13 +582,13 @@ export function createDrawTool(config: DrawToolConfig = PENCIL_CONFIG): Tool {
    * would schedule a React render that can land after the paint it was meant
    * for — the delay the predicted tail exists to hide.
    */
-  const publishFrame = (): void => {
+  const publishFrame = (frame: DrawPoint[] = points): void => {
     if (!strokeProps) return;
     publishLiveStroke({
       origin,
       props: strokeProps,
       opacity: strokeOpacity,
-      points: straightAnchor === null ? points : densifyStraight(points),
+      points: straightAnchor === null ? frame : densifyStraight(frame),
       predicted,
     });
   };
@@ -687,7 +818,9 @@ export function createDrawTool(config: DrawToolConfig = PENCIL_CONFIG): Tool {
     // pressed, so it must not open with the start taper again — that would pinch
     // the line to nothing in the middle of an unbroken stroke.
     strokeProps = { ...strokeProps, startTaper: 0 };
-    beginShape(ctx, worldOrigin, { x: 0, y: 0, pressure: last.pressure });
+    // The seed carries the cut point's tilt as well as its pressure, or a
+    // leaning stylus would restart upright and pinch the line at the seam.
+    beginShape(ctx, worldOrigin, { ...last, x: 0, y: 0 });
   };
 
   // Minimum spacing between recorded samples, in world units. See `appendPoint`.
@@ -740,21 +873,6 @@ export function createDrawTool(config: DrawToolConfig = PENCIL_CONFIG): Tool {
     if (velocityPressure && strokeProps?.inkAlgorithm !== 'reference')
       return pressureFromVelocity();
     return NEUTRAL_PRESSURE;
-  };
-
-  /**
-   * The pressure curve this stroke is drawn with.
-   *
-   * `medium` means "whichever curve this input calls for", which is what every
-   * stroke used before the preference existed — a stylus reading real force
-   * wants a different response from a mouse whose "pressure" is its own speed.
-   * The two deliberate ends override that for both, because someone who says
-   * the pen is too soft is saying it about the pointer they actually have.
-   */
-  const pressureEasingFor = (curve: PencilPressureCurve): PressureEasing => {
-    if (curve !== 'medium') return curve;
-    if (stylusInput) return 'stylus';
-    return velocityPressure ? 'ease-out-sine' : 'linear';
   };
 
   const snapToAngle = (point: DrawPoint, start: DrawPoint): DrawPoint => {
@@ -1081,12 +1199,10 @@ export function createDrawTool(config: DrawToolConfig = PENCIL_CONFIG): Tool {
     // document write path is untouched — peers receive real samples per frame.
     wantsPredictedSamples: true,
 
-    onEnter() {
-      if (config.id === 'draw') playPenToolSound('activate');
-    },
-
     onPointerDown(info: ToolPointerInfo, ctx: ToolContext) {
       if (info.button !== 0) return;
+      // The word isn't finished: tidy it at the next pause, not mid-letter.
+      holdAutoRefine();
       const util = shapeRegistry.get('draw');
       if (!util) return;
       const pencil = useCanvasUiStore.getState();
@@ -1171,11 +1287,12 @@ export function createDrawTool(config: DrawToolConfig = PENCIL_CONFIG): Tool {
         return;
       }
       strokeOpacity = style.opacity;
-      const profile = stylusInput
-        ? STROKE_PROFILES.realPressure(style.size)
-        : velocityPressure
-          ? STROKE_PROFILES.simulatePressure(style.size)
-          : STROKE_PROFILES.solid(style.size);
+      const { profile, thinning, pressureEasing } = pencilNib(
+        style.size,
+        stylusInput,
+        velocityPressure,
+        pencil,
+      );
       strokeProps = {
         ...(util.getDefaultProps() as DrawProps),
         points: [],
@@ -1190,21 +1307,22 @@ export function createDrawTool(config: DrawToolConfig = PENCIL_CONFIG): Tool {
         inkAlgorithm: 'reference',
         isComplete: false,
         simulatePressure: velocityPressure,
-        pressureEasing: pressureEasingFor(pencil.pencilPressureCurve),
+        pressureEasing,
         pressureWarmup: stylusInput || velocityPressure,
-        thinning: !stylusInput && !velocityPressure
-          ? 0
-          : pencil.pencilThinning === REFERENCE_PENCIL_DYNAMICS.thinning
-            ? profile.thinning
-            : pencil.pencilThinning,
+        thinning,
         smoothing: pencil.pencilSmoothing,
-        // Quoted against the camera the stroke is being drawn at, so the hand
-        // gets the same steadying zoomed out as it does at 1:1. Baked in here,
-        // not read at render time — the shape must look the same at every zoom
-        // once it exists.
-        streamline: pencil.pencilStabilization === DEFAULT_PENCIL_STABILIZATION
-          ? profile.streamline
-          : pencilStabilizationToStreamline(pencil.pencilStabilization),
+        // No camera term: the reference filter weighs each *sample*, and
+        // samples arrive per pointer event (mouse, touch) or per screen pixel
+        // (the stylus gate), so its smoothing is already the same on screen at
+        // every zoom. Baked in here, not read at render time — the shape must
+        // look the same at every zoom once it exists.
+        streamline: anchorAtDefault(
+          pencilStabilizationToStreamline(pencil.pencilStabilization),
+          pencilStabilizationToStreamline(DEFAULT_PENCIL_STABILIZATION),
+          profile.streamline,
+          0,
+          1,
+        ),
         startTaper: pencil.pencilStartTaper,
         // `velocity` writes its taper at the lift, where the speed that earns
         // it is finally known; until then the stroke ends in a round cap like
@@ -1277,7 +1395,20 @@ export function createDrawTool(config: DrawToolConfig = PENCIL_CONFIG): Tool {
         ? points[points.length - 1]?.pressure
         : undefined;
       if (!snapped) appendPoint(info, liftPressure);
+      // Read before finalize resets them. A snapped shape is already clean, and
+      // a chunked or extended stroke spans shapes the tidy would treat apart.
+      const tidy =
+        id !== null &&
+        info.pointerType === 'mouse' &&
+        config.ink === 'pencil' &&
+        !snapped &&
+        !chunked &&
+        !extendedFrom &&
+        useCanvasUiStore.getState().autoRefineHandwriting
+          ? id
+          : null;
       finalize(ctx);
+      if (tidy) queueAutoRefine(tidy);
       // Stay in the draw tool; intentionally no selection of the new stroke.
     },
 
@@ -1293,7 +1424,6 @@ export function createDrawTool(config: DrawToolConfig = PENCIL_CONFIG): Tool {
     // orphaned shape. Commit it, matching onCommit's "keep what was drawn".
     onExit(ctx: ToolContext) {
       finalize(ctx);
-      if (config.id === 'draw') playPenToolSound('deactivate');
     },
 
     // A pinch (or tool switch) mid-stroke discards the partial stroke entirely.

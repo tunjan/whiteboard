@@ -154,6 +154,23 @@ describe('ToolPropertiesSatellite', () => {
   });
 });
 
+describe('the tray under a bottom bar', () => {
+  // Changing tool must not move the tray's top edge, so no tool gets a second
+  // row: frames and stickers used to, and an unlabelled slider sat alone on it.
+  it('is one row for every tool', () => {
+    for (const tool of ['draw', 'eraser', 'rectangle', 'arrow', 'text', 'frame', 'sticker']) {
+      expect(render(tool).match(/tbar-style-row/g)).toHaveLength(1);
+    }
+  });
+
+  it('puts the tray away with the bar', () => {
+    const html = renderToStaticMarkup(
+      <ToolPropertiesSatellite activeToolId="draw" barHidden />,
+    );
+    expect(html).toContain('data-visible="false"');
+  });
+});
+
 // The pill has to read as a second bar stacked over the toolbar rather than as
 // a flange growing out of it. Each of these is one of the things doing that
 // work, so each is worth failing a build over.
@@ -193,13 +210,18 @@ describe('ToolPropertiesSatellite as the only style surface', () => {
   const controls = (tool: string) =>
     [...render(tool).matchAll(/aria-label="([^"]+)"/g)].map((m) => m[1]);
 
-  // Nothing is behind a key: every setting the tool has is on the bar, on a
-  // second row above the colours.
+  // No catch-all Options key: every setting has its own place in the tray. The
+  // arrow's route and ends are out in the open, and fold behind one key only
+  // under the narrow bar.
   it('shows every setting on the bar rather than behind a key', () => {
     expect(controls('draw')).not.toContain('Options');
-    expect(controls('arrow')).toEqual(
-      expect.arrayContaining(['Route', 'Ends', 'Stroke']),
+    const wideArrow = renderToStaticMarkup(
+      <ToolPropertiesSatellite activeToolId="arrow" fullPalette />,
     );
+    for (const name of ['Route', 'Ends', 'Stroke']) {
+      expect(wideArrow).toContain(`aria-label="${name}"`);
+    }
+    expect(controls('arrow')).toEqual(expect.arrayContaining(['Arrow', 'Stroke']));
     expect(controls('text')).toEqual(
       expect.arrayContaining(['Font', 'Weight', 'Align']),
     );
@@ -247,7 +269,7 @@ describe('ToolPropertiesSatellite as the only style surface', () => {
   // vertical scroller cannot open for the pixel a focus ring bleeds.
   it('stays inside a narrow screen and scrolls sideways within it', () => {
     const html = render('draw');
-    expect(html).toContain('max-w-[calc(100vw-1rem)]');
+    expect(html).toContain('max-w-[calc((100vw-1rem)/var(--drawer-scale))]');
     expect(html).toContain('tbar-style');
   });
 });

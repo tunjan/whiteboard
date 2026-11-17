@@ -23,7 +23,7 @@ const relayEphemeral = createEphemeralRelay();
 const persistence = createDocumentPersistence();
 const sessions = createSessionTracker();
 
-export const liveStudentBoardIds = () => sessions.liveStudentBoardIds();
+export const liveBoards = () => sessions.liveBoards();
 
 /**
  * Which connection publishes each awareness client id — how the tutor's people
@@ -135,6 +135,34 @@ function boardConnections(boardId: string): Connection[] {
   return out;
 }
 
+/**
+ * Close one live document and unload it, so no client keeps editing it and
+ * nothing re-persists it behind a caller about to delete its rows. A no-op when
+ * the document is not open.
+ */
+export async function closeDocument(documentName: string): Promise<void> {
+  const open = hocuspocus.documents.get(documentName);
+  if (!open) return;
+  hocuspocus.closeConnections(documentName);
+  // `unloadDocument` is a no-op while a store is still debounced, and that is
+  // exactly the state right after someone drew on what is now being deleted:
+  // the caller's deletes would run, and the pending store would append a fresh
+  // log row a couple of seconds later for a document nothing references.
+  // Flushing the debounce first both makes the unload real and puts every row
+  // this document will ever own in the table before the caller drops them.
+  // Returns undefined when nothing is pending.
+  await hocuspocus.debouncer.executeNow(`onStoreDocument-${documentName}`);
+  await hocuspocus.unloadDocument(open);
+}
+
+/** {@link closeDocument} for every live document of a board, pages included. */
+export async function closeBoardDocuments(boardId: string): Promise<void> {
+  const names = [...hocuspocus.documents.keys()].filter(
+    (name) => boardIdOf(name) === boardId,
+  );
+  await Promise.all(names.map(closeDocument));
+}
+
 const isStudent = (connection: Connection) =>
   (connection.context as { access?: Access }).access !== 'tutor';
 
@@ -148,6 +176,19 @@ const isStudent = (connection: Connection) =>
 export function disconnectStudents(boardId: string): void {
   for (const connection of boardConnections(boardId)) {
     if (isStudent(connection)) connection.webSocket.close(4000, 'access changed');
+  }
+}
+
+/**
+ * Tell every tutor on `boardId` something, over the board document's socket
+ * only: a page document shares that socket, and sending on it too would
+ * deliver the message once per open page.
+ */
+export function notifyTutors(boardId: string, payload: string): void {
+  for (const connection of boardConnections(boardId)) {
+    if (!isStudent(connection) && connection.document.name === boardId) {
+      connection.sendStateless(payload);
+    }
   }
 }
 

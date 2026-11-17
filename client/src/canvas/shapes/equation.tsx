@@ -6,6 +6,7 @@ import {
   type EquationRender,
 } from '../equation-render';
 import { boxBounds, boxHitTest, rotationTransform } from './box-geometry';
+import { useConversionStore } from '../use-conversion-store';
 import { DEFAULT_SHAPE_STYLE } from './style';
 import type { ShapeUtil } from './types';
 
@@ -267,6 +268,8 @@ export const equationUtil: ShapeUtil<'equation'> = {
     const entry = useEquationRender(latex, inline);
     const lastTypeset = useRef<TypesetRender | null>(null);
     const settled = useSettledSource(latex);
+    // Just replaced handwriting: ease in as the strokes fade out.
+    const arrived = useConversionStore((s) => s.arrivedId === shape.id);
 
     if (latex && !entry) requestEquationTypeset(latex, inline);
 
@@ -293,6 +296,7 @@ export const equationUtil: ShapeUtil<'equation'> = {
     return (
       <g
         transform={transform}
+        className={arrived ? 'equation-settle' : undefined}
         role="img"
         aria-label={`Equation: ${latex}`}
       >
@@ -318,6 +322,21 @@ export const equationUtil: ShapeUtil<'equation'> = {
             dangerouslySetInnerHTML={{ __html: display.render.svg }}
           />
         </g>
+        {shape.props.tag && (
+          // ponytail: drawn outside the box, so it is not hit-testable and is
+          // culled with the box. Fold it into w/h if either starts to matter.
+          <text
+            x={shape.x + w + fontSize * 0.75}
+            y={shape.y + h / 2}
+            dominantBaseline="central"
+            fill={color}
+            fontSize={fontSize}
+            fontFamily="serif"
+            pointerEvents="none"
+          >
+            ({shape.props.tag})
+          </text>
+        )}
       </g>
     );
   },

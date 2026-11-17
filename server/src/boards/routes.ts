@@ -1,6 +1,8 @@
 import { Hono } from 'hono';
 import { and, desc, eq, or, sql } from 'drizzle-orm';
 import {
+  AGENT_HELP_MODES,
+  type AgentHelp,
   type BoardMeta,
   type BoardShare,
   SHARE_MODES,
@@ -17,8 +19,9 @@ import {
   unpackBoardFile,
 } from './board-file';
 import {
+  closeBoardDocuments,
   disconnectStudents,
-  liveStudentBoardIds,
+  liveBoards,
   removeClient,
 } from '../collab/hocuspocus';
 import { db } from '../db/client';
@@ -123,10 +126,12 @@ boardRoutes.get('/', async (c) => {
   return c.json(rows.map(toMeta));
 });
 
+const SHARE_COLUMNS = { key: boards.shareKey, mode: boards.shareMode, agentHelp: boards.agentHelp };
+
 // The student link: its key and what it grants.
 boardRoutes.get('/:id/access', async (c) => {
   const [row] = await db
-    .select({ key: boards.shareKey, mode: boards.shareMode })
+    .select(SHARE_COLUMNS)
     .from(boards)
     .where(eq(boards.id, c.req.param('id')));
   if (!row) return c.json({ error: 'not found' }, 404);
@@ -135,19 +140,26 @@ boardRoutes.get('/:id/access', async (c) => {
 
 // Change what the link grants. Students already in reconnect under the new
 // mode (or are refused, for 'off').
+// What "Ask the board" does for them is read per request: no reconnect.
 boardRoutes.patch('/:id/access', async (c) => {
   const id = c.req.param('id');
-  const body = (await c.req.json().catch(() => ({}))) as { mode?: unknown };
-  if (!SHARE_MODES.includes(body.mode as ShareMode)) {
+  const body = (await c.req.json().catch(() => ({}))) as { mode?: unknown; agentHelp?: unknown };
+  const mode = body.mode as ShareMode | undefined;
+  const agentHelp = body.agentHelp as AgentHelp | undefined;
+  if (mode !== undefined && !SHARE_MODES.includes(mode)) {
     return c.json({ error: 'mode must be edit, view or off' }, 400);
   }
+  if (agentHelp !== undefined && !AGENT_HELP_MODES.includes(agentHelp)) {
+    return c.json({ error: 'agentHelp must be full, hints or off' }, 400);
+  }
+  if (!mode && !agentHelp) return c.json({ error: 'mode must be edit, view or off' }, 400);
   const [row] = await db
     .update(boards)
-    .set({ shareMode: body.mode as ShareMode })
+    .set({ ...(mode ? { shareMode: mode } : {}), ...(agentHelp ? { agentHelp } : {}) })
     .where(eq(boards.id, id))
-    .returning({ key: boards.shareKey, mode: boards.shareMode });
+    .returning(SHARE_COLUMNS);
   if (!row) return c.json({ error: 'not found' }, 404);
-  disconnectStudents(id);
+  if (mode) disconnectStudents(id);
   return c.json(row as BoardShare);
 });
 
@@ -159,7 +171,7 @@ boardRoutes.post('/:id/access/reset', async (c) => {
     .update(boards)
     .set({ shareKey: sql`replace(gen_random_uuid()::text, '-', '')` })
     .where(eq(boards.id, id))
-    .returning({ key: boards.shareKey, mode: boards.shareMode });
+    .returning(SHARE_COLUMNS);
   if (!row) return c.json({ error: 'not found' }, 404);
   disconnectStudents(id);
   return c.json(row as BoardShare);
@@ -178,9 +190,10 @@ boardRoutes.post('/:id/remove', async (c) => {
   return c.json({ ok: true });
 });
 
-// Which boards have a student in them right now. In-memory only, so it covers
-// this server process — which is the only one the collab socket runs on.
-boardRoutes.get('/live', (c) => c.json(liveStudentBoardIds()));
+// Which boards have a student in them right now, and who on them is AFK.
+// In-memory only, so it covers this server process — which is the only one the
+// collab socket runs on.
+boardRoutes.get('/live', (c) => c.json(liveBoards()));
 
 // Idempotent upsert — supports the client's offline outbox (client mints the id).
 boardRoutes.post('/', async (c) => {
@@ -313,6 +326,9 @@ boardRoutes.delete('/:id/sessions/:date', async (c) => {
 
 boardRoutes.delete('/:id', async (c) => {
   const id = c.req.param('id');
+  // Close the live documents first: a client still editing would otherwise
+  // keep appending update rows for a board that no longer exists.
+  await closeBoardDocuments(id);
   // A board is stored as several documents: its own, plus one per page (see
   // `pageDocumentName`). `starts_with` rather than a LIKE pattern because a
   // board id may legitimately contain `_`, which LIKE would read as a wildcard.

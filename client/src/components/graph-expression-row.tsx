@@ -33,7 +33,7 @@ import { useThemeStore } from '@/use-theme-store';
 import { cn, swatchBorder } from '@/lib/utils';
 import { ChoiceGroup, ChoiceItem } from './graph-choice-group';
 import { MATH_SYMBOL, QUIET_NUMBER } from './graph-panel-styles';
-import { formatNumber, useDebouncedValue } from './graph-panel-utils';
+import { formatBound, parseBound, useDebouncedValue } from './graph-panel-utils';
 
 const DASHES: StrokeDash[] = ['solid', 'dashed', 'dotted'];
 const SWATCH_COLUMNS = 6;
@@ -231,9 +231,10 @@ function DomainRow({
   variable: string;
   onChange: (domain: GraphParametricDomain) => void;
 }) {
+  const span = domain.max - domain.min;
   const [draft, setDraft] = useState({
-    min: formatNumber(domain.min),
-    max: formatNumber(domain.max),
+    min: formatBound(domain.min, span),
+    max: formatBound(domain.max, span),
   });
 
   // A domain changed elsewhere replaces the draft during render, not an
@@ -241,23 +242,25 @@ function DomainRow({
   const [synced, setSynced] = useState(domain);
   if (synced.min !== domain.min || synced.max !== domain.max) {
     setSynced(domain);
-    setDraft({ min: formatNumber(domain.min), max: formatNumber(domain.max) });
+    setDraft({ min: formatBound(domain.min, span), max: formatBound(domain.max, span) });
   }
 
   const commit = (bound: 'min' | 'max') => {
-    const text = draft[bound].trim();
-    // `Number('')` is 0: a cleared field reverts rather than committing 0.
-    const value = text === '' ? NaN : Number(text);
+    const value = parseBound(draft[bound]);
     const next = { ...domain, [bound]: value };
-    if (Number.isFinite(value) && next.min < next.max) onChange(next);
-    else setDraft((d) => ({ ...d, [bound]: formatNumber(domain[bound]) }));
+    const valid = Number.isFinite(value) && next.min < next.max;
+    if (valid) onChange(next);
+    // Rewritten even when nothing changed, so a typed `2pi` reads back `2π`.
+    const shown = valid ? next : domain;
+    setDraft((d) => ({ ...d, [bound]: formatBound(shown[bound], shown.max - shown.min) }));
   };
 
   const field = (bound: 'min' | 'max') => (
     <Input
-      type="number"
-      step="any"
-      inputMode="decimal"
+      type="text"
+      autoComplete="off"
+      spellCheck={false}
+      enterKeyHint="done"
       aria-label={`${variable} ${bound === 'min' ? 'minimum' : 'maximum'}`}
       value={draft[bound]}
       onChange={(e) => setDraft((d) => ({ ...d, [bound]: e.target.value }))}
@@ -292,6 +295,7 @@ export function ExpressionRow({
   onEscape,
   registerField,
   definitions,
+  angleUnit,
 }: {
   expression: GraphExpression;
   index: number;
@@ -303,6 +307,7 @@ export function ExpressionRow({
   onEscape: () => void;
   registerField: (el: MathfieldElement | null) => void;
   definitions: GraphFunctionDefinitions;
+  angleUnit: 'rad' | 'deg';
 }) {
   const errorId = useId();
   const settled = useDebouncedValue(expression.expression, 400);
@@ -428,7 +433,7 @@ export function ExpressionRow({
 
       {parametric ? (
         <DomainRow
-          domain={parametricDomain(expression.domain)}
+          domain={parametricDomain(expression.domain, angleUnit)}
           variable={parsed.polar ? 'θ' : 't'}
           onChange={(domain) => onPatch({ domain })}
         />

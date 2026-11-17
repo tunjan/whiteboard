@@ -8,9 +8,13 @@ import {
   type UploadedImage,
 } from '../board/blobs';
 import { screenToWorld } from './camera';
-import { getTopIndex } from './order';
+import { getTopIndex, jitterKeyBetween } from './order';
 import { useCameraStore } from './use-camera-store';
-import { editor, withoutUndo } from './use-document-store';
+import {
+  currentSession,
+  editor,
+  updateShapeOnPage,
+} from './use-document-store';
 import { useSelectionStore } from './use-selection-store';
 import { useToolStore } from './use-tool-store';
 
@@ -34,7 +38,10 @@ export async function placeImageFiles(
   const images = files.filter((f) => f.type.startsWith('image/'));
   const dims = await Promise.all(images.map(imageDimensions));
   const ids: string[] = [];
-  // One transaction: a multi-image paste is a single undo step.
+  const pageId = currentSession()?.currentPageId;
+  // One transaction: a multi-image paste is a single undo step. `getShapes()`
+  // is stale inside it, so the top is taken once and carried forward.
+  let index = getTopIndex(editor.getShapes());
   editor.transact(() => {
     let offset = 0;
     images.forEach((file, i) => {
@@ -55,7 +62,7 @@ export async function placeImageFiles(
         x: at.x - w / 2 + offset,
         y: at.y - h / 2 + offset,
         rotation: 0,
-        index: getTopIndex(editor.getShapes()),
+        index,
         props: {
           blobId: '',
           w,
@@ -66,9 +73,12 @@ export async function placeImageFiles(
       } as Shape);
       ids.push(id);
       offset += 16;
+      index = jitterKeyBetween(index, null);
     });
   });
-  images.forEach((file, i) => void uploadPlacedImage(ids[i]!, file));
+  if (pageId) {
+    images.forEach((file, i) => void uploadPlacedImage(pageId, ids[i]!, file));
+  }
   return ids;
 }
 
@@ -77,7 +87,11 @@ export async function placeImageFiles(
  * (as link previews are): Ctrl+Z should step back over the whole paste, not
  * peel the upload off it first.
  */
-async function uploadPlacedImage(id: string, file: File): Promise<void> {
+async function uploadPlacedImage(
+  pageId: string,
+  id: string,
+  file: File,
+): Promise<void> {
   const localUrl = imageHref(id, '')!;
   let up: UploadedImage;
   try {
@@ -87,7 +101,7 @@ async function uploadPlacedImage(id: string, file: File): Promise<void> {
     deleteLocalImageUrl(id);
     URL.revokeObjectURL(localUrl);
     // Peers could never load it; remove the placeholder they're seeing.
-    withoutUndo(() => editor.deleteShapes([id]));
+    await updateShapeOnPage(pageId, id, () => null);
     return;
   }
   // Swap the preview over to the bytes that were actually uploaded, so the
@@ -101,19 +115,18 @@ async function uploadPlacedImage(id: string, file: File): Promise<void> {
   // Safe once both keys point at the replacement: an <image> that already
   // painted keeps its decoded bitmap, and a remount re-reads `imageHref`.
   URL.revokeObjectURL(localUrl);
-  const shape = editor.getShape(id);
-  if (shape?.type === 'image' && !shape.props.blobId) {
-    withoutUndo(() => {
-      editor.updateShape(id, {
-        props: {
-          blobId: up.blobId,
-          naturalWidth: up.naturalWidth,
-          naturalHeight: up.naturalHeight,
-          ...(up.thumbBlobId ? { thumbBlobId: up.thumbBlobId } : {}),
-        },
-      });
-    });
-  }
+  await updateShapeOnPage(pageId, id, (shape) =>
+    shape.type === 'image' && !shape.props.blobId
+      ? {
+          props: {
+            blobId: up.blobId,
+            naturalWidth: up.naturalWidth,
+            naturalHeight: up.naturalHeight,
+            ...(up.thumbBlobId ? { thumbBlobId: up.thumbBlobId } : {}),
+          },
+        }
+      : undefined,
+  );
   deleteLocalImageUrl(id);
 }
 

@@ -20,12 +20,14 @@ import { MindBlown, Skull } from './sticker-icons';
  * The app's accent language: one evenly spaced hue wheel at a shared lightness
  * and chroma (L 0.70 / C 0.15), listed in hue order. Sticker artwork keeps one
  * fixed color across a theme switch and through the PNG export, so this stays
- * a literal hex set rather than a theme-aware CSS variable.
+ * a literal hex set rather than a theme-aware CSS variable. Gold and yellow sit
+ * off the wheel: at its lightness both go to mustard.
  */
 const ACCENT = {
   red: '#ed756e',
   orange: '#e48233',
-  amber: '#c79600',
+  gold: '#ea9f22',
+  yellow: '#f2c12e',
   lime: '#9ca81f',
   green: '#5bb661',
   teal: '#00b89a',
@@ -63,10 +65,10 @@ export interface StickerDef {
 export const STICKERS: StickerDef[] = [
   { id: 'thumbs-up', label: 'Thumbs up', Icon: ThumbsUp, color: ACCENT.green, filled: true },
   { id: 'thumbs-down', label: 'Thumbs down', Icon: ThumbsDown, color: ACCENT.indigo, filled: true },
-  { id: 'star', label: 'Star', Icon: Star, color: ACCENT.amber, filled: true },
+  { id: 'star', label: 'Star', Icon: Star, color: ACCENT.gold, filled: true },
   { id: 'heart', label: 'Heart', Icon: Heart, color: ACCENT.rose, filled: true },
   { id: 'flame', label: 'Fire', Icon: Flame, color: ACCENT.orange, filled: true },
-  { id: 'zap', label: 'Zap', Icon: Zap, color: ACCENT.amber, filled: true },
+  { id: 'zap', label: 'Zap', Icon: Zap, color: ACCENT.yellow, filled: true },
   { id: 'party', label: 'Party', Icon: PartyPopper, color: ACCENT.violet, filled: true },
   { id: 'sparkles', label: 'Sparkles', Icon: Sparkles, color: ACCENT.magenta, filled: true },
   { id: 'mind-blown', label: 'Mind blown', Icon: MindBlown, color: ACCENT.red, filled: true },
@@ -74,7 +76,7 @@ export const STICKERS: StickerDef[] = [
   { id: 'question', label: 'Question', Icon: CircleQuestionMark, color: ACCENT.red, filled: false },
   { id: 'alert', label: 'Alert', Icon: CircleAlert, color: ACCENT.orange, filled: false },
   { id: 'check', label: 'Check', Icon: Check, color: ACCENT.green, filled: false },
-  { id: 'eyes', label: 'Eyes on this', Icon: Eye, color: ACCENT.cyan, filled: false },
+  { id: 'eyes', label: 'Eye on this', Icon: Eye, color: ACCENT.cyan, filled: false },
 ];
 
 const FALLBACK = STICKERS[0]!;
@@ -90,6 +92,9 @@ export function getSticker(id: string): StickerDef {
 const ART_VIEW_BOX = '-4 -4 32 32';
 const HALO_STROKE = 5;
 const GLYPH_STROKE = 2;
+/** Line art has no mass of its own, so it is drawn heavier to hold its place. */
+const LINE_HALO_STROKE = 6.5;
+const LINE_GLYPH_STROKE = 3.2;
 
 /**
  * The sticker artwork, positioned in the caller's coordinate space. Shared by
@@ -128,13 +133,13 @@ export function StickerArt({
         {...box}
         fill="#ffffff"
         stroke="#ffffff"
-        style={{ strokeWidth: HALO_STROKE }}
+        style={{ strokeWidth: filled ? HALO_STROKE : LINE_HALO_STROKE }}
       />
       <Icon
         {...box}
         fill={filled ? color : 'none'}
         stroke={color}
-        style={{ strokeWidth: GLYPH_STROKE }}
+        style={{ strokeWidth: filled ? GLYPH_STROKE : LINE_GLYPH_STROKE }}
       />
     </>
   );

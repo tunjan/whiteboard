@@ -40,6 +40,7 @@ import {
   type GraphFunctionDefinitions,
 } from './graph-parser';
 import { sampleGraphExpression, type GraphSampleResult } from './graph-sampler';
+import type { GraphAxes } from './graph-scale';
 import type {
   GraphSampleRequest,
   GraphSampleResponse,
@@ -53,6 +54,9 @@ export interface GraphSampleInput {
   verticalSamples: number;
   /** Whether to also find intersections (the shape's `showIntersections`). */
   intersections: boolean;
+  /** Log axes, if any. Results then come back in plot space (`graph-scale`). */
+  axes?: GraphAxes;
+  angleUnit?: 'rad' | 'deg';
 }
 
 export interface GraphSampleOutput {
@@ -103,6 +107,8 @@ export function sampleGraph(
         input.samples,
         input.verticalSamples,
         definitions,
+        input.axes,
+        input.angleUnit,
       ),
     ),
     intersections: input.intersections
@@ -112,6 +118,8 @@ export function sampleGraph(
           input.parameters,
           INTERSECTION_SAMPLES,
           definitions,
+          undefined,
+          input.axes,
         )
       : [],
   };
@@ -313,7 +321,10 @@ export function useGraphCurves(
       busy.current = true;
       void sampleOffThread(job.input)
         .catch(() =>
-          sampleGraph(job.input, createGraphFunctionDefinitions(job.input.expressions)),
+          sampleGraph(
+            job.input,
+            createGraphFunctionDefinitions(job.input.expressions, job.input.angleUnit),
+          ),
         )
         .then((sampled) => {
           remember(job.key, sampled);

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { PolygonKind } from '@whiteboard/shared';
 import { toolRegistry } from '@/canvas/tools/tool-registry';
-import { useStyleStore } from '@/canvas/use-style-store';
+import { slotColor, useStyleStore } from '@/canvas/use-style-store';
 import { useToolStore } from '@/canvas/use-tool-store';
 import {
   Popover,
@@ -17,7 +17,7 @@ import {
   polygonLabel,
   SHAPE_MENU_TOOLS,
 } from './toolbar-constants';
-import { useToolbarSide } from './toolbar-primitives';
+import { refocusForKeyboard, useToolbarSide } from './toolbar-primitives';
 import { ToolKey, useLastHeld } from './toolbar-tool-button';
 
 const BASIC_SHAPES = SHAPE_MENU_TOOLS.filter((id) => id !== 'polygon');
@@ -43,6 +43,7 @@ export function ShapeMenu({
   const setTool = useToolStore((state) => state.setTool);
   const polygonKind = useStyleStore((state) => state.polygonKind);
   const setPolygonKind = useStyleStore((state) => state.setPolygonKind);
+  const color = useStyleStore((state) => slotColor(state, 'diagram'));
 
   const currentOrLastId = useLastHeld(SHAPE_MENU_TOOLS, activeToolId);
   const active = currentOrLastId === activeToolId;
@@ -66,6 +67,7 @@ export function ShapeMenu({
 
   const art = (
     <ShapeArt
+      color={color}
       kind={
         isPolygon
           ? polygonKind
@@ -100,7 +102,12 @@ export function ShapeMenu({
         {art}
       </ToolKey>
 
-      <PopoverContent side={side} sideOffset={8} className="w-auto p-1">
+      <PopoverContent
+        side={side}
+        sideOffset={8}
+        finalFocus={refocusForKeyboard}
+        className="drawer-popup w-auto p-1"
+      >
         <PopoverTitle className="sr-only">Shapes</PopoverTitle>
         <div className="grid grid-cols-4 gap-0.5" role="group" aria-label="Shapes">
           {BASIC_SHAPES.map((toolId) => {

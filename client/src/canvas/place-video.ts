@@ -6,8 +6,13 @@ import {
   uploadImageBlob,
 } from '../board/blobs';
 import { toast } from '@/components/ui/toast';
-import { getTopIndex } from './order';
-import { editor, withoutUndo } from './use-document-store';
+import { shortFileName } from '@/lib/utils';
+import { getTopIndex, jitterKeyBetween } from './order';
+import {
+  currentSession,
+  editor,
+  updateShapeOnPage,
+} from './use-document-store';
 
 /** Default size (world units) for a freshly-placed video — 16:9. */
 const DEFAULT_W = 480;
@@ -51,15 +56,23 @@ export function parseYoutubeId(input: string): string | null {
   return id && /^[A-Za-z0-9_-]{11}$/.test(id) ? id : null;
 }
 
-/** Create a YouTube video shape centered at `at`, select it, return its id. */
-export function createYoutubeShape(videoId: string, at: Point): string {
+/**
+ * Create a YouTube video shape centered at `at`, select it, return its id.
+ * `index` is for a caller placing several shapes in one transaction, where
+ * `getShapes()` is stale and the top has to be carried forward by hand.
+ */
+export function createYoutubeShape(
+  videoId: string,
+  at: Point,
+  index = getTopIndex(editor.getShapes()),
+): string {
   const shape = {
     id: genId(),
     type: 'video',
     x: at.x - DEFAULT_W / 2,
     y: at.y - DEFAULT_H / 2,
     rotation: 0,
-    index: getTopIndex(editor.getShapes()),
+    index,
     props: { videoId, w: DEFAULT_W, h: DEFAULT_H },
   } as Shape;
   editor.createShape(shape);
@@ -147,7 +160,7 @@ export async function placeVideoFiles(
   const fits = files.filter((f) => {
     if (f.size <= MAX_VIDEO_BYTES) return true;
     toast.add({
-      title: f.name,
+      title: shortFileName(f.name),
       description: 'Videos up to 100 MB can be added to the board.',
       type: 'error',
     });
@@ -160,14 +173,17 @@ export async function placeVideoFiles(
     if (probe) ready.push({ file, probe });
     else
       toast.add({
-        title: file.name,
+        title: shortFileName(file.name),
         description: 'This browser can’t play that video.',
         type: 'error',
       });
   });
 
   const ids: string[] = [];
-  // One transaction: a multi-video paste is a single undo step.
+  const pageId = currentSession()?.currentPageId;
+  // One transaction: a multi-video paste is a single undo step. `getShapes()`
+  // is stale inside it, so the top is taken once and carried forward.
+  let index = getTopIndex(editor.getShapes());
   editor.transact(() => {
     let offset = 0;
     for (const { probe } of ready) {
@@ -183,28 +199,30 @@ export async function placeVideoFiles(
         x: at.x - w / 2 + offset,
         y: at.y - h / 2 + offset,
         rotation: 0,
-        index: getTopIndex(editor.getShapes()),
+        index,
         props: { videoId: '', blobId: '', posterBlobId: '', w, h },
       } as Shape);
       ids.push(id);
       offset += 16;
+      index = jitterKeyBetween(index, null);
     }
   });
   ready.forEach(({ file, probe }, i) => {
-    void uploadPlacedVideo(ids[i]!, file, probe.poster);
+    if (pageId) void uploadPlacedVideo(pageId, ids[i]!, file, probe.poster);
   });
   return ids;
 }
 
 /** Upload a placed video and its poster, then patch the blob ids in. */
 async function uploadPlacedVideo(
+  pageId: string,
   id: string,
   file: File,
   poster: Blob,
 ): Promise<void> {
   const localUrl = imageHref(id, '')!;
   const progress = toast.add({
-    title: file.name,
+    title: shortFileName(file.name),
     description: 'Uploading video…',
     type: 'loading',
   });
@@ -217,28 +235,29 @@ async function uploadPlacedVideo(
     ]);
   } catch (error) {
     console.error('[video] upload failed', error);
-    toast.add({
-      title: file.name,
+    toast.update(progress, {
       description: 'The video could not be uploaded.',
       type: 'error',
     });
     deleteLocalImageUrl(id);
     URL.revokeObjectURL(localUrl);
     // Peers could never play it; remove the placeholder they're seeing.
-    withoutUndo(() => editor.deleteShapes([id]));
+    await updateShapeOnPage(pageId, id, () => null);
     return;
-  } finally {
-    toast.close(progress);
   }
+  toast.update(progress, {
+    description: 'Video added',
+    timeout: 2_000,
+    type: 'success',
+  });
   // The poster's bytes are the ones just uploaded: keep showing them locally.
   setLocalImageUrl(posterBlobId, localUrl);
   deleteLocalImageUrl(id);
-  const shape = editor.getShape(id);
-  if (shape?.type === 'video' && !shape.props.blobId) {
-    // Outside undo history, as image uploads are: Ctrl+Z steps back over the
-    // whole paste rather than peeling the upload off it first.
-    withoutUndo(() => {
-      editor.updateShape(id, { props: { blobId, posterBlobId } });
-    });
-  }
+  // Outside undo history, as image uploads are: Ctrl+Z steps back over the
+  // whole paste rather than peeling the upload off it first.
+  await updateShapeOnPage(pageId, id, (shape) =>
+    shape.type === 'video' && !shape.props.blobId
+      ? { props: { blobId, posterBlobId } }
+      : undefined,
+  );
 }

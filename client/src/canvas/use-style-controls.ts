@@ -167,8 +167,8 @@ function useSharedValue<T>(
 
 /**
  * Restyle the selection, and — when the active tool draws — what it draws
- * next. With the select tool the edit stays on the selection, so recolouring a
- * heading does not also recolour the pen.
+ * next. With the select tool the edit stays on the selection, so restyling a
+ * heading does not also restyle whichever group was last live.
  */
 function writesNextStyle(): boolean {
   return styleSlot(useToolStore.getState().activeToolId) !== null;
@@ -365,11 +365,13 @@ export function useStyleControls(activeToolId: string): StyleControls {
     // the active tool. A selection's opacity lives on the selection toolbar,
     // next to the object, so it is only a style-bar control for a tool's
     // defaults.
-    // Stickers stamp as art, and one slider alone is not worth a key.
+    // Stickers stamp as art, and one slider alone is not worth a key. A frame
+    // is structure: a faded border is almost never what anyone wants.
     opacity:
       activeToolId !== 'highlighter' &&
       activeToolId !== 'select' &&
-      activeToolId !== 'sticker',
+      activeToolId !== 'sticker' &&
+      activeToolId !== 'frame',
 
     font: targetType === 'text' || targetType === 'mixed',
     align: targetType === 'text' || targetType === 'mixed',
@@ -401,7 +403,7 @@ export function useStyleControls(activeToolId: string): StyleControls {
   }, [theme]);
 
   const applyFill = (value: FillStyle) => {
-    setFill(value);
+    if (writesNextStyle()) setFill(value);
     for (const id of selectedIds) {
       const shape = editor.getShape(id);
       if (shape && FILLABLE.has(shape.type)) {
@@ -411,7 +413,7 @@ export function useStyleControls(activeToolId: string): StyleControls {
   };
 
   const applyDash = (value: StrokeDash) => {
-    setDash(value);
+    if (writesNextStyle()) setDash(value);
     for (const id of selectedIds) {
       const shape = editor.getShape(id);
       if (shape && DASHABLE.has(shape.type)) {
@@ -420,10 +422,10 @@ export function useStyleControls(activeToolId: string): StyleControls {
     }
   };
 
-  // Sets the opacity of the current selection (any shape type) and the style
-  // default new shapes inherit.
+  // Sets the opacity of the current selection (any shape type) and, for a tool
+  // that draws, the default its next shape inherits.
   const applyOpacity = (value: number) => {
-    setOpacity(value);
+    if (writesNextStyle()) setOpacity(value);
     for (const id of selectedIds) editor.updateShape(id, { opacity: value });
   };
 

@@ -117,6 +117,51 @@ function subscribe(key: string, listener: () => void): () => void {
 }
 
 /**
+ * Run `listener` when one expression's cache entry appears or is evicted.
+ * Returns an unsubscribe function. For callers outside React; components use
+ * {@link useEquationRender}.
+ */
+export function subscribeEquationRender(
+  latex: string,
+  inline: boolean,
+  listener: () => void,
+): () => void {
+  return subscribe(renderKey(latex, inline), listener);
+}
+
+/** The em `convertEquation` typesets at. Dividing by it turns MathJax's pixel
+ *  geometry into `em`, so math scales with whatever text it sits in. */
+const MATHJAX_BASE_PX = 16;
+
+/**
+ * A render's box in `em` of the surrounding text, for setting math inline.
+ *
+ * `depth` is how much of the formula hangs below the baseline of the line it
+ * sits on. MathJax reports this as a `vertical-align` style, which the
+ * sanitizer strips (see `equation-convert`), so it is recovered from the
+ * viewBox instead: the box runs from `minY` above the baseline to
+ * `minY + height` below it. Without it every parenthesis, subscript and
+ * fraction in a sentence would float, resting its *bottom* on the baseline.
+ */
+export function inlineMathBox(render: { svg: string; width: number; height: number }): {
+  width: number;
+  height: number;
+  depth: number;
+} {
+  const viewBox = /viewBox="\s*[-\d.]+\s+(-?[\d.]+)\s+[-\d.]+\s+([\d.]+)/.exec(
+    render.svg,
+  );
+  const height = render.height / MATHJAX_BASE_PX;
+  const boxTop = Number(viewBox?.[1]);
+  const boxHeight = Number(viewBox?.[2]);
+  const depth =
+    Number.isFinite(boxTop) && boxHeight > 0
+      ? ((boxTop + boxHeight) / boxHeight) * height
+      : 0;
+  return { width: render.width / MATHJAX_BASE_PX, height, depth };
+}
+
+/**
  * Synchronously read an already-typeset expression.
  *
  * Reading also refreshes the entry's recency, which is what keeps the

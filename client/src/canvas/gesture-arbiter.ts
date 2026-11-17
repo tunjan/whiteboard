@@ -247,6 +247,10 @@ export class GestureArbiter {
   } | null = null;
   // The pressed Quick Zoom gesture's state.
   private quickZoom: { returnZoom: number; overviewZoom: number } | null = null;
+  // Pointers whose capture this released itself. The browser answers each
+  // release with a `lostpointercapture`, which for a finger still on the glass
+  // (the first of a pinch) must not read as that finger lifting.
+  private releasedCaptures = new Set<number>();
 
   /** Stop the timers this owns. Safe to call more than once. */
   dispose(): void {
@@ -413,6 +417,7 @@ export class GestureArbiter {
 
   private releaseCapture(target: Element, id: number | null): void {
     if (id !== null && target.hasPointerCapture(id)) {
+      this.releasedCaptures.add(id);
       target.releasePointerCapture(id);
     }
   }
@@ -628,6 +633,9 @@ export class GestureArbiter {
    */
   private abandonGesture(target: Element): void {
     if (this.gesture !== 'pan') {
+      // A one-finger zoom ends here too; left set, it would hijack the next
+      // zoom gesture, Quick Zoom's included.
+      this.oneFingerZoom = null;
       this.endToolGesture(target, 'cancel');
       return;
     }
@@ -759,6 +767,8 @@ export class GestureArbiter {
     // leave the next context menu swallowed.
     this.rightPointer = null;
     this.swallowContextMenu = false;
+    // A new press: whatever capture this released for the id before is over.
+    this.releasedCaptures.delete(e.pointerId);
 
     // Touch: one finger either drives the active tool or pans the board (see
     // `fingerAction`); two fingers are always a pinch/pan.
@@ -1159,6 +1169,19 @@ export class GestureArbiter {
     if (!isTouchPointer(e)) return;
     this.activeTouches.delete(e.pointerId);
     if (this.activeTouches.size < 2) this.endPinch('flush', true);
+    else if (this.pinch) {
+      // The pinch reads the first two fingers, which may now be a different
+      // pair: measure from that pair as it stands rather than reading the swap
+      // as a spread or a pan.
+      this.pinchCamera.flush();
+      const pts = [...this.activeTouches.values()];
+      const g = pinchGesture(pts[0]!, pts[1]!);
+      this.pinch.startDistance = g.distance;
+      this.pinch.startZoom = useCameraStore.getState().camera.z;
+      this.pinch.startMidpoint = g.midpoint;
+      this.pinch.lastMidpoint = g.midpoint;
+      this.pinchLastDistance = g.distance;
+    }
     if (this.activeTouches.size === 0) {
       this.pinchLatch = false;
       // Resolved on the way out rather than on the way in: whether fingers that
@@ -1291,6 +1314,8 @@ export class GestureArbiter {
   // touch/pen has gone, in case its pointerup/cancel was dropped. Cleaning up here
   // too keeps the latch from outliving the gesture.
   onLostPointerCapture = (e: ReactPointerEvent): void => {
+    // The echo of a release this made itself: the pointer has not gone.
+    if (this.releasedCaptures.delete(e.pointerId)) return;
     if (this.rightPointer?.id === e.pointerId) this.rightPointer = null;
     this.releaseTouchTracking(e);
     this.host.edgeScroll.stop();
@@ -1301,6 +1326,9 @@ export class GestureArbiter {
     if (e.pointerId === this.toolPointerId) {
       if (this.gesture === 'tool') {
         this.endToolGesture(e.currentTarget, this.takenAway(e));
+      } else if (this.gesture === 'pan') {
+        // Without this `useSpacePan` still believes a drag is in flight.
+        this.abandonGesture(e.currentTarget);
       }
       this.dropGesture();
     }

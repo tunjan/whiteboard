@@ -59,7 +59,7 @@ import {
   compilePaint,
   fillOp,
   paintCompiled,
-  DOM_SHAPE_TYPES,
+  isDomShape,
   type CompiledOp,
   type PaintContext,
 } from './canvas-2d-paint';
@@ -524,7 +524,7 @@ export function Canvas2dShapeLayer({ width, height }: ShapeRendererProps) {
       if (!ids) {
         const next = new Set<string>();
         for (const [id, shape] of shapes)
-          if (DOM_SHAPE_TYPES.has(shape.type)) next.add(id);
+          if (isDomShape(shape)) next.add(id);
         const changed =
           next.size !== domNative.size || [...next].some((id) => !domNative.has(id));
         domNative = next;
@@ -533,7 +533,7 @@ export function Canvas2dShapeLayer({ width, height }: ShapeRendererProps) {
       let changed = false;
       for (const id of ids) {
         const shape = shapes.get(id);
-        const owned = !!shape && DOM_SHAPE_TYPES.has(shape.type);
+        const owned = !!shape && isDomShape(shape);
         if (owned === domNative.has(id)) continue;
         if (owned) domNative.add(id);
         else domNative.delete(id);

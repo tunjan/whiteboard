@@ -39,6 +39,9 @@ export function SelectionLayer() {
   const selectedIds = useSelectionStore((s) => s.selectedIds);
   const marquee = useSelectionStore((s) => s.marquee);
   const snapGuides = useSelectionStore((s) => s.snapGuides);
+  // A selection being moved, resized or rotated drops its box and handles, as
+  // tldraw's does; snap guides stay.
+  const transforming = useSelectionStore((s) => s.transforming);
   // Only the selected shapes, pulled out of the live cache by id. Depending on
   // a whole-page object invalidated this layer once per stroke frame even when
   // the selection was untouched.
@@ -47,14 +50,20 @@ export function SelectionLayer() {
   // re-render when any of them moves — and only then.
   const shapes = useGroupSubtree(selectedIds);
   const coarse = isCoarsePointer();
-  const info = getSelectionInfo(
+  const fullInfo = getSelectionInfo(
     shapes,
     selectedIds,
     camera.z,
     (id) => shapesRecord[id],
     coarse,
   );
-  const single = info?.isSingle ? shapesRecord?.[info.ids[0]!] : undefined;
+  const single = fullInfo?.isSingle
+    ? shapesRecord?.[fullInfo.ids[0]!]
+    : undefined;
+  // Except a lone text shape's box while it is resized: the box is the width
+  // its text is rewrapping to (tldraw keeps it for the same case).
+  const keepBox = transforming === 'resize' && single?.type === 'text';
+  const info = transforming && !keepBox ? null : fullInfo;
   const locked = !!single?.locked;
   // A group's box bounds shapes rather than being one, so it is dashed to tell
   // the two apart. This layer draws in screen space, so the dash keeps its size
@@ -66,7 +75,7 @@ export function SelectionLayer() {
   // Shapes that describe their own outline (connectors) are traced instead of
   // boxed: a rectangle around an open curve covers mostly empty canvas, says
   // nothing about where the stroke runs, and hides what is underneath it.
-  const traced = selectedIds.flatMap((id) => {
+  const traced = (transforming ? [] : selectedIds).flatMap((id) => {
     const shape = shapesRecord?.[id];
     if (!shape) return [];
     const util = shapeRegistry.getFor(shape);
@@ -149,7 +158,7 @@ export function SelectionLayer() {
               {/* Corners last: their invisible cursor targets overlap the ends
                   of the edge bands, and the one painted on top is the one the
                   pointer reads — which has to be the one the select tool picks. */}
-              {[...info.handles]
+              {!transforming && [...info.handles]
                 .sort((a, b) => a.id.length - b.id.length)
                 .map((h) => {
                   const p = toScreen(h.point);
@@ -227,7 +236,7 @@ export function SelectionLayer() {
                     </g>
                   );
                 })}
-              {info.rotateHandle &&
+              {!transforming && info.rotateHandle &&
                 (() => {
                   const knob = info.rotateHandle;
                   const p = toScreen(knob.point);

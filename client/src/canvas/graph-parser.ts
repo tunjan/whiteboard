@@ -816,6 +816,59 @@ function tokenize(
   return attachLogBases(applyBareCalls(captureAggregates(tokens, names)));
 }
 
+/** Index of the `)` closing the `(` at `open`, or -1. */
+function closingParen(tokens: readonly Token[], open: number): number {
+  let depth = 0;
+  for (let index = open; index < tokens.length; index += 1) {
+    const type = tokens[index]!.type;
+    if (type === 'lparen') depth += 1;
+    else if (type === 'rparen' && --depth === 0) return index;
+  }
+  return -1;
+}
+
+const TRIG_TAKES_ANGLE = new Set(['sin', 'cos', 'tan', 'sec', 'csc', 'cot']);
+const TRIG_GIVES_ANGLE = new Set(['asin', 'acos', 'atan']);
+const numeral = (value: string): Token => ({ type: 'number', value });
+const PI: Token = { type: 'constant', value: 'pi' };
+const operator = (value: string): Token => ({ type: 'operator', value });
+const LPAREN: Token = { type: 'lparen', value: '(' };
+const RPAREN: Token = { type: 'rparen', value: ')' };
+
+/**
+ * Degree mode, as a rewrite: `sin(a)` → `sin(pi/180*(a))` and `asin(a)` →
+ * `(180/pi*asin(a))`. Done on tokens so both evaluators — mathjs and the Rust
+ * program — read the same text, and nothing downstream knows about units.
+ * Returns new arrays: sums and integrals are shared between the two halves of
+ * a polar curve, so rewriting them in place would convert them twice.
+ */
+function inDegrees(tokens: readonly Token[]): Token[] {
+  const out = tokens.map((token) =>
+    token.type === 'aggregate'
+      ? {
+          ...token,
+          from: inDegrees(token.from),
+          to: inDegrees(token.to),
+          body: inDegrees(token.body),
+        }
+      : token,
+  );
+  for (let index = out.length - 1; index >= 0; index -= 1) {
+    const token = out[index]!;
+    if (token.type !== 'function' || out[index + 1]?.type !== 'lparen') continue;
+    const close = closingParen(out, index + 1);
+    if (close < 0) continue;
+    if (TRIG_TAKES_ANGLE.has(token.value)) {
+      out.splice(close, 0, RPAREN);
+      out.splice(index + 2, 0, PI, operator('/'), numeral('180'), operator('*'), LPAREN);
+    } else if (TRIG_GIVES_ANGLE.has(token.value)) {
+      out.splice(close + 1, 0, RPAREN);
+      out.splice(index, 0, LPAREN, numeral('180'), operator('/'), PI, operator('*'));
+    }
+  }
+  return out;
+}
+
 /** `log _2(x)` → `log(x, 2)`, now that every call has its parentheses. */
 function attachLogBases(tokens: Token[]): Token[] {
   for (let index = tokens.length - 1; index >= 0; index -= 1) {
@@ -1054,6 +1107,7 @@ function functionNodeName(node: MathNode): string | null {
 function compileGraphFunctionDefinition(
   source: GraphFunctionDefinitionSource,
   userFunctions: ReadonlySet<string>,
+  degrees: boolean,
 ): GraphFunctionDefinition {
   if (!isValidFunctionName(source.name)) {
     throw new Error(`Function name "${source.name}" is reserved`);
@@ -1067,7 +1121,8 @@ function compileGraphFunctionDefinition(
     throw new Error(`Function argument "${source.argument}" is not allowed`);
   }
 
-  const bodyTokens = tokenize(source.body.trim(), userFunctions);
+  const tokenized = tokenize(source.body.trim(), userFunctions);
+  const bodyTokens = degrees ? inDegrees(tokenized) : tokenized;
   const normalizedBody = normalizeTokens(bodyTokens);
   if (!normalizedBody) throw new Error('Enter a function body');
   const directVariables = new Set<string>();
@@ -1140,6 +1195,21 @@ function definitionSignature(definitions: GraphFunctionDefinitions): string {
   return definitionSignatures.get(definitions) ?? '';
 }
 
+/** Definitions for a graph in degrees; anything else reads radians. */
+const degreeDefinitions = new WeakSet<GraphFunctionDefinitions>();
+
+/** What a graph in degrees with no `f(x) = …` rows resolves against. */
+const DEGREE_GRAPH_FUNCTIONS: GraphFunctionDefinitions = new Map();
+degreeDefinitions.add(DEGREE_GRAPH_FUNCTIONS);
+definitionSignatures.set(DEGREE_GRAPH_FUNCTIONS, 'deg');
+
+function inDegreesIf(
+  tokens: Token[],
+  definitions: GraphFunctionDefinitions,
+): Token[] {
+  return degreeDefinitions.has(definitions) ? inDegrees(tokens) : tokens;
+}
+
 /**
  * Compile the `f(x) = …` definitions among `expressions`.
  *
@@ -1149,11 +1219,17 @@ function definitionSignature(definitions: GraphFunctionDefinitions): string {
  */
 export function createGraphFunctionDefinitions(
   expressions: readonly GraphExpression[],
+  angleUnit: 'rad' | 'deg' = 'rad',
 ): GraphFunctionDefinitions {
+  // The unit rides on the definitions because they are what every parse is
+  // already keyed on and handed: a graph's angle mode reaches the parser, the
+  // worker and the intersection finder without a parameter of its own.
+  const degrees = angleUnit === 'deg';
+  const empty = degrees ? DEGREE_GRAPH_FUNCTIONS : EMPTY_GRAPH_FUNCTIONS;
   // Without the parser there is nothing to compile these into, and an empty
   // map is what a graph with no `f(x) = …` rows resolves against anyway. Not
   // cached: the real definitions have to be built once the chunk lands.
-  if (!graphMathReady()) return EMPTY_GRAPH_FUNCTIONS;
+  if (!graphMathReady()) return empty;
 
   const sources = new Map<string, GraphFunctionDefinitionSource>();
   for (const expression of expressions) {
@@ -1163,10 +1239,11 @@ export function createGraphFunctionDefinitions(
     }
   }
 
-  const signature = [...sources.values()]
+  const sourceSignature = [...sources.values()]
     .map((source) => `${source.name}(${source.argument})=${source.body}`)
     .join('\u0000');
-  if (!signature) return EMPTY_GRAPH_FUNCTIONS;
+  if (!sourceSignature) return empty;
+  const signature = degrees ? `deg\u0001${sourceSignature}` : sourceSignature;
   const cached = cacheGet(definitionsCache, signature);
   if (cached) return cached;
 
@@ -1176,7 +1253,7 @@ export function createGraphFunctionDefinitions(
     try {
       definitions.set(
         source.name,
-        compileGraphFunctionDefinition(source, userFunctions),
+        compileGraphFunctionDefinition(source, userFunctions, degrees),
       );
     } catch (error) {
       definitions.set(source.name, {
@@ -1201,6 +1278,7 @@ export function createGraphFunctionDefinitions(
     }
   }
   definitionSignatures.set(definitions, signature);
+  if (degrees) degreeDefinitions.add(definitions);
   return cacheSet(
     definitionsCache,
     signature,
@@ -1657,6 +1735,7 @@ function parseFunctionDefinitionExpression(
   const definition = compileGraphFunctionDefinition(
     definitionSource,
     userFunctions,
+    degreeDefinitions.has(definitions),
   );
   const localDefinitions = new Map(definitions);
   localDefinitions.set(definition.name, definition);
@@ -1879,7 +1958,7 @@ function compileRestriction(
   variables: Set<string>,
 ): { evaluate: RelationEvaluator; op: GraphComparison }[] {
   const { sides, ops } = splitOnComparison(
-    tokenize(text.trim(), new Set(definitions.keys())),
+    inDegreesIf(tokenize(text.trim(), new Set(definitions.keys())), definitions),
   );
   if (ops.length === 0) {
     throw new Error('A restriction needs a comparison, like {x > 0}');
@@ -1917,17 +1996,25 @@ function parseGraphExpressionUncached(
     }
     const { body, restrictions } = splitRestrictions(trimmed);
     if (!body) return { ok: false, source, message: 'Enter an expression' };
-    const tokens = tokenize(body, new Set(definitions.keys()));
+    const typed = tokenize(body, new Set(definitions.keys()));
 
-    const coordinate = body.startsWith('(') ? splitCoordinate(tokens) : null;
-    const polar = coordinate ? null : polarCoordinates(tokens);
+    const coordinate = body.startsWith('(') ? splitCoordinate(typed) : null;
+    const polar = coordinate ? null : polarCoordinates(typed);
     if (coordinate || polar) {
       if (restrictions.length > 0) {
         throw new Error('Restrictions like {x > 0} work on curves in x and y');
       }
-      const parsed = parseCoordinateExpression(source, (coordinate ?? polar)!, definitions);
+      // Converted after the polar rewrite, so in degrees θ is degrees in the
+      // cos(θ), sin(θ) that place the curve as well as in r = f(θ).
+      const [xSide, ySide] = (coordinate ?? polar)!;
+      const parsed = parseCoordinateExpression(
+        source,
+        [inDegreesIf(xSide, definitions), inDegreesIf(ySide, definitions)],
+        definitions,
+      );
       return polar ? { ...parsed, polar: true } : parsed;
     }
+    const tokens = inDegreesIf(typed, definitions);
 
     let kind: 'explicit' | 'implicit';
     let normalized: string;

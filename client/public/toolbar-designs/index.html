@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Selection toolbar styles</title>
+<style>
+@font-face{font-family:Inter;src:url(inter.woff2) format('woff2');font-weight:100 900}
+:root{--fg:#292A2E;--muted:#505258;--subtle:#6B6E76;--border:rgba(11,18,14,.14);--strong:rgba(11,18,14,.24);
+--overlay:0 8px 12px rgba(30,31,33,.15),0 0 1px rgba(30,31,33,.31);--hover:rgba(41,42,46,.08);--press:rgba(41,42,46,.14);
+--sel:#1868DB;--danger:#AE2E24;--danger-bg:#FFECEB;--board:#F7F7F6}
+*{box-sizing:border-box}
+body{margin:0;background:#EDEDEC;font:13px/16px Inter,system-ui,sans-serif;color:var(--fg);-webkit-font-smoothing:antialiased}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(560px,1fr));gap:16px;padding:16px;max-width:1180px;margin:0 auto}
+.card{background:#fff;border-radius:12px;box-shadow:0 0 0 1px var(--border);position:relative}
+.card.ref{box-shadow:0 0 0 1px var(--strong)}
+.stage{position:relative;height:280px;background:var(--board);border-radius:12px 12px 0 0;
+ background-image:radial-gradient(circle,rgba(41,42,46,.13) 1px,transparent 1.2px);background-size:20px 20px}
+.meta{padding:12px 16px 14px;display:flex;gap:12px;align-items:baseline}
+.meta b{font-weight:600;font-size:14px}.meta .d{color:var(--muted);line-height:18px}
+.spec{display:block;margin-top:6px;font:11.5px/16px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--subtle)}
+.num{font-weight:600;color:var(--subtle);font-variant-numeric:tabular-nums;min-width:12px}
+.sel{position:absolute;left:50%;top:150px;width:180px;height:104px;margin-left:-90px;outline:1.5px solid var(--sel)}
+.sel i{position:absolute;width:8px;height:8px;background:#fff;border:1.5px solid var(--sel);border-radius:2px}
+.sel svg{position:absolute;inset:0}
+.at{position:absolute;left:50%;top:calc(150px - var(--off));transform:translate(-50%,-100%)}
+.plate{display:flex;align-items:center;gap:var(--gapk);padding:var(--pad);border-radius:var(--r);border:var(--bd);box-shadow:var(--sh);background:var(--pbg,#fff)}
+.key{position:relative;display:inline-flex;align-items:center;justify-content:center;flex:none;width:var(--key);height:var(--key);padding:0;border:var(--kbd,0);border-radius:var(--kr);background:var(--kbg,transparent);box-shadow:var(--ksh,none);color:var(--pfg,var(--fg));font:inherit;cursor:default;transition:background-color .1s}
+.key svg{width:var(--ico,16px);height:var(--ico,16px);opacity:.8}
+.key:hover{background:var(--hov,var(--hover))}.key:hover svg,.key[aria-expanded=true] svg{opacity:1}
+.key[aria-expanded=true]{background:var(--prs,var(--press))}
+.key.danger:hover{background:var(--dhov,var(--danger-bg));color:var(--dfg,var(--danger))}
+.sw{width:16px;height:16px;border-radius:50%;background:var(--sel);box-shadow:var(--swr,inset 0 0 0 1px rgba(0,0,0,.12))}
+.air{width:var(--grp);flex:none}
+.line{width:1px;height:var(--lh,16px);background:var(--lc,var(--border));margin:0 var(--lm,4px);flex:none}
+.full{width:1px;align-self:stretch;background:var(--lc,var(--border));margin:calc(-1 * var(--pad)) var(--lm,4px);flex:none}
+.seg{display:flex;gap:var(--gapk);padding:2px;border-radius:calc(var(--kr) + 2px);background:var(--segbg,rgba(41,42,46,.05))}
+.anchor{position:relative;display:inline-flex}
+.pop{display:none;position:absolute;top:calc(100% + 8px);left:0;z-index:20}
+.pop.open{display:block}.pop.right{left:auto;right:0}
+.panel{background:#fff;border:1px solid var(--border);border-radius:8px;box-shadow:var(--overlay)}
+.menu{padding:4px;min-width:200px}
+.row{display:flex;align-items:center;gap:10px;height:30px;padding:0 8px;border-radius:6px;white-space:nowrap;color:var(--fg)}
+.row:hover{background:var(--hover)}.row svg{width:16px;height:16px;opacity:.8;flex:none}
+.row kbd{margin-left:auto;padding-left:16px;font:inherit;color:var(--subtle)}
+.swatches{display:grid;grid-template-columns:repeat(6,22px);gap:8px;padding:10px}
+.dot{width:22px;height:22px;border-radius:50%;border:0;padding:0;box-shadow:inset 0 0 0 1px rgba(0,0,0,.12)}
+.dot.on{box-shadow:inset 0 0 0 1px rgba(0,0,0,.12),0 0 0 2px #fff,0 0 0 3.5px var(--sel)}
+.opac{display:flex;align-items:center;gap:10px;padding:2px 10px 10px;color:var(--muted)}
+.opac svg{width:16px;height:16px}.opac input{flex:1;accent-color:var(--fg)}
+</style>
+</head>
+<body>
+<div class="grid" id="grid"></div>
+<script>
+const ICONS={"Sigma":"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-sigma\" aria-hidden=\"true\"><path d=\"M18 7V5a1 1 0 0 0-1-1H6.5a.5.5 0 0 0-.4.8l4.5 6a2 2 0 0 1 0 2.4l-4.5 6a.5.5 0 0 0 .4.8H17a1 1 0 0 0 1-1v-2\"></path></svg>","WandSparkles":"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-wand-sparkles\" aria-hidden=\"true\"><path d=\"m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72\"></path><path d=\"m14 7 3 3\"></path><path d=\"M5 6v4\"></path><path d=\"M19 14v4\"></path><path d=\"M10 2v2\"></path><path d=\"M7 8H3\"></path><path d=\"M21 16h-4\"></path><path d=\"M11 3H9\"></path></svg>","ListChecks":"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-list-checks\" aria-hidden=\"true\"><path d=\"M13 5h8\"></path><path d=\"M13 12h8\"></path><path d=\"M13 19h8\"></path><path d=\"m3 17 2 2 4-4\"></path><path d=\"m3 7 2 2 4-4\"></path></svg>","CopyPlus":"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-copy-plus\" aria-hidden=\"true\"><line x1=\"15\" x2=\"15\" y1=\"12\" y2=\"18\"></line><line x1=\"12\" x2=\"18\" y1=\"15\" y2=\"15\"></line><rect width=\"14\" height=\"14\" x=\"8\" y=\"8\" rx=\"2\" ry=\"2\"></rect><path d=\"M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2\"></path></svg>","Blend":"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-blend\" aria-hidden=\"true\"><circle cx=\"9\" cy=\"9\" r=\"7\"></circle><circle cx=\"15\" cy=\"15\" r=\"7\"></circle></svg>","BringToFront":"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-bring-to-front\" aria-hidden=\"true\"><rect x=\"8\" y=\"8\" width=\"8\" height=\"8\" rx=\"2\"></rect><path d=\"M4 10a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2\"></path><path d=\"M14 20a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2v-4a2 2 0 0 0-2-2\"></path></svg>","SendToBack":"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-send-to-back\" aria-hidden=\"true\"><rect x=\"14\" y=\"14\" width=\"8\" height=\"8\" rx=\"2\"></rect><rect x=\"2\" y=\"2\" width=\"8\" height=\"8\" rx=\"2\"></rect><path d=\"M7 14v1a2 2 0 0 0 2 2h1\"></path><path d=\"M14 7h1a2 2 0 0 1 2 2v1\"></path></svg>","Lock":"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-lock\" aria-hidden=\"true\"><rect width=\"18\" height=\"11\" x=\"3\" y=\"11\" rx=\"2\" ry=\"2\"></rect><path d=\"M7 11V7a5 5 0 0 1 10 0v4\"></path></svg>","Unlock":"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-lock-open\" aria-hidden=\"true\"><rect width=\"18\" height=\"11\" x=\"3\" y=\"11\" rx=\"2\" ry=\"2\"></rect><path d=\"M7 11V7a5 5 0 0 1 9.9-1\"></path></svg>","Trash2":"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-trash2 lucide-trash-2\" aria-hidden=\"true\"><path d=\"M10 11v6\"></path><path d=\"M14 11v6\"></path><path d=\"M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6\"></path><path d=\"M3 6h18\"></path><path d=\"M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2\"></path></svg>","MoreHorizontal":"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-ellipsis\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"1\"></circle><circle cx=\"19\" cy=\"12\" r=\"1\"></circle><circle cx=\"5\" cy=\"12\" r=\"1\"></circle></svg>","Sparkles":"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-sparkles\" aria-hidden=\"true\"><path d=\"M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z\"></path><path d=\"M20 2v4\"></path><path d=\"M22 4h-4\"></path><circle cx=\"4\" cy=\"20\" r=\"2\"></circle></svg>","ChevronDown":"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-chevron-down\" aria-hidden=\"true\"><path d=\"m6 9 6 6 6-6\"></path></svg>","ChevronRight":"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-chevron-right\" aria-hidden=\"true\"><path d=\"m9 18 6-6-6-6\"></path></svg>","Copy":"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-copy\" aria-hidden=\"true\"><rect width=\"14\" height=\"14\" x=\"8\" y=\"8\" rx=\"2\" ry=\"2\"></rect><path d=\"M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2\"></path></svg>","Group":"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-group\" aria-hidden=\"true\"><path d=\"M3 7V5c0-1.1.9-2 2-2h2\"></path><path d=\"M17 3h2c1.1 0 2 .9 2 2v2\"></path><path d=\"M21 17v2c0 1.1-.9 2-2 2h-2\"></path><path d=\"M7 21H5c-1.1 0-2-.9-2-2v-2\"></path><rect width=\"7\" height=\"5\" x=\"7\" y=\"7\" rx=\"1\"></rect><rect width=\"7\" height=\"5\" x=\"10\" y=\"12\" rx=\"1\"></rect></svg>","ImageDown":"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-image-down\" aria-hidden=\"true\"><path d=\"M10.3 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10l-3.1-3.1a2 2 0 0 0-2.814.014L6 21\"></path><path d=\"m14 19 3 3v-5.5\"></path><path d=\"m17 22 3-3\"></path><circle cx=\"9\" cy=\"9\" r=\"2\"></circle></svg>","Palette":"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-palette\" aria-hidden=\"true\"><path d=\"M12 22a1 1 0 0 1 0-20 10 9 0 0 1 10 9 5 5 0 0 1-5 5h-2.25a1.75 1.75 0 0 0-1.4 2.8l.3.4a1.75 1.75 0 0 1-1.4 2.8z\"></path><circle cx=\"13.5\" cy=\"6.5\" r=\".5\" fill=\"currentColor\"></circle><circle cx=\"17.5\" cy=\"10.5\" r=\".5\" fill=\"currentColor\"></circle><circle cx=\"6.5\" cy=\"12.5\" r=\".5\" fill=\"currentColor\"></circle><circle cx=\"8.5\" cy=\"7.5\" r=\".5\" fill=\"currentColor\"></circle></svg>","LineChart":"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-chart-line\" aria-hidden=\"true\"><path d=\"M3 3v16a2 2 0 0 0 2 2h16\"></path><path d=\"m19 9-5 5-4-4-3 3\"></path></svg>","ChartSpline":"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-chart-spline\" aria-hidden=\"true\"><path d=\"M3 3v16a2 2 0 0 0 2 2h16\"></path><path d=\"M7 16c.5-2 1.5-7 4-7 2 0 2 3 4 3 2.5 0 4.5-5 5-7\"></path></svg>"};
+const I=n=>ICONS[n];
+const key=(n,l,c='')=>`<button class="key ${c}" aria-label="${l}" title="${l}">${I(n)}</button>`;
+const pop=(t,p,c='')=>`<span class="anchor">${t.replace('<button','<button data-pop')}<div class="pop ${c}">${p}</div></span>`;
+const COLORS=['#292A2E','#1868DB','#C9372C','#1F845A','#E06C00','#6E5DC6'];
+const colorPanel=`<div class="panel"><div class="swatches">${COLORS.map((c,i)=>`<button class="dot ${i==1?'on':''}" style="background:${c}" aria-label="Colour ${i+1}"></button>`).join('')}</div></div>`;
+const opacPanel=`<div class="panel" style="width:200px"><div class="opac" style="padding:10px">${I('Blend')}<input type="range" value="100" aria-label="Opacity"><span>100%</span></div></div>`;
+const morePanel=`<div class="panel menu"><div class="row">${I('Copy')}Copy<kbd>⌘C</kbd></div><div class="row">${I('ImageDown')}Copy as PNG<kbd>⇧⌘C</kbd></div><div class="row">${I('Group')}Group<kbd>⌘G</kbd></div></div>`;
+const GROUPS=[
+  key('Sigma','Convert to equation')+key('ChartSpline','Graph function')+key('WandSparkles','Tidy handwriting')+key('ListChecks','Check work')+key('CopyPlus','Duplicate')+pop(`<button class="key" aria-label="Colour" title="Colour"><span class="sw"></span></button>`,colorPanel)+pop(key('Blend','Opacity'),opacPanel),
+  key('BringToFront','Bring to front')+key('SendToBack','Send to back'),
+  key('Unlock','Lock')+key('Trash2','Delete','danger'),
+  pop(key('MoreHorizontal','More'),morePanel,'right'),
+];
+const bar=(sep,seg)=>seg?GROUPS.map(g=>`<span class="seg">${g}</span>`).join(''):GROUPS.join(`<span class="${sep}"></span>`);
+const D=[
+ {n:'Today',ref:1,d:'The current bar, for comparison.',sep:'air',
+  v:{pad:'4px',key:'32px',kr:'6px',r:'8px',bd:'1px solid var(--border)',sh:'var(--overlay)',gapk:'0px',grp:'8px',off:'12px'},
+  s:'padding 4 · key 32 · key radius 6 · plate radius 8 · border 1px · overlay shadow · groups 8px air · 12px off the selection'},
+ {n:'Tight',d:'Less padding and smaller keys, with a hairline border and no shadow. The bar takes up the least board space.',sep:'line',
+  v:{pad:'2px',key:'28px',kr:'5px',r:'7px',bd:'1px solid var(--strong)',sh:'none',gapk:'0px',lh:'14px',lm:'3px',off:'8px'},
+  s:'padding 2 · key 28 · key radius 5 · plate radius 7 · border 1px strong · no shadow · 14px hairline groups · 8px off'},
+ {n:'Roomy',d:'Bigger keys and padding, a large radius, and no border, just a soft shadow. Easy to hit on a trackpad or touch screen.',sep:'air',
+  v:{pad:'6px',key:'36px',kr:'10px',r:'16px',bd:'0',sh:'0 12px 28px rgba(30,31,33,.14),0 2px 6px rgba(30,31,33,.08)',gapk:'2px',grp:'12px',off:'16px',ico:'18px'},
+  s:'padding 6 · key 36 · key radius 10 · plate radius 16 · no border · 28px soft shadow · 2px between keys · 12px air · 16px off'},
+ {n:'Pill',d:'Fully rounded ends with round hover chips. Wider side padding so the curve has room.',sep:'line',
+  v:{pad:'4px 8px',key:'32px',kr:'999px',r:'999px',bd:'1px solid var(--border)',sh:'0 4px 12px rgba(30,31,33,.12)',gapk:'2px',lh:'18px',lm:'6px',off:'12px'},
+  s:'padding 4 / 8 · key 32 · round keys · plate radius 999 · border 1px · 12px shadow · 18px hairlines, 6px margin'},
+ {n:'Flat outline',d:'Print-like: a strong 1.5px border, no shadow, and full-height dividers that run from edge to edge.',sep:'full',
+  v:{pad:'4px',key:'32px',kr:'4px',r:'6px',bd:'1.5px solid var(--fg)',sh:'none',gapk:'0px',lc:'var(--fg)',lm:'4px',off:'12px'},
+  s:'padding 4 · key 32 · key radius 4 · plate radius 6 · border 1.5px ink · no shadow · full-height ink dividers'},
+ {n:'Segmented',d:'Each group sits in its own tinted track inside the plate. The grouping is clear without any lines.',seg:1,
+  v:{pad:'4px',key:'30px',kr:'6px',r:'10px',bd:'1px solid var(--border)',sh:'var(--overlay)',gapk:'4px',off:'12px',hov:'#fff',segbg:'rgba(41,42,46,.07)'},
+  s:'padding 4 · key 30 · key radius 6 · plate radius 10 · 4px between tracks · tracks 2px padding, 7% tint · hover lifts to white'},
+ {n:'Keycaps',d:'No plate. Every key is its own small tile with a border and shadow, spaced 4px apart.',sep:'air',
+  v:{pad:'0',key:'30px',kr:'7px',r:'0',bd:'0',sh:'none',pbg:'transparent',gapk:'4px',grp:'10px',off:'12px',kbg:'#fff',kbd:'1px solid var(--border)',ksh:'0 1px 2px rgba(30,31,33,.10)',hov:'#F1F1F0'},
+  s:'no plate · tile 30 · tile radius 7 · each tile border 1px + 2px shadow · 4px between tiles · 10px between groups'},
+ {n:'Attached',d:'Sits close to the selection with a selection-blue border, so it reads as part of the selection.',sep:'line',
+  v:{pad:'3px',key:'30px',kr:'4px',r:'6px',bd:'1.5px solid var(--sel)',sh:'none',gapk:'0px',lh:'16px',lm:'3px',lc:'rgba(24,104,219,.3)',off:'9px',hov:'#E9F2FE'},
+  s:'padding 3 · key 30 · key radius 4 · plate radius 6 · border 1.5px blue · no shadow · blue hairlines · 9px off · blue hover'},
+ {n:'Dark compact',d:'A near-black plate with no border, a deep shadow and slightly smaller keys. It stands out against any ink.',sep:'line',
+  v:{pad:'3px',key:'30px',kr:'7px',r:'10px',bd:'0',sh:'0 10px 24px rgba(0,0,0,.22),0 0 0 1px rgba(0,0,0,.4)',gapk:'0px',lh:'16px',lm:'4px',lc:'rgba(255,255,255,.16)',off:'12px',pbg:'#1F1F21',pfg:'#fff',hov:'rgba(255,255,255,.12)',prs:'rgba(255,255,255,.18)',dhov:'rgba(255,120,100,.18)',dfg:'#FF9C8F',swr:'0 0 0 1.5px #1F1F21,0 0 0 2.5px rgba(255,255,255,.45)'},
+  s:'padding 3 · key 30 · key radius 7 · plate radius 10 · no border · 24px deep shadow · white 16% hairlines · 12px off'},
+];
+const sketch=`<svg viewBox="0 0 180 104" aria-hidden="true"><path d="M16 88 L166 87 M90 98 L91 10" stroke="#8C8F97" stroke-width="1.4" fill="none" stroke-linecap="round"/><path d="M32 16 C52 58, 70 84, 91 84 C112 83, 128 58, 148 13" stroke="#292A2E" stroke-width="2.2" fill="none" stroke-linecap="round"/><text x="98" y="24" font-family="Georgia,serif" font-style="italic" font-size="13" fill="#505258">y = x²</text></svg>`;
+const handles='<i style="left:-5px;top:-5px"></i><i style="right:-5px;top:-5px"></i><i style="left:-5px;bottom:-5px"></i><i style="right:-5px;bottom:-5px"></i>';
+document.getElementById('grid').innerHTML=D.map((x,i)=>{const vars=Object.entries(x.v).map(([k,v])=>`--${k}:${v}`).join(';');
+ return `<section class="card ${x.ref?'ref':''}" id="d${i}" style="${vars}"><div class="stage"><div class="sel">${sketch}${handles}</div><div class="at"><div class="plate">${bar(x.sep,x.seg)}</div></div></div><div class="meta"><span class="num">${x.ref?'–':i}</span><div><b>${x.n}</b> <span class="d">${x.d}</span><span class="spec">${x.s}</span></div></div></section>`}).join('');
+document.addEventListener('click',e=>{
+  const t=e.target.closest('[data-pop]');
+  document.querySelectorAll('.pop.open').forEach(p=>{if(!t||p!==t.nextElementSibling){p.classList.remove('open');p.previousElementSibling.setAttribute('aria-expanded','false');p.closest('.card').style.zIndex=''}});
+  if(t){const p=t.nextElementSibling;const o=p.classList.toggle('open');t.setAttribute('aria-expanded',o);t.closest('.card').style.zIndex=o?5:''}
+});
+</script>
+</body>
+</html>

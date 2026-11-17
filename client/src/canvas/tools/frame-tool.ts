@@ -72,13 +72,12 @@ export function createFrameTool(): Tool {
       const shapes = ctx.editor.getShapes();
       const parentId = topFrameAtPoint(shapes, info.point)?.id ?? null;
       const count = shapes.filter((s) => s.type === 'frame').length;
-      const style = nextShapeStyle();
       const props: FrameProps = {
         ...(util.getDefaultProps() as FrameProps),
         w: 0,
         h: 0,
         name: `Frame ${count + 1}`,
-        color: style.color,
+        color: nextShapeStyle().color,
       };
       const shape = {
         id,
@@ -87,7 +86,7 @@ export function createFrameTool(): Tool {
         x: info.point.x,
         y: info.point.y,
         rotation: 0,
-        opacity: style.opacity,
+        opacity: 1,
         // The background begins below its siblings; captured shapes keep their
         // indices and therefore remain above it inside the new frame.
         index: getBottomIndex(

@@ -56,14 +56,18 @@ import { polygonVerticesForBox } from './shapes/polygon-geometry';
 import { dashProps, strokeLineCap } from './shapes/render-style';
 import { MEDIA_CORNER_RADIUS } from './shapes/style';
 import { fontStack, fontWeight, layoutTextProps } from './shapes/text-measure';
+import { isRichText } from './shapes/text-rich';
 import { videoPoster } from './shapes/video';
 import { usesImageThumb, type LodDetail } from './lod';
 
 /** Fill opacity the SVG components give a `solid` fill. */
 const SOLID_FILL_OPACITY = 0.18;
-/** Cell size and line weight of the hatch fills, in world units. */
+/** Cell size and line weight of the hatch fills, in world units. The SVG
+ *  pattern strokes a 1-wide line on its tile's edge, which the tile clips to
+ *  the inner half: 0.5 wide, centred a quarter unit in from the edge. */
 const HATCH_SPACING = 7;
-const HATCH_WIDTH = 1;
+const HATCH_WIDTH = 0.5;
+const HATCH_OFFSET = HATCH_WIDTH / 2;
 
 const IMAGE_SHADOW = { dy: 1, blur: 1, opacity: 0.08 };
 const VIDEO_SHADOW = { dy: 1, blur: 1, opacity: 0.08 };
@@ -199,6 +203,15 @@ export const DOM_SHAPE_TYPES: ReadonlySet<string> = new Set([
   'graph',
   'bookmark',
 ]);
+
+/** Whether the DOM draws `shape`: a `DOM_SHAPE_TYPES` member, or text whose
+ *  Markdown and math the browser lays out (`text-rich`). */
+export function isDomShape(shape: Shape): boolean {
+  return (
+    DOM_SHAPE_TYPES.has(shape.type) ||
+    (shape.type === 'text' && isRichText(shape.props.text))
+  );
+}
 
 /** The dash a stroke of `size` actually paints with — the `useLodDash` rule. */
 export function lodDash(
@@ -420,7 +433,7 @@ export function buildPaint(shape: Shape, env: PaintEnv): PaintOp[] {
       const { w, h, kind, fillStyle, size } = shape.props;
       const color = paint(shape.props.color);
       const dash = lodDash(shape.props.dash, size, lod);
-      const points = polygonVerticesForBox(kind, 0, 0, w, h);
+      const points = polygonVerticesForBox(kind, 0, 0, w, h, shape.id, size);
       const d = closedPath(points);
       const ops: PaintOp[] = [];
       const fill = fillOp(d, color, fillStyle, w, h);
@@ -539,7 +552,7 @@ export function buildPaint(shape: Shape, env: PaintEnv): PaintOp[] {
     }
     case 'text': {
       const { text, fontSize, fontFamily } = shape.props;
-      if (!text) return [];
+      if (!text || isRichText(text)) return [];
       const layout = layoutTextProps(shape.props);
       const color = paint(shape.props.color);
       const font = `${fontWeight(shape.props.fontWeight)} ${fontSize}px ${fontStack(fontFamily)}`;
@@ -826,8 +839,8 @@ function paintPath(
  * The hatch fills, drawn as clipped parallel lines at 45 degrees.
  *
  * The SVG uses a 7x7 `<pattern>`; a canvas pattern is a bitmap, which the
- * camera would resample. Lines stroked live stay one world unit wide at every
- * zoom, which is what the pattern means.
+ * camera would resample. Lines stroked live stay the pattern's visible half
+ * unit wide at every zoom, which is what the pattern means.
  */
 function paintHatch(
   ctx: CanvasRenderingContext2D,
@@ -846,13 +859,13 @@ function paintHatch(
   ctx.rotate(Math.PI / 4);
   ctx.beginPath();
   for (let x = -reach; x <= reach; x += HATCH_SPACING) {
-    ctx.moveTo(x, -reach);
-    ctx.lineTo(x, reach);
+    ctx.moveTo(x + HATCH_OFFSET, -reach);
+    ctx.lineTo(x + HATCH_OFFSET, reach);
   }
   if (fill.crosshatch)
     for (let y = -reach; y <= reach; y += HATCH_SPACING) {
-      ctx.moveTo(-reach, y);
-      ctx.lineTo(reach, y);
+      ctx.moveTo(-reach, y + HATCH_OFFSET);
+      ctx.lineTo(reach, y + HATCH_OFFSET);
     }
   ctx.stroke();
   ctx.restore();

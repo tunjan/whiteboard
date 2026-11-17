@@ -54,7 +54,7 @@ export const PALETTE: Palette = {
     { name: 'Violet', value: '#ae3ec9' },
     { name: 'Blue', value: '#4465e9' },
     { name: 'Light blue', value: '#4ba1f1' },
-    { name: 'Yellow', value: '#f1ac4b' },
+    { name: 'Yellow', value: '#f2c12e' },
     { name: 'Orange', value: '#e16919' },
     { name: 'Green', value: '#099268' },
     { name: 'Light green', value: '#4cb05e' },
@@ -103,15 +103,19 @@ export function allSwatches(colors: PaletteColor[]): PaletteColor[] {
   return [...quickSwatches(colors), ...LIGHT_SLOTS.flatMap((slot) => colors[slot] ?? [])];
 }
 
+/** Palette values since changed, so a saved style or ramp keeps its slot. */
+const RETIRED: Record<string, string> = { '#f1ac4b': '#f2c12e' };
+
 /** A palette colour from either theme, as `theme` draws it; anything else as is. */
 export function inCurrentTheme(
   color: string,
   theme: Theme = useThemeStore.getState().theme,
 ): string {
   const current = paletteColors(theme);
-  if (current.some((c) => c.value === color)) return color;
+  const known = RETIRED[color] ?? color;
+  if (current.some((c) => c.value === known)) return known;
   const slot = [...PALETTE.light, ...PALETTE.dark].findIndex(
-    (c) => c.value === color,
+    (c) => c.value === known,
   );
   return slot >= 0 ? current[slot % current.length]!.value : color;
 }
@@ -152,10 +156,9 @@ export const SIZE_OPTIONS: SizeOption[] = [
 /**
  * The style new shapes inherit.
  *
- * Colour and size are kept per instrument (see `StyleSlot`); the rest is one
- * set shared by every tool. Only a control the user actually moved writes
- * here — selecting a shape shows that shape's style on the bar without
- * changing what the next one will be drawn with.
+ * Kept per group of tools (see `StyleSlot`). Only a control the user actually
+ * moved writes here — selecting a shape shows that shape's style on the bar
+ * without changing what the next one will be drawn with.
  */
 export interface NextShapeStyle {
   /** Current stroke color for new shapes (and the last applied). */
@@ -175,46 +178,69 @@ export interface NextShapeStyle {
 }
 
 /**
- * The instruments that keep their own colour and size: a tutor writes in black
- * and highlights in yellow, and re-picking both on every switch was the bar's
- * main cost. Shapes, text and the rest share one slot.
+ * The groups of tools that keep a style of their own. A setting is shared
+ * inside a group and never between two: tools that go together in one drawing
+ * should match, and tools swapped between mid-lesson should not disturb each
+ * other. A tutor writes in black and highlights in yellow, a dashed rectangle
+ * must not dash the next pen stroke, and labels stay black on a coloured
+ * diagram. Equations read as text; shapes, lines and arrows are the diagram.
  */
-export type StyleSlot = 'pen' | 'highlighter' | 'other';
+export type StyleSlot = 'pen' | 'highlighter' | 'diagram' | 'text' | 'frame';
 
-type SlotStyle = Pick<NextShapeStyle, 'color' | 'size'>;
-
-/** Tools that paint nothing leave the live colour where it is. */
-const UNSTYLED_TOOLS = new Set(['select', 'hand', 'laser', 'eraser']);
+/** Tools with no style to keep leave the live one where it is. */
+const UNSTYLED_TOOLS = new Set(['select', 'hand', 'laser', 'eraser', 'sticker']);
 
 export function styleSlot(toolId: string): StyleSlot | null {
   if (toolId === 'draw') return 'pen';
   if (toolId === 'highlighter') return 'highlighter';
-  return UNSTYLED_TOOLS.has(toolId) ? null : 'other';
+  if (toolId === 'text' || toolId === 'equation') return 'text';
+  if (toolId === 'frame') return 'frame';
+  return UNSTYLED_TOOLS.has(toolId) ? null : 'diagram';
 }
 
-/** What a slot opens on before it has ever been used. */
-function slotDefault(slot: StyleSlot): SlotStyle | undefined {
-  if (slot !== 'highlighter') return undefined;
-  return { color: inCurrentTheme(PALETTE.light[6]!.value), size: SIZE_OPTIONS[1]!.value };
+/** The style `slot` lays down: live, put away, or as it opens on first use. */
+function resolveSlot(
+  state: Pick<StyleStore, keyof NextShapeStyle | 'slot' | 'slots'>,
+  slot: StyleSlot,
+): NextShapeStyle {
+  if (slot === state.slot) return pickStyle(state);
+  const saved = state.slots[slot];
+  if (saved) return { ...saved, color: inCurrentTheme(saved.color) };
+  const base = { ...defaultStyle(), color: inCurrentTheme(DEFAULT_COLOR) };
+  switch (slot) {
+    case 'highlighter':
+      return {
+        ...base,
+        color: inCurrentTheme(PALETTE.light[6]!.value),
+        size: SIZE_OPTIONS[1]!.value,
+      };
+    case 'frame':
+      return { ...base, color: inCurrentTheme(PALETTE.light[1]!.value) };
+    case 'diagram': {
+      // Takes after the pen, not whatever happens to be live: a first
+      // rectangle drawn after highlighting should not come out yellow.
+      const { color, size } = resolveSlot(state, 'pen');
+      return { ...base, color, size };
+    }
+    default:
+      return base;
+  }
 }
 
 /** The colour a tool will draw in, whether or not it is the active one. */
 export function slotColor(
-  state: Pick<StyleStore, 'color' | 'slot' | 'slots'>,
+  state: Pick<StyleStore, keyof NextShapeStyle | 'slot' | 'slots'>,
   slot: StyleSlot,
 ): string {
-  if (slot === state.slot) return state.color;
-  return inCurrentTheme(
-    state.slots[slot]?.color ?? slotDefault(slot)?.color ?? state.color,
-  );
+  return resolveSlot(state, slot).color;
 }
 
 interface StyleStore extends NextShapeStyle {
-  /** The slot the live `color` and `size` belong to. */
+  /** The slot the live style belongs to. */
   slot: StyleSlot;
-  /** The other slots' colour and size, put away while they are not live. */
-  slots: Partial<Record<StyleSlot, SlotStyle>>;
-  /** Put the live colour and size away and take out `slot`'s. */
+  /** The other slots' styles, put away while they are not live. */
+  slots: Partial<Record<StyleSlot, NextShapeStyle>>;
+  /** Put the live style away and take out `slot`'s. */
   enterSlot: (slot: StyleSlot) => void;
   /** The toolbar's colours, as the user arranged them; null for the default. */
   ramp: string[] | null;
@@ -283,23 +309,10 @@ export const useStyleStore = create<StyleStore>()(
       enterSlot: (slot) =>
         set((state) => {
           if (slot === state.slot) return state;
-          // A slot never used before starts from the pen, not from whatever
-          // happens to be live — a first rectangle drawn after highlighting
-          // should not come out yellow.
-          const saved =
-            state.slots[slot] ??
-            slotDefault(slot) ??
-            (state.slot === 'pen' ? undefined : state.slots.pen);
           return {
             slot,
-            slots: {
-              ...state.slots,
-              [state.slot]: { color: state.color, size: state.size },
-            },
-            ...(saved && {
-              color: inCurrentTheme(saved.color),
-              size: saved.size,
-            }),
+            slots: { ...state.slots, [state.slot]: pickStyle(state) },
+            ...resolveSlot(state, slot),
           };
         }),
       ramp: null,
@@ -352,23 +365,32 @@ export const useStyleStore = create<StyleStore>()(
     }),
     {
       name: 'whiteboard:style',
-      version: 2,
+      version: 3,
       migrate: migrateStyle,
     },
   ),
 );
 
-// Switching tools swaps in that instrument's colour and size, by click, key or
-// spring-hold alike.
+// Switching tools swaps in that group's style, by click, key or spring-hold
+// alike.
 useToolStore.subscribe((state) => {
   const slot = styleSlot(state.activeToolId);
   if (slot) useStyleStore.getState().enterSlot(slot);
 });
 
+function pickStyle(source: NextShapeStyle): NextShapeStyle {
+  const { color, size, fill, dash, opacity } = source;
+  return { color, size, fill, dash, opacity };
+}
+
 /** Read the style new shapes inherit outside React. */
 export function nextShapeStyle(): NextShapeStyle {
-  const { color, size, fill, dash, opacity } = useStyleStore.getState();
-  return { color, size, fill, dash, opacity };
+  return pickStyle(useStyleStore.getState());
+}
+
+/** The same for a group that may not be the live one. */
+export function slotStyle(slot: StyleSlot): NextShapeStyle {
+  return resolveSlot(useStyleStore.getState(), slot);
 }
 
 /** Whatever of a stored style is usable, over the defaults for the rest. */
@@ -388,12 +410,34 @@ function carry(source: Partial<NextShapeStyle> | undefined): NextShapeStyle {
 /**
  * v0 kept one flat set of values for every tool; v1 split them per instrument.
  *
- * The split is gone again, so a v1 store collapses back onto the pen's values —
+ * That split was undone, so a v1 store collapses back onto the pen's values —
  * of the four groups that is the one carrying what someone was last actually
  * drawing with. v0 already stored the flat set under these names.
+ *
+ * v2 kept colour and size per slot and shared the rest. Each slot takes a copy
+ * of the shared values, so nothing someone has set changes under them; `other`
+ * becomes the diagram, and text and frames open on their own defaults.
  */
 export function migrateStyle(persisted: unknown, version: number): StyleStore {
-  if (version >= 2) return persisted as StyleStore;
+  if (version >= 3) return persisted as StyleStore;
+  if (version === 2) {
+    const v2 = persisted as NextShapeStyle & {
+      slot?: string;
+      slots?: Record<string, Partial<NextShapeStyle>>;
+    };
+    const renamed = (slot: string) => (slot === 'other' ? 'diagram' : slot);
+    const { fill, dash, opacity } = v2;
+    return {
+      ...v2,
+      slot: renamed(v2.slot ?? 'pen'),
+      slots: Object.fromEntries(
+        Object.entries(v2.slots ?? {}).map(([slot, style]) => [
+          renamed(slot),
+          carry({ ...style, fill, dash, opacity }),
+        ]),
+      ),
+    } as StyleStore;
+  }
   if (version === 1) {
     const { groups, ...rest } = (persisted ?? {}) as {
       groups?: Record<string, Partial<NextShapeStyle>>;

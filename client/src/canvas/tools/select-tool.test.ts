@@ -9,6 +9,7 @@ import { useImageCroppingStore } from '../use-image-cropping-store';
 import { useCanvasUiStore } from '../use-canvas-ui-store';
 import { useSelectionStore } from '../use-selection-store';
 import { nextShapeStyle } from '../use-style-store';
+import { textBoxSize } from '../shapes/text-rich';
 import { createSelectTool } from './select-tool';
 import type { ToolContext, ToolPointerInfo } from './types';
 
@@ -249,6 +250,40 @@ describe('select tool state machine', () => {
     tool.onPointerMove?.(pointer(70, 10, { altKey: true }), ctx);
     tool.onCancel?.(ctx);
     expect(shapes.get('a')?.x).toBe(30);
+  });
+
+  it('flags the selection as transforming only while it is dragged', () => {
+    const { ctx, shapes } = context([rectangle('a', 0, 0, 'a0')]);
+    const tool = createSelectTool();
+    useSelectionStore.getState().setSelection(['a']);
+
+    tool.onPointerDown?.(pointer(10, 10), ctx);
+    expect(useSelectionStore.getState().transforming).toBe(null);
+    tool.onPointerMove?.(pointer(40, 10), ctx);
+    expect(useSelectionStore.getState().transforming).toBe('move');
+    tool.onPointerUp?.(pointer(40, 10), ctx);
+    expect(useSelectionStore.getState().transforming).toBe(null);
+
+    tool.onPointerDown?.(pointer(40, 10), ctx);
+    tool.onPointerMove?.(pointer(70, 10), ctx);
+    tool.onCancel?.(ctx);
+    expect(useSelectionStore.getState().transforming).toBe(null);
+
+    const info = getSelectionInfo([shapes.get('a')!], ['a'], 1)!;
+    const se = info.handles.find((h) => h.id === 'se')!.point;
+    tool.onPointerDown?.(pointer(se.x, se.y), ctx);
+    tool.onPointerMove?.(pointer(se.x + 20, se.y + 20), ctx);
+    expect(useSelectionStore.getState().transforming).toBe('resize');
+    tool.onPointerUp?.(pointer(se.x + 20, se.y + 20), ctx);
+    expect(useSelectionStore.getState().transforming).toBe(null);
+
+    const knob = getSelectionInfo([shapes.get('a')!], ['a'], 1)!.rotateHandle!
+      .point;
+    tool.onPointerDown?.(pointer(knob.x, knob.y), ctx);
+    tool.onPointerMove?.(pointer(knob.x + 30, knob.y), ctx);
+    expect(useSelectionStore.getState().transforming).toBe('rotate');
+    tool.onPointerUp?.(pointer(knob.x + 30, knob.y), ctx);
+    expect(useSelectionStore.getState().transforming).toBe(null);
   });
 
   it('drills into an unentered group on double-click before editing a member', () => {
@@ -577,6 +612,151 @@ describe('select tool state machine', () => {
 
     expect(shapes.get('a')).toMatchObject({ x: -20 });
     expect(shapes.get('a')?.props).toMatchObject({ w: 80, h: 30 });
+  });
+
+  it('does not replay an earlier gesture’s pointer when a modifier changes', () => {
+    const { ctx, shapes } = context([rectangle('a', 0, 0, 'a0')]);
+    const tool = createSelectTool();
+    tool.onPointerDown?.(pointer(300, 300), ctx);
+    tool.onPointerMove?.(pointer(500, 500), ctx);
+    tool.onPointerUp?.(pointer(500, 500), ctx);
+    useSelectionStore.getState().setSelection(['a']);
+
+    tool.onPointerDown?.(pointer(40, 15), ctx);
+    tool.onKeyDown?.(
+      {
+        key: 'Alt',
+        altKey: true,
+        shiftKey: false,
+        ctrlKey: false,
+        metaKey: false,
+      } as KeyboardEvent,
+      ctx,
+    );
+    expect(shapes.get('a')?.props).toMatchObject({ w: 40 });
+  });
+
+  it('carries a frame’s children when resizing a selection that holds it', () => {
+    const child = { ...rectangle('c', 210, 10, 'a2'), parentId: 'f' };
+    const { ctx, shapes } = context([
+      rectangle('r', 0, 0, 'a0'),
+      frame('f', 200, 0, 'a1'),
+      child,
+    ]);
+    const tool = createSelectTool();
+    useSelectionStore.getState().setSelection(['r', 'f']);
+    const { maxX, maxY } = getSelectionInfo(
+      ctx.editor.getShapes(),
+      ['r', 'f'],
+      1,
+      ctx.editor.getShape,
+    )!.bounds;
+
+    tool.onPointerDown?.(pointer(maxX, maxY), ctx);
+    tool.onPointerMove?.(pointer(maxX * 2, maxY * 2, { metaKey: true }), ctx);
+    expect(shapes.get('f')).toMatchObject({ x: 400, props: { w: 200 } });
+    // Same offset from the frame's moved origin, as a single-frame resize keeps.
+    expect(shapes.get('c')).toMatchObject({ x: 410, y: 10 });
+
+    tool.onCancel?.(ctx);
+    expect(shapes.get('c')).toMatchObject({ x: 210, y: 10 });
+  });
+
+  it('honours an inward snap while resizing about the centre', () => {
+    const { ctx, shapes } = context([
+      rectangle('a', 0, 0, 'a0'),
+      rectangle('t', 57, 300, 'a1'),
+    ]);
+    const tool = createSelectTool();
+    useSelectionStore.getState().setSelection(['a']);
+
+    tool.onPointerDown?.(pointer(40, 15), ctx);
+    tool.onPointerMove?.(pointer(59, 15, { altKey: true }), ctx);
+    const a = shapes.get('a') as Extract<Shape, { type: 'rectangle' }>;
+    expect(a.x + a.props.w).toBeCloseTo(57);
+    expect(a.x).toBeCloseTo(-17);
+    tool.onPointerUp?.(pointer(59, 15, { altKey: true }), ctx);
+  });
+
+  it('honours an inward snap while resizing a multi-selection about the centre', () => {
+    const { ctx, shapes } = context([
+      rectangle('a', 0, 0, 'a0'),
+      rectangle('b', 0, 40, 'a1'),
+      rectangle('t', 57, 300, 'a2'),
+    ]);
+    const tool = createSelectTool();
+    useSelectionStore.getState().setSelection(['a', 'b']);
+
+    tool.onPointerDown?.(pointer(40, 35), ctx);
+    tool.onPointerMove?.(pointer(59, 35, { altKey: true }), ctx);
+    const a = shapes.get('a') as Extract<Shape, { type: 'rectangle' }>;
+    expect(a.x + a.props.w).toBeCloseTo(57);
+    tool.onPointerUp?.(pointer(59, 35, { altKey: true }), ctx);
+  });
+
+  it('leaves a locked frame’s children behind when it is dragged with the selection', () => {
+    const { ctx, shapes } = context([
+      rectangle('r', 0, 0, 'a0'),
+      { ...frame('f', 200, 0, 'a1'), locked: true },
+      { ...rectangle('c', 210, 10, 'a2'), parentId: 'f' },
+    ]);
+    const tool = createSelectTool();
+    useSelectionStore.getState().setSelection(['r', 'f']);
+
+    tool.onPointerDown?.(pointer(10, 10), ctx);
+    tool.onPointerMove?.(pointer(60, 10, { metaKey: true, altKey: true }), ctx);
+    tool.onPointerUp?.(pointer(60, 10, { metaKey: true, altKey: true }), ctx);
+
+    expect(shapes.get('r')?.x).toBe(50);
+    expect(shapes.get('f')?.x).toBe(200);
+    expect(shapes.get('c')?.x).toBe(210);
+  });
+
+  it('keeps the opposite side of rotated text put when its width is reset', () => {
+    const text: Extract<Shape, { type: 'text' }> = {
+      id: 't',
+      type: 'text',
+      x: 0,
+      y: 0,
+      rotation: Math.PI / 2,
+      index: 'a0',
+      props: {
+        text: 'a few words that wrap',
+        color: '#111',
+        fontSize: 24,
+        fontFamily: 'sans',
+        sizingMode: 'fixed',
+        width: 80,
+        lineHeight: 1.2,
+        align: 'start',
+      },
+    };
+    const { ctx, shapes } = context([text]);
+    const tool = createSelectTool();
+    useSelectionStore.getState().setSelection(['t']);
+    const westMid = (s: Extract<Shape, { type: 'text' }>) => {
+      const box = textBoxSize(s.props);
+      return rotatePoint(
+        { x: s.x, y: s.y + box.height / 2 },
+        { x: s.x + box.width / 2, y: s.y + box.height / 2 },
+        s.rotation,
+      );
+    };
+    const before = westMid(text);
+    const east = getSelectionInfo([text], ['t'], 1)!.handles.find(
+      (h) => h.id === 'e',
+    )!.point;
+
+    tool.onDoubleClick?.(pointer(east.x, east.y), ctx);
+
+    const after = shapes.get('t') as Extract<Shape, { type: 'text' }>;
+    expect(after.props.sizingMode).toBe('auto');
+    // The reset really changed both sides of the box, or this proves nothing.
+    expect(textBoxSize(after.props).height).not.toBeCloseTo(
+      textBoxSize(text.props).height,
+    );
+    expect(westMid(after).x).toBeCloseTo(before.x);
+    expect(westMid(after).y).toBeCloseTo(before.y);
   });
 
   it('mirrors a shape dragged past its own anchor instead of collapsing it', () => {

@@ -185,7 +185,34 @@ describe('aggregate', () => {
     expect(row.studentMinutes).toBe(50);
     // Alone was 15:00–15:30, less the ten idle minutes.
     expect(row.aloneMinutes).toBe(20);
-    expect(row.visits.find((v) => !v.isTutor)!.afkMinutes).toBe(10);
+    const visit = row.visits.find((v) => !v.isTutor)!;
+    expect(visit.afkMinutes).toBe(10);
+    expect(visit.afkSpans).toEqual([[at('15:20'), at('15:30')]]);
+    expect(visit.aloneSpans).toEqual([[at('15:00'), at('15:20')]]);
+    expect(row.afkMinutes).toBe(10);
+    expect(row.joiners.find((j) => !j.isTutor)!.afkMinutes).toBe(10);
+    expect(result.totals.afkMinutes).toBe(10);
+  });
+
+  it('splits an idle stretch around a tutor who came and went', () => {
+    const at = (hhmm: string) =>
+      new Date(`2026-03-10T${hhmm}:00.000Z`).getTime();
+    const result = summary([
+      session({ afk: [[at('15:10'), at('15:50')]] }),
+      session({
+        name: 'Tutor',
+        isTutor: true,
+        startedAt: new Date(at('15:20')),
+        lastSeenAt: new Date(at('15:30')),
+      }),
+    ]);
+    const visit = result.boards[0]!.visits.find((v) => !v.isTutor)!;
+    expect(visit.afkSpans).toEqual([
+      [at('15:10'), at('15:20')],
+      [at('15:30'), at('15:50')],
+    ]);
+    expect(visit.afkMinutes).toBe(30);
+    expect(visit.minutes).toBe(30);
   });
 
   it('ignores idle stretches outside the connection they belong to', () => {

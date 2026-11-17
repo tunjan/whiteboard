@@ -3,6 +3,7 @@ import { genId, type Point, type Shape } from '@whiteboard/shared';
 import { collectSubtree, pruneDegenerateGroups } from '../commands';
 import { generateKeyBetween } from '../order';
 import { shapeRegistry } from '../shapes/shape-registry';
+import { playEraseSound } from '../tool-sounds';
 import { useCameraStore } from '../use-camera-store';
 import { useCanvasUiStore, type EraserMode } from '../use-canvas-ui-store';
 import { useEraserCutStore } from '../use-eraser-cut-store';
@@ -52,7 +53,6 @@ export function createEraserTool(): Tool {
   let phase: 'idle' | 'pointing' | 'erasing' = 'idle';
   let last: Point | null = null;
   let startScreen: Point | null = null;
-  let startPressure = 0.5;
   let longPressTimer: ReturnType<typeof setTimeout> | null = null;
   /** Mode captured at pointer-down, so a mid-stroke change can't split a swipe. */
   let mode: EraserMode = 'object';
@@ -79,7 +79,6 @@ export function createEraserTool(): Tool {
     if (phase !== 'pointing' || !last) return;
     clearLongPress();
     phase = 'erasing';
-    useEraserTrailStore.getState().begin(last, startPressure);
   }
 
   /** End the stroke, clearing transient state and the preview. */
@@ -183,6 +182,7 @@ export function createEraserTool(): Tool {
     // transaction below.
     const orphanedParents = new Set<string>();
     if (doomed.size || entries.length) {
+      playEraseSound();
       ctx.editor.transact(() => {
         // Sorted by index, so the shape after the original bounds the range the
         // extra fragments are inserted into — they stay stacked where the ink was.
@@ -250,7 +250,6 @@ export function createEraserTool(): Tool {
       phase = 'pointing';
       last = info.point;
       startScreen = info.screenPoint;
-      startPressure = info.pressure;
       topOnly = info.altKey;
       mode = useCanvasUiStore.getState().eraserMode;
       protectedIds = protectedAt(ctx.editor, info.point, eraserMargin());
@@ -258,6 +257,10 @@ export function createEraserTool(): Tool {
       cuts.clear();
       // A click with no drag still erases what's under the cursor.
       extend(ctx.editor, info.point, info.point);
+      // The contact patch lands on the press, before anything has moved.
+      useEraserTrailStore
+        .getState()
+        .begin(info.point, info.pressure, info.timestamp);
       if (!info.shiftKey && !info.altKey && !info.ctrlKey && !info.metaKey) {
         longPressTimer = setTimeout(enterErasing, ERASER_LONG_PRESS_MS);
       }
@@ -281,7 +284,9 @@ export function createEraserTool(): Tool {
       const from = last ?? info.point;
       extend(ctx.editor, from, info.point);
       last = info.point;
-      useEraserTrailStore.getState().extend(info.point, info.pressure);
+      useEraserTrailStore
+        .getState()
+        .extend(info.point, info.pressure, info.timestamp, info.zoom);
     },
 
     onPointerUp(_info: ToolPointerInfo, ctx: ToolContext) {

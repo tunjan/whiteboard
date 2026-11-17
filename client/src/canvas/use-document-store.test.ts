@@ -20,9 +20,11 @@ import {
 } from './page-actions';
 import {
   compareIndex,
+  currentSession,
   documentByteSize,
   editor,
   loadBoard,
+  migrateLegacyPageShapes,
   redo,
   setCurrentPage,
   spatialIndex,
@@ -49,6 +51,10 @@ import { useTextEditingStore } from './use-text-editing-store';
 import { registerPageSwitchInteractionCompleter } from './page-transition';
 import { readPageSession } from './page-session-state';
 import { useFollowStore } from '@/collab/use-follow-store';
+import { invalidateTextMetrics } from './shapes/text-measure';
+import { legacyShapesMapName } from './page-migration';
+import { shapeToY } from './shape-yjs';
+import { setBoardAccess } from '@/board/board-access';
 
 function rect(id: string, index: string): RectangleShape {
   return {
@@ -204,6 +210,34 @@ describe('board loading readiness', () => {
     dispose();
     expect(useBoardLoadingStore.getState().ready).toBe(false);
     dispose = loadBoard('test-doc-store', { persist: false, collab: false });
+  });
+});
+
+describe('legacy page migration', () => {
+  afterEach(() => setBoardAccess('pending'));
+
+  function plantLegacyShape() {
+    const pageId = useDocumentStore.getState().currentPageId;
+    const legacy = currentSession()!.doc.getMap(legacyShapesMapName(pageId));
+    legacy.set('rect-a', shapeToY(rect('rect-a', 'a1')));
+    return { pageId, legacy };
+  }
+
+  it('moves legacy shapes onto the open page', async () => {
+    const { pageId, legacy } = plantLegacyShape();
+    migrateLegacyPageShapes(pageId);
+    await Promise.resolve();
+    expect(legacy.size).toBe(0);
+    expect(editor.getShape('rect-a')).toBeDefined();
+  });
+
+  it('writes nothing from a view-only link', async () => {
+    const { pageId, legacy } = plantLegacyShape();
+    setBoardAccess('view');
+    migrateLegacyPageShapes(pageId);
+    await Promise.resolve();
+    expect(legacy.size).toBe(1);
+    expect(editor.getShape('rect-a')).toBeUndefined();
   });
 });
 
@@ -381,6 +415,19 @@ describe('page transitions', () => {
     expect(spatialIndex.search(box(295, -5, 305, 5))).toEqual(['rect-a']);
     expect(editor.getShape('rect-b')).not.toBe(untouched);
     expect(editor.getShape('rect-b')).toEqual(untouched);
+  });
+
+  it('re-derives a parked page once text metrics change', () => {
+    const firstPageId = useDocumentStore.getState().currentPageId;
+    editor.createShape(rect('rect-a', 'a1'));
+    const untouched = editor.getShape('rect-a');
+    createPage('Page 2');
+
+    invalidateTextMetrics();
+
+    setCurrentPage(firstPageId);
+    expect(editor.getShape('rect-a')).not.toBe(untouched);
+    expect(editor.getShape('rect-a')).toEqual(untouched);
   });
 
   it('publishes shape edits without waking the zustand store', () => {
@@ -1091,6 +1138,19 @@ describe('the stroke the local pointer is drawing', () => {
       // rebuilding the page's derived state to say so would be pure cost.
       expect(shapeStore.sorted.get()).toBe(published);
     }
+  });
+
+  it('publishes a live highlighter, whose underlay the scene paints', () => {
+    const marker = draw('live', stroke(2));
+    editor.createShape({
+      ...marker,
+      props: { ...marker.props, inkKind: 'highlight' },
+    } as Shape);
+    beginLiveStroke('live');
+
+    editor.updateShape('live', { props: { points: stroke(9) } });
+    const shape = shapeStore.sorted.get().find((s) => s.id === 'live');
+    expect(shape?.type === 'draw' && shape.props.points).toHaveLength(9);
   });
 
   it('still publishes when anything else changes', () => {

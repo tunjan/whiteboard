@@ -17,6 +17,7 @@ export * from './access';
 export * from './links';
 export * from './latency';
 export * from './ai-latex';
+export * from './ai-agent';
 export * from './voice';
 export * from './ephemeral';
 export * from './analytics';

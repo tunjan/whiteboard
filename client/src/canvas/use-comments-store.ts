@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { Bounds } from '@whiteboard/shared';
 
 /** A single comment message. The root message of a thread (`id === threadId`)
  *  carries the pin's world position and the thread's resolved flag; replies
@@ -17,6 +18,20 @@ export interface CommentMessage {
   createdAt: number;
   /** Root only: resolved threads are hidden. */
   resolved?: boolean;
+  /** Root only, work checker threads: the world bounds of the wrong line. */
+  box?: Bounds;
+  /** Root only, work checker threads: the corrected line as LaTeX. */
+  correction?: string;
+  /**
+   * Root only, work checker threads: the shapes of the line the mistake was
+   * raised on. Absent on threads from before it was recorded.
+   */
+  shapeIds?: string[];
+  /**
+   * Root only: resolved by a person — dismissed, or its correction added —
+   * rather than by the checker finding the mistake gone.
+   */
+  dismissed?: boolean;
 }
 
 interface CommentsStore {

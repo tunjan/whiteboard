@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import * as Y from 'yjs';
+import { signSession } from '../auth/jwt';
 import {
   AFK_GRACE_MS,
   type SessionStore,
@@ -195,10 +196,15 @@ describe('session tracking', () => {
     ] as const) {
       await t.connected({ socketId, documentName, requestHeaders: headers });
     }
-    expect(t.liveStudentBoardIds().sort()).toEqual(['board-1', 'board-2']);
+    expect(
+      t
+        .liveBoards()
+        .map((b) => b.id)
+        .sort(),
+    ).toEqual(['board-1', 'board-2']);
 
     await t.disconnected({ socketId: 's3', documentName: 'board-2' });
-    expect(t.liveStudentBoardIds()).toEqual(['board-1']);
+    expect(t.liveBoards().map((b) => b.id)).toEqual(['board-1']);
   });
 });
 
@@ -316,5 +322,64 @@ describe('AFK tracking', () => {
     t.awareness({ socketId: 's1', documentName: 'b', user: { name: 'Ada' } });
     await t.flush();
     expect(afk()).toEqual([]);
+  });
+
+  it('reports an idle student live, only past the grace', async () => {
+    const { t, publish, advance } = await joined();
+    publish(0);
+    advance(AFK_GRACE_MS);
+    expect(t.liveBoards()).toEqual([{ id: 'b', afk: [] }]);
+    advance(7 * MIN);
+    // Awareness renewals keep arriving from an idle tab; a frozen one sends none.
+    publish(0);
+    expect(t.liveBoards()).toEqual([
+      { id: 'b', afk: [{ name: 'Ada', idleMinutes: 12 }] },
+    ]);
+    advance(MIN);
+    publish(1);
+    expect(t.liveBoards()).toEqual([{ id: 'b', afk: [] }]);
+  });
+
+  it('never reports a student AFK with a tutor on the board', async () => {
+    const { t, publish, advance } = await joined();
+    publish(0);
+    advance(20 * MIN);
+    expect(t.liveBoards()[0]!.afk).toHaveLength(1);
+
+    const token = await signSession({ role: 'tutor', name: 'Tutor' });
+    await t.connected({
+      socketId: 'tutor',
+      documentName: 'b',
+      requestHeaders: { cookie: `wb_session=${token}` },
+    });
+    expect(t.liveBoards()).toEqual([{ id: 'b', afk: [] }]);
+
+    await t.disconnected({ socketId: 'tutor', documentName: 'b' });
+    expect(t.liveBoards()[0]!.afk).toHaveLength(1);
+  });
+
+  it('keeps a student active while another of their tabs is', async () => {
+    const { t, publish, advance } = await joined();
+    publish(0);
+    await t.connected({
+      socketId: 's2',
+      documentName: 'b',
+      requestHeaders: headers,
+    });
+    const other = (activity: number) =>
+      t.awareness({
+        socketId: 's2',
+        documentName: 'b',
+        user: { name: 'Ada' },
+        attention: { activity, away: null },
+      });
+    other(0);
+    advance(20 * MIN);
+    other(1);
+    expect(t.liveBoards()).toEqual([{ id: 'b', afk: [] }]);
+    advance(20 * MIN);
+    expect(t.liveBoards()).toEqual([
+      { id: 'b', afk: [{ name: 'Ada', idleMinutes: 20 }] },
+    ]);
   });
 });
