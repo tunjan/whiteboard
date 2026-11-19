@@ -5,6 +5,7 @@ import { BlockedHostError, fetchPublicUrl } from './fetch-remote';
 import { parseLinkMeta } from './meta';
 import { clientIp, rateLimiter } from '../rate-limit';
 import { requireBoardEdit } from '../boards/access';
+import { requireFeature } from '../boards/features';
 
 /**
  * Link unfurling for pasted URLs. The browser can't read a cross-origin page
@@ -53,7 +54,7 @@ function cacheSet(url: string, value: LinkUnfurl): void {
   cache.set(url, { value, expires: Date.now() + CACHE_TTL_MS });
 }
 
-linkRoutes.get('/unfurl', requireBoardEdit, async (c) => {
+linkRoutes.get('/unfurl', requireBoardEdit, requireFeature('media'), async (c) => {
   const url = c.req.query('url') ?? '';
   let parsed: URL;
   try {

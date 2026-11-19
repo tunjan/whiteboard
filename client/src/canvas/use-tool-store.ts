@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { isViewOnly } from '@/board/board-access';
+import { toolOffered, useFeaturesStore } from '@/board/features';
 import { playPenSound } from './tool-sounds';
 
 interface ToolStore {
@@ -18,6 +19,8 @@ export const useToolStore = create<ToolStore>((set, get) => ({
     // A view-only link can look around and point, nothing else — whether the
     // tool is reached by toolbar, key or spring-hold.
     if (isViewOnly() && !VIEW_ONLY_TOOLS.has(activeToolId)) return;
+    // Nor a tool whose feature the tutor turned off on this board.
+    if (!toolOffered(activeToolId)) return;
     // The sound belongs to the transition, not to the toolbar: the pen is
     // reached for by key, by spring-hold and by click, and all three should
     // sound the same.
@@ -26,3 +29,10 @@ export const useToolStore = create<ToolStore>((set, get) => ({
     set({ activeToolId });
   },
 }));
+
+// A tool in hand when the tutor turns its feature off is put down.
+useFeaturesStore.subscribe(() => {
+  if (!toolOffered(useToolStore.getState().activeToolId)) {
+    useToolStore.setState({ activeToolId: 'select' });
+  }
+});

@@ -1,4 +1,5 @@
 import type { AgentHelp } from './ai-agent';
+import type { FeatureSet } from './features';
 
 /** What a board's student link grants. The tutor always has full access. */
 export type ShareMode = 'edit' | 'view' | 'off';
@@ -11,6 +12,8 @@ export interface BoardShare {
   mode: ShareMode;
   /** What "Ask the board" does for students on this board. */
   agentHelp: AgentHelp;
+  /** The board's own feature set, or null when it follows the tutor's defaults. */
+  features: FeatureSet | null;
 }
 
 /**

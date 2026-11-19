@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { ReactElement, ReactNode } from 'react';
 import {
   ClipboardCopy,
+  Code,
   Download,
   EllipsisVertical,
   Eye,
@@ -10,6 +11,7 @@ import {
   Gauge,
   Keyboard,
   Layers,
+  ListChecks,
   Magnet,
   Moon,
   Mouse,
@@ -25,6 +27,9 @@ import {
 } from 'lucide-react';
 import { AiModelsDialog } from '@/components/ai-models-dialog';
 import { boardKey } from '@/board/board-access';
+import { useFeature } from '@/board/features';
+import { FeaturesSubmenu } from '@/components/feature-settings';
+import { setAutoCheck, useAutoCheckStore } from '@/canvas/work-checker';
 
 import {
   copyBoardToPngClipboard,
@@ -67,6 +72,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Slider } from '@/components/ui/slider';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { cn } from '@/lib/utils';
 import { useThemeStore } from '@/use-theme-store';
 
@@ -163,10 +169,11 @@ function MenuSliderItem({
     <Slider
       aria-label={label}
       className={cn(
-        '[--wb-slider-thumb:1.125rem] [--wb-slider-track:1rem]',
         inline
-          ? 'min-w-0 flex-1 [&_[data-slot=slider-range]]:bg-fg-subtle/40'
-          : '[&_[data-slot=slider-range]]:bg-fg-subtle',
+          ? // A hairline track under a round thumb: a capsule this short, next
+            // to a one-word label, reads as an on/off switch.
+            'min-w-0 flex-1 [--wb-slider-thumb:0.875rem] [--wb-slider-track:0.25rem] [&_[data-slot=slider-range]]:bg-fg-subtle/60 [&_[data-slot=slider-thumb]]:h-[calc(var(--wb-slider-thumb)+2*var(--wb-slider-pad))] [&_[data-slot=slider-thumb]>span]:ring-1 [&_[data-slot=slider-thumb]>span]:ring-fg-subtle/30'
+          : '[--wb-slider-thumb:1.125rem] [--wb-slider-track:1rem] [&_[data-slot=slider-range]]:bg-fg-subtle',
         bipolar && '[&_[data-slot=slider-range]]:bg-transparent',
       )}
       min={min}
@@ -213,6 +220,64 @@ function MenuSliderItem({
           {fader}
         </>
       )}
+    </DropdownMenuItem>
+  );
+}
+
+/**
+ * A three-way choice as a menu row: label, then a segmented control, so the
+ * value is set where it is read instead of a flyout deeper. ←/→ step it, as
+ * they move a fader.
+ */
+function MenuChoiceItem<T extends string>({
+  label,
+  value,
+  options,
+  labels,
+  onChange,
+}: {
+  label: string;
+  value: T;
+  options: readonly T[];
+  labels: Record<T, string>;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <DropdownMenuItem
+      closeOnClick={false}
+      label={label}
+      className="h-9 justify-between gap-3 py-0"
+      onKeyDown={(event) => {
+        if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+        event.stopPropagation();
+        event.preventDefault();
+        const step = event.key === 'ArrowRight' ? 1 : -1;
+        const index = Math.min(
+          options.length - 1,
+          Math.max(0, options.indexOf(value) + step),
+        );
+        onChange(options[index]!);
+      }}
+    >
+      <span className="whitespace-nowrap">{label}</span>
+      <ToggleGroup
+        aria-label={label}
+        value={[value]}
+        // A pressed segment pressed again would empty the group.
+        onValueChange={(next) => next[0] && onChange(next[0] as T)}
+        className="shrink-0"
+      >
+        {options.map((option) => (
+          <ToggleGroupItem
+            key={option}
+            value={option}
+            tabIndex={-1}
+            className="h-6 min-w-0 px-2 text-xs"
+          >
+            {labels[option]}
+          </ToggleGroupItem>
+        ))}
+      </ToggleGroup>
     </DropdownMenuItem>
   );
 }
@@ -363,24 +428,13 @@ export function PenSettingsItems() {
         onChange={setPencilThinning}
       />
       <DropdownMenuSeparator />
-      <DropdownMenuSub>
-        <DropdownMenuSubTrigger>
-          Stroke ends
-          <MenuValue>{END_TAPER_LABELS[pencilEndTaper]}</MenuValue>
-        </DropdownMenuSubTrigger>
-        <DropdownMenuSubContent className="w-40">
-          <DropdownMenuRadioGroup
-            value={pencilEndTaper}
-            onValueChange={(value) => setPencilEndTaper(value as EndTaperMode)}
-          >
-            {END_TAPER_MODES.map((mode) => (
-              <DropdownMenuRadioItem key={mode} value={mode}>
-                {END_TAPER_LABELS[mode]}
-              </DropdownMenuRadioItem>
-            ))}
-          </DropdownMenuRadioGroup>
-        </DropdownMenuSubContent>
-      </DropdownMenuSub>
+      <MenuChoiceItem
+        label="Stroke ends"
+        value={pencilEndTaper}
+        options={END_TAPER_MODES}
+        labels={END_TAPER_LABELS}
+        onChange={setPencilEndTaper}
+      />
       <DropdownMenuCheckboxItem
         checked={autoRefineHandwriting}
         onCheckedChange={setAutoRefineHandwriting}
@@ -422,26 +476,13 @@ export function PenSettingsItems() {
             onChange={setPencilStartTaper}
           />
           <DropdownMenuSeparator />
-          <DropdownMenuSub>
-            <DropdownMenuSubTrigger>
-              Response
-              <MenuValue>{PRESSURE_CURVE_LABELS[pencilPressureCurve]}</MenuValue>
-            </DropdownMenuSubTrigger>
-            <DropdownMenuSubContent className="w-40">
-              <DropdownMenuRadioGroup
-                value={pencilPressureCurve}
-                onValueChange={(value) =>
-                  setPencilPressureCurve(value as PencilPressureCurve)
-                }
-              >
-                {PRESSURE_CURVES.map((curve) => (
-                  <DropdownMenuRadioItem key={curve} value={curve}>
-                    {PRESSURE_CURVE_LABELS[curve]}
-                  </DropdownMenuRadioItem>
-                ))}
-              </DropdownMenuRadioGroup>
-            </DropdownMenuSubContent>
-          </DropdownMenuSub>
+          <MenuChoiceItem
+            label="Response"
+            value={pencilPressureCurve}
+            options={PRESSURE_CURVES}
+            labels={PRESSURE_CURVE_LABELS}
+            onChange={setPencilPressureCurve}
+          />
           <DropdownMenuCheckboxItem
             checked={pencilSimulatePressure}
             onCheckedChange={setPencilSimulatePressure}
@@ -677,6 +718,9 @@ export function BoardActionsMenu({
 }) {
   const [exporting, setExporting] = useState(false);
   const [aiModelsOpen, setAiModelsOpen] = useState(false);
+  // Auto-check is only offered where the server has a model to check with.
+  const aiEnabled = useFeature('ai');
+  const autoCheck = useAutoCheckStore((s) => s.on);
   const theme = useThemeStore((s) => s.theme);
   const toggleTheme = useThemeStore((s) => s.toggle);
   const pngExportScale = useCanvasUiStore((s) => s.pngExportScale);
@@ -732,6 +776,11 @@ export function BoardActionsMenu({
           <DropdownMenuItem onClick={onOpenShortcuts}>
             <Keyboard />
             Keyboard shortcuts
+          </DropdownMenuItem>
+          {/* AGPL-3.0 §13: everyone using this deployment can get its source. */}
+          <DropdownMenuItem render={<a href="/source" target="_blank" rel="noreferrer" />}>
+            <Code />
+            Source code
           </DropdownMenuItem>
         </DropdownMenuGroup>
 
@@ -837,10 +886,17 @@ export function BoardActionsMenu({
             <Mouse />
             Invert mouse scroll
           </DropdownMenuCheckboxItem>
+          {aiEnabled && (
+            <DropdownMenuCheckboxItem checked={autoCheck} onCheckedChange={setAutoCheck}>
+              <ListChecks />
+              Auto-check working
+            </DropdownMenuCheckboxItem>
+          )}
           <PenSubmenu />
           {isCoarsePointer() && <TouchSubmenu />}
           <SoundSubmenu />
           {isTutor && <AttentionSubmenu />}
+          {isTutor && <FeaturesSubmenu boardId={boardId} />}
           {/* The tutor's bill, so the tutor's choice; app-wide, not per board. */}
           {isTutor && (
             <DropdownMenuItem onClick={() => setAiModelsOpen(true)}>

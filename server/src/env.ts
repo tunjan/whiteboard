@@ -35,12 +35,26 @@ export const env = {
   musicDir: process.env.MUSIC_DIR ?? 'data/music',
   /** Directory where board repository documents are stored (content-addressed). */
   docDir: process.env.DOC_DIR ?? 'data/docs',
+  /** CSV the tutor's toolbar usage is appended to (see usage.ts). */
+  usageFile: process.env.USAGE_FILE ?? 'data/usage.csv',
   /**
    * Total bytes the open upload endpoints may hold across `blobDir` and
    * `docDir`. Uploads need no login, so this is what stops them filling the
    * disk Postgres shares.
    */
   uploadQuotaBytes: Number(process.env.UPLOAD_QUOTA_GB ?? 20) * 1024 ** 3,
+  /**
+   * The public demo board (`/demo`, see `boards/demo.ts`): on with `DEMO=1`,
+   * replaced every `DEMO_RESET_MINUTES`, optionally from a `.board` file.
+   */
+  demo: process.env.DEMO === '1',
+  demoResetMinutes: Math.max(1, Number(process.env.DEMO_RESET_MINUTES ?? 60) || 60),
+  demoSeed: process.env.DEMO_SEED || undefined,
+  /**
+   * Where this deployment's source code is, for the "Source code" link that
+   * AGPL-3.0 §13 asks a host of a modified copy to offer its users.
+   */
+  sourceUrl: process.env.SOURCE_URL ?? 'https://github.com/tunjan/best-whiteboard',
   /** Request header carrying the real client IP behind a proxy (see rate-limit.ts). */
   clientIpHeader: process.env.CLIENT_IP_HEADER?.toLowerCase() || undefined,
   /**

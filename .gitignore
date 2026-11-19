@@ -19,3 +19,4 @@ client/public/pdfjs/
 
 # Local clone of the unslop design skill; not part of this repo.
 unslop/
+server/data/usage.csv

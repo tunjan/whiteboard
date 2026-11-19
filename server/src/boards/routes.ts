@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { and, desc, eq, or, sql } from 'drizzle-orm';
 import {
   AGENT_HELP_MODES,
+  FEATURES_MESSAGE,
   type AgentHelp,
   type BoardMeta,
   type BoardShare,
@@ -12,6 +13,7 @@ import {
 } from '@whiteboard/shared';
 import { requireTutor } from '../auth/middleware';
 import { requestAccess } from './access';
+import { featuresFor, fullFeatureSet, readSetting } from './features';
 import {
   BoardFileError,
   exportBoard,
@@ -22,6 +24,7 @@ import {
   closeBoardDocuments,
   disconnectStudents,
   liveBoards,
+  notifyBoard,
   removeClient,
 } from '../collab/hocuspocus';
 import { db } from '../db/client';
@@ -89,6 +92,13 @@ boardRoutes.get('/:id/export', async (c) => {
   });
 });
 
+/** What the board offers (see `features.ts`). Open to the same students as the title. */
+boardRoutes.get('/:id/features', async (c) => {
+  const id = c.req.param('id');
+  if (!(await requestAccess(c, id))) return c.json({ error: 'not found' }, 404);
+  return c.json(await featuresFor(id));
+});
+
 // Everything else about a board is management, and management is tutor-only.
 boardRoutes.use('*', requireTutor);
 
@@ -119,14 +129,20 @@ boardRoutes.post('/import', async (c) => {
 });
 
 boardRoutes.get('/', async (c) => {
-  const rows = await db
-    .select()
-    .from(boards)
-    .orderBy(desc(boards.lastOpenedAt));
-  return c.json(rows.map(toMeta));
+  const [rows, demo] = await Promise.all([
+    db.select().from(boards).orderBy(desc(boards.lastOpenedAt)),
+    readSetting('demo') as Promise<{ id?: string } | undefined>,
+  ]);
+  // The public demo is nobody's board; it stays out of the library.
+  return c.json(rows.filter((row) => row.id !== demo?.id).map(toMeta));
 });
 
-const SHARE_COLUMNS = { key: boards.shareKey, mode: boards.shareMode, agentHelp: boards.agentHelp };
+const SHARE_COLUMNS = {
+  key: boards.shareKey,
+  mode: boards.shareMode,
+  agentHelp: boards.agentHelp,
+  features: boards.features,
+};
 
 // The student link: its key and what it grants.
 boardRoutes.get('/:id/access', async (c) => {
@@ -141,9 +157,15 @@ boardRoutes.get('/:id/access', async (c) => {
 // Change what the link grants. Students already in reconnect under the new
 // mode (or are refused, for 'off').
 // What "Ask the board" does for them is read per request: no reconnect.
+// A features change (a full set, or null for the tutor's defaults) is pushed
+// to everyone on the board, who refetch.
 boardRoutes.patch('/:id/access', async (c) => {
   const id = c.req.param('id');
-  const body = (await c.req.json().catch(() => ({}))) as { mode?: unknown; agentHelp?: unknown };
+  const body = (await c.req.json().catch(() => ({}))) as {
+    mode?: unknown;
+    agentHelp?: unknown;
+    features?: unknown;
+  };
   const mode = body.mode as ShareMode | undefined;
   const agentHelp = body.agentHelp as AgentHelp | undefined;
   if (mode !== undefined && !SHARE_MODES.includes(mode)) {
@@ -152,14 +174,25 @@ boardRoutes.patch('/:id/access', async (c) => {
   if (agentHelp !== undefined && !AGENT_HELP_MODES.includes(agentHelp)) {
     return c.json({ error: 'agentHelp must be full, hints or off' }, 400);
   }
-  if (!mode && !agentHelp) return c.json({ error: 'mode must be edit, view or off' }, 400);
+  const features = body.features === null ? null : fullFeatureSet(body.features);
+  if (body.features !== undefined && body.features !== null && !features) {
+    return c.json({ error: 'features must be a value for every feature, or null' }, 400);
+  }
+  if (!mode && !agentHelp && body.features === undefined) {
+    return c.json({ error: 'mode must be edit, view or off' }, 400);
+  }
   const [row] = await db
     .update(boards)
-    .set({ ...(mode ? { shareMode: mode } : {}), ...(agentHelp ? { agentHelp } : {}) })
+    .set({
+      ...(mode ? { shareMode: mode } : {}),
+      ...(agentHelp ? { agentHelp } : {}),
+      ...(body.features !== undefined ? { features } : {}),
+    })
     .where(eq(boards.id, id))
     .returning(SHARE_COLUMNS);
   if (!row) return c.json({ error: 'not found' }, 404);
   if (mode) disconnectStudents(id);
+  if (body.features !== undefined) notifyBoard(id, FEATURES_MESSAGE);
   return c.json(row as BoardShare);
 });
 
@@ -325,7 +358,12 @@ boardRoutes.delete('/:id/sessions/:date', async (c) => {
 });
 
 boardRoutes.delete('/:id', async (c) => {
-  const id = c.req.param('id');
+  await deleteBoard(c.req.param('id'));
+  return c.json({ ok: true });
+});
+
+/** A board and everything stored under it: documents, update log, notes. */
+export async function deleteBoard(id: string): Promise<void> {
   // Close the live documents first: a client still editing would otherwise
   // keep appending update rows for a board that no longer exists.
   await closeBoardDocuments(id);
@@ -354,5 +392,4 @@ boardRoutes.delete('/:id', async (c) => {
     .delete(boardSessionNotes)
     .where(eq(boardSessionNotes.boardId, id));
   await db.delete(boards).where(eq(boards.id, id));
-  return c.json({ ok: true });
-});
+}

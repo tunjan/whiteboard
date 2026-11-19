@@ -31,7 +31,7 @@ import {
   WandSparkles,
   X,
 } from 'lucide-react';
-import { aiLatexEnabled } from '@/board/latex-ai';
+import { useFeature } from '@/board/features';
 import { type Point, worldToScreen } from './camera';
 import { alignShapes, distributeShapes } from './align';
 import { copyShapes } from './clipboard';
@@ -159,18 +159,9 @@ export function SelectionToolbar() {
   // SelectionLayer).
   const shapes = useGroupSubtree(selectedIds);
 
-  // Whether the server has an AI key configured, so the equation button only
-  // appears where clicking it could work.
-  const [aiEnabled, setAiEnabled] = useState(false);
-  useEffect(() => {
-    let cancelled = false;
-    aiLatexEnabled().then((enabled) => {
-      if (!cancelled) setAiEnabled(enabled);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  // Whether this board offers AI (and the server has a key), so the equation
+  // button only appears where clicking it could work.
+  const aiEnabled = useFeature('ai');
   // Read from the store rather than held here: the conversion outlives a
   // selection change, and the key must say so for whatever is selected.
   const converting = useConversionStore((s) => s.reading !== null);

@@ -97,10 +97,30 @@ list with comments.
 | `UPLOAD_QUOTA_GB` | | Disk cap for uploads (default 20) |
 | `OPENROUTER_API_KEY` | | Turns on the AI equation buttons. They are hidden when unset |
 | `BLOB_DIR`, `DOC_DIR`, `MUSIC_DIR` | | Where images, documents and music live (default `server/data/…`) |
+| `SOURCE_URL` | | Where the in-app "Source code" link points (see License) |
+| `DEMO`, `DEMO_RESET_MINUTES`, `DEMO_SEED` | | Public demo board at `/demo` (see below) |
 
 With `NODE_ENV=production` (the Docker image sets it), the server refuses to
 start if the three required variables are missing, instead of falling back to
 insecure defaults.
+
+### Features per board
+
+The tutor picks which optional features boards offer: AI, stickers, voice and
+video, music, comments, files, YouTube and links, graphs, equations, compass
+and ruler, templates and the laser. Set the defaults from the account menu on
+the home screen (**Features…**). Change a single board from its ⋯ menu
+(**Features**), and **Use my defaults** sets it back. Turning a feature off
+removes the ways to add it, but whatever is already on the board stays. AI,
+files and link previews are also refused by the server, because they cost
+money or disk.
+
+### Public demo
+
+`DEMO=1` serves a board at `/demo` that anyone can draw on without signing in.
+Every `DEMO_RESET_MINUTES` (default 60) it is replaced by a fresh board, empty
+or copied from the `.board` file in `DEMO_SEED`. AI, files and music are off
+on it, and it does not show in the tutor's library.
 
 Music player: put audio files in `server/data/music/<playlist>/`. Each folder
 is a playlist (mp3, m4a, wav, ogg, aac, flac, webm).
@@ -199,3 +219,19 @@ patterns.
   (`client/src/collab/voice/peer-connection.ts`).
 - **Uploads need no login** (students upload through share links). The upload
   quota is the only cap.
+
+## Self-hosting or hosted
+
+You can run this yourself, for free, with everything in this README. You
+bring your own server, Postgres and, if you want AI, your own OpenRouter key.
+
+If you'd rather not set anything up, use the hosted service instead.
+
+## License
+
+[GNU Affero General Public License v3.0](LICENSE) (`AGPL-3.0-only`).
+
+You may use, modify and self-host this freely. If you let other people use a
+modified copy over a network, you must offer them its source under the same
+license. Set `SOURCE_URL` to where your changes are published: the app's ⋯ →
+**Source code** link points there.

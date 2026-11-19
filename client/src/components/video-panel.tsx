@@ -55,7 +55,7 @@ const PANEL_MORPH_MS = 320;
 // Mirrors the ladder in CanvasControls, offset by that toolbar's own height
 // (2.5rem, or 3.25rem once coarse-pointer targets grow it) plus a gap.
 const ANCHOR =
-  'right-[max(0.75rem,env(safe-area-inset-right))] bottom-[calc(3.25rem+var(--wb-inset-bottom))] max-sm:bottom-[calc(var(--drawer-reach)+3rem+var(--wb-inset-bottom))] [@media(pointer:coarse)]:bottom-[calc(var(--drawer-reach)+3.75rem+var(--wb-inset-bottom))]';
+  'right-[max(0.75rem,env(safe-area-inset-right))] bottom-[calc(3.25rem+var(--wb-inset-bottom))] max-[840px]:bottom-[calc(var(--drawer-reach)+3rem+var(--wb-inset-bottom))] [@media(pointer:coarse)]:bottom-[calc(var(--drawer-reach)+3.75rem+var(--wb-inset-bottom))]';
 
 const MODE_SIZE: Record<VideoPanelMode, string> = {
   bar: 'max-w-[calc(100vw-1.5rem)]',

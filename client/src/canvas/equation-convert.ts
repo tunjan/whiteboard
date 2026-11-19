@@ -144,6 +144,41 @@ function sanitizeRenderTree(adaptor: LiteAdaptor, node: LiteElement): void {
   }
 }
 
+/**
+ * How far the radical's rule is pulled back over the √ glyph, in font units
+ * (1000/em). The TeX surds end in a rounded tip that meets the rule's left
+ * edge at one point, so the stroke slopes away beneath it and leaves a notch
+ * that shows once the board is zoomed in. Measured on the four fixed sizes,
+ * the notch is 8–18 units wide at the rule's foot and the stroke there is over
+ * 40 wide, so 20 closes it without poking out the other side. The stretched
+ * surd (`E001` top piece) has a flat arm into the rule already and is left as
+ * it is.
+ */
+const RADICAL_OVERLAP = 20;
+
+/** Close the notch where each fixed-size √ meets its rule (see above). */
+function joinRadicals(adaptor: LiteAdaptor, node: LiteElement): void {
+  const mml = adaptor.getAttribute(node, 'data-mml-node');
+  if (mml === 'msqrt' || mml === 'mroot') {
+    const children = adaptor.childNodes(node).filter((c) => !adaptor.kind(c).startsWith('#')) as LiteElement[];
+    const surd = children.find(
+      (c) =>
+        adaptor.getAttribute(c, 'data-mml-node') === 'mo' &&
+        adaptor.childNodes(c).some((g) => adaptor.getAttribute(g as LiteElement, 'data-c') === '221A'),
+    );
+    const rule = children.find((c) => adaptor.kind(c) === 'rect');
+    if (surd && rule) {
+      const x = Number(adaptor.getAttribute(rule, 'x'));
+      const width = Number(adaptor.getAttribute(rule, 'width'));
+      adaptor.setAttribute(rule, 'x', String(x - RADICAL_OVERLAP));
+      adaptor.setAttribute(rule, 'width', String(width + RADICAL_OVERLAP));
+    }
+  }
+  for (const child of adaptor.childNodes(node)) {
+    if (!adaptor.kind(child).startsWith('#')) joinRadicals(adaptor, child as LiteElement);
+  }
+}
+
 function decodeMathJaxAttribute(value: string): string {
   return value
     .replaceAll('&quot;', '"')
@@ -273,6 +308,7 @@ export function convertEquation(latex: string, inline = false): EquationRender {
     runtime.adaptor.removeAttribute(svg, 'width');
     runtime.adaptor.removeAttribute(svg, 'height');
     sanitizeRenderTree(runtime.adaptor, svg);
+    joinRadicals(runtime.adaptor, svg);
     const markup = runtime.adaptor.outerHTML(svg);
     const embeddedError = embeddedMathJaxError(markup);
     return embeddedError

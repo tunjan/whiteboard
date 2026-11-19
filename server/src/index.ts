@@ -13,6 +13,8 @@ import { analyticsRoutes } from './analytics/routes';
 import { authRoutes } from './auth/routes';
 import { blobRoutes } from './blobs/routes';
 import { boardRoutes } from './boards/routes';
+import { settingsRoutes } from './boards/features';
+import { demoRoutes, startDemo } from './boards/demo';
 import { documentRoutes } from './documents/routes';
 import { drainCollab, hocuspocus } from './collab/hocuspocus';
 import { closeDb, db } from './db/client';
@@ -21,6 +23,7 @@ import { linkRoutes } from './links/routes';
 import { musicRoutes } from './music/routes';
 import { pageRoutes } from './collab/page-routes';
 import { clientErrorRoutes } from './client-errors';
+import { usageRoutes } from './usage';
 
 const app = new Hono();
 
@@ -103,6 +106,11 @@ app.route('/api/docs', documentRoutes);
 app.route('/api/links', linkRoutes);
 app.route('/api/music', musicRoutes);
 app.route('/api/pages', pageRoutes);
+app.route('/api/settings', settingsRoutes);
+app.route('/api/usage', usageRoutes);
+app.route('/demo', demoRoutes);
+// AGPL-3.0 §13: the app's "Source code" link, pointed at this deployment's source.
+app.get('/source', (c) => c.redirect(env.sourceUrl));
 
 const clientDist = fileURLToPath(new URL('../../client/dist', import.meta.url));
 const clientIndex = fileURLToPath(
@@ -143,6 +151,7 @@ app.get('*', serveIndexHtml);
 
 const server = serve({ fetch: app.fetch, port: env.port }, (info) => {
   console.log(`[server] HTTP + collab listening on http://localhost:${info.port}`);
+  startDemo();
 });
 
 // Route WebSocket upgrades to Hocuspocus (board collaboration). Each document

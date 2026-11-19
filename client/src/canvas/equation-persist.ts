@@ -18,7 +18,7 @@ const STORE = 'renders';
  * font cache mode, the sanitizer, the package list — so old renders are not
  * served for the new pipeline.
  */
-const FORMAT = 1;
+const FORMAT = 2;
 /** Entries kept; the oldest written beyond this are dropped on open. */
 const MAX_ENTRIES = 2000;
 

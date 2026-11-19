@@ -36,13 +36,16 @@ import {
 
 /**
  * The width at which the full row stops crowding the viewport. With a mouse the
- * corner HUDs share the bar's row, so that is the bar plus both corners. A
- * touch screen lifts the corners above it (see `CanvasControls`), so the bar
- * only has to fit itself — ~540px at touch key size — which every iPad does
- * in portrait.
+ * corner HUDs share the bar's row, so that is the bar plus both corners:
+ * measured 2026-11-19, the full bar is 712px at 0.72 scale and the view
+ * cluster 228px, so it fits from ~1210px (at 1060 the two overlapped by 66px).
+ * Below 840px the narrow bar no longer fits either, and the corners lift
+ * (`max-[840px]` in `CanvasControls`). A touch screen always lifts them, so
+ * the bar only has to fit itself — ~540px at touch key size — which every
+ * iPad does in portrait.
  */
 const WIDE_QUERY =
-  '(min-width: 1060px), (pointer: coarse) and (min-width: 600px)';
+  '(min-width: 1220px), (pointer: coarse) and (min-width: 600px)';
 
 /**
  * The same question for the left rail, which spends height instead: the full

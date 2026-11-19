@@ -157,7 +157,10 @@ function DropdownMenuSubContent({
   align = 'start',
   alignOffset = -3,
   side = 'right',
-  sideOffset = 0,
+  // Measured from the trigger row, which sits inside the parent's 4px padding
+  // and 1px border: 5px clears the parent, the other 4 is the same gap a
+  // top-level menu keeps from its trigger.
+  sideOffset = 9,
   className,
   ...props
 }: React.ComponentProps<typeof DropdownMenuContent>) {

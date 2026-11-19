@@ -149,6 +149,8 @@ function ContextMenuSubContent({
     <ContextMenuContent
       data-slot="context-menu-sub-content"
       side="right"
+      // Clears the parent's 4px padding and 1px border, then a 4px gap.
+      sideOffset={9}
       {...props}
     />
   );

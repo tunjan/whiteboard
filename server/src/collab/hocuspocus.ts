@@ -192,6 +192,13 @@ export function notifyTutors(boardId: string, payload: string): void {
   }
 }
 
+/** {@link notifyTutors}, but to everyone on the board. */
+export function notifyBoard(boardId: string, payload: string): void {
+  for (const connection of boardConnections(boardId)) {
+    if (connection.document.name === boardId) connection.sendStateless(payload);
+  }
+}
+
 /**
  * Remove one student, named by the awareness client id the tutor sees them
  * by. They are told first, so their client stops rather than reconnects; the

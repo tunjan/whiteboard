@@ -5,7 +5,7 @@ import type {
   GraphProps,
   GraphViewport,
 } from '@whiteboard/shared';
-import { graphColors } from './graph-colors';
+import { curveColors } from './graph-colors';
 
 /** Selectable curve stroke widths, in screen pixels (strokes don't scale). */
 export const GRAPH_CURVE_WIDTHS = [1.25, 2.25, 3.5, 5];
@@ -92,7 +92,7 @@ export function createDefaultGraphProps(): GraphProps {
     viewport: cloneViewport(DEFAULT_GRAPH_VIEWPORT),
     expressions: DEFAULT_GRAPH_PROPS.expressions.map((expression) => ({
       ...expression,
-      color: graphColors()[0]!.value,
+      color: curveColors()[0]!.value,
     })),
     parameters: {},
     points: [],
@@ -100,7 +100,7 @@ export function createDefaultGraphProps(): GraphProps {
 }
 
 export function createGraphExpression(index: number): GraphExpression {
-  const colors = graphColors();
+  const colors = curveColors();
   return {
     id:
       typeof crypto !== 'undefined' && 'randomUUID' in crypto

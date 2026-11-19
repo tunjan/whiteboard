@@ -13,6 +13,18 @@ export function graphColors(
   return paletteColors(theme);
 }
 
+/** Blue, red, green, orange, violet: the order new curves take, so the
+ * first two always contrast. */
+const CURVE_SLOTS = [4, 11, 8, 7, 3];
+
+/** The colours new curves are assigned round-robin, drawn for `theme`. */
+export function curveColors(
+  theme: Theme = useThemeStore.getState().theme,
+): PaletteColor[] {
+  const colors = graphColors(theme);
+  return CURVE_SLOTS.map((slot) => colors[slot]!);
+}
+
 /** Looks up a curve color's name in the current palette, if it's still on it. */
 export function graphColorName(
   color: string,

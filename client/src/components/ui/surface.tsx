@@ -40,7 +40,8 @@ export const HOVER_REVEAL =
  * what let four corners outweigh the drawing between them.
  */
 export const INSTRUMENT =
-  'wb-instrument wb-chrome-quiet flex items-center gap-0.5 p-1';
+  // Keys inside take the plate's 12px less its 4px padding.
+  'wb-instrument wb-chrome-quiet flex items-center gap-0.5 p-1 [--radius-control:var(--radius-lg)]';
 
 /**
  * A key inside one. No halo: a halo is what separates a glyph from a drawing

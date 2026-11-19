@@ -6,7 +6,7 @@ import {
 import { CloseGlyph, PlusGlyph, SparklesGlyph } from '@/components/ui/glyphs';
 import { blobUrl } from '@/board/blobs';
 import { generateSticker, pickAndAddStickers } from '@/board/custom-stickers';
-import { aiLatexEnabled } from '@/board/latex-ai';
+import { useFeature } from '@/board/features';
 import { removeCustomSticker } from '@/canvas/board-records';
 import { STICKERS, StickerPreview } from '@/canvas/shapes/sticker-catalog';
 import {
@@ -99,17 +99,9 @@ function CustomStickerItem({
  */
 function GenerateStickerItem({ disabled }: { disabled: boolean }) {
   const side = useToolbarSide();
-  const [enabled, setEnabled] = useState(false);
+  const enabled = useFeature('ai');
   const [open, setOpen] = useState(false);
   const [prompt, setPrompt] = useState('');
-
-  useEffect(() => {
-    let live = true;
-    void aiLatexEnabled().then((on) => live && setEnabled(on));
-    return () => {
-      live = false;
-    };
-  }, []);
 
   if (!enabled) return null;
 

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { TOOL_FEATURE } from '@whiteboard/shared';
 import {
   ChevronDownGlyph,
   ImageGlyph,
@@ -12,6 +13,7 @@ import {
 import { PanelBottom, PanelLeft } from 'lucide-react';
 import { blobUrl } from '@/board/blobs';
 import { pickAndAddStickers } from '@/board/custom-stickers';
+import { useFeaturesStore } from '@/board/features';
 import { pickAndPlaceImages } from '@/canvas/place-image';
 import { gridParts, placePreset, unitCircleParts } from '@/canvas/place-preset';
 import { STICKERS, StickerPreview } from '@/canvas/shapes/sticker-catalog';
@@ -127,9 +129,13 @@ export function CompactMoreMenu({
     useCustomStickersStore((state) => state.stickers),
   );
 
-  const menuTools: readonly string[] = expanded
-    ? ['comment', 'equation', ...CONSTRUCTION_TOOLS]
-    : COMPACT_MORE_TOOLS;
+  const features = useFeaturesStore((state) => state.features);
+  const menuTools: readonly string[] = (
+    expanded ? ['comment', 'equation', ...CONSTRUCTION_TOOLS] : COMPACT_MORE_TOOLS
+  ).filter((id) => {
+    const feature = TOOL_FEATURE[id];
+    return !feature || features[feature];
+  });
   // Lit only for a tool with no key of its own.
   const active =
     (!expanded && activeToolId === 'sticker') || menuTools.includes(activeToolId);
@@ -207,7 +213,7 @@ export function CompactMoreMenu({
           <DropdownMenuSeparator />
 
           <DropdownMenuGroup>
-            {!expanded && (
+            {!expanded && features.stickers && (
               <DropdownMenuSub>
                 <DropdownMenuSubTrigger>
                   <StickerGlyph className="size-4" />
@@ -241,6 +247,7 @@ export function CompactMoreMenu({
               </DropdownMenuSub>
             )}
 
+            {features.templates && (
             <DropdownMenuSub>
               <DropdownMenuSubTrigger>
                 <UnitCircleGlyph className="size-4" />
@@ -255,6 +262,7 @@ export function CompactMoreMenu({
                 <TableSizePicker />
               </DropdownMenuSubContent>
             </DropdownMenuSub>
+            )}
 
             {!expanded && (
               <DropdownMenuItem onClick={() => void pickAndPlaceImages()}>
@@ -263,10 +271,12 @@ export function CompactMoreMenu({
                 <DropdownMenuShortcut>U</DropdownMenuShortcut>
               </DropdownMenuItem>
             )}
-            <DropdownMenuItem onClick={() => setVideoOpen(true)}>
-              <VideoGlyph className="size-4" />
-              Add YouTube video
-            </DropdownMenuItem>
+            {features.media && (
+              <DropdownMenuItem onClick={() => setVideoOpen(true)}>
+                <VideoGlyph className="size-4" />
+                Add YouTube video
+              </DropdownMenuItem>
+            )}
           </DropdownMenuGroup>
 
           <DropdownMenuSeparator />

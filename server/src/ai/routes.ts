@@ -25,7 +25,6 @@ import {
   type TranscribeResponse,
   AI_JOBS,
 } from '@whiteboard/shared';
-import { env } from '../env';
 import { requireTutor } from '../auth/middleware';
 import {
   GRAPH_SYSTEM_PROMPT,
@@ -56,6 +55,7 @@ import {
   partialSayText,
   SAY_TOOL,
   sayOf,
+  toolAllowed,
 } from './agent';
 import { recordAgentAsk } from './agent-asks';
 import {
@@ -77,6 +77,7 @@ import {
 } from './models';
 import { clientIp, rateLimiter } from '../rate-limit';
 import { agentHelpFor, requireBoardEdit } from '../boards/access';
+import { featuresFor, requireFeature } from '../boards/features';
 
 /**
  * LaTeX from ink, and LaTeX from a description.
@@ -94,6 +95,9 @@ aiRoutes.use('/transcribe', requireBoardEdit);
 aiRoutes.use('/sticker', requireBoardEdit);
 aiRoutes.use('/agent', requireBoardEdit);
 aiRoutes.use('/check', requireBoardEdit);
+for (const path of ['/latex/*', '/graph/*', '/transcribe', '/sticker', '/agent', '/check']) {
+  aiRoutes.use(path, requireFeature('ai'));
+}
 aiRoutes.use('/models', requireTutor);
 
 /**
@@ -119,9 +123,6 @@ const clientLimit = rateLimiter(WINDOW_LIMIT / 3, WINDOW_MS);
 function withinRateLimit(c: Context): boolean {
   return clientLimit(clientIp(c)) && globalLimit('all');
 }
-
-/** Whether the two AI actions should appear in the UI at all. */
-aiRoutes.get('/config', (c) => c.json({ enabled: Boolean(env.openRouterApiKey) }));
 
 /**
  * Run a chat job on its chosen model and bill it to the request's board. The
@@ -563,6 +564,8 @@ aiRoutes.post('/agent', async (c) => {
   const help = await agentHelpFor(c, c.req.header('x-board-id') ?? '');
   if (help === 'off') return c.json({ error: 'Your tutor has turned Ask the board off' }, 403);
   const context = { previous, hints: help === 'hints' };
+  // A feature the tutor turned off is one the agent can't route around.
+  const features = await featuresFor(c.req.header('x-board-id') ?? '');
 
   // Streamed, the model is too: the person waiting sees each step as it
   // starts. The plain JSON answer stays for callers that only want the result.
@@ -584,7 +587,9 @@ aiRoutes.post('/agent', async (c) => {
       typeof image === 'string'
         ? lookMessages(instruction, board, image, context)
         : agentMessages(instruction, board, context);
-    const tools = typeof image === 'string' ? AGENT_TOOLS_AFTER_LOOK : AGENT_TOOLS;
+    const tools = (typeof image === 'string' ? AGENT_TOOLS_AFTER_LOOK : AGENT_TOOLS).filter(
+      (t) => toolAllowed(t.function.name, features),
+    );
     // The answer as it is written: plain text while no edit has started
     // (text beside edits is the model planning, dropped below), or `say`'s
     // text as its arguments arrive. Text that turns out to be planning is
@@ -626,7 +631,7 @@ aiRoutes.post('/agent', async (c) => {
     if (toolCalls.some((call) => call.name === LOOK_TOOL)) {
       return { transcript, look: true, actions: [] };
     }
-    const actions = parseAgentActions(toolCalls);
+    const actions = parseAgentActions(toolCalls).filter((a) => toolAllowed(a.type, features));
     // Text beside tool calls is the model planning its layout aloud; what it
     // means for the user beside edits comes through `say`. Only when it did
     // nothing is its plain text the answer.

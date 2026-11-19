@@ -356,8 +356,12 @@
          control  6px   radius.medium — every button, triggers
          overlay  8px   radius.large  — popovers, menus, context menus, toasts
          panel    8px   radius.large  — cards, tooltips, floating panels
-         toolbar  8px   radius.large  — the floating bar
+         toolbar 12px   radius.xlarge — the floating bars and corner plates,
+                                        so they share the drawer's curve
          modal   12px   radius.xlarge — dialogs
+
+       A key inside a plate is the plate's radius minus its padding, so a
+       4px-padded plate's keys are 8px (`INSTRUMENT`, `--tb-key-radius`).
 
        Tailwind's own names are pinned to the same tokens, so `rounded-lg`
        in a component means `radius.large`. */
@@ -365,7 +369,7 @@
   --radius-control: var(--ds-radius-medium);
   --radius-overlay: var(--ds-radius-large);
   --radius-panel: var(--ds-radius-large);
-  --radius-toolbar: var(--ds-radius-large);
+  --radius-toolbar: var(--ds-radius-xlarge);
   --radius-modal: var(--ds-radius-xlarge);
   --radius-full: 9999px;
 
@@ -1840,9 +1844,13 @@
  * minimap's own canvas covers its plate, so glass under it would be a pass
  * that paints nothing.
  */
+/* At rest the glass is a surface with a hairline, not a grey wash: thin grey
+   fill with no edge read as a smudge over the grid. Only the lift (shadow)
+   waits for the reach. */
 .wb-instrument.wb-chrome-quiet {
-  --glass-tint: var(--bg-panel);
-  --glass-alpha: 58%;
+  --glass-tint: var(--bg-surface);
+  --glass-alpha: 84%;
+  border-color: color-mix(in srgb, var(--border) 55%, transparent);
   background-color: color-mix(
     in srgb,
     var(--glass-tint) var(--glass-alpha),
@@ -1858,11 +1866,10 @@
 .wb-chrome-quiet:has([aria-expanded='true']),
 .wb-chrome-quiet:has([data-popup-open]) {
   --glass-tint: var(--bg-surface);
-  --glass-alpha: 74%;
+  --glass-alpha: 92%;
   border-color: var(--border);
   box-shadow: var(--s-toolbar);
 }
-
 :root[data-camera-moving] .wb-instrument.wb-chrome-quiet {
   --glass-alpha: 94%;
   -webkit-backdrop-filter: none;
@@ -2661,7 +2668,7 @@
   --drawer-h: 76px;
   --drawer-cell: 62px;
   --drawer-radius: 17px;
-  --drawer-tray-radius: 18px;
+  --drawer-tray-radius: var(--drawer-radius);
   /* How far the tray reaches down behind the bar. */
   --drawer-tuck: 26px;
   /* The visible height of the tray's row of tools. */
@@ -2962,7 +2969,7 @@
 }
 
 .drawer-history .drawer-cell {
-  width: 44px;
+  width: 34px;
   height: 34px;
   border-radius: 10px;
 }
@@ -3060,7 +3067,6 @@
 .tray-panel .tray-open > .tray-cell {
   flex: none;
   width: 52px;
-  border-radius: 10px;
 }
 
 /* Space for "100%", so the row and its open panel hold still under the slider. */
@@ -3090,7 +3096,6 @@
 
 .tray-grid .tray-cell {
   width: auto;
-  border-radius: 10px;
 }
 
 .tray-cell {
@@ -3550,7 +3555,7 @@ body:has(.drawer-popup[data-open]):not(:has(.drawer-popup [data-popup-open])) .w
 
 [data-orientation='vertical'] .drawer-history .drawer-cell {
   width: 34px;
-  height: 44px;
+  height: 34px;
 }
 
 [data-orientation='vertical'] .drawer-history .drawer-glyph {

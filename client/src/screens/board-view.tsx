@@ -36,6 +36,7 @@ import { Toaster } from '@/components/ui/toast';
 import { VideoPanel } from '@/components/video-panel';
 import { Button } from '@/components/ui/button';
 import { useToolStore } from '@/canvas/use-tool-store';
+import { startUsageLog } from '@/lib/usage-log';
 import { navigate } from '@/router';
 
 // These panels pull in MathLive and its KaTeX assets. Keep them outside the
@@ -84,6 +85,10 @@ export function BoardView({ boardId }: { boardId: string }) {
 
   // Each board answers for itself; nothing carries over to the next one.
   useEffect(() => () => setBoardAccess('pending'), [boardId]);
+
+  // The tutor's toolbar use, for deciding what the toolbar should be.
+  const isTutor = identity?.isTutor ?? false;
+  useEffect(() => (isTutor ? startUsageLog(boardId) : undefined), [isTutor, boardId]);
 
   // A view-only link keeps only the tools that change nothing.
   useEffect(() => {

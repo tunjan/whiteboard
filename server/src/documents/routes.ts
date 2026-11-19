@@ -10,6 +10,7 @@ import { extForDocId, isValidDocId, readDoc, saveDoc } from './store';
 import { clientIp, uploadBudget } from '../rate-limit';
 import { StorageFullError } from '../storage-quota';
 import { requireBoardEdit } from '../boards/access';
+import { requireFeature } from '../boards/features';
 
 // Board document repository bytes. Like the image blob store, uploads are open
 // to anyone who may edit a board. Safety comes from the
@@ -27,6 +28,7 @@ export const documentRoutes = new Hono();
 documentRoutes.post(
   '/',
   requireBoardEdit,
+  requireFeature('documents'),
   bodyLimit({
     maxSize: MAX_DOCUMENT_BYTES,
     onError: (c) => c.json({ error: 'File too large' }, 413),

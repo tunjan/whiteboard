@@ -27,22 +27,6 @@ import { getLocalUser } from '@/collab/presence';
 /** The model read the image (or the description) and found no maths in it. */
 export class UnreadableError extends Error {}
 
-/**
- * Whether the server has an OpenRouter key, cached for the session.
- *
- * Asked once and remembered: it is a property of the deployment, and the
- * answer decides whether two buttons render at all.
- */
-let configured: Promise<boolean> | null = null;
-
-export function aiLatexEnabled(): Promise<boolean> {
-  configured ??= fetch('/api/ai/config', { credentials: 'include' })
-    .then((res) => (res.ok ? (res.json() as Promise<{ enabled?: boolean }>) : null))
-    .then((body) => Boolean(body?.enabled))
-    .catch(() => false);
-  return configured;
-}
-
 /** POST to an AI endpoint; resolves the parsed body, throws toast-ready errors. */
 async function postAi(
   path: string,

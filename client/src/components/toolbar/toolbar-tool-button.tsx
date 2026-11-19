@@ -2,6 +2,7 @@ import { useState, type ComponentType, type ReactElement, type ReactNode } from 
 import { Toolbar as ToolbarPrimitive } from '@base-ui/react/toolbar';
 import { toolRegistry } from '@/canvas/tools/tool-registry';
 import { slotColor, useStyleStore } from '@/canvas/use-style-store';
+import { useToolOffered } from '@/board/features';
 import { useToolStore } from '@/canvas/use-tool-store';
 import { Tooltip, TooltipTrigger } from '@/components/ui/tooltip';
 import {
@@ -162,8 +163,9 @@ export function ToolButton({ toolId }: { toolId: string }) {
   // A boolean, so a tool change re-renders the two keys it touches, not all.
   const pressed = useToolStore((state) => state.activeToolId === toolId);
   const setTool = useToolStore((state) => state.setTool);
+  const offered = useToolOffered(toolId);
   const tool = toolRegistry.get(toolId);
-  if (!tool) return null;
+  if (!tool || !offered) return null;
 
   const Art = TOOL_ART[toolId];
   const Glyph = TOOL_GLYPH[toolId] ?? tool.icon;

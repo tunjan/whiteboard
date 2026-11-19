@@ -29,6 +29,13 @@
       "when": 1794407190263,
       "tag": "0003_agent_help",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1795125170733,
+      "tag": "0004_features",
+      "breakpoints": true
     }
   ]
 }

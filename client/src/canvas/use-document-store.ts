@@ -28,7 +28,8 @@ import {
   type YShape,
 } from './page-derived';
 import { transact } from '@tldraw/state';
-import { REMOVED_MESSAGE } from '@whiteboard/shared';
+import { FEATURES_MESSAGE, REMOVED_MESSAGE } from '@whiteboard/shared';
+import { loadFeatures } from '@/board/features';
 import { boardKey, isViewOnly, setBoardAccess } from '@/board/board-access';
 import { publishDocumentChanges } from './engine/document-changes';
 import { shapeStore } from './engine/shape-store';
@@ -756,11 +757,16 @@ export function loadBoard(
       // The tutor's cookie rides the socket's upgrade; a student's link key
       // rides here. The server answers with the scope this board grants.
       token: boardKey(),
-      onAuthenticated: ({ scope }) =>
-        setBoardAccess(scope === 'readonly' ? 'view' : 'edit'),
+      onAuthenticated: ({ scope }) => {
+        setBoardAccess(scope === 'readonly' ? 'view' : 'edit');
+        // On every (re)connect: a change made while this client was away
+        // never reached it as a message.
+        void loadFeatures(boardId);
+      },
       onAuthenticationFailed: () => setBoardAccess('denied'),
       onStateless: ({ payload }) => {
         if (payload === REMOVED_MESSAGE) setBoardAccess('removed');
+        else if (payload === FEATURES_MESSAGE) void loadFeatures(boardId);
       },
     });
     // A provider given a socket to share does not attach to it on its own —

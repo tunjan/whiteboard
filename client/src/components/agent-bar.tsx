@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
-import { ArrowUp, Check, CircleAlert, ListChecks, Loader2, Mic, Sparkles, Square, X } from 'lucide-react';
-import { aiLatexEnabled, askBoardAgent } from '@/board/latex-ai';
+import { create } from 'zustand';
+import { ArrowUp, Check, CircleAlert, Loader2, Mic, Sparkles, Square, X } from 'lucide-react';
+import { askBoardAgent } from '@/board/latex-ai';
+import { useFeature } from '@/board/features';
 import {
   MAX_AGENT_HISTORY,
   MAX_AGENT_REPLY_CHARS,
@@ -23,7 +25,7 @@ import {
   showMistake,
   startAutoCheck,
   stopAutoCheck,
-  useCheckerStore,
+  useAutoCheckStore,
 } from '@/canvas/work-checker';
 import { editor, onLocalShapesChanged, undo, useDocumentStore } from '@/canvas/use-document-store';
 import { playAgentSound } from '@/components/agent-sound';
@@ -33,26 +35,54 @@ import { Kbd } from '@/components/ui/kbd';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 
-// The same height and material as the corner instruments either side, so the
-// top edge reads as one row: glass at rest, a plate when reached.
+// The same height as the corner instruments either side, so the top edge
+// reads as one row.
 const pillClass = cn(
   'flex h-10.5 items-center gap-2 rounded-panel px-3 text-sm whitespace-nowrap text-fg-muted',
   'transition-colors hover:text-fg focus-visible:shadow-focus focus-visible:outline-none',
 );
-const quietClass = 'wb-instrument wb-chrome-quiet';
+
+/** Whether the bar is open and a request is running, shared with `AskBoardKey`. */
+const useAgentBarStore = create<{ open: boolean; busy: boolean }>(() => ({
+  open: false,
+  busy: false,
+}));
+
+/**
+ * The bar's key on the board's own row (top left), beside the board and page
+ * it acts on. `/` opens the bar too. Only where the server has a model.
+ */
+export function AskBoardKey() {
+  const enabled = useFeature('ai');
+  const busy = useAgentBarStore((s) => s.busy);
+  if (!enabled) return null;
+  return (
+    <TooltipProvider delay={300}>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Ask the board"
+              aria-keyshortcuts="/"
+              onClick={() => useAgentBarStore.setState({ open: true })}
+            />
+          }
+        >
+          {busy ? <Loader2 className="animate-spin text-selected" /> : <Sparkles />}
+        </TooltipTrigger>
+        <TooltipContent side="bottom">
+          <span>Ask the board</span>
+          <Kbd>/</Kbd>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
 
 const enterClass =
   'ease-[var(--ease-out-expo)] motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95 motion-safe:duration-200';
-
-const AUTO_CHECK_KEY = 'whiteboard:auto-check';
-
-function readAutoCheck(): boolean {
-  try {
-    return localStorage.getItem(AUTO_CHECK_KEY) === '1';
-  } catch {
-    return false;
-  }
-}
 
 /**
  * What the last instruction came to, shown under the bar where the eye is.
@@ -94,15 +124,17 @@ const clock = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2,
 
 /**
  * The board agent's one control: say or type what should happen on the board,
- * and it happens as one undoable edit. Top centre, clear of the chrome in the
- * left corner and the session rail in the right; `/` opens it from the canvas.
+ * and it happens as one undoable edit. Opens top centre, clear of the chrome in
+ * the left corner and the session rail in the right, from `AskBoardKey` or `/`.
  * Only rendered where the server has a model to answer it.
  */
 export function AgentBar() {
-  const [enabled, setEnabled] = useState(false);
-  const [open, setOpen] = useState(false);
+  const enabled = useFeature('ai');
+  const open = useAgentBarStore((s) => s.open);
+  const setOpen = (next: boolean) => useAgentBarStore.setState({ open: next });
   const [text, setText] = useState('');
-  const [busy, setBusy] = useState(false);
+  const busy = useAgentBarStore((s) => s.busy);
+  const setBusy = (next: boolean) => useAgentBarStore.setState({ busy: next });
   const [recorder, setRecorder] = useState<MediaRecorder | null>(null);
   const [recordedFor, setRecordedFor] = useState(0);
   const [status, setStatus] = useState('');
@@ -126,17 +158,8 @@ export function AgentBar() {
   // every recorder change (it would flag each new recording as discarded).
   const recorderRef = useRef<MediaRecorder | null>(null);
 
-  const [autoCheck, setAutoCheck] = useState(readAutoCheck);
-  const checking = useCheckerStore((s) => s.checking);
-  const cleanAt = useCheckerStore((s) => s.cleanAt);
-  // A clean pass shows as a tick in the icon's slot for a moment.
-  const [clean, setClean] = useState(false);
-  useEffect(() => {
-    if (!cleanAt) return;
-    setClean(true);
-    const timer = setTimeout(() => setClean(false), 1500);
-    return () => clearTimeout(timer);
-  }, [cleanAt]);
+  // Switched in the board menu; only the mistakes it finds show here.
+  const autoCheck = useAutoCheckStore((s) => s.on);
   const messages = useCommentsStore((s) => s.messages);
   const openThreadId = useCommentsStore((s) => s.openThreadId);
   const pageId = useDocumentStore((s) => s.currentPageId);
@@ -148,16 +171,6 @@ export function AgentBar() {
     return stopAutoCheck;
   }, [enabled, autoCheck]);
 
-  const toggleAutoCheck = () => {
-    const next = !autoCheck;
-    setAutoCheck(next);
-    try {
-      localStorage.setItem(AUTO_CHECK_KEY, next ? '1' : '');
-    } catch {
-      // Remembering it is a convenience; the toggle works without storage.
-    }
-  };
-
   /** Each press moves on to the mistake after the one open, top to bottom. */
   const nextMistake = () => {
     const at = mistakes.findIndex((m) => m.id === openThreadId);
@@ -165,13 +178,6 @@ export function AgentBar() {
     if (next) showMistake(next);
   };
 
-  useEffect(() => {
-    let active = true;
-    void aiLatexEnabled().then((on) => active && setEnabled(on));
-    return () => {
-      active = false;
-    };
-  }, []);
 
   useEffect(() => {
     if (!enabled) return;
@@ -191,6 +197,8 @@ export function AgentBar() {
       discard.current = true;
       if (recorderRef.current?.state === 'recording') recorderRef.current.stop();
       request.current?.abort();
+      // Shared state outlives the bar; the next board starts closed.
+      useAgentBarStore.setState({ open: false, busy: false });
     },
     [],
   );
@@ -408,12 +416,17 @@ export function AgentBar() {
     setStatus('Listening. Press the microphone again to send, Escape to cancel');
   };
 
-  /** Closing keeps a request running: its outcome still lands under the pills. */
+  /**
+   * Closing keeps a request running: its outcome still lands under the pills.
+   * A finished answer or error goes with the bar, whose X is now its close;
+   * a confirmation stays for its Undo.
+   */
   const close = () => {
     if (recorder) {
       discard.current = true;
       recorder.stop();
     }
+    if (!busy) setOutcome((o) => (o?.kind === 'done' ? o : null));
     setOpen(false);
     (document.activeElement as HTMLElement | null)?.blur();
   };
@@ -424,6 +437,108 @@ export function AgentBar() {
   const drafting = !outcome && busy && Boolean(draft?.text.trim());
   const shown: Outcome | null =
     outcome ?? (drafting && draft ? { id: draft.id, kind: 'reply', text: draft.text, question: lastInstruction.current } : null);
+
+  // Open, the progress and the answer are sections of the bar's own panel:
+  // one surface, one close, text on the bar's icon column. Closed, they float
+  // under the pills as cards of their own.
+  const attached = open;
+  const cardClass = 'rounded-panel border border-border bg-surface shadow-float';
+
+  const progress = busy && !outcome && steps.length > 0 && (
+    // Where the request is up to, step by step as the server reports
+    // them: done ones ticked, the one under way in full ink. The
+    // screen reader hears each through the live status below.
+    // Shown only once the wait is long enough to need saying.
+    <ol
+      aria-hidden="true"
+      className={cn(
+        'agent-drop-in-late relative flex max-w-full flex-col gap-0.5 px-2.5 py-1.5 text-xs text-fg-muted',
+        attached ? 'border-t border-border' : cardClass,
+      )}
+    >
+      {/* The last few: a long answer's early steps stop mattering. */}
+      {steps.slice(-4).map((s, i, list) => {
+        const current = i === list.length - 1;
+        return (
+          <li
+            key={steps.length - list.length + i}
+            className={cn('flex min-w-0 items-center gap-1.5', current && 'agent-drop-in text-fg')}
+          >
+            {current ? (
+              <Loader2 className="size-3 shrink-0 animate-spin text-selected" aria-hidden="true" />
+            ) : (
+              <Check className="size-3 shrink-0 text-success" aria-hidden="true" />
+            )}
+            <span className="truncate">{s.label}</span>
+            {s.count > 1 && <span className="shrink-0 tabular-nums">×{s.count}</span>}
+          </li>
+        );
+      })}
+    </ol>
+  );
+
+  const undoButton = (
+    <Button
+      type="button"
+      size="sm"
+      variant="ghost"
+      className="-my-0.5 h-6 shrink-0 px-2 text-xs"
+      onClick={() => {
+        undo();
+        setOutcome(null);
+        setStatus('Undone');
+      }}
+    >
+      Undo
+    </Button>
+  );
+
+  const answer = shown && (
+    <div
+      key={shown.id}
+      // Positioned like the bar above it, so it paints over the bar's
+      // shadow rather than under it: static, it sat beneath the shadow's
+      // 40px blur, which greyed its first lines.
+      className={cn(
+        'touch-targets relative flex max-w-full items-center gap-2 py-1 pr-1 pl-2.5 text-xs',
+        attached ? 'w-full border-t border-border' : cardClass,
+        shown.kind === 'error' ? 'text-danger' : 'text-fg-secondary',
+        // An answer is the one outcome with something to read: it gets
+        // the bar's full width and body-size type instead of a chip.
+        shown.kind === 'reply' && 'w-full items-start py-2 text-sm text-fg',
+        shown.leaving ? 'agent-leave' : 'agent-drop-in',
+      )}
+    >
+      {shown.kind === 'done' && (
+        <Check className="tick-draw size-3.5 shrink-0 text-success" aria-hidden="true" />
+      )}
+      {/* Not by colour alone: a failure carries its own mark. */}
+      {shown.kind === 'error' && <CircleAlert className="size-3.5 shrink-0" aria-hidden="true" />}
+      {/* Markdown and `$…$` maths, through the renderer comments use. */}
+      {shown.kind === 'reply' ? (
+        <div className="flex max-h-64 min-w-0 flex-1 flex-col gap-1 overflow-y-auto pr-2">
+          {shown.question && <p className="truncate text-xs text-fg-muted">{shown.question}</p>}
+          <CommentText text={shown.text} className="min-w-0 text-pretty" />
+        </div>
+      ) : (
+        <CommentText text={shown.text} className="min-w-0 flex-1 text-pretty" />
+      )}
+      {(shown.kind === 'done' || (shown.kind === 'reply' && shown.undoable && !drafting)) && undoButton}
+      {/* Attached, the bar's X right above closes it. */}
+      {!attached && shown.kind !== 'done' && !drafting && (
+        <Button
+          type="button"
+          size="icon-sm"
+          variant="ghost"
+          aria-label={shown.kind === 'reply' ? 'Close answer' : 'Dismiss'}
+          className="-my-0.5 size-6 shrink-0 text-fg-muted"
+          onClick={() => setOutcome(null)}
+        >
+          <X className="size-3.5" aria-hidden="true" />
+        </Button>
+      )}
+    </div>
+  );
 
   return (
     <div
@@ -441,14 +556,11 @@ export function AgentBar() {
       }}
     >
       {open ? (
-        <form
-          // The pills' radius, so the pill and the bar it unfurls into are one
-          // shape; `touch-targets` gives a finger 44px keys.
-          className="agent-unfurl touch-targets relative flex w-full items-center gap-1 overflow-hidden rounded-panel border border-border bg-surface p-1 shadow-float"
-          onSubmit={(event) => {
-            event.preventDefault();
-            submit();
-          }}
+        // The pills' radius, so the pill and the bar it unfurls into are one
+        // shape.
+        <div
+          className={cn('agent-unfurl flex w-full flex-col overflow-hidden', cardClass)}
+          // On the panel, so Escape works from the answer's Undo too.
           onKeyDown={(event) => {
             if (event.key !== 'Escape') return;
             event.preventDefault();
@@ -460,136 +572,100 @@ export function AgentBar() {
             else close();
           }}
         >
-          <span className="ml-1.5 flex size-4 shrink-0 items-center justify-center" aria-hidden="true">
-            {recorder ? (
-              <span className="follow-live-dot size-2 text-danger" />
-            ) : (
-              <Sparkles className={cn('size-4 text-fg-muted transition-colors', busy && 'text-selected')} />
-            )}
-          </span>
-          <Input
-            ref={inputRef}
-            // Opening is always a request to type: `/` or a click on the pill.
-            autoFocus
-            aria-label="Tell the board what to do"
-            value={text}
-            onChange={(event) => {
-              setText(event.target.value);
-              if (outcome?.kind !== 'done') setOutcome(null);
-            }}
-            onKeyDown={(event) => {
-              if (event.key !== 'ArrowUp' || text || !lastInstruction.current) return;
+          <form
+            // `touch-targets` gives a finger 44px keys.
+            className="touch-targets relative flex w-full items-center gap-1 p-1"
+            onSubmit={(event) => {
               event.preventDefault();
-              setText(lastInstruction.current);
+              submit();
             }}
-            placeholder={recorder ? 'Listening…' : 'Plot y = x², or ask…'}
-            // Read-only rather than disabled, so focus stays here mid-request.
-            readOnly={busy || Boolean(recorder)}
-            aria-busy={busy || undefined}
-            maxLength={1000}
-            // A variant, not a plain class: the base `text-fg` comes later in
-            // the sheet and would win.
-            className="flex-1 border-transparent bg-transparent shadow-none transition-colors hover:border-transparent focus:border-transparent focus:shadow-none aria-busy:text-fg-muted"
-          />
-          {recorder && (
-            <span className="shrink-0 px-1 text-xs text-fg-muted tabular-nums" aria-hidden="true">
-              {clock(recordedFor)}
-            </span>
-          )}
-          <Button
-            type="button"
-            size="icon-sm"
-            variant={recorder ? 'default' : 'ghost'}
-            aria-label={recorder ? 'Send recording' : 'Speak an instruction'}
-            disabled={busy}
-            onClick={() => void toggleRecording()}
           >
-            {recorder ? (
-              <ArrowUp className="size-3.5" aria-hidden="true" />
-            ) : (
-              <Mic className="size-3.5" aria-hidden="true" />
-            )}
-          </Button>
-          {busy ? (
-            <Button type="button" size="icon-sm" variant="secondary" aria-label="Stop" onClick={cancel}>
-              <Square className="size-3 fill-current" aria-hidden="true" />
-            </Button>
-          ) : recorder ? null : (
-            <Button
-              type="submit"
-              size="icon-sm"
-              variant={text.trim() ? 'default' : 'ghost'}
-              aria-label="Send"
-              disabled={!text.trim()}
-            >
-              <ArrowUp className="size-3.5" aria-hidden="true" />
-            </Button>
-          )}
-          <Button type="button" size="icon-sm" variant="ghost" aria-label="Close" onClick={close}>
-            <X className="size-3.5" aria-hidden="true" />
-          </Button>
-          {busy && (
-            // The bar's own edge carries the wait, so the field stays readable.
-            <span
-              aria-hidden="true"
-              className="conversion-sweep pointer-events-none absolute bottom-0 left-0 h-0.5 w-1/3 rounded-full bg-selected [--sweep-from:-100%] [--sweep-to:300%] motion-reduce:w-full motion-reduce:animate-none motion-reduce:opacity-40"
+            <span className="ml-1.5 flex size-4 shrink-0 items-center justify-center" aria-hidden="true">
+              {recorder ? (
+                <span className="follow-live-dot size-2 text-danger" />
+              ) : (
+                <Sparkles className={cn('size-4 text-fg-muted transition-colors', busy && 'text-selected')} />
+              )}
+            </span>
+            <Input
+              ref={inputRef}
+              // Opening is always a request to type: `/` or a click on the pill.
+              autoFocus
+              aria-label="Tell the board what to do"
+              value={text}
+              onChange={(event) => {
+                setText(event.target.value);
+                if (outcome?.kind !== 'done') setOutcome(null);
+              }}
+              onKeyDown={(event) => {
+                if (event.key !== 'ArrowUp' || text || !lastInstruction.current) return;
+                event.preventDefault();
+                setText(lastInstruction.current);
+              }}
+              // The last few exchanges go with the next one, so say so while
+              // one is on screen.
+              placeholder={recorder ? 'Listening…' : shown?.kind === 'reply' ? 'Ask a follow-up…' : 'Plot y = x², or ask…'}
+              // Read-only rather than disabled, so focus stays here mid-request.
+              readOnly={busy || Boolean(recorder)}
+              aria-busy={busy || undefined}
+              maxLength={1000}
+              // A variant, not a plain class: the base `text-fg` comes later in
+              // the sheet and would win.
+              className="flex-1 border-transparent bg-transparent shadow-none transition-colors hover:border-transparent focus:border-transparent focus:shadow-none aria-busy:text-fg-muted"
             />
-          )}
-        </form>
+            {recorder && (
+              <span className="shrink-0 px-1 text-xs text-fg-muted tabular-nums" aria-hidden="true">
+                {clock(recordedFor)}
+              </span>
+            )}
+            <Button
+              type="button"
+              size="icon-sm"
+              variant={recorder ? 'default' : 'ghost'}
+              aria-label={recorder ? 'Send recording' : 'Speak an instruction'}
+              disabled={busy}
+              onClick={() => void toggleRecording()}
+            >
+              {recorder ? (
+                <ArrowUp className="size-3.5" aria-hidden="true" />
+              ) : (
+                <Mic className="size-3.5" aria-hidden="true" />
+              )}
+            </Button>
+            {busy ? (
+              <Button type="button" size="icon-sm" variant="secondary" aria-label="Stop" onClick={cancel}>
+                <Square className="size-3 fill-current" aria-hidden="true" />
+              </Button>
+            ) : recorder ? null : (
+              <Button
+                type="submit"
+                size="icon-sm"
+                variant={text.trim() ? 'default' : 'ghost'}
+                aria-label="Send"
+                disabled={!text.trim()}
+              >
+                <ArrowUp className="size-3.5" aria-hidden="true" />
+              </Button>
+            )}
+            <Button type="button" size="icon-sm" variant="ghost" aria-label="Close" onClick={close}>
+              <X className="size-3.5" aria-hidden="true" />
+            </Button>
+            {busy && (
+              // The bar's own edge carries the wait, so the field stays readable.
+              <span
+                aria-hidden="true"
+                className="conversion-sweep pointer-events-none absolute bottom-0 left-0 h-0.5 w-1/3 rounded-full bg-selected [--sweep-from:-100%] [--sweep-to:300%] motion-reduce:w-full motion-reduce:animate-none motion-reduce:opacity-40"
+              />
+            )}
+          </form>
+          {progress}
+          {answer}
+        </div>
       ) : (
         <TooltipProvider delay={300}>
-          <div className="relative flex justify-center gap-2 max-lg:flex-wrap motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-150">
-            <button
-              type="button"
-              aria-keyshortcuts="/"
-              // A request still running holds the plate, like any corner that
-              // has something going on.
-              data-awake={busy ? '' : undefined}
-              onClick={() => setOpen(true)}
-              className={cn(pillClass, quietClass)}
-            >
-              {busy ? (
-                <Loader2 className="size-4 animate-spin text-selected" aria-hidden="true" />
-              ) : (
-                <Sparkles className="size-4" aria-hidden="true" />
-              )}
-              Ask the board
-              {/* No key to press on a tablet. */}
-              <Kbd className="pointer-coarse:hidden">/</Kbd>
-            </button>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <button
-                    type="button"
-                    aria-pressed={autoCheck}
-                    onClick={toggleAutoCheck}
-                    // On is a fill, like every other control that is on; off is
-                    // a quiet instrument like its neighbour.
-                    className={cn(
-                      pillClass,
-                      autoCheck ? 'bg-tb-sel-bg text-tb-sel-fg hover:bg-tb-sel-bg-hover hover:text-tb-sel-fg' : quietClass,
-                    )}
-                  />
-                }
-              >
-                {/* A spinner in the icon's own slot: the check is running, and
-                    the pill doesn't change width every time it does. Only
-                    its own checks: a Check work from the selection spins
-                    there, not on a switch that may be off. */}
-                {checking && autoCheck ? (
-                  <Loader2 className="size-4 animate-spin" aria-hidden="true" />
-                ) : clean && autoCheck ? (
-                  <Check className="tick-draw size-4 text-success" aria-hidden="true" />
-                ) : (
-                  <ListChecks className="size-4" aria-hidden="true" />
-                )}
-                Auto-check
-              </TooltipTrigger>
-              <TooltipContent side="bottom">
-                {autoCheck ? 'Checking your working as you write' : 'Check your working as you write'}
-              </TooltipContent>
-            </Tooltip>
+          {/* Closed, top centre is empty board unless the checker has
+              something to show: the bar's key lives in the top-left row. */}
+          <div className="relative flex justify-center gap-2 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-150">
             {mistakes.length > 0 && (
               <Tooltip>
                 <TooltipTrigger
@@ -598,15 +674,11 @@ export function AgentBar() {
                       type="button"
                       data-comment-ui
                       onClick={nextMistake}
-                      // Hung off the row's end, so the two pills don't shift
-                      // every time a mistake comes or goes.
-                      // Below lg the row has no room to hang it off; it wraps.
-                      // Flat like its neighbours: the red is the signal, and
-                      // a shadow lifted it above two pills it sits level with.
+                      // Flat like the chrome: the red is the signal.
                       className={cn(
                         pillClass,
                         enterClass,
-                        'border border-danger-border bg-danger-bg text-danger tabular-nums hover:bg-[var(--ds-background-danger-hovered)] hover:text-danger active:bg-[var(--ds-background-danger-pressed)] lg:absolute lg:left-full lg:ml-2',
+                        'border border-danger-border bg-danger-bg text-danger tabular-nums hover:bg-[var(--ds-background-danger-hovered)] hover:text-danger active:bg-[var(--ds-background-danger-pressed)]',
                       )}
                     />
                   }
@@ -628,111 +700,8 @@ export function AgentBar() {
           </div>
         </TooltipProvider>
       )}
-      {busy && !outcome && steps.length > 0 && (
-        // Where the request is up to, step by step as the server reports
-        // them: done ones ticked, the one under way in full ink. The
-        // screen reader hears each through the live status below.
-        // Shown only once the wait is long enough to need saying.
-        <ol
-          aria-hidden="true"
-          className="agent-drop-in-late relative flex max-w-full flex-col gap-0.5 rounded-panel border border-border bg-surface px-2.5 py-1.5 text-xs text-fg-muted shadow-float"
-        >
-          {/* The last few: a long answer's early steps stop mattering. */}
-          {steps.slice(-4).map((s, i, shown) => {
-            const current = i === shown.length - 1;
-            return (
-              <li
-                key={steps.length - shown.length + i}
-                className={cn('flex min-w-0 items-center gap-1.5', current && 'agent-drop-in text-fg')}
-              >
-                {current ? (
-                  <Loader2 className="size-3 shrink-0 animate-spin text-selected" aria-hidden="true" />
-                ) : (
-                  <Check className="size-3 shrink-0 text-success" aria-hidden="true" />
-                )}
-                <span className="truncate">{s.label}</span>
-                {s.count > 1 && <span className="shrink-0 tabular-nums">×{s.count}</span>}
-              </li>
-            );
-          })}
-        </ol>
-      )}
-      {shown && (
-        <div
-          key={shown.id}
-          // Positioned like the bar above it, so it paints over the bar's
-          // shadow rather than under it: static, it sat beneath the shadow's
-          // 40px blur, which greyed its first lines.
-          className={cn(
-            'touch-targets relative flex max-w-full items-center gap-2 rounded-panel border border-border bg-surface py-1 pr-1 pl-2.5 text-xs shadow-float',
-            shown.kind === 'error' ? 'text-danger' : 'text-fg-secondary',
-            // An answer is the one outcome with something to read: it gets
-            // the bar's full width and body-size type instead of a chip.
-            shown.kind === 'reply' && 'w-full items-start px-3 py-2 text-sm text-fg',
-            shown.leaving ? 'agent-leave' : 'agent-drop-in',
-          )}
-        >
-          {shown.kind === 'done' && (
-            <Check className="tick-draw size-3.5 shrink-0 text-success" aria-hidden="true" />
-          )}
-          {/* Not by colour alone: a failure carries its own mark. */}
-          {shown.kind === 'error' && <CircleAlert className="size-3.5 shrink-0" aria-hidden="true" />}
-          {/* Markdown and `$…$` maths, through the renderer comments use. */}
-          {shown.kind === 'reply' ? (
-            <div className="flex max-h-64 min-w-0 flex-1 flex-col gap-1 overflow-y-auto">
-              {shown.question && <p className="truncate text-xs text-fg-muted">{shown.question}</p>}
-              <CommentText text={shown.text} className="min-w-0 text-pretty" />
-            </div>
-          ) : (
-            <CommentText text={shown.text} className="min-w-0 text-pretty" />
-          )}
-          {shown.kind === 'done' && (
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              className="h-6 px-2 text-xs"
-              onClick={() => {
-                undo();
-                setOutcome(null);
-                setStatus('Undone');
-              }}
-            >
-              Undo
-            </Button>
-          )}
-          {shown.kind === 'reply' && shown.undoable && !drafting && (
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              className="-my-0.5 h-6 shrink-0 px-2 text-xs"
-              onClick={() => {
-                undo();
-                setOutcome(null);
-                setStatus('Undone');
-              }}
-            >
-              Undo
-            </Button>
-          )}
-          {shown.kind !== 'done' && !drafting && (
-            <Button
-              type="button"
-              size="icon-sm"
-              variant="ghost"
-              aria-label={shown.kind === 'reply' ? 'Close answer' : 'Dismiss'}
-              className="-my-0.5 size-6 shrink-0 text-fg-muted"
-              onClick={() => {
-                setOutcome(null);
-                inputRef.current?.focus();
-              }}
-            >
-              <X className="size-3.5" aria-hidden="true" />
-            </Button>
-          )}
-        </div>
-      )}
+      {!open && progress}
+      {!open && answer}
       <span role="status" aria-live="polite" className="sr-only">
         {status}
       </span>

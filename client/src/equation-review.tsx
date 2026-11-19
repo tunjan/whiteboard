@@ -5,15 +5,11 @@ import type { EquationShape } from '@whiteboard/shared';
 import { EquationPanelContent } from '@/components/equation-panel';
 import { ensureEquationRenderer, typesetEquation } from '@/canvas/equation-render';
 import { useThemeStore } from '@/use-theme-store';
+import { ALL_FEATURES } from '@whiteboard/shared';
+import { useFeaturesStore } from '@/board/features';
 
-const realFetch = window.fetch.bind(window);
-window.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
-  const url = typeof input === 'string' ? input : String((input as Request).url ?? input);
-  if (url.includes('/api/ai/config')) {
-    return Promise.resolve(new Response(JSON.stringify({ enabled: true }), { headers: { 'content-type': 'application/json' } }));
-  }
-  return realFetch(input as RequestInfo, init);
-}) as typeof window.fetch;
+// Review page: every feature on, AI included, without a server to ask.
+useFeaturesStore.setState({ features: ALL_FEATURES });
 
 function shape(id: string, latex: string, extra: Partial<EquationShape['props']> = {}): EquationShape {
   return {

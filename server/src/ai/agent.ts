@@ -13,6 +13,8 @@ import {
   type AgentBoardSummary,
   type AgentColor,
   type AgentPrevious,
+  type Feature,
+  type FeatureSet,
   type FillStyle,
 } from '@whiteboard/shared';
 import type { ChatMessage, ToolCall, ToolDefinition } from './openrouter';
@@ -42,7 +44,7 @@ The board summary lists the visible viewport and the shapes in or near it, with 
 - Never delete or rewrite anything the instruction does not ask about.
 - The summary has no handwriting, pictures or rendered appearance. For a question about what the board or the selection shows, or an edit that depends on handwriting or images, call look_at_board alone first; you will then get the picture. If a picture is already attached, don't ask for it.
 - To answer a question, reply in text with no tool calls. To explain something while also editing the board, call say once with the explanation; other text you write beside tool calls is never shown.
-If the instruction is unclear or can't be done with these tools, make no calls and say why in one short sentence for the user.
+If the instruction is unclear, only a greeting, or can't be done with these tools, make no calls and reply in one short, friendly sentence that offers one or two concrete things you could do with what is on the board. Don't mention "the instruction" or that you made no changes.
 
 Writing for the user (answers and say). It shows in a narrow card that renders Markdown and LaTeX:
 - No greeting, no "I can see the board", no closing question or offer of more help.
@@ -248,6 +250,20 @@ export function lookMessages(
 }
 
 /** Every tool but the look: the picture has been taken. */
+/** The board feature each tool creates, for the tools that need one on. */
+const TOOL_FEATURE: Partial<Record<string, Feature>> = {
+  create_equation: 'equations',
+  create_graph: 'graphs',
+  create_sticker: 'stickers',
+  generate_sticker: 'stickers',
+};
+
+/** Whether the agent may use `tool` on a board offering `features`. */
+export const toolAllowed = (tool: string, features: FeatureSet): boolean => {
+  const feature = TOOL_FEATURE[tool];
+  return !feature || features[feature];
+};
+
 export const AGENT_TOOLS_AFTER_LOOK = AGENT_TOOLS.filter((t) => t.function.name !== LOOK_TOOL);
 
 /** The earlier exchanges a client sent: the last few that are two capped strings. */

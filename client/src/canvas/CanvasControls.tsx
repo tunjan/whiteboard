@@ -176,7 +176,7 @@ export function CanvasControls({
       data-ui-layer
       data-arrive="up"
       style={{ '--arrive-i': 3 } as React.CSSProperties}
-      className="absolute right-[calc(0.75rem+env(safe-area-inset-right))] bottom-[calc(0.75rem+var(--wb-inset-bottom))] z-[var(--z-canvas-hud)] max-sm:bottom-[calc(var(--drawer-reach)+0.5rem+var(--wb-inset-bottom))] [@media(pointer:coarse)]:bottom-[calc(var(--drawer-reach)+0.5rem+var(--wb-inset-bottom))] select-none"
+      className="absolute right-[calc(0.75rem+env(safe-area-inset-right))] bottom-[calc(0.75rem+var(--wb-inset-bottom))] z-[var(--z-canvas-hud)] max-[840px]:bottom-[calc(var(--drawer-reach)+0.5rem+var(--wb-inset-bottom))] [@media(pointer:coarse)]:bottom-[calc(var(--drawer-reach)+0.5rem+var(--wb-inset-bottom))] select-none"
     >
       <TooltipProvider delay={300}>
         <Surface

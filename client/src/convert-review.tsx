@@ -1,13 +1,17 @@
 // TEMPORARY review harness for the handwriting -> equation conversion. Delete.
 import { createRoot } from 'react-dom/client';
 import './index.css';
+import { ALL_FEATURES } from '@whiteboard/shared';
+import { useFeaturesStore } from '@/board/features';
+
+// Review page: every feature on, AI included, without a server to ask.
+useFeaturesStore.setState({ features: ALL_FEATURES });
 
 const realFetch = window.fetch.bind(window);
 (window as any).__ai = { delay: 3000, calls: 0, fail: false };
 window.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
   const url = typeof input === 'string' ? input : String((input as Request).url ?? input);
   const json = (b: unknown) => new Response(JSON.stringify(b), { headers: { 'content-type': 'application/json' } });
-  if (url.includes('/api/ai/config')) return Promise.resolve(json({ enabled: true }));
   if (url.includes('/api/ai/latex/ink')) {
     const ai = (window as any).__ai;
     ai.calls++;

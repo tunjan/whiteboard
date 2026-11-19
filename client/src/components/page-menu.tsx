@@ -138,7 +138,7 @@ function useCoarsePointer(): boolean {
  * Page switcher for a board, docked in the top-left chrome. Page state lives in
  * the shared Yjs document, so changes appear immediately for every collaborator.
  */
-export function PageMenu({ className }: { className?: string }) {
+export function PageMenu() {
   const boardId = useDocumentStore((state) => state.boardId);
   const pages = useDocumentStore((state) => state.doc.pages);
   const pageOrder = useDocumentStore((state) => state.doc.pageOrder);
@@ -229,10 +229,7 @@ export function PageMenu({ className }: { className?: string }) {
               variant="ghost"
               size="sm"
               aria-label={`Pages, current page: ${current?.name ?? 'Page 1'}`}
-              className={cn(
-                'max-w-[clamp(4.5rem,18vw,11.25rem)] rounded-control px-2 text-fg-secondary',
-                className,
-              )}
+              className="max-w-[clamp(4.5rem,18vw,11.25rem)] rounded-control px-2 text-fg-secondary"
             />
           }
         >

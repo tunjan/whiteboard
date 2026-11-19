@@ -52,6 +52,18 @@ export const boards = pgTable('boards', {
   shareMode: text('share_mode').notNull().default('edit'),
   // What "Ask the board" does for students: 'full', 'hints' or 'off'.
   agentHelp: text('agent_help').notNull().default('full'),
+  // This board's own feature set (`FeatureSet` in @whiteboard/shared), or null
+  // to follow the tutor's defaults in `app_settings`.
+  features: jsonb('features'),
+});
+
+/**
+ * Instance-wide settings, one JSON value per key: `features` (the tutor's
+ * default `FeatureSet`) and `demo` (the current public demo board).
+ */
+export const appSettings = pgTable('app_settings', {
+  key: text('key').primaryKey(),
+  value: jsonb('value').notNull(),
 });
 
 /**

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, type DragEvent, type RefObject } from 'react';
+import { hasFeature } from '@/board/features';
 import { getLocalUser } from '@/collab/presence';
 import { stopFollowingForManualCameraChange } from '@/collab/use-follow-store';
 import { addFilesToRepository } from '@/board/documents';
@@ -126,7 +127,7 @@ export function useCanvasPasteAndDrop({
       // Pasted links become preview cards. `breakUndoCapture` makes the paste
       // its own undo step, so Ctrl+Z removes exactly what was just pasted.
       const urls = linkUrlsFromClipboard(text, dt?.getData('text/html') ?? '');
-      if (urls) {
+      if (urls && hasFeature('media')) {
         e.preventDefault();
         breakUndoCapture();
         selectPasted(placeLinkUrls(urls, world));
@@ -134,7 +135,7 @@ export function useCanvasPasteAndDrop({
       }
       // A bare video id is not a URL, so it never matches the link path above.
       const youtubeId = parseYoutubeId(text);
-      if (youtubeId) {
+      if (youtubeId && hasFeature('media')) {
         e.preventDefault();
         selectPasted([createYoutubeShape(youtubeId, world)]);
         return;
@@ -162,10 +163,13 @@ export function useCanvasPasteAndDrop({
       const images = dropped.filter((f) => f.type.startsWith('image/'));
       const pdfs = dropped.filter((f) => f.type === PDF_MIME);
       const videos = dropped.filter(isVideoFile);
-      const documents = dropped.filter(
-        (f) =>
-          !f.type.startsWith('image/') && f.type !== PDF_MIME && !isVideoFile(f),
-      );
+      // Filed in the repository — unless the tutor turned it off here.
+      const documents = hasFeature('documents')
+        ? dropped.filter(
+            (f) =>
+              !f.type.startsWith('image/') && f.type !== PDF_MIME && !isVideoFile(f),
+          )
+        : [];
       if (!images.length && !pdfs.length && !videos.length && !documents.length)
         return;
       e.preventDefault();

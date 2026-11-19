@@ -29,6 +29,11 @@ import {
   type PeerPresence,
 } from './collab/use-presence-store';
 import { genId } from '@whiteboard/shared';
+import { ALL_FEATURES } from '@whiteboard/shared';
+import { useFeaturesStore } from '@/board/features';
+
+// Review page: every feature on, AI included, without a server to ask.
+useFeaturesStore.setState({ features: ALL_FEATURES });
 
 const params = new URLSearchParams(location.search);
 applyTheme(params.get('theme') === 'dark' ? 'dark' : 'light');
@@ -74,7 +79,6 @@ if (withAi) {
   };
   window.fetch = (input, init) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-    if (url.endsWith('/api/ai/config')) return reply({ enabled: true });
     // Kept for a console check of what the bar sends (previous, image).
     if (url.endsWith('/api/ai/agent'))
       ((window as { agentBodies?: unknown[] }).agentBodies ??= []).push(JSON.parse(String(init?.body)));

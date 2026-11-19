@@ -2,10 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { Loader2, Mic, Sparkles, Square } from 'lucide-react';
 import {
-  aiLatexEnabled,
   dictateLatex,
   latexFromPrompt,
 } from '@/board/latex-ai';
+import { useFeature } from '@/board/features';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui/toast';
@@ -32,7 +32,7 @@ export function useEquationDictation({
   updateLatex: (latex: string) => void;
   focusInput: () => void;
 }) {
-  const [aiEnabled, setAiEnabled] = useState(false);
+  const aiEnabled = useFeature('ai');
   const [prompt, setPrompt] = useState('');
   const [generating, setGenerating] = useState(false);
   const [recorder, setRecorder] = useState<MediaRecorder | null>(null);
@@ -44,15 +44,6 @@ export function useEquationDictation({
   // the spinner it replaces were only ever visible.
   const [dictationStatus, setDictationStatus] = useState('');
 
-  useEffect(() => {
-    let active = true;
-    aiLatexEnabled().then((enabled) => {
-      if (active) setAiEnabled(enabled);
-    });
-    return () => {
-      active = false;
-    };
-  }, []);
 
   /**
    * Ask the model to write LaTeX for a plain-language description.

@@ -168,6 +168,14 @@ const CASES: Case[] = [
     check: only('update_shape'),
   },
   {
+    name: 'greeting gets a friendly offer, not a status report',
+    instruction: 'hi',
+    board: { shapes: [eq1] },
+    check: all(answers, (a) =>
+      /instruction|no changes|nothing to change/i.test(a.reply ?? '') ? `reads as a status report: ${a.reply}` : null,
+    ),
+  },
+  {
     name: 'hints only',
     instruction: 'solve x^2 - 5x + 6 = 0 for me',
     context: { hints: true },

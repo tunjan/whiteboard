@@ -178,11 +178,11 @@ function pinMistakes(
   lines: Line[],
   pageId: string,
   skipDismissed: boolean,
-): { reported: { id: string; box: Bounds }[]; clean: boolean } {
+): { id: string; box: Bounds }[] {
   const threads = Object.values(useCommentsStore.getState().messages).filter(
     (m): m is Mistake => m.id === m.threadId && m.pageId === pageId && Boolean(m.box),
   );
-  const { pins, resolve, clean } = planPins(
+  const { pins, resolve } = planPins(
     errors,
     lines,
     threads,
@@ -207,7 +207,7 @@ function pinMistakes(
         },
   );
   for (const id of resolve) setThreadResolved(id, true);
-  return { reported, clean };
+  return reported;
 }
 
 /**
@@ -280,14 +280,30 @@ let inFlightQuiet = false;
 /** `workSignature` of what the last completed always-on check read. */
 let lastSignature = '';
 
+const AUTO_CHECK_KEY = 'whiteboard:auto-check';
+
+function readAutoCheck(): boolean {
+  try {
+    return localStorage.getItem(AUTO_CHECK_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
 /**
- * Whether a check is in flight, for the controls that show it, and when the
- * last always-on check came back clean — silence alone can't say that.
+ * Whether always-on checking is switched on, remembered per browser. Set from
+ * the board menu; `AgentBar` starts and stops the checker from it.
  */
-export const useCheckerStore = create<{ checking: boolean; cleanAt: number }>(() => ({
-  checking: false,
-  cleanAt: 0,
-}));
+export const useAutoCheckStore = create<{ on: boolean }>(() => ({ on: readAutoCheck() }));
+
+export function setAutoCheck(on: boolean): void {
+  useAutoCheckStore.setState({ on });
+  try {
+    localStorage.setItem(AUTO_CHECK_KEY, on ? '1' : '');
+  } catch {
+    // Remembering it is a convenience; the switch works without storage.
+  }
+}
 
 /** The checker's unresolved threads on `pageId`, in reading order. */
 export function openMistakes(
@@ -379,7 +395,6 @@ export async function checkShapes(ids: string[], quiet = false): Promise<void> {
   const controller = new AbortController();
   inFlight = controller;
   inFlightQuiet = quiet;
-  useCheckerStore.setState({ checking: true });
   try {
     const png = await renderShapesForRecognition(
       shapes.map((s) => s.id),
@@ -392,10 +407,9 @@ export async function checkShapes(ids: string[], quiet = false): Promise<void> {
     if (controller.signal.aborted) return;
     // The user has moved to another page: its lines are not these.
     if (useDocumentStore.getState().currentPageId !== pageId) return;
-    const { reported, clean } = pinMistakes(errors, lines, pageId, quiet);
+    const reported = pinMistakes(errors, lines, pageId, quiet);
     if (quiet) {
       lastSignature = signature;
-      if (clean) useCheckerStore.setState({ cleanAt: Date.now() });
       return;
     }
     const first = reported[0];
@@ -413,10 +427,7 @@ export async function checkShapes(ids: string[], quiet = false): Promise<void> {
     if (controller.signal.aborted) return;
     throw err;
   } finally {
-    if (inFlight === controller) {
-      inFlight = null;
-      useCheckerStore.setState({ checking: false });
-    }
+    if (inFlight === controller) inFlight = null;
   }
 }
 

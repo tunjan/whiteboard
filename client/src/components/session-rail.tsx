@@ -11,6 +11,7 @@ import type { AttentionState } from '@/collab/attention-state';
 import { useAttentionStore } from '@/collab/use-attention-store';
 import { useFollowStore } from '@/collab/use-follow-store';
 import { useVoiceStore } from '@/collab/voice/use-voice-store';
+import { useFeaturesStore } from '@/board/features';
 import { useDocumentsStore } from '@/canvas/use-documents-store';
 import { useMusicPlaybackStore } from '@/music/use-music-playback-store';
 import { ConnectionIndicator } from '@/components/connection-indicator';
@@ -280,6 +281,7 @@ export function SessionRail({
     peers.some((peer) => !peer.isTutor && peer.following);
   const hasUnread = Object.keys(documents).some((id) => unread.has(id));
   const playing = playback.status === 'playing';
+  const features = useFeaturesStore((state) => state.features);
 
   const localVoice: VoiceDisplayState | null =
     voiceStatus === 'joined'
@@ -477,13 +479,13 @@ export function SessionRail({
           It renders nothing when there is nobody to follow. */}
       <FollowControls identity={identity} toolbarItem />
 
-      <ToolSlot shown={open || inCall}>
+      <ToolSlot shown={(open && features.voice) || inCall}>
         <VoiceControls identity={identity} toolbarItem />
       </ToolSlot>
-      <ToolSlot shown={open || hasUnread}>
+      <ToolSlot shown={features.documents && (open || hasUnread)}>
         <DocumentsPanel identity={identity} toolbarItem />
       </ToolSlot>
-      <ToolSlot shown={open || playing}>
+      <ToolSlot shown={(open && features.music) || playing}>
         <MusicPlayer identity={identity} toolbarItem />
       </ToolSlot>
       {/* Sharing is done once per session, so it waits with the other tools

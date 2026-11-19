@@ -1,6 +1,7 @@
 import { lazy, Suspense, useState } from 'react';
 import { ArrowLeft, ChevronDown } from 'lucide-react';
 import { type Identity } from '@/collab/identity';
+import { AskBoardKey } from '@/components/agent-bar';
 import { BoardActionsMenu } from '@/components/board-actions-menu';
 import { FollowFrame } from '@/components/follow-frame';
 import { KeyboardShortcutsDialog } from '@/components/keyboard-shortcuts-dialog';
@@ -73,7 +74,7 @@ export function BoardChrome({
       <FollowFrame identity={identity} />
 
       {/* ── Top-left: where you are ─────────────────────────────────────────
-          Back │ Board ▾  Page ▾
+          Back │ Board ▾  Page ▾  ✦
 
           The board's name is the menu. Everything that menu holds is a thing
           you do *to this board* — rename it, export it, read its notes, set
@@ -81,9 +82,12 @@ export function BoardChrome({
           corner a key and tells the truth about what they belong to. The ⋯ it
           replaces said nothing about its own contents.
 
-          The page then sits recessed inside that row: on this board a recess
-          means "a value inside a group", which is exactly what a page is
-          inside a board. That is the separator, and it needed no glyph. */}
+          The page follows as a second trigger of the same make, so neither
+          reads as a different kind of object; the weight and colour step
+          (title medium, page secondary) is the only separator.
+
+          Ask the board closes the row: it acts on this board and page, so it
+          sits with them rather than alone in the middle of the board. */}
       <Surface
         role="navigation"
         aria-label="Board"
@@ -142,7 +146,8 @@ export function BoardChrome({
           }
         />
 
-        <PageMenu className="bg-tb-seg-chip" />
+        <PageMenu />
+        <AskBoardKey />
       </Surface>
 
       {/* ── Top-right: who is here, and what is running ─────────────────── */}

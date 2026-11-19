@@ -22,3 +22,4 @@ export * from './voice';
 export * from './ephemeral';
 export * from './analytics';
 export * from './ink-codec';
+export * from './features';

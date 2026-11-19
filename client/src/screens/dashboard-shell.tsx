@@ -5,10 +5,12 @@ import {
   LogOut,
   Menu,
   Moon,
+  SlidersHorizontal,
   Sparkles,
   Sun,
 } from 'lucide-react';
 import { AiModelsDialog } from '@/components/ai-models-dialog';
+import { FeaturesDialog } from '@/components/feature-settings';
 import { BrandMark } from '@/components/brand-mark';
 import {
   DropdownMenu,
@@ -258,6 +260,7 @@ export function AccountMenu({
 }) {
   const { theme, toggle: toggleTheme } = useThemeStore();
   const [aiModelsOpen, setAiModelsOpen] = useState(false);
+  const [featuresOpen, setFeaturesOpen] = useState(false);
   return (
     <>
       <DropdownMenu>
@@ -302,6 +305,10 @@ export function AccountMenu({
               <Sparkles data-icon="inline-start" />
               AI models…
             </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setFeaturesOpen(true)}>
+              <SlidersHorizontal data-icon="inline-start" />
+              Features…
+            </DropdownMenuItem>
           </DropdownMenuGroup>
           <DropdownMenuSeparator />
           <DropdownMenuItem variant="destructive" onClick={onLogout}>
@@ -311,6 +318,7 @@ export function AccountMenu({
         </DropdownMenuContent>
       </DropdownMenu>
       <AiModelsDialog open={aiModelsOpen} onOpenChange={setAiModelsOpen} />
+      <FeaturesDialog open={featuresOpen} onOpenChange={setFeaturesOpen} />
     </>
   );
 }

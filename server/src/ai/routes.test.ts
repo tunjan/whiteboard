@@ -27,6 +27,16 @@ vi.mock('../boards/access', () => ({
   agentHelpFor: vi.fn(async () => 'full'),
 }));
 
+// The feature gate has its own suite (boards/features.test.ts); here every
+// board offers everything.
+vi.mock('../boards/features', async () => {
+  const { ALL_FEATURES } = await import('@whiteboard/shared');
+  return {
+    requireFeature: () => async (_c: unknown, next: () => Promise<void>) => next(),
+    featuresFor: vi.fn(async () => ALL_FEATURES),
+  };
+});
+
 // Only the dictation suite gives these answers; every other case is rejected
 // before a model is reached.
 vi.mock('../auth/middleware', () => ({
@@ -69,14 +79,6 @@ async function post(path: string, body: unknown, method = 'POST'): Promise<Respo
     body: JSON.stringify(body),
   });
 }
-
-describe('GET /config', () => {
-  it('reports whether the feature is configured', async () => {
-    const res = await aiRoutes.request('/config');
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ enabled: expect.any(Boolean) });
-  });
-});
 
 describe('POST /latex/ink', () => {
   it('rejects a missing image', async () => {
