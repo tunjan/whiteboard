@@ -2,7 +2,7 @@
 
 Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
 
-> **Codebase Architecture & File Map:** See [REPO_MAP.md](file:///Users/alberto/Desktop/best%20whiteboard/REPO_MAP.md) for a comprehensive index of files, types, state flow, and extension patterns.
+> **Codebase Architecture & File Map:** See [REPO_MAP.md](REPO_MAP.md) for a comprehensive index of files, types, state flow, and extension patterns.
 
 **Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
 

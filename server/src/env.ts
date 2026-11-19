@@ -54,7 +54,7 @@ export const env = {
    * Where this deployment's source code is, for the "Source code" link that
    * AGPL-3.0 §13 asks a host of a modified copy to offer its users.
    */
-  sourceUrl: process.env.SOURCE_URL ?? 'https://github.com/tunjan/best-whiteboard',
+  sourceUrl: process.env.SOURCE_URL ?? 'https://github.com/tunjan/whiteboard',
   /** Request header carrying the real client IP behind a proxy (see rate-limit.ts). */
   clientIpHeader: process.env.CLIENT_IP_HEADER?.toLowerCase() || undefined,
   /**
