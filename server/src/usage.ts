@@ -2,7 +2,7 @@ import { appendFile, mkdir, stat } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
-import { requireTutor } from './auth/middleware';
+import { currentTutor, requireTutor } from './auth/middleware';
 import { env } from './env';
 
 /**
@@ -30,6 +30,10 @@ export function csvRow(fields: unknown[]): string {
 }
 
 usageRoutes.use('*', requireTutor);
+// Only the operator's own use is kept: on a hosted server, other tutors'
+// clicks are theirs, not something to log. Accepted and dropped, so their
+// clients have nothing to retry.
+usageRoutes.use('*', async (c, next) => (currentTutor(c).isAdmin ? next() : c.body(null, 204)));
 
 usageRoutes.post('/', bodyLimit({ maxSize: 256 * 1024 }), async (c) => {
   const body = (await c.req.json().catch(() => null)) as { rows?: unknown } | null;

@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
-import { count, desc, gte, sql } from 'drizzle-orm';
+import { and, count, desc, eq, gte, inArray, sql } from 'drizzle-orm';
 import { isAnalyticsRange, type AgentAsk } from '@whiteboard/shared';
-import { requireTutor } from '../auth/middleware';
+import { currentTutor, requireTutor } from '../auth/middleware';
 import { db } from '../db/client';
 import {
   agentAsks,
@@ -35,6 +35,8 @@ analyticsRoutes.get('/', async (c) => {
   const days = isAnalyticsRange(asked) ? asked : DEFAULT_RANGE;
   const now = new Date();
   const from = rangeStart(days, now);
+  // Everything below is about this tutor's boards and nobody else's.
+  const owned = db.select({ id: boards.id }).from(boards).where(eq(boards.tutorId, currentTutor(c).id));
 
   const [
     boardRows,
@@ -54,7 +56,8 @@ analyticsRoutes.get('/', async (c) => {
           createdAt: boards.createdAt,
           lastOpenedAt: boards.lastOpenedAt,
         })
-        .from(boards),
+        .from(boards)
+        .where(eq(boards.tutorId, currentTutor(c).id)),
       db
         .select({
           boardId: boardSessions.boardId,
@@ -70,7 +73,7 @@ analyticsRoutes.get('/', async (c) => {
         .from(boardSessions)
         // A visit that began before the range but ran into it still belongs to
         // it, so the filter is on where it ended.
-        .where(gte(boardSessions.lastSeenAt, from)),
+        .where(and(gte(boardSessions.lastSeenAt, from), inArray(boardSessions.boardId, owned))),
       // When a student was last on each board, over all of history — the row
       // above is range-bound, and "quiet since June" is the question the range
       // cannot answer about itself.
@@ -80,6 +83,7 @@ analyticsRoutes.get('/', async (c) => {
           lastSeenAt: sql<Date | null>`max(${boardSessions.lastSeenAt}) filter (where not ${boardSessions.isTutor})`,
         })
         .from(boardSessions)
+        .where(inArray(boardSessions.boardId, owned))
         .groupBy(boardSessions.boardId),
       // Stored size and page count, from the snapshot rows...
       db
@@ -89,6 +93,7 @@ analyticsRoutes.get('/', async (c) => {
           pages: sql<number>`count(*) filter (where ${boardDocuments.documentName} like '%/pages/%')::int`,
         })
         .from(boardDocuments)
+        .where(inArray(boardIdExpr, owned))
         .groupBy(boardIdExpr),
       // ...plus the append-only tail each snapshot has not absorbed yet.
       db
@@ -97,6 +102,7 @@ analyticsRoutes.get('/', async (c) => {
           bytes: sql<number>`sum(octet_length(${boardDocumentUpdates.data}))::int`,
         })
         .from(boardDocumentUpdates)
+        .where(inArray(updatesBoardIdExpr, owned))
         .groupBy(updatesBoardIdExpr),
       db
         .select({
@@ -104,6 +110,7 @@ analyticsRoutes.get('/', async (c) => {
           notes: count(),
         })
         .from(boardSessionNotes)
+        .where(inArray(boardSessionNotes.boardId, owned))
         .groupBy(boardSessionNotes.boardId),
       // AI spend in range, by the board it was made for...
       db
@@ -113,7 +120,7 @@ analyticsRoutes.get('/', async (c) => {
           cost: sql<number>`sum(${aiUsage.cost})::float8`,
         })
         .from(aiUsage)
-        .where(gte(aiUsage.createdAt, from))
+        .where(and(gte(aiUsage.createdAt, from), inArray(aiUsage.boardId, owned)))
         .groupBy(aiUsage.boardId),
       // ...and by the model that made it.
       db
@@ -124,14 +131,14 @@ analyticsRoutes.get('/', async (c) => {
           cost: sql<number>`sum(${aiUsage.cost})::float8`,
         })
         .from(aiUsage)
-        .where(gte(aiUsage.createdAt, from))
+        .where(and(gte(aiUsage.createdAt, from), inArray(aiUsage.boardId, owned)))
         .groupBy(aiUsage.job, aiUsage.model)
         .orderBy(sql`sum(${aiUsage.cost}) desc`),
       // What students asked the board agent, newest first.
       db
         .select()
         .from(agentAsks)
-        .where(gte(agentAsks.createdAt, from))
+        .where(and(gte(agentAsks.createdAt, from), inArray(agentAsks.boardId, owned)))
         .orderBy(desc(agentAsks.createdAt)),
     ]);
 

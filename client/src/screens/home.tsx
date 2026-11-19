@@ -1136,7 +1136,7 @@ export function Home() {
   ) : null;
 
   const account = auth ? (
-    <AccountMenu name={accountName} onLogout={signOut} />
+    <AccountMenu name={accountName} auth={auth} onLogout={signOut} />
   ) : null;
 
   return (

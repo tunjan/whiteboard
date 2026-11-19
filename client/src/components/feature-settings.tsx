@@ -124,9 +124,12 @@ export function FeaturesSubmenu({ boardId }: { boardId: string }) {
 export function FeaturesDialog({
   open,
   onOpenChange,
+  aiNeedsPro = false,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** AI is sold with Pro here and this tutor is on Free. */
+  aiNeedsPro?: boolean;
 }) {
   const [features, setFeatures] = useState<FeatureSet | null>(null);
   useEffect(() => {
@@ -163,10 +166,15 @@ export function FeaturesDialog({
               <li key={f}>
                 <label className="flex h-9 items-center gap-3 text-sm text-fg [&_svg:not([class*='size-'])]:size-4">
                   <Icon />
-                  <span className="flex-1">{label}</span>
+                  <span className="flex-1">
+                    {label}
+                    {f === 'ai' && aiNeedsPro ? (
+                      <span className="ml-2 text-xs text-fg-muted">with Pro</span>
+                    ) : null}
+                  </span>
                   <Switch
                     checked={features?.[f] ?? false}
-                    disabled={!features}
+                    disabled={!features || (f === 'ai' && aiNeedsPro)}
                     onCheckedChange={(on) => toggle(f, on)}
                   />
                 </label>

@@ -3,30 +3,26 @@ import { describe, expect, it, vi } from 'vitest';
 import { ALL_FEATURES, resolveFeatures } from '@whiteboard/shared';
 import { requireFeature } from './features';
 
-// What the two tables hold for this test: the tutor's defaults and the board's
-// own set. `select().from(table).where()` answers by table.
+// What this test's board holds: its tutor's defaults and its own set.
 const stored = vi.hoisted(() => ({
   defaults: undefined as unknown,
   board: null as unknown,
 }));
 
-vi.mock('../db/client', async () => {
-  const { appSettings } = await import('../db/schema');
-  return {
-    db: {
-      select: () => ({
-        from: (table: unknown) => ({
-          where: async () =>
-            table === appSettings
-              ? stored.defaults === undefined
-                ? []
-                : [{ value: stored.defaults }]
-              : [{ features: stored.board }],
+// `featuresFor` reads the board joined to its tutor in one query.
+vi.mock('../db/client', () => ({
+  db: {
+    select: () => ({
+      from: () => ({
+        leftJoin: () => ({
+          where: async () => [
+            { board: stored.board, defaults: stored.defaults, plan: 'free', isAdmin: false },
+          ],
         }),
       }),
-    },
-  };
-});
+    }),
+  },
+}));
 
 vi.mock('../env', async (actual) => ({
   env: { ...(await actual<typeof import('../env')>()).env, openRouterApiKey: 'test-key' },

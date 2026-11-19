@@ -2,6 +2,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { rateLimiter } from './rate-limit';
 import { authRoutes } from './auth/routes';
 
+// No accounts: every attempt is a wrong password, which is all this suite counts.
+vi.mock('./auth/tutors', () => ({
+  countTutors: async () => 0,
+  tutorByEmail: async () => undefined,
+}));
+
 afterEach(() => vi.useRealTimers());
 
 describe('rateLimiter', () => {

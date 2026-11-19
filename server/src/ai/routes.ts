@@ -25,7 +25,7 @@ import {
   type TranscribeResponse,
   AI_JOBS,
 } from '@whiteboard/shared';
-import { requireTutor } from '../auth/middleware';
+import { requireAdmin, requireTutor } from '../auth/middleware';
 import {
   GRAPH_SYSTEM_PROMPT,
   INK_SYSTEM_PROMPT,
@@ -98,7 +98,8 @@ aiRoutes.use('/check', requireBoardEdit);
 for (const path of ['/latex/*', '/graph/*', '/transcribe', '/sticker', '/agent', '/check']) {
   aiRoutes.use(path, requireFeature('ai'));
 }
-aiRoutes.use('/models', requireTutor);
+// The models are the operator's bill: their choice, not each tutor's.
+aiRoutes.use('/models', requireTutor, requireAdmin);
 
 /**
  * Requests allowed per window, counted across the whole process.

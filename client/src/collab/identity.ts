@@ -1,4 +1,6 @@
 import { getAuth } from '@/board/auth';
+import { boardKey } from '@/board/board-access';
+import { parseBoardId } from '@/router';
 
 export interface Identity {
   name: string;
@@ -120,12 +122,26 @@ export interface ResolvedIdentity {
 }
 
 /**
- * Authenticated → tutor (reserved color, name from session). Otherwise a
+ * Whether the signed-in tutor owns the board in the address bar. A tutor's own
+ * URL carries no share key; one that does may be another tutor's board, where
+ * this tutor is a guest like anyone else on the link.
+ */
+async function ownsOpenBoard(): Promise<boolean> {
+  const boardId = parseBoardId(globalThis.location?.pathname ?? '');
+  if (!boardId || !boardKey()) return true;
+  const res = await fetch(`/api/boards/${encodeURIComponent(boardId)}/access`, {
+    credentials: 'include',
+  }).catch(() => null);
+  return res?.ok ?? false;
+}
+
+/**
+ * The board's own tutor → tutor (reserved color, name from session). Otherwise a
  * student: name from localStorage, or prompt for one.
  */
 export async function resolveIdentity(): Promise<ResolvedIdentity> {
   const auth = await getAuth();
-  if (auth.authenticated) {
+  if (auth.authenticated && (await ownsOpenBoard())) {
     return {
       identity: {
         name: auth.name ?? 'Tutor',

@@ -19,10 +19,41 @@ if (!sessionSecret) warnDefault('SESSION_SECRET');
 
 if (production && !process.env.DATABASE_URL) warnDefault('DATABASE_URL');
 
+// Billing half set up would take money and never grant Pro, or send tutors to
+// a Checkout that returns nowhere.
+if (process.env.STRIPE_SECRET_KEY) {
+  for (const name of ['STRIPE_PRICE_ID', 'STRIPE_WEBHOOK_SECRET', 'PUBLIC_URL']) {
+    if (!process.env[name]) throw new Error(`[server] STRIPE_SECRET_KEY is set, so ${name} must be too.`);
+  }
+}
+
 export const env = {
   port: Number(process.env.PORT ?? 3001),
-  /** Plaintext tutor password, compared in constant time. */
+  /**
+   * The first account's password, used once: on first boot, when there are no
+   * accounts yet, it creates the admin (see `auth/tutors.ts`).
+   */
   tutorPassword: tutorPassword ?? 'tutor',
+  /** That account's sign-in name. The login screen hides it on a one-tutor server. */
+  tutorEmail: (process.env.TUTOR_EMAIL ?? 'tutor').trim().toLowerCase(),
+  /** `SIGNUPS=open` lets anyone create a tutor account (the hosted service). */
+  signups: process.env.SIGNUPS === 'open',
+  /**
+   * This deployment's address, e.g. `https://whiteboard.example.com`. Links
+   * that leave the app — reset emails, Stripe's return pages — are built from
+   * it, never from the request's Host header, which a client can forge.
+   */
+  publicUrl: (process.env.PUBLIC_URL ?? '').replace(/\/+$/, ''),
+  /** Resend, for password-reset emails. Unset: an admin resets by command. */
+  resendApiKey: process.env.RESEND_API_KEY || undefined,
+  resendFrom: process.env.RESEND_FROM ?? 'Whiteboard <noreply@example.com>',
+  /**
+   * Stripe, for the hosted Pro plan. Billing is on only with a secret key;
+   * without one every tutor gets every feature the server can run.
+   */
+  stripeSecretKey: process.env.STRIPE_SECRET_KEY || undefined,
+  stripePriceId: process.env.STRIPE_PRICE_ID ?? '',
+  stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? '',
   /** Secret used to sign the session JWT. Random per-boot if unset. */
   sessionSecret: sessionSecret ?? crypto.randomUUID(),
   tutorName: process.env.TUTOR_NAME ?? 'Tutor',

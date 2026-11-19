@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { and, desc, eq, or, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, or, sql } from 'drizzle-orm';
 import {
   AGENT_HELP_MODES,
   FEATURES_MESSAGE,
@@ -11,9 +11,10 @@ import {
   genBoardId,
   pageDocumentPrefix,
 } from '@whiteboard/shared';
-import { requireTutor } from '../auth/middleware';
+import { createMiddleware } from 'hono/factory';
+import { currentTutor, requireTutor } from '../auth/middleware';
 import { requestAccess } from './access';
-import { featuresFor, fullFeatureSet, readSetting } from './features';
+import { featuresFor, fullFeatureSet } from './features';
 import {
   BoardFileError,
   exportBoard,
@@ -99,8 +100,22 @@ boardRoutes.get('/:id/features', async (c) => {
   return c.json(await featuresFor(id));
 });
 
-// Everything else about a board is management, and management is tutor-only.
+// Everything else about a board is management, and management is tutor-only —
+// for the board's own tutor. Another tutor's board is a 404, as if it didn't exist.
 boardRoutes.use('*', requireTutor);
+const ownsBoard = createMiddleware(async (c, next) => {
+  const id = c.req.param('id');
+  // The two routes at this depth that name no board.
+  if (id === 'live' || id === 'import' || !id) return next();
+  const [row] = await db
+    .select({ id: boards.id })
+    .from(boards)
+    .where(and(eq(boards.id, id), eq(boards.tutorId, currentTutor(c).id)));
+  if (!row) return c.json({ error: 'not found' }, 404);
+  await next();
+});
+boardRoutes.use('/:id', ownsBoard);
+boardRoutes.use('/:id/*', ownsBoard);
 
 // A `.board` file becomes a new board. The row is written last, so a file that
 // fails partway never shows up in the library.
@@ -115,6 +130,7 @@ boardRoutes.post('/import', async (c) => {
       .values({
         id,
         name: file.name.trim() || 'Untitled board',
+        tutorId: currentTutor(c).id,
         createdAt: now,
         updatedAt: now,
       })
@@ -129,12 +145,12 @@ boardRoutes.post('/import', async (c) => {
 });
 
 boardRoutes.get('/', async (c) => {
-  const [rows, demo] = await Promise.all([
-    db.select().from(boards).orderBy(desc(boards.lastOpenedAt)),
-    readSetting('demo') as Promise<{ id?: string } | undefined>,
-  ]);
-  // The public demo is nobody's board; it stays out of the library.
-  return c.json(rows.filter((row) => row.id !== demo?.id).map(toMeta));
+  const rows = await db
+    .select()
+    .from(boards)
+    .where(eq(boards.tutorId, currentTutor(c).id))
+    .orderBy(desc(boards.lastOpenedAt));
+  return c.json(rows.map(toMeta));
 });
 
 const SHARE_COLUMNS = {
@@ -226,7 +242,16 @@ boardRoutes.post('/:id/remove', async (c) => {
 // Which boards have a student in them right now, and who on them is AFK.
 // In-memory only, so it covers this server process — which is the only one the
 // collab socket runs on.
-boardRoutes.get('/live', (c) => c.json(liveBoards()));
+boardRoutes.get('/live', async (c) => {
+  const live = liveBoards();
+  if (!live.length) return c.json(live);
+  const owned = await db
+    .select({ id: boards.id })
+    .from(boards)
+    .where(and(eq(boards.tutorId, currentTutor(c).id), inArray(boards.id, live.map((b) => b.id))));
+  const ids = new Set(owned.map((row) => row.id));
+  return c.json(live.filter((board) => ids.has(board.id)));
+});
 
 // Idempotent upsert — supports the client's offline outbox (client mints the id).
 boardRoutes.post('/', async (c) => {
@@ -238,12 +263,20 @@ boardRoutes.post('/', async (c) => {
   const name =
     (typeof body.name === 'string' && body.name.trim()) || 'Untitled board';
   const now = new Date();
+  const tutorId = currentTutor(c).id;
   const [row] = await db
     .insert(boards)
-    .values({ id, name, createdAt: now, updatedAt: now })
-    .onConflictDoUpdate({ target: boards.id, set: { name, updatedAt: now } })
+    .values({ id, name, tutorId, createdAt: now, updatedAt: now })
+    // Only ever re-names this tutor's own board: an id another tutor holds is
+    // a conflict, not a takeover.
+    .onConflictDoUpdate({
+      target: boards.id,
+      set: { name, updatedAt: now },
+      setWhere: eq(boards.tutorId, tutorId),
+    })
     .returning();
-  return c.json(toMeta(row!));
+  if (!row) return c.json({ error: 'board id taken' }, 409);
+  return c.json(toMeta(row));
 });
 
 boardRoutes.patch('/:id', async (c) => {

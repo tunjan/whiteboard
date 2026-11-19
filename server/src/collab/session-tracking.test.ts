@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import * as Y from 'yjs';
-import { signSession } from '../auth/jwt';
+// Whether a cookie is the board's tutor's is `boardAccess`'s call (its own
+// suite); here the cookie `tutor-session` is, and nothing else.
+vi.mock('../boards/access', () => ({
+  boardAccess: vi.fn(async (_board: string, _key: unknown, token?: string) =>
+    token === 'tutor-session' ? 'tutor' : null,
+  ),
+}));
 import {
   AFK_GRACE_MS,
   type SessionStore,
@@ -346,7 +352,7 @@ describe('AFK tracking', () => {
     advance(20 * MIN);
     expect(t.liveBoards()[0]!.afk).toHaveLength(1);
 
-    const token = await signSession({ role: 'tutor', name: 'Tutor' });
+    const token = 'tutor-session';
     await t.connected({
       socketId: 'tutor',
       documentName: 'b',

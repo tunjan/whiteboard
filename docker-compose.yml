@@ -29,6 +29,19 @@ services:
     # Room for the shutdown drain (15s) before Docker sends SIGKILL.
     stop_grace_period: 30s
 
+  # The way in from the internet for a hosted server, without opening a port:
+  # a Cloudflare tunnel whose public hostname points at http://app:3001. Make
+  # the tunnel in the Cloudflare dashboard, put its token in TUNNEL_TOKEN (in a
+  # `.env` beside this file) and run `docker compose --profile app --profile tunnel up -d`.
+  tunnel:
+    profiles: [tunnel]
+    image: cloudflare/cloudflared:2025.10.0
+    restart: unless-stopped
+    depends_on: [app]
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:-}
+
 volumes:
   whiteboard_pg:
   whiteboard_data:

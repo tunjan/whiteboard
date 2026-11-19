@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import * as Y from 'yjs';
 import { type LiveBoard, PAGE_DOCUMENT_INFIX } from '@whiteboard/shared';
-import { verifySession } from '../auth/jwt';
+import { boardAccess } from '../boards/access';
 import { SESSION_COOKIE } from '../auth/routes';
 import { db } from '../db/client';
 import { boardSessions } from '../db/schema';
@@ -145,8 +145,8 @@ function headerValue(headers: RequestHeaders, name: string): string | null {
   return raw ?? null;
 }
 
-/** Whether the upgrade request carried a valid tutor session cookie. */
-async function isTutorRequest(headers: RequestHeaders): Promise<boolean> {
+/** Whether the upgrade request carried the session cookie of the board's own tutor. */
+async function isTutorRequest(headers: RequestHeaders, boardId: string): Promise<boolean> {
   const cookie = headerValue(headers, 'cookie');
   if (!cookie) return false;
   const token = cookie
@@ -155,7 +155,7 @@ async function isTutorRequest(headers: RequestHeaders): Promise<boolean> {
     .find((part) => part.startsWith(`${SESSION_COOKIE}=`))
     ?.slice(SESSION_COOKIE.length + 1);
   if (!token) return false;
-  return Boolean(await verifySession(decodeURIComponent(token)));
+  return (await boardAccess(boardId, undefined, decodeURIComponent(token))) === 'tutor';
 }
 
 export interface SessionTrackerOptions {
@@ -188,7 +188,7 @@ export function createSessionTracker(options: SessionTrackerOptions = {}) {
     const id = key(payload.socketId, boardId);
     if (live.has(id)) return;
     const startedAt = new Date(now());
-    const isTutor = await isTutorRequest(payload.requestHeaders);
+    const isTutor = await isTutorRequest(payload.requestHeaders, boardId);
     // The identity arrives over awareness a moment later; the row opens now so
     // a connection that never publishes one is still counted.
     const entry: Live = {

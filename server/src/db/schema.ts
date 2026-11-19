@@ -20,10 +20,40 @@ const bytea = customType<{ data: Buffer; driverData: Buffer }>({
   },
 });
 
+/**
+ * A tutor's account. A self-hosted server has one, made from `TUTOR_PASSWORD`
+ * on first boot (`auth/tutors.ts`); the hosted one lets tutors sign up.
+ */
+export const tutors = pgTable('tutors', {
+  id: text('id').primaryKey(),
+  // Lowercased. A self-hosted admin's is `TUTOR_EMAIL`, `tutor` by default.
+  email: text('email').notNull().unique(),
+  name: text('name').notNull(),
+  // `scrypt$<salt>$<hash>`, see `auth/password.ts`.
+  passwordHash: text('password_hash').notNull(),
+  // The operator: picks the AI models and gets AI without a plan.
+  isAdmin: boolean('is_admin').notNull().default(false),
+  // Default `FeatureSet` for this tutor's boards, or null for everything.
+  features: jsonb('features'),
+  // 'free' | 'pro', kept in step with Stripe by the billing webhook.
+  plan: text('plan').notNull().default('free'),
+  stripeCustomerId: text('stripe_customer_id'),
+  // Bumped on a password change: every session signed before it stops working.
+  sessionVersion: integer('session_version').notNull().default(0),
+  // sha256 of the emailed reset token, and when it stops working.
+  resetTokenHash: text('reset_token_hash'),
+  resetExpiresAt: timestamp('reset_expires_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
 /** Board metadata only — never the CRDT content. */
 export const boards = pgTable('boards', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
+  // The tutor who owns it; null only for the public demo board.
+  tutorId: text('tutor_id'),
   // Tutor-only notes about the student. Never exposed to student clients or the
   // Yjs doc — only served via the requireTutor-gated /notes endpoints.
   privateNotes: text('private_notes').notNull().default(''),

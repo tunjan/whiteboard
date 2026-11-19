@@ -15,6 +15,8 @@ import { blobRoutes } from './blobs/routes';
 import { boardRoutes } from './boards/routes';
 import { settingsRoutes } from './boards/features';
 import { demoRoutes, startDemo } from './boards/demo';
+import { bootstrapAdmin } from './auth/tutors';
+import { billingRoutes } from './billing/stripe';
 import { documentRoutes } from './documents/routes';
 import { drainCollab, hocuspocus } from './collab/hocuspocus';
 import { closeDb, db } from './db/client';
@@ -108,6 +110,7 @@ app.route('/api/music', musicRoutes);
 app.route('/api/pages', pageRoutes);
 app.route('/api/settings', settingsRoutes);
 app.route('/api/usage', usageRoutes);
+app.route('/api/billing', billingRoutes);
 app.route('/demo', demoRoutes);
 // AGPL-3.0 §13: the app's "Source code" link, pointed at this deployment's source.
 app.get('/source', (c) => c.redirect(env.sourceUrl));
@@ -151,7 +154,10 @@ app.get('*', serveIndexHtml);
 
 const server = serve({ fetch: app.fetch, port: env.port }, (info) => {
   console.log(`[server] HTTP + collab listening on http://localhost:${info.port}`);
-  startDemo();
+  // The first account comes before the demo, which must not be handed to it.
+  void bootstrapAdmin()
+    .catch((error: unknown) => console.error('[server] admin bootstrap failed', error))
+    .finally(startDemo);
 });
 
 // Route WebSocket upgrades to Hocuspocus (board collaboration). Each document

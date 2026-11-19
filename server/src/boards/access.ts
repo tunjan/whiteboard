@@ -18,7 +18,7 @@ import { boards } from '../db/schema';
 /**
  * Who may do what on a board.
  *
- * The tutor (session cookie) may do anything. Anyone else needs the board's
+ * The board's tutor (session cookie) may do anything. Anyone else needs the board's
  * share key — the `?k=` in the link the tutor hands out — and gets what the
  * board's share mode says: edit, view, or nothing. The board id alone is no
  * longer a capability: it shows up in every page document name and URL, and
@@ -33,13 +33,18 @@ export async function boardAccess(
   key: string | undefined,
   sessionToken: string | undefined,
 ): Promise<Access | null> {
-  if (sessionToken && (await verifySession(sessionToken))) return 'tutor';
-  if (!key) return null;
+  if (!key && !sessionToken) return null;
   const [row] = await db
-    .select({ shareKey: boards.shareKey, shareMode: boards.shareMode })
+    .select({ shareKey: boards.shareKey, shareMode: boards.shareMode, tutorId: boards.tutorId })
     .from(boards)
     .where(eq(boards.id, boardId));
-  if (!row || row.shareMode === 'off') return null;
+  if (!row) return null;
+  // The board's own tutor. Another tutor is signed in, but here they are only
+  // whatever their link makes them — like anyone else holding it.
+  if (sessionToken && row.tutorId && (await verifySession(sessionToken))?.id === row.tutorId) {
+    return 'tutor';
+  }
+  if (!key || row.shareMode === 'off') return null;
   // Hashed first so the comparison is fixed-length and constant-time.
   if (!timingSafeEqual(digest(key), digest(row.shareKey))) return null;
   return row.shareMode === 'view' ? 'view' : 'edit';

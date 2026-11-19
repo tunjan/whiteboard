@@ -1,7 +1,8 @@
-import { type ReactNode, useState } from 'react';
+import { type ReactNode, useEffect, useState } from 'react';
 import {
   BarChart2,
   ChevronRight,
+  CreditCard,
   LogOut,
   Menu,
   Moon,
@@ -11,6 +12,8 @@ import {
 } from 'lucide-react';
 import { AiModelsDialog } from '@/components/ai-models-dialog';
 import { FeaturesDialog } from '@/components/feature-settings';
+import { type AuthState, getAuthConfig } from '@/board/auth';
+import { openBilling } from '@/board/billing';
 import { BrandMark } from '@/components/brand-mark';
 import {
   DropdownMenu,
@@ -253,14 +256,22 @@ export function markerFor(name: string): string {
 /** The profile button at the end of the top nav, and the menu it opens. */
 export function AccountMenu({
   name,
+  auth,
   onLogout,
 }: {
   name: string;
+  auth: AuthState | null;
   onLogout: () => void;
 }) {
   const { theme, toggle: toggleTheme } = useThemeStore();
   const [aiModelsOpen, setAiModelsOpen] = useState(false);
   const [featuresOpen, setFeaturesOpen] = useState(false);
+  // Whether Pro is sold here; a self-hosted server never shows billing.
+  const [billing, setBilling] = useState(false);
+  useEffect(() => {
+    void getAuthConfig().then((config) => setBilling(config.billing));
+  }, []);
+  const pro = auth?.plan === 'pro';
   return (
     <>
       <DropdownMenu>
@@ -301,15 +312,27 @@ export function AccountMenu({
               )}
               {theme === 'dark' ? 'Light theme' : 'Dark theme'}
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setAiModelsOpen(true)}>
-              <Sparkles data-icon="inline-start" />
-              AI models…
-            </DropdownMenuItem>
+            {/* The operator's bill, so the operator's choice. */}
+            {auth?.isAdmin && (
+              <DropdownMenuItem onClick={() => setAiModelsOpen(true)}>
+                <Sparkles data-icon="inline-start" />
+                AI models…
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem onClick={() => setFeaturesOpen(true)}>
               <SlidersHorizontal data-icon="inline-start" />
               Features…
             </DropdownMenuItem>
           </DropdownMenuGroup>
+          {billing && !auth?.isAdmin && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => void openBilling(pro ? 'portal' : 'checkout')}>
+                <CreditCard data-icon="inline-start" />
+                {pro ? 'Manage billing' : 'Upgrade to Pro'}
+              </DropdownMenuItem>
+            </>
+          )}
           <DropdownMenuSeparator />
           <DropdownMenuItem variant="destructive" onClick={onLogout}>
             <LogOut data-icon="inline-start" />
@@ -318,7 +341,11 @@ export function AccountMenu({
         </DropdownMenuContent>
       </DropdownMenu>
       <AiModelsDialog open={aiModelsOpen} onOpenChange={setAiModelsOpen} />
-      <FeaturesDialog open={featuresOpen} onOpenChange={setFeaturesOpen} />
+      <FeaturesDialog
+        open={featuresOpen}
+        onOpenChange={setFeaturesOpen}
+        aiNeedsPro={billing && !pro && !auth?.isAdmin}
+      />
     </>
   );
 }

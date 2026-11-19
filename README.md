@@ -88,7 +88,7 @@ list with comments.
 
 | Variable | Required | Purpose |
 |---|---|---|
-| `TUTOR_PASSWORD` | yes | The only login: the tutor's |
+| `TUTOR_PASSWORD` | yes | Makes the first (admin) account on first boot |
 | `SESSION_SECRET` | yes | Signs the session cookie. Use a long random string |
 | `DATABASE_URL` | yes | Postgres connection |
 | `TUTOR_NAME` | | Name on the tutor's cursor |
@@ -99,6 +99,7 @@ list with comments.
 | `BLOB_DIR`, `DOC_DIR`, `MUSIC_DIR` | | Where images, documents and music live (default `server/data/…`) |
 | `SOURCE_URL` | | Where the in-app "Source code" link points (see License) |
 | `DEMO`, `DEMO_RESET_MINUTES`, `DEMO_SEED` | | Public demo board at `/demo` (see below) |
+| `SIGNUPS`, `PUBLIC_URL`, `RESEND_*`, `STRIPE_*` | | Running it as a hosted service (see below) |
 
 With `NODE_ENV=production` (the Docker image sets it), the server refuses to
 start if the three required variables are missing, instead of falling back to
@@ -213,7 +214,7 @@ patterns.
 
 ## Known limitations
 
-- **One account.** There is a single tutor and no student accounts.
+- **Students have no accounts.** They join by link and pick a name.
 - **Voice and video are peer-to-peer with STUN only.** They can fail on strict
   school or corporate networks until a TURN server is configured
   (`client/src/collab/voice/peer-connection.ts`).
@@ -226,6 +227,39 @@ You can run this yourself, for free, with everything in this README. You
 bring your own server, Postgres and, if you want AI, your own OpenRouter key.
 
 If you'd rather not set anything up, use the hosted service instead.
+
+### Hosting it for others
+
+The same server runs a hosted service. Each tutor has an account, and their
+boards, attendance and settings are theirs alone. On first boot the server
+turns `TUTOR_PASSWORD` into the admin account, which owns every board made
+before accounts existed. The admin picks the AI models and gets AI on any
+plan.
+
+1. **A machine.** Any small VPS with Docker will do. Clone the repo there and
+   fill in `server/.env` from `server/.env.example`.
+2. **Accounts.** Set `SIGNUPS=open` and `PUBLIC_URL`. For "Forgot password"
+   emails, add `RESEND_API_KEY` and `RESEND_FROM`. Otherwise reset passwords
+   with `npm run tutor:password -w server -- <email>`.
+3. **The Pro plan.** In Stripe, make a recurring price and set
+   `STRIPE_SECRET_KEY` and `STRIPE_PRICE_ID`. Add a webhook endpoint at
+   `PUBLIC_URL/api/billing/webhook` for `checkout.session.completed` and
+   `customer.subscription.*`, and set its secret as `STRIPE_WEBHOOK_SECRET`.
+   Free tutors get everything except AI; Pro adds AI. Stripe's customer
+   portal handles changes and cancellations, so turn it on in the Stripe
+   dashboard.
+4. **The way in.** Create a Cloudflare tunnel whose public hostname points at
+   `http://app:3001`, put its token in a `.env` beside `docker-compose.yml` as
+   `TUNNEL_TOKEN`, then:
+
+   ```bash
+   docker compose --profile app --profile tunnel up -d --build
+   ```
+
+5. **Backups.** `scripts/backup.sh` saves the database and the uploads volume
+   together. Run it nightly from cron and copy `backups/` off the machine.
+
+`DEMO=1` adds the public demo, and the login screen links to it.
 
 ## License
 

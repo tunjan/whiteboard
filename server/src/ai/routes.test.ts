@@ -41,6 +41,7 @@ vi.mock('../boards/features', async () => {
 // before a model is reached.
 vi.mock('../auth/middleware', () => ({
   requireTutor: async (_c: unknown, next: () => Promise<void>) => next(),
+  requireAdmin: async (_c: unknown, next: () => Promise<void>) => next(),
 }));
 
 // Who asked is told to the tutor and stored; not this suite's concern.

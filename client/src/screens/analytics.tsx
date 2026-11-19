@@ -972,7 +972,7 @@ export function Analytics() {
     <DashboardShell
       busy={!data || loading}
       account={
-        auth ? <AccountMenu name={accountName} onLogout={signOut} /> : null
+        auth ? <AccountMenu name={accountName} auth={auth} onLogout={signOut} /> : null
       }
       nav={
         <>

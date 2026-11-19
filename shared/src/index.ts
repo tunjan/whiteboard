@@ -23,3 +23,4 @@ export * from './ephemeral';
 export * from './analytics';
 export * from './ink-codec';
 export * from './features';
+export * from './auth';

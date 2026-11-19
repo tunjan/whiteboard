@@ -8,17 +8,26 @@ import {
   type Feature,
   type FeatureSet,
 } from '@whiteboard/shared';
-import { requireTutor } from '../auth/middleware';
+import { currentTutor, requireTutor } from '../auth/middleware';
+import type { Tutor } from '../auth/tutors';
 import { db } from '../db/client';
-import { appSettings, boards } from '../db/schema';
+import { appSettings, boards, tutors } from '../db/schema';
 import { env } from '../env';
 
 /**
  * Which optional features a board offers (see `features.ts` in
- * @whiteboard/shared): the board's own set, else the tutor's defaults.
+ * @whiteboard/shared): the board's own set, else its tutor's defaults.
  */
 
-const aiConfigured = () => Boolean(env.openRouterApiKey);
+/**
+ * Whether AI can run for a tutor's boards: the server has a key, and — where
+ * the Pro plan is sold — the tutor is on it (or runs the server).
+ */
+export function aiAllowed(tutor: Pick<Tutor, 'plan' | 'isAdmin'> | null | undefined): boolean {
+  if (!env.openRouterApiKey) return false;
+  if (!env.stripeSecretKey) return true;
+  return tutor?.plan === 'pro' || tutor?.isAdmin === true;
+}
 
 export async function readSetting(key: string): Promise<unknown> {
   const [row] = await db
@@ -35,17 +44,27 @@ export async function writeSetting(key: string, value: unknown): Promise<void> {
     .onConflictDoUpdate({ target: appSettings.key, set: { value } });
 }
 
-/** The tutor's defaults, as a new board would get them. */
-export async function defaultFeatures(): Promise<FeatureSet> {
-  return resolveFeatures(await readSetting('features'), null, aiConfigured());
+/** A tutor's defaults, as a new board of theirs gets them. */
+export function defaultFeatures(tutor: Tutor): FeatureSet {
+  return resolveFeatures(tutor.features, null, aiAllowed(tutor));
 }
 
 export async function featuresFor(boardId: string): Promise<FeatureSet> {
-  const [defaults, [row]] = await Promise.all([
-    readSetting('features'),
-    db.select({ features: boards.features }).from(boards).where(eq(boards.id, boardId)),
-  ]);
-  return resolveFeatures(defaults, row?.features ?? null, aiConfigured());
+  const [row] = await db
+    .select({
+      board: boards.features,
+      defaults: tutors.features,
+      plan: tutors.plan,
+      isAdmin: tutors.isAdmin,
+    })
+    .from(boards)
+    .leftJoin(tutors, eq(tutors.id, boards.tutorId))
+    .where(eq(boards.id, boardId));
+  return resolveFeatures(
+    row?.defaults,
+    row?.board ?? null,
+    aiAllowed(row?.plan == null ? null : { plan: row.plan, isAdmin: row.isAdmin ?? false }),
+  );
 }
 
 /** A full set from a request body, or null when the body is not one. */
@@ -75,11 +94,15 @@ export const requireFeature = (feature: Feature) =>
 export const settingsRoutes = new Hono();
 settingsRoutes.use('*', requireTutor);
 
-settingsRoutes.get('/features', async (c) => c.json(await defaultFeatures()));
+settingsRoutes.get('/features', (c) => c.json(defaultFeatures(currentTutor(c))));
 
 settingsRoutes.put('/features', async (c) => {
   const set = fullFeatureSet(await c.req.json().catch(() => null));
   if (!set) return c.json({ error: 'a value for every feature is required' }, 400);
-  await writeSetting('features', set);
-  return c.json(await defaultFeatures());
+  const [tutor] = await db
+    .update(tutors)
+    .set({ features: set })
+    .where(eq(tutors.id, currentTutor(c).id))
+    .returning();
+  return c.json(defaultFeatures(tutor!));
 });

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { ReactElement, ReactNode } from 'react';
 import {
   ClipboardCopy,
@@ -28,6 +28,7 @@ import {
 import { AiModelsDialog } from '@/components/ai-models-dialog';
 import { boardKey } from '@/board/board-access';
 import { useFeature } from '@/board/features';
+import { getAuth } from '@/board/auth';
 import { FeaturesSubmenu } from '@/components/feature-settings';
 import { setAutoCheck, useAutoCheckStore } from '@/canvas/work-checker';
 
@@ -720,6 +721,11 @@ export function BoardActionsMenu({
   const [aiModelsOpen, setAiModelsOpen] = useState(false);
   // Auto-check is only offered where the server has a model to check with.
   const aiEnabled = useFeature('ai');
+  // AI models are the operator's bill; another tutor on a hosted server has no say.
+  const [isAdmin, setIsAdmin] = useState(false);
+  useEffect(() => {
+    if (isTutor) void getAuth().then((auth) => setIsAdmin(auth.isAdmin === true));
+  }, [isTutor]);
   const autoCheck = useAutoCheckStore((s) => s.on);
   const theme = useThemeStore((s) => s.theme);
   const toggleTheme = useThemeStore((s) => s.toggle);
@@ -897,8 +903,8 @@ export function BoardActionsMenu({
           <SoundSubmenu />
           {isTutor && <AttentionSubmenu />}
           {isTutor && <FeaturesSubmenu boardId={boardId} />}
-          {/* The tutor's bill, so the tutor's choice; app-wide, not per board. */}
-          {isTutor && (
+          {/* The operator's bill, so the operator's choice; app-wide, not per board. */}
+          {isAdmin && (
             <DropdownMenuItem onClick={() => setAiModelsOpen(true)}>
               <Sparkles />
               AI models…
